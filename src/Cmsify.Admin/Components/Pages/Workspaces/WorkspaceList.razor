@@ -1,0 +1,144 @@
+@page "/workspaces"
+@rendermode InteractiveServer
+@inject WorkspaceApiClient Workspaces
+@inject WorkspaceState WorkspaceState
+@inject NavigationManager Navigation
+
+<div class="cms-page-head">
+    <div>
+        <h1>Workspaces</h1>
+        <div class="lead">Manage the workspaces available in Cmsify.</div>
+    </div>
+    <button class="btn btn-primary" @onclick="NewWorkspace">New Workspace</button>
+</div>
+
+<div class="cms-search mb-3" style="max-width:320px">
+    <i class="bi bi-search"></i>
+    <input class="form-control" placeholder="Search by name or slug" @bind="search" @bind:event="oninput" />
+</div>
+
+@if (items.Count == 0)
+{
+    <EmptyState Title="No workspaces yet" Body="Create your first workspace to begin modeling content.">
+        <button class="btn btn-primary btn-sm" @onclick="NewWorkspace">Create workspace</button>
+    </EmptyState>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var workspace in Filtered)
+        {
+            <div class="col-md-6 col-xl-4">
+                <div class="cms-card h-100">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h2 class="h6 mb-1">@workspace.Name</h2>
+                            <div class="small text-muted font-monospace">@workspace.Slug</div>
+                        </div>
+                        <StatusBadge Text="Active" />
+                    </div>
+                    <p class="text-muted mt-3">@workspace.Description</p>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="() => Open(workspace)">Open</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(workspace)">Edit</button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (editing is not null)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editing.Id == Guid.Empty ? "New Workspace" : "Edit Workspace")</h5>
+                    <button type="button" class="btn-close" @onclick="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label">Name</label>
+                    <InputText class="form-control mb-3" @bind-Value="editing.Name" @oninput="SlugFromName" />
+                    <label class="form-label">Slug</label>
+                    <InputText class="form-control mb-3" @bind-Value="editing.Slug" />
+                    <label class="form-label">Description</label>
+                    <InputTextArea class="form-control" @bind-Value="editing.Description" />
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="Close">Cancel</button>
+                    <button class="btn btn-primary" @onclick="SaveAsync">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@code {
+    private List<WorkspaceDto> items = [];
+    private string? search;
+    private WorkspaceEdit? editing;
+
+    private IEnumerable<WorkspaceDto> Filtered => items.Where(item => string.IsNullOrWhiteSpace(search) || item.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || item.Slug.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var page = await Workspaces.ListAsync();
+        items = page.Items.ToList();
+    }
+
+    private void Open(WorkspaceDto workspace)
+    {
+        WorkspaceState.Set(workspace);
+        Navigation.NavigateTo($"/workspaces/{workspace.Id}");
+    }
+
+    private void NewWorkspace() => editing = new WorkspaceEdit();
+
+    private void Edit(WorkspaceDto workspace) => editing = new WorkspaceEdit(workspace.Id, workspace.Name, workspace.Slug, workspace.Description);
+
+    private void Close() => editing = null;
+
+    private void SlugFromName(ChangeEventArgs args)
+    {
+        if (editing is not null && string.IsNullOrWhiteSpace(editing.Slug))
+        {
+            editing.Slug = Slugify(editing.Name);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (editing is null)
+        {
+            return;
+        }
+
+        var request = new WorkspaceRequest(editing.Name, editing.Slug, editing.Description);
+        var saved = editing.Id == Guid.Empty ? await Workspaces.CreateAsync(request) : await Workspaces.UpdateAsync(editing.Id, request);
+        items.RemoveAll(item => item.Id == saved.Id);
+        items.Add(saved);
+        editing = null;
+    }
+
+    private static string Slugify(string value) => string.Join('-', value.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+    private sealed class WorkspaceEdit
+    {
+        public WorkspaceEdit() { }
+
+        public WorkspaceEdit(Guid id, string name, string slug, string? description)
+        {
+            Id = id;
+            Name = name;
+            Slug = slug;
+            Description = description;
+        }
+
+        public Guid Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Slug { get; set; } = "";
+        public string? Description { get; set; }
+    }
+}

@@ -1,0 +1,48 @@
+@if (Visible)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@Title</h5>
+                    <button type="button" class="btn-close" @onclick="CancelAsync" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>@Message</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CancelAsync">Cancel</button>
+                    <button class="btn @ButtonClass" disabled="@Busy" @onclick="ConfirmAsync">
+                        @if (Busy)
+                        {
+                            <LoadingSpinner />
+                        }
+                        @ConfirmText
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public string Title { get; set; } = "Confirm action";
+    [Parameter] public string Message { get; set; } = "This action cannot be undone.";
+    [Parameter] public string ConfirmText { get; set; } = "Confirm";
+    [Parameter] public string ButtonClass { get; set; } = "btn-danger";
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    private bool Busy { get; set; }
+
+    private async Task CancelAsync() => await OnCancel.InvokeAsync();
+
+    private async Task ConfirmAsync()
+    {
+        Busy = true;
+        await OnConfirm.InvokeAsync();
+        Busy = false;
+    }
+}

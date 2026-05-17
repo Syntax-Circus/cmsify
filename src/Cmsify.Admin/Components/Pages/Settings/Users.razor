@@ -1,0 +1,118 @@
+@page "/settings/users"
+@rendermode InteractiveServer
+@inject UserApiClient UsersClient
+
+<div class="cms-page-head">
+    <div><h1>Users</h1><div class="lead">Create users, assign roles, and manage temporary passwords.</div></div>
+    <button class="btn btn-primary" @onclick="() => creating = true">Create User</button>
+</div>
+
+<Toast Message="@toast" />
+
+<div class="cms-card p-0">
+    <table class="cms-table">
+        <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Last Login</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody>
+        @foreach (var user in users)
+        {
+            <tr>
+                <td>@user.Email</td>
+                <td>@user.DisplayName</td>
+                <td><RoleBadge Role="@user.Role.ToString()" /></td>
+                <td>@(user.LastLoginAt.HasValue ? @<LocalTimeDisplay Value="@user.LastLoginAt.Value" /> : @<span>Never</span>)</td>
+                <td><StatusBadge Text="@(user.IsActive ? "Active" : "Inactive")" /></td>
+                <td class="d-flex gap-1"><button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(user)">Edit</button><button class="btn btn-outline-secondary btn-sm" @onclick="() => ResetAsync(user)">Reset Password</button></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+@if (creating || editing is not null)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">@(editing is null ? "Create User" : "Edit User")</h5><button class="btn-close" @onclick="Close"></button></div>
+                <div class="modal-body">
+                    <label class="form-label">Email</label><InputText class="form-control mb-3" @bind-Value="form.Email" />
+                    <label class="form-label">Display name</label><InputText class="form-control mb-3" @bind-Value="form.DisplayName" />
+                    <label class="form-label">Role</label><InputSelect class="form-select mb-3" @bind-Value="form.Role">@foreach (var role in Enum.GetValues<UserRole>()) { <option value="@role">@role</option> }</InputSelect>
+                    @if (editing is null)
+                    {
+                        <label class="form-label">Temporary password</label><InputText class="form-control mb-3" @bind-Value="form.TemporaryPassword" />
+                    }
+                    <div class="form-check form-switch"><InputCheckbox class="form-check-input" @bind-Value="form.IsActive" /><label class="form-check-label">Active</label></div>
+                </div>
+                <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="Close">Cancel</button><button class="btn btn-primary" @onclick="SaveAsync">Save</button></div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@if (!string.IsNullOrWhiteSpace(oneTimeSecret))
+{
+    <div class="alert alert-warning mt-3"><strong>Temporary password:</strong> <code>@oneTimeSecret</code> — copy it now. It will not be shown again.</div>
+}
+
+@code {
+    private List<UserDto> users = [];
+    private bool creating;
+    private UserDto? editing;
+    private UserForm form = new();
+    private string? oneTimeSecret;
+    private string? toast;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => users = (await UsersClient.ListAsync()).Items.ToList();
+
+    private void Edit(UserDto user)
+    {
+        editing = user;
+        form = new UserForm { Email = user.Email, DisplayName = user.DisplayName, Role = user.Role, IsActive = user.IsActive, TimeZoneId = user.TimeZoneId };
+    }
+
+    private void Close()
+    {
+        creating = false;
+        editing = null;
+        form = new();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (editing is null)
+        {
+            var response = await UsersClient.CreateAsync(new CreateUserRequest(form.Email, form.DisplayName, form.Role, form.TemporaryPassword, form.TimeZoneId));
+            oneTimeSecret = response.TemporaryPassword;
+        }
+        else
+        {
+            await UsersClient.UpdateAsync(editing.Id, new UpdateUserRequest(form.Email, form.DisplayName, form.Role, form.TimeZoneId, form.IsActive));
+        }
+
+        Close();
+        await LoadAsync();
+    }
+
+    private async Task ResetAsync(UserDto user)
+    {
+        var password = $"Temp-{Guid.NewGuid():N}"[..18];
+        var response = await UsersClient.ResetPasswordAsync(user.Id, password);
+        oneTimeSecret = response.TemporaryPassword;
+        toast = "Password reset";
+        await LoadAsync();
+    }
+
+    private sealed class UserForm
+    {
+        public string Email { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public UserRole Role { get; set; } = UserRole.Reader;
+        public string TemporaryPassword { get; set; } = $"Temp-{Guid.NewGuid():N}"[..18];
+        public string? TimeZoneId { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
+}

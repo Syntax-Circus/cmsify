@@ -1,6 +1,14 @@
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+        <GuardedRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
+    <NotFound>
+        <LayoutView Layout="typeof(MainLayout)">
+            <div class="cms-empty">
+                <h1>Page not found</h1>
+                <p>The requested admin page does not exist.</p>
+            </div>
+        </LayoutView>
+    </NotFound>
 </Router>

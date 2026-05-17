@@ -22,6 +22,13 @@ public sealed class ApiClientsController : ControllerBase
         this.configuration = configuration;
     }
 
+    [HttpGet]
+    public async Task<ActionResult<PagedResponse<ApiClientDto>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    {
+        var result = await apiClientRepository.ListAsync(new PageRequest((Math.Max(1, page) - 1) * Math.Clamp(pageSize, 1, 200), Math.Clamp(pageSize, 1, 200)), ct);
+        return Ok(new PagedResponse<ApiClientDto>(result.Items, result.TotalCount, Math.Max(1, page), result.Limit));
+    }
+
     [HttpPost]
     public async Task<ActionResult<CreateApiClientResponse>> Create(CreateApiClientRequest request, CancellationToken ct)
     {
@@ -37,6 +44,34 @@ public sealed class ApiClientsController : ControllerBase
     {
         var client = await apiClientRepository.GetAsync(id, ct);
         return client is null ? NotFound() : Ok(client);
+    }
+
+    [HttpPost("{id:guid}/revoke")]
+    public async Task<ActionResult<ApiClientDto>> Revoke(Guid id, CancellationToken ct)
+    {
+        var client = await apiClientRepository.GetAsync(id, ct);
+        if (client is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(await apiClientRepository.UpdateAsync(new UpdateApiClientCommand(id, client.Name, client.Description, client.Role, client.WorkspaceId, false, client.ExpiresAt), ct));
+    }
+
+    [HttpPost("{id:guid}/rotate")]
+    public async Task<ActionResult<CreateApiClientResponse>> Rotate(Guid id, CancellationToken ct)
+    {
+        var client = await apiClientRepository.GetAsync(id, ct);
+        if (client is null)
+        {
+            return NotFound();
+        }
+
+        var rawToken = TokenUtility.GenerateApiToken();
+        var tokenHash = BCrypt.Net.BCrypt.HashPassword(rawToken, configuration.GetValue("Auth:BcryptCost", 12));
+        await apiClientRepository.SoftDeleteAsync(id, currentActor.UserId!.Value, ct);
+        var created = await apiClientRepository.CreateAsync(new CreateApiClientCommand(client.Name, client.Description, client.Role, client.WorkspaceId, client.ExpiresAt, currentActor.UserId!.Value), tokenHash, ct);
+        return Ok(new CreateApiClientResponse(created, rawToken, "Store this token securely - it cannot be retrieved again."));
     }
 }
 

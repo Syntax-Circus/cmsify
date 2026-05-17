@@ -16,6 +16,8 @@ public sealed class User : SoftDeletableEntity
 
     public string? TimeZoneId { get; set; }
 
+    public string? Theme { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTimeOffset? LastLoginAt { get; set; }

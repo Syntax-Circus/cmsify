@@ -1,0 +1,51 @@
+@page "/workspaces/{WorkspaceId:guid}"
+@rendermode InteractiveServer
+@inject WorkspaceApiClient Workspaces
+@inject TemplateApiClient Templates
+@inject ContentApiClient Content
+@inject MediaApiClient Media
+@inject WorkspaceState WorkspaceState
+
+<div class="cms-page-head">
+    <div>
+        <h1>@workspace?.Name</h1>
+        <div class="lead">@workspace?.Description</div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3"><a class="cms-card cms-stat text-decoration-none" href="/workspaces/@WorkspaceId/content"><span class="cms-stat__label">Content Items</span><span class="cms-stat__value">@contentCount</span></a></div>
+    <div class="col-md-3"><a class="cms-card cms-stat text-decoration-none" href="/workspaces/@WorkspaceId/content"><span class="cms-stat__label">Published</span><span class="cms-stat__value">@publishedCount</span></a></div>
+    <div class="col-md-3"><a class="cms-card cms-stat text-decoration-none" href="/workspaces/@WorkspaceId/templates"><span class="cms-stat__label">Templates</span><span class="cms-stat__value">@templateCount</span></a></div>
+    <div class="col-md-3"><a class="cms-card cms-stat text-decoration-none" href="/workspaces/@WorkspaceId/media"><span class="cms-stat__label">Media Assets</span><span class="cms-stat__value">@mediaCount</span></a></div>
+</div>
+
+<div class="cms-card">
+    <h2 class="h6 text-muted">Quick actions</h2>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-primary" href="/workspaces/@WorkspaceId/content/new">New Content</a>
+        <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/templates">New Template</a>
+        <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/media">Upload Media</a>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    private WorkspaceDto? workspace;
+    private int templateCount;
+    private int contentCount;
+    private int publishedCount;
+    private int mediaCount;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var (loaded, _) = await Workspaces.GetAsync(WorkspaceId);
+        workspace = loaded;
+        WorkspaceState.Set(loaded);
+        templateCount = (await Templates.ListAsync(WorkspaceId)).TotalCount;
+        var content = await Content.ListAsync(WorkspaceId, null, null, null, null, null);
+        contentCount = content.TotalCount;
+        publishedCount = content.Items.Count(item => item.Status == ContentStatus.Published);
+        mediaCount = (await Media.ListAsync(WorkspaceId, null, null)).TotalCount;
+    }
+}

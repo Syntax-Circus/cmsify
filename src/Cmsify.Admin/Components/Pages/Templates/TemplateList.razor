@@ -1,0 +1,104 @@
+@page "/workspaces/{WorkspaceId:guid}/templates"
+@rendermode InteractiveServer
+@inject TemplateApiClient Templates
+@inject NavigationManager Navigation
+
+<div class="cms-page-head">
+    <div>
+        <h1>Templates</h1>
+        <div class="lead">Create and version composable content structures.</div>
+    </div>
+    <button class="btn btn-primary" @onclick="() => showNew = true">New Template</button>
+</div>
+
+<div class="d-flex gap-2 mb-3">
+    <div class="cms-search" style="max-width:320px">
+        <i class="bi bi-search"></i>
+        <input class="form-control" placeholder="Search templates" @bind="search" @bind:event="oninput" />
+    </div>
+    <button class="btn btn-outline-secondary" @onclick="LoadAsync">Search</button>
+</div>
+
+@if (templates.Count == 0)
+{
+    <EmptyState Title="No templates yet" Body="Start by creating a template for your content model.">
+        <button class="btn btn-primary btn-sm" @onclick="() => showNew = true">New Template</button>
+    </EmptyState>
+}
+else
+{
+    <div class="cms-card p-0">
+        <table class="cms-table">
+            <thead><tr><th>Name</th><th>Slug</th><th>Current Version</th><th>Actions</th></tr></thead>
+            <tbody>
+            @foreach (var template in templates)
+            {
+                <tr>
+                    <td><strong>@template.Name</strong><div class="small text-muted">@template.Description</div></td>
+                    <td class="font-monospace">@template.Slug</td>
+                    <td>@(template.CurrentVersionId.HasValue ? "Current" : "Draft only")</td>
+                    <td class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="() => Edit(template)">Edit</button>
+                        <a class="btn btn-outline-secondary btn-sm" href="/workspaces/@WorkspaceId/templates/@template.Id/versions">Versions</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (showNew)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">New Template</h5><button class="btn-close" @onclick="() => showNew = false"></button></div>
+                <div class="modal-body">
+                    <label class="form-label">Name</label>
+                    <InputText class="form-control mb-3" @bind-Value="newName" />
+                    <label class="form-label">Slug</label>
+                    <InputText class="form-control mb-3" @bind-Value="newSlug" />
+                    <label class="form-label">Description</label>
+                    <InputTextArea class="form-control" @bind-Value="newDescription" />
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => showNew = false">Cancel</button>
+                    <button class="btn btn-primary" @onclick="CreateAsync">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    private List<TemplateSummaryResponse> templates = [];
+    private string? search;
+    private bool showNew;
+    private string newName = "";
+    private string newSlug = "";
+    private string? newDescription;
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var page = await Templates.ListAsync(WorkspaceId, search);
+        templates = page.Items.ToList();
+    }
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newSlug))
+        {
+            newSlug = string.Join('-', newName.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        var created = await Templates.CreateAsync(WorkspaceId, new CreateTemplateRequest(newName, newSlug, newDescription));
+        Navigation.NavigateTo($"/workspaces/{WorkspaceId}/templates/{created.Id}");
+    }
+
+    private void Edit(TemplateSummaryResponse template) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/templates/{template.Id}");
+}

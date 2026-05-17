@@ -1,0 +1,72 @@
+@inject MediaApiClient MediaClient
+
+@if (Visible)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Select media</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAsync" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex gap-2 mb-3">
+                        <input class="form-control form-control-sm" placeholder="Search filename" @bind="search" @bind:event="oninput" />
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LoadAsync">Search</button>
+                    </div>
+                    <InputFile OnChange="UploadAsync" />
+                    <div class="row g-2 mt-3">
+                        @foreach (var asset in assets)
+                        {
+                            <div class="col-md-4">
+                                <button type="button" class="cms-card w-100 text-start" @onclick="() => SelectAsync(asset)">
+                                    <strong>@asset.FileName</strong>
+                                    <div class="small text-muted">@asset.MimeType</div>
+                                </button>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CloseAsync">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
+    [Parameter] public string? MimePrefix { get; set; }
+    [Parameter] public EventCallback<MediaAssetResponse> Selected { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
+
+    private string? search;
+    private IReadOnlyList<MediaAssetResponse> assets = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var page = await MediaClient.ListAsync(WorkspaceId, MimePrefix, search);
+        assets = page.Items;
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs args)
+    {
+        await MediaClient.UploadAsync(WorkspaceId, args.File, null);
+        await LoadAsync();
+    }
+
+    private async Task SelectAsync(MediaAssetResponse asset) => await Selected.InvokeAsync(asset);
+
+    private async Task CloseAsync() => await Closed.InvokeAsync();
+}

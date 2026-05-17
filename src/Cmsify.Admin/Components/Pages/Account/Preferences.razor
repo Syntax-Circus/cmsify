@@ -1,0 +1,55 @@
+@page "/account/preferences"
+@rendermode InteractiveServer
+@inject UserPreferencesState PrefState
+@inject SettingsApiClient Settings
+
+<div class="cms-page-head">
+    <div>
+        <h1>Account preferences</h1>
+        <div class="lead">Choose how dates and the admin theme are displayed.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="/account/change-password">Change password</a>
+</div>
+
+<Toast Message="@toast" />
+
+<div class="cms-card" style="max-width:680px">
+    <div class="mb-3">
+        <label class="form-label">Display name</label>
+        <input class="form-control" value="@account?.DisplayName" readonly />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Time zone</label>
+        <InputText class="form-control" @bind-Value="timeZoneId" />
+        <div class="form-text">Use an IANA or Windows time-zone ID supported by the server.</div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Theme</label>
+        <InputSelect class="form-select" @bind-Value="theme">
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+        </InputSelect>
+    </div>
+    <button class="btn btn-primary" @onclick="SaveAsync">Save preferences</button>
+</div>
+
+@code {
+    private AccountPreferencesResponse? account;
+    private string timeZoneId = TimeZoneInfo.Local.Id;
+    private string theme = "auto";
+    private string? toast;
+
+    protected override async Task OnInitializedAsync()
+    {
+        account = await Settings.GetPreferencesAsync();
+        timeZoneId = account.TimeZoneId ?? PrefState.TimeZoneId;
+        theme = account.Theme;
+    }
+
+    private async Task SaveAsync()
+    {
+        await PrefState.SaveAsync(timeZoneId, theme);
+        toast = "Preferences saved";
+    }
+}

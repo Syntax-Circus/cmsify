@@ -1,0 +1,40 @@
+@page "/workspaces/{WorkspaceId:guid}/templates/{TemplateId:guid}/versions"
+@rendermode InteractiveServer
+@inject TemplateApiClient Templates
+
+<div class="cms-page-head">
+    <div><h1>Version History</h1><div class="lead">Review draft, published, and archived template versions.</div></div>
+    <button class="btn btn-primary" @onclick="NewVersionAsync">New Version</button>
+</div>
+
+<div class="cms-card p-0">
+    <table class="cms-table">
+        <thead><tr><th>Version</th><th>Status</th><th>Fields</th><th>Published</th><th>Notes</th></tr></thead>
+        <tbody>
+        @foreach (var version in versions)
+        {
+            <tr>
+                <td><a href="/workspaces/@WorkspaceId/templates/@TemplateId">Version @version.VersionNumber</a></td>
+                <td><StatusBadge Status="@version.Status" /></td>
+                <td>@version.FieldCount</td>
+                <td>@(version.PublishedAt.HasValue ? @<LocalTimeDisplay Value="@version.PublishedAt.Value" /> : @<span>-</span>)</td>
+                <td>@version.Notes</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public Guid TemplateId { get; set; }
+    private IReadOnlyList<TemplateVersionSummaryResponse> versions = [];
+
+    protected override async Task OnParametersSetAsync() => versions = await Templates.ListVersionsAsync(WorkspaceId, TemplateId);
+
+    private async Task NewVersionAsync()
+    {
+        await Templates.CreateDraftAsync(WorkspaceId, TemplateId, "New draft");
+        versions = await Templates.ListVersionsAsync(WorkspaceId, TemplateId);
+    }
+}

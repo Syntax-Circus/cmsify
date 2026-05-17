@@ -1,0 +1,13 @@
+<ConfirmDialog Visible="Visible"
+               Title="This item changed"
+               Message="Another user changed this item. Reload the item and apply your changes again."
+               ConfirmText="Reload"
+               ButtonClass="btn-warning"
+               OnCancel="OnCancel"
+               OnConfirm="OnReload" />
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnReload { get; set; }
+}

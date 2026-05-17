@@ -1,5 +1,7 @@
 using DotNetEnv;
 using Cmsify.Admin.Components;
+using Cmsify.Admin.Services;
+using Cmsify.Admin.State;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,6 +10,27 @@ builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+builder.Services.AddHttpClient("CmsifyApi", client =>
+{
+    var baseUrl = builder.Configuration["Admin:ApiBaseUrl"]
+        ?? builder.Configuration["Api:BaseUrl"]
+        ?? "https://localhost:7001";
+    client.BaseAddress = new Uri(baseUrl);
+});
+builder.Services.AddScoped<BrowserStorage>();
+builder.Services.AddScoped<AuthState>();
+builder.Services.AddScoped<WorkspaceState>();
+builder.Services.AddScoped<UserPreferencesState>();
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<WorkspaceApiClient>();
+builder.Services.AddScoped<TemplateApiClient>();
+builder.Services.AddScoped<ContentApiClient>();
+builder.Services.AddScoped<MediaApiClient>();
+builder.Services.AddScoped<WebhookApiClient>();
+builder.Services.AddScoped<AuditApiClient>();
+builder.Services.AddScoped<UserApiClient>();
+builder.Services.AddScoped<ApiClientsApiClient>();
+builder.Services.AddScoped<SettingsApiClient>();
 
 var app = builder.Build();
 

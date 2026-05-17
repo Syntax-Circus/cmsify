@@ -1,0 +1,36 @@
+<span class="cms-badge @CssClass">
+    <i class="bi @Icon"></i>
+    @Label
+</span>
+
+@code {
+    [Parameter] public object? Status { get; set; }
+    [Parameter] public string? Text { get; set; }
+
+    private string Value => (Text ?? Status?.ToString() ?? "Unknown").ToLowerInvariant();
+    private string Label => Text ?? Status?.ToString() ?? "Unknown";
+    private string CssClass => Value switch
+    {
+        "draft" => "cms-badge--draft",
+        "review" => "cms-badge--review",
+        "approved" => "cms-badge--approved",
+        "published" or "active" or "delivered" => "cms-badge--published",
+        "archived" or "inactive" => "cms-badge--archived",
+        "failed" => "cms-badge--danger",
+        _ => "cms-badge--neutral"
+    };
+
+    private string Icon => Value switch
+    {
+        "draft" => "bi-pencil",
+        "review" => "bi-eye",
+        "approved" => "bi-check2-circle",
+        "published" => "bi-globe2",
+        "archived" => "bi-archive",
+        "active" => "bi-circle-fill",
+        "inactive" => "bi-slash-circle",
+        "delivered" => "bi-check2",
+        "failed" => "bi-x-octagon",
+        _ => "bi-info-circle"
+    };
+}
