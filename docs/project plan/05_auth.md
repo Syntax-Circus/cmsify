@@ -193,22 +193,22 @@ On startup, if `Users` table is empty:
 
 ## Tasks
 
-- [ ] Install `BCrypt.Net-Next`, `Microsoft.AspNetCore.Authentication.JwtBearer`
-- [ ] Define `UserSession` entity and EF configuration
-- [ ] Implement token generation utilities (random bytes, base64url encoding, SHA-256 hashing)
-- [ ] Implement login endpoint and session creation
-- [ ] Implement logout and session invalidation
-- [ ] Implement per-request auth middleware (session token + API client token resolution)
-- [ ] Implement `ICurrentActor` and `HttpContextCurrentActor`
-- [ ] Implement `[RequireRole]` attribute
-- [ ] Implement OIDC/JWT layer behind `Auth:Oidc:Enabled` feature flag
-- [ ] Implement claims mapping from JWT to `ICurrentActor`
-- [ ] Implement first-run admin bootstrap
-- [ ] Add `Auth:Bootstrap:AdminEmail` and `Auth:Bootstrap:AdminPassword` to `.env.example`
-- [ ] Unit test: BCrypt verify
-- [ ] Unit test: `[RequireRole]` attribute for all role combinations
-- [ ] Integration test: login flow, token use, logout, expired token rejection
-- [ ] Integration test: OIDC JWT validation with a test-issued JWT
+- [x] Install `BCrypt.Net-Next`, `Microsoft.AspNetCore.Authentication.JwtBearer`
+- [x] Define `UserSession` entity and EF configuration
+- [x] Implement token generation utilities (random bytes, base64url encoding, SHA-256 hashing)
+- [x] Implement login endpoint and session creation
+- [x] Implement logout and session invalidation
+- [x] Implement per-request auth middleware (session token + API client token resolution)
+- [x] Implement `ICurrentActor` and `HttpContextCurrentActor`
+- [x] Implement `[RequireRole]` attribute
+- [x] Implement OIDC/JWT layer behind `Auth:Oidc:Enabled` feature flag
+- [x] Implement claims mapping from JWT to `ICurrentActor`
+- [x] Implement first-run admin bootstrap
+- [x] Add `Auth:Bootstrap:AdminEmail` and `Auth:Bootstrap:AdminPassword` to `.env.example`
+- [x] Unit test: BCrypt verify
+- [x] Unit test: `[RequireRole]` attribute for all role combinations
+- [x] Integration test: login flow, token use, logout, expired token rejection
+- [x] Integration test: OIDC JWT validation with a test-issued JWT
 
 ---
 

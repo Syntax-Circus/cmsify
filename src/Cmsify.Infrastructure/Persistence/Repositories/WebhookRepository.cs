@@ -1,5 +1,6 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -7,11 +8,17 @@ namespace Cmsify.Infrastructure.Persistence.Repositories;
 public sealed class WebhookRepository : IWebhookRepository
 {
     private readonly CmsifyDbContext dbContext;
+    private readonly ICurrentActor currentActor;
 
-    public WebhookRepository(CmsifyDbContext dbContext) => this.dbContext = dbContext;
+    public WebhookRepository(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    {
+        this.dbContext = dbContext;
+        this.currentActor = currentActor;
+    }
 
     public async Task<WebhookEndpointDto?> GetEndpointAsync(Guid id, CancellationToken ct = default) =>
         (await dbContext.WebhookEndpoints.AsNoTracking()
+            .ScopeToActorWorkspace(currentActor)
             .Include(endpoint => endpoint.Subscriptions)
             .FirstOrDefaultAsync(endpoint => endpoint.Id == id, ct))?.ToDto();
 
@@ -19,6 +26,7 @@ public sealed class WebhookRepository : IWebhookRepository
         dbContext.WebhookEndpoints.AsNoTracking()
             .Include(endpoint => endpoint.Subscriptions)
             .Where(endpoint => endpoint.WorkspaceId == workspaceId)
+            .ScopeToActorWorkspace(currentActor)
             .OrderBy(endpoint => endpoint.Name)
             .ToPagedResultAsync(page, endpoint => endpoint.ToDto(), ct);
 
@@ -47,6 +55,7 @@ public sealed class WebhookRepository : IWebhookRepository
     public async Task<WebhookEndpointDto> UpdateEndpointAsync(UpdateWebhookEndpointCommand command, CancellationToken ct = default)
     {
         var entity = await dbContext.WebhookEndpoints
+            .ScopeToActorWorkspace(currentActor)
             .Include(endpoint => endpoint.Subscriptions)
             .FirstAsync(endpoint => endpoint.Id == command.Id, ct);
 

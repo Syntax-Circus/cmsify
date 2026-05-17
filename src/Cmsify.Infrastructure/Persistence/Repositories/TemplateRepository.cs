@@ -1,5 +1,6 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -7,15 +8,21 @@ namespace Cmsify.Infrastructure.Persistence.Repositories;
 public sealed class TemplateRepository : ITemplateRepository
 {
     private readonly CmsifyDbContext dbContext;
+    private readonly ICurrentActor currentActor;
 
-    public TemplateRepository(CmsifyDbContext dbContext) => this.dbContext = dbContext;
+    public TemplateRepository(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    {
+        this.dbContext = dbContext;
+        this.currentActor = currentActor;
+    }
 
     public async Task<TemplateDto?> GetAsync(Guid id, CancellationToken ct = default) =>
-        (await dbContext.Templates.AsNoTracking().FirstOrDefaultAsync(template => template.Id == id, ct))?.ToDto();
+        (await dbContext.Templates.AsNoTracking().ScopeToActorWorkspace(currentActor).FirstOrDefaultAsync(template => template.Id == id, ct))?.ToDto();
 
     public Task<PagedResult<TemplateDto>> ListByWorkspaceAsync(Guid workspaceId, PageRequest page, CancellationToken ct = default) =>
         dbContext.Templates.AsNoTracking()
             .Where(template => template.WorkspaceId == workspaceId)
+            .ScopeToActorWorkspace(currentActor)
             .OrderBy(template => template.Name)
             .ToPagedResultAsync(page, template => template.ToDto(), ct);
 
@@ -36,7 +43,7 @@ public sealed class TemplateRepository : ITemplateRepository
 
     public async Task<TemplateDto> UpdateAsync(UpdateTemplateCommand command, CancellationToken ct = default)
     {
-        var entity = await dbContext.Templates.FirstAsync(template => template.Id == command.Id, ct);
+        var entity = await dbContext.Templates.ScopeToActorWorkspace(currentActor).FirstAsync(template => template.Id == command.Id, ct);
         entity.Name = command.Name;
         entity.Slug = command.Slug;
         entity.Description = command.Description;
@@ -48,7 +55,7 @@ public sealed class TemplateRepository : ITemplateRepository
 
     public async Task SoftDeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        var entity = await dbContext.Templates.FirstAsync(template => template.Id == id, ct);
+        var entity = await dbContext.Templates.ScopeToActorWorkspace(currentActor).FirstAsync(template => template.Id == id, ct);
         entity.SoftDelete(actorUserId);
         await dbContext.SaveChangesAsync(ct);
     }

@@ -32,6 +32,29 @@ public interface IContentSearchVectorBuilder
     string Build(ContentItem item, TemplateVersion version);
 }
 
+public interface ICurrentActor
+{
+    Guid? UserId { get; }
+
+    Guid? ApiClientId { get; }
+
+    UserRole Role { get; }
+
+    Guid? WorkspaceId { get; }
+
+    bool IsAuthenticated { get; }
+}
+
+public sealed record CurrentActorInfo(Guid? UserId, Guid? ApiClientId, UserRole Role, Guid? WorkspaceId, bool IsAuthenticated) : ICurrentActor
+{
+    public static CurrentActorInfo Anonymous { get; } = new(null, null, UserRole.Reader, null, false);
+}
+
+public static class CurrentActorHttpContextKeys
+{
+    public const string ItemName = "Cmsify.CurrentActor";
+}
+
 public interface IWebhookQueue
 {
     ValueTask EnqueueAsync(WebhookEvent evt, CancellationToken ct = default);

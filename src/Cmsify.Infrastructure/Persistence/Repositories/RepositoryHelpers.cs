@@ -1,5 +1,6 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -25,5 +26,12 @@ internal static class RepositoryHelpers
         entity.DeletedAt = DateTimeOffset.UtcNow;
         entity.DeletedByUserId = actorUserId;
         entity.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public static IQueryable<TEntity> ScopeToActorWorkspace<TEntity>(this IQueryable<TEntity> query, ICurrentActor actor)
+    {
+        return actor.WorkspaceId.HasValue
+            ? query.Where(entity => EF.Property<Guid>(entity!, "WorkspaceId") == actor.WorkspaceId.Value)
+            : query;
     }
 }

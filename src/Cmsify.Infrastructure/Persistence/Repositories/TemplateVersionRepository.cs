@@ -1,6 +1,7 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -8,15 +9,20 @@ namespace Cmsify.Infrastructure.Persistence.Repositories;
 public sealed class TemplateVersionRepository : ITemplateVersionRepository
 {
     private readonly CmsifyDbContext dbContext;
+    private readonly ICurrentActor currentActor;
 
-    public TemplateVersionRepository(CmsifyDbContext dbContext) => this.dbContext = dbContext;
+    public TemplateVersionRepository(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    {
+        this.dbContext = dbContext;
+        this.currentActor = currentActor;
+    }
 
     public async Task<TemplateVersionDto?> GetAsync(Guid id, CancellationToken ct = default) =>
-        (await dbContext.TemplateVersions.AsNoTracking().FirstOrDefaultAsync(version => version.Id == id, ct))?.ToDto();
+        (await Scope(dbContext.TemplateVersions.AsNoTracking()).FirstOrDefaultAsync(version => version.Id == id, ct))?.ToDto();
 
     public async Task<IReadOnlyList<TemplateVersionDto>> ListByTemplateAsync(Guid templateId, CancellationToken ct = default)
     {
-        var versions = await dbContext.TemplateVersions.AsNoTracking()
+        var versions = await Scope(dbContext.TemplateVersions.AsNoTracking())
             .Where(version => version.TemplateId == templateId)
             .OrderByDescending(version => version.VersionNumber)
             .ToListAsync(ct);
@@ -25,7 +31,7 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
 
     public async Task<TemplateVersionDto> CreateDraftAsync(CreateTemplateVersionCommand command, CancellationToken ct = default)
     {
-        var nextVersion = await dbContext.TemplateVersions
+        var nextVersion = await Scope(dbContext.TemplateVersions)
             .Where(version => version.TemplateId == command.TemplateId)
             .Select(version => (int?)version.VersionNumber)
             .MaxAsync(ct) ?? 0;
@@ -44,7 +50,7 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
 
     public async Task SaveStructureAsync(SaveTemplateVersionStructureCommand command, CancellationToken ct = default)
     {
-        var version = await dbContext.TemplateVersions
+        var version = await Scope(dbContext.TemplateVersions)
             .Include(v => v.Sections)
             .Include(v => v.Fields)
             .ThenInclude(field => field.AllowedTypes)
@@ -112,7 +118,7 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
 
     public async Task<TemplateVersionDto> PublishAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        var entity = await dbContext.TemplateVersions.FirstAsync(version => version.Id == id, ct);
+        var entity = await Scope(dbContext.TemplateVersions).FirstAsync(version => version.Id == id, ct);
         if (entity.Status != TemplateVersionStatus.Draft)
         {
             throw new InvalidOperationException("Only draft template versions can be published.");
@@ -132,4 +138,9 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
         await dbContext.SaveChangesAsync(ct);
         return entity.ToDto();
     }
+
+    private IQueryable<TemplateVersion> Scope(IQueryable<TemplateVersion> query) =>
+        currentActor.WorkspaceId.HasValue
+            ? query.Where(version => dbContext.Templates.Any(template => template.Id == version.TemplateId && template.WorkspaceId == currentActor.WorkspaceId.Value))
+            : query;
 }

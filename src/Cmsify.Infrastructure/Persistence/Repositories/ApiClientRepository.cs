@@ -1,5 +1,6 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -7,14 +8,19 @@ namespace Cmsify.Infrastructure.Persistence.Repositories;
 public sealed class ApiClientRepository : IApiClientRepository
 {
     private readonly CmsifyDbContext dbContext;
+    private readonly ICurrentActor currentActor;
 
-    public ApiClientRepository(CmsifyDbContext dbContext) => this.dbContext = dbContext;
+    public ApiClientRepository(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    {
+        this.dbContext = dbContext;
+        this.currentActor = currentActor;
+    }
 
     public async Task<ApiClientDto?> GetAsync(Guid id, CancellationToken ct = default) =>
-        (await dbContext.ApiClients.AsNoTracking().FirstOrDefaultAsync(client => client.Id == id, ct))?.ToDto();
+        (await Scope(dbContext.ApiClients.AsNoTracking()).FirstOrDefaultAsync(client => client.Id == id, ct))?.ToDto();
 
     public Task<PagedResult<ApiClientDto>> ListAsync(PageRequest page, CancellationToken ct = default) =>
-        dbContext.ApiClients.AsNoTracking().OrderBy(client => client.Name).ToPagedResultAsync(page, client => client.ToDto(), ct);
+        Scope(dbContext.ApiClients.AsNoTracking()).OrderBy(client => client.Name).ToPagedResultAsync(page, client => client.ToDto(), ct);
 
     public async Task<ApiClientDto> CreateAsync(CreateApiClientCommand command, string tokenHash, CancellationToken ct = default)
     {
@@ -36,7 +42,7 @@ public sealed class ApiClientRepository : IApiClientRepository
 
     public async Task<ApiClientDto> UpdateAsync(UpdateApiClientCommand command, CancellationToken ct = default)
     {
-        var entity = await dbContext.ApiClients.FirstAsync(client => client.Id == command.Id, ct);
+        var entity = await Scope(dbContext.ApiClients).FirstAsync(client => client.Id == command.Id, ct);
         entity.Name = command.Name;
         entity.Description = command.Description;
         entity.Role = command.Role;
@@ -50,8 +56,13 @@ public sealed class ApiClientRepository : IApiClientRepository
 
     public async Task SoftDeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        var entity = await dbContext.ApiClients.FirstAsync(client => client.Id == id, ct);
+        var entity = await Scope(dbContext.ApiClients).FirstAsync(client => client.Id == id, ct);
         entity.SoftDelete(actorUserId);
         await dbContext.SaveChangesAsync(ct);
     }
+
+    private IQueryable<ApiClient> Scope(IQueryable<ApiClient> query) =>
+        currentActor.WorkspaceId.HasValue
+            ? query.Where(client => client.WorkspaceId == currentActor.WorkspaceId.Value)
+            : query;
 }

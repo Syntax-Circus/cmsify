@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
@@ -8,7 +7,6 @@ using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Persistence.Interceptors;
 using Cmsify.Infrastructure.Persistence.Repositories;
 using Cmsify.Infrastructure.Storage;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Extensions;
@@ -25,7 +23,6 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddScoped<AuditInterceptor>();
-        services.TryAddSingleton<IHttpContextAccessor, AmbientHttpContextAccessor>();
         services.AddDbContext<CmsifyDbContext>((serviceProvider, options) =>
         {
             options.UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
@@ -54,16 +51,5 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<WebhookRetryService>();
 
         return services;
-    }
-
-    internal sealed class AmbientHttpContextAccessor : IHttpContextAccessor
-    {
-        private static readonly AsyncLocal<HttpContext?> Current = new();
-
-        public HttpContext? HttpContext
-        {
-            get => Current.Value;
-            set => Current.Value = value;
-        }
     }
 }

@@ -1,6 +1,7 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -8,15 +9,20 @@ namespace Cmsify.Infrastructure.Persistence.Repositories;
 public sealed class ContentItemRepository : IContentItemRepository
 {
     private readonly CmsifyDbContext dbContext;
+    private readonly ICurrentActor currentActor;
 
-    public ContentItemRepository(CmsifyDbContext dbContext) => this.dbContext = dbContext;
+    public ContentItemRepository(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    {
+        this.dbContext = dbContext;
+        this.currentActor = currentActor;
+    }
 
     public async Task<ContentItemDto?> GetAsync(Guid id, CancellationToken ct = default) =>
-        (await dbContext.ContentItems.AsNoTracking().FirstOrDefaultAsync(content => content.Id == id, ct))?.ToDto();
+        (await dbContext.ContentItems.AsNoTracking().ScopeToActorWorkspace(currentActor).FirstOrDefaultAsync(content => content.Id == id, ct))?.ToDto();
 
     public async Task<PagedResult<ContentItemDto>> QueryAsync(ContentQuery query, CancellationToken ct = default)
     {
-        var items = dbContext.ContentItems.AsNoTracking().AsQueryable();
+        var items = dbContext.ContentItems.AsNoTracking().ScopeToActorWorkspace(currentActor).AsQueryable();
 
         if (query.WorkspaceId.HasValue)
         {
@@ -104,6 +110,7 @@ public sealed class ContentItemRepository : IContentItemRepository
     public async Task<ContentItemDto> UpdateAsync(UpdateContentItemCommand command, CancellationToken ct = default)
     {
         var entity = await dbContext.ContentItems
+            .ScopeToActorWorkspace(currentActor)
             .Include(content => content.FieldValues)
             .Include(content => content.Tags)
             .FirstAsync(content => content.Id == command.Id, ct);
@@ -133,7 +140,7 @@ public sealed class ContentItemRepository : IContentItemRepository
 
     public async Task<ContentItemDto> SetStatusAsync(Guid id, ContentStatus status, Guid actorUserId, CancellationToken ct = default)
     {
-        var entity = await dbContext.ContentItems.FirstAsync(content => content.Id == id, ct);
+        var entity = await dbContext.ContentItems.ScopeToActorWorkspace(currentActor).FirstAsync(content => content.Id == id, ct);
         entity.Status = status;
         entity.UpdatedAt = DateTimeOffset.UtcNow;
         entity.UpdatedByUserId = actorUserId;
@@ -155,6 +162,7 @@ public sealed class ContentItemRepository : IContentItemRepository
     public async Task<IReadOnlyList<ContentItemDto>> GetPendingScheduledPublishAsync(DateTimeOffset now, int limit = 100, CancellationToken ct = default)
     {
         var items = await dbContext.ContentItems.AsNoTracking()
+            .ScopeToActorWorkspace(currentActor)
             .Where(content => content.Status == ContentStatus.Approved && content.PublishAt <= now)
             .OrderBy(content => content.PublishAt)
             .Take(Math.Clamp(limit, 1, 500))
@@ -164,7 +172,7 @@ public sealed class ContentItemRepository : IContentItemRepository
 
     public async Task SoftDeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        var entity = await dbContext.ContentItems.FirstAsync(content => content.Id == id, ct);
+        var entity = await dbContext.ContentItems.ScopeToActorWorkspace(currentActor).FirstAsync(content => content.Id == id, ct);
         entity.SoftDelete(actorUserId);
         await dbContext.SaveChangesAsync(ct);
     }

@@ -34,6 +34,8 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<User> Users => Set<User>();
 
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
+
     public DbSet<ApiClient> ApiClients => Set<ApiClient>();
 
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
