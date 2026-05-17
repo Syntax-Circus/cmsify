@@ -79,4 +79,26 @@ public sealed class TemplateGraphValidatorTests
 
         Assert.True(result.IsValid);
     }
+
+    [Fact]
+    public void ValidateCycles_ReturnsFailure_ForAllowedTypeSelfReference()
+    {
+        var templateId = Guid.CreateVersion7();
+        var version = new TemplateVersion { TemplateId = templateId, VersionNumber = 1 };
+        var field = new TemplateField
+        {
+            TemplateVersionId = version.Id,
+            Key = "block",
+            Label = "Block",
+            CompositionMode = CompositionMode.Inline,
+            IsOpen = false,
+            TemplateId = Guid.CreateVersion7()
+        };
+        field.AllowedTypes.Add(new TemplateFieldAllowedType { FieldId = field.Id, AllowedTemplateId = templateId });
+        version.Fields.Add(field);
+
+        var result = new TemplateGraphValidator().ValidateCycles(version);
+
+        Assert.False(result.IsValid);
+    }
 }

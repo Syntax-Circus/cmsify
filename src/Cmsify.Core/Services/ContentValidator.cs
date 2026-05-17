@@ -1,4 +1,5 @@
 using Cmsify.Core.Domain.Entities;
+using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using FluentValidation.Results;
 
@@ -35,8 +36,61 @@ public sealed class ContentValidator : IContentValidator
             {
                 failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' allows at most {field.MaxOccurrences.Value} value(s)."));
             }
+
+            if (values is null)
+            {
+                continue;
+            }
+
+            foreach (var value in values)
+            {
+                ValidateValueKind(field, value, failures);
+            }
         }
 
         return new ValidationResult(failures);
+    }
+
+    private static void ValidateValueKind(TemplateField field, ContentFieldValue value, ICollection<ValidationFailure> failures)
+    {
+        if (field.TemplateId.HasValue || field.IsOpen)
+        {
+            if (value.ValueKind != ValueKind.ChildContent)
+            {
+                failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' expects a child content value."));
+            }
+
+            if (!value.ChildContentItemId.HasValue)
+            {
+                failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' requires ChildContentItemId."));
+            }
+
+            return;
+        }
+
+        if (!field.PrimitiveType.HasValue)
+        {
+            return;
+        }
+
+        var expected = field.PrimitiveType.Value switch
+        {
+            PrimitiveType.Text => ValueKind.Text,
+            PrimitiveType.RichText => ValueKind.RichText,
+            PrimitiveType.Markdown => ValueKind.Markdown,
+            PrimitiveType.Boolean => ValueKind.Boolean,
+            PrimitiveType.PickList => ValueKind.PickList,
+            PrimitiveType.Media => ValueKind.Media,
+            PrimitiveType.File => ValueKind.File,
+            PrimitiveType.Link => ValueKind.Link,
+            PrimitiveType.Quote => ValueKind.Quote,
+            PrimitiveType.Separator => ValueKind.Separator,
+            _ => value.ValueKind
+        };
+
+        if (value.ValueKind != expected)
+        {
+            failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' expects {expected} values."));
+        }
     }
 }

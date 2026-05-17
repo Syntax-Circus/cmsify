@@ -69,4 +69,24 @@ public sealed class ContentValidatorTests
 
         Assert.True(result.IsValid);
     }
+
+    [Fact]
+    public void Validate_ReturnsFailure_WhenValueKindDoesNotMatchPrimitiveType()
+    {
+        var field = new TemplateField
+        {
+            TemplateVersionId = Guid.CreateVersion7(),
+            Key = "enabled",
+            Label = "Enabled",
+            PrimitiveType = PrimitiveType.Boolean
+        };
+        var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
+        version.Fields.Add(field);
+        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "true" });
+
+        var result = new ContentValidator().Validate(item, version);
+
+        Assert.False(result.IsValid);
+    }
 }

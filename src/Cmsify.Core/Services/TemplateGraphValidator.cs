@@ -28,25 +28,37 @@ public sealed class TemplateGraphValidator : ITemplateGraphValidator
 
         foreach (var field in version.Fields.Where(field => !field.IsOpen))
         {
-            if (!field.TemplateId.HasValue)
+            foreach (var referencedTemplateId in GetReferencedTemplateIds(field))
             {
-                continue;
-            }
+                if (path.Contains(referencedTemplateId))
+                {
+                    failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' creates a circular template reference."));
+                    continue;
+                }
 
-            var referencedTemplateId = field.TemplateId.Value;
-
-            if (path.Contains(referencedTemplateId))
-            {
-                failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' creates a circular template reference."));
-                continue;
-            }
-
-            if (field.ReferencedTemplateVersion is not null)
-            {
-                Visit(field.ReferencedTemplateVersion, path, failures);
+                if (field.ReferencedTemplateVersion is not null && field.ReferencedTemplateVersion.TemplateId == referencedTemplateId)
+                {
+                    Visit(field.ReferencedTemplateVersion, path, failures);
+                }
             }
         }
 
         _ = path.Pop();
+    }
+
+    private static IEnumerable<Guid> GetReferencedTemplateIds(TemplateField field)
+    {
+        if (field.TemplateId.HasValue)
+        {
+            yield return field.TemplateId.Value;
+        }
+
+        foreach (var allowedType in field.AllowedTypes)
+        {
+            if (allowedType.AllowedTemplateId.HasValue)
+            {
+                yield return allowedType.AllowedTemplateId.Value;
+            }
+        }
     }
 }

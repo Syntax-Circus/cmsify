@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Core.Services;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Persistence.Interceptors;
@@ -31,6 +32,10 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<IDbSeeder, DbSeeder>();
         services.AddScoped<ICmsifyDatabaseMigrator, CmsifyDatabaseMigrator>();
+        services.AddScoped<ITemplateGraphValidator, TemplateGraphValidator>();
+        services.AddScoped<IContentValidator, ContentValidator>();
+        services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
+        services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();
         services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();
