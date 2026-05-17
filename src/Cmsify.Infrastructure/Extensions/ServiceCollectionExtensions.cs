@@ -7,6 +7,7 @@ using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Persistence.Interceptors;
 using Cmsify.Infrastructure.Persistence.Repositories;
+using Cmsify.Infrastructure.Security;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 
@@ -37,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
         services.AddScoped<IContentSearchVectorBuilder, ContentSearchVectorBuilder>();
+        services.AddSingleton<ISecretProtector, AesSecretProtector>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();
         services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();

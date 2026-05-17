@@ -79,3 +79,10 @@ public interface IStorageProvider
 }
 
 public sealed record StoredFile(string StorageKey, string Provider, long SizeBytes);
+
+public interface ISecretProtector
+{
+    string Protect(string secret);
+
+    string Unprotect(string protectedSecret);
+}

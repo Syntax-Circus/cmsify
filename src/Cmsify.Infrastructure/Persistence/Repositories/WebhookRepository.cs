@@ -9,11 +9,13 @@ public sealed class WebhookRepository : IWebhookRepository
 {
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
+    private readonly ISecretProtector secretProtector;
 
-    public WebhookRepository(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    public WebhookRepository(CmsifyDbContext dbContext, ICurrentActor currentActor, ISecretProtector secretProtector)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
+        this.secretProtector = secretProtector;
     }
 
     public async Task<WebhookEndpointDto?> GetEndpointAsync(Guid id, CancellationToken ct = default) =>
@@ -99,15 +101,18 @@ public sealed class WebhookRepository : IWebhookRepository
             .OrderByDescending(log => log.CreatedAt)
             .ToPagedResultAsync(page, log => log.ToDto(), ct);
 
-    public async Task<IReadOnlyList<WebhookDispatchTargetDto>> GetActiveEndpointsForEventAsync(string eventType, Guid? workspaceId, CancellationToken ct = default) =>
-        await dbContext.WebhookEndpoints.AsNoTracking()
+    public async Task<IReadOnlyList<WebhookDispatchTargetDto>> GetActiveEndpointsForEventAsync(string eventType, Guid? workspaceId, CancellationToken ct = default)
+    {
+        var targets = await dbContext.WebhookEndpoints.AsNoTracking()
             .Where(endpoint => endpoint.IsActive && (!workspaceId.HasValue || endpoint.WorkspaceId == workspaceId.Value))
             .Where(endpoint => endpoint.Subscriptions.Any(subscription => subscription.EventType == eventType))
             .Select(endpoint => new WebhookDispatchTargetDto(endpoint.Id, endpoint.WorkspaceId, endpoint.Url, endpoint.Secret))
             .ToListAsync(ct);
+        return targets.Select(target => target with { Secret = secretProtector.Unprotect(target.Secret) }).ToArray();
+    }
 
     public async Task<IReadOnlyList<PendingWebhookDeliveryDto>> GetPendingDeliveryLogsAsync(DateTimeOffset now, int limit, CancellationToken ct = default) =>
-        await dbContext.WebhookDeliveryLogs.AsNoTracking()
+        (await dbContext.WebhookDeliveryLogs.AsNoTracking()
             .Where(log => !log.IsDelivered && !log.IsFailed && log.NextRetryAt <= now)
             .OrderBy(log => log.NextRetryAt)
             .Take(Math.Clamp(limit, 1, 500))
@@ -116,7 +121,9 @@ public sealed class WebhookRepository : IWebhookRepository
                 log => log.WebhookEndpointId,
                 endpoint => endpoint.Id,
                 (log, endpoint) => new PendingWebhookDeliveryDto(log.Id, log.WebhookEndpointId, endpoint.WorkspaceId, log.EventType, endpoint.Url, endpoint.Secret, log.Payload, log.AttemptCount, log.NextRetryAt))
-            .ToListAsync(ct);
+            .ToListAsync(ct))
+            .Select(delivery => delivery with { Secret = secretProtector.Unprotect(delivery.Secret) })
+            .ToArray();
 
     public async Task MarkDeliverySucceededAsync(Guid deliveryLogId, int statusCode, CancellationToken ct = default)
     {

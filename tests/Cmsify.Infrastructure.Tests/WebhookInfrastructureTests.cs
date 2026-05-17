@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using Cmsify.Infrastructure.BackgroundServices;
+using Cmsify.Infrastructure.Security;
+using Microsoft.Extensions.Configuration;
 
 namespace Cmsify.Infrastructure.Tests;
 
@@ -35,5 +37,22 @@ public sealed class WebhookInfrastructureTests
         var delay = WebhookBackoffCalculator.CalculateDelay(20, TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(5));
 
         Assert.Equal(TimeSpan.FromMinutes(5), delay);
+    }
+
+    [Fact]
+    public void AesSecretProtector_RoundTripsAndDoesNotStorePlaintext()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Secrets:EncryptionKey"] = "unit-test-secret-key-with-enough-length"
+            })
+            .Build();
+        var protector = new AesSecretProtector(configuration);
+
+        var encrypted = protector.Protect("webhook-secret");
+
+        Assert.NotEqual("webhook-secret", encrypted);
+        Assert.Equal("webhook-secret", protector.Unprotect(encrypted));
     }
 }

@@ -18,12 +18,14 @@ public sealed class TemplatesController : ControllerBase
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
     private readonly IFieldConfigValidator fieldConfigValidator;
+    private readonly IWebhookQueue webhookQueue;
 
-    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IFieldConfigValidator fieldConfigValidator)
+    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IFieldConfigValidator fieldConfigValidator, IWebhookQueue webhookQueue)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
         this.fieldConfigValidator = fieldConfigValidator;
+        this.webhookQueue = webhookQueue;
     }
 
     [HttpGet]
@@ -250,6 +252,13 @@ public sealed class TemplatesController : ControllerBase
         template.CurrentVersionId = version.Id;
         template.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
+        await webhookQueue.EnqueueAsync(new WebhookEvent(
+            "template.version_published",
+            workspaceId,
+            version.Id,
+            JsonSerializer.SerializeToElement(new { templateId = id, templateVersionId = version.Id, versionNumber = version.VersionNumber, workspaceId }),
+            DateTimeOffset.UtcNow),
+            ct);
         return Ok(ToVersionResponse(version));
     }
 

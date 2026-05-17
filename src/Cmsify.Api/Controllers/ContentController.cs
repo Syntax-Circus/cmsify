@@ -160,6 +160,7 @@ public sealed class ContentController : ControllerBase
         await ApplyTagsAsync(content, workspaceId, request.Tags, ct);
         dbContext.ContentItems.Add(content);
         await dbContext.SaveChangesAsync(ct);
+        await EnqueueContentEventAsync("content.created", content, ct);
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
         return CreatedAtAction(nameof(Get), new { workspaceId, id = content.Id }, await ToDetailResponseAsync(content.Id, ct: ct));
     }
@@ -413,6 +414,7 @@ public sealed class ContentController : ControllerBase
         }
 
         await dbContext.SaveChangesAsync(ct);
+        await EnqueueContentEventAsync("content.status_changed", content, ct);
         if (targetStatus is ContentStatus.Published or ContentStatus.Archived)
         {
             await EnqueueContentEventAsync(targetStatus == ContentStatus.Published ? "content.published" : "content.archived", content, ct);

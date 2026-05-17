@@ -2,7 +2,9 @@ using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Core.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace Cmsify.Api.Controllers;
 
@@ -13,11 +15,13 @@ public sealed class WorkspacesController : ControllerBase
 {
     private readonly IWorkspaceRepository workspaceRepository;
     private readonly ICurrentActor currentActor;
+    private readonly IWebhookQueue webhookQueue;
 
-    public WorkspacesController(IWorkspaceRepository workspaceRepository, ICurrentActor currentActor)
+    public WorkspacesController(IWorkspaceRepository workspaceRepository, ICurrentActor currentActor, IWebhookQueue webhookQueue)
     {
         this.workspaceRepository = workspaceRepository;
         this.currentActor = currentActor;
+        this.webhookQueue = webhookQueue;
     }
 
     [HttpGet]
@@ -79,6 +83,7 @@ public sealed class WorkspacesController : ControllerBase
         }
 
         var workspace = await workspaceRepository.UpdateAsync(new UpdateWorkspaceCommand(id, request.Name, request.Slug, request.Description), ct);
+        await webhookQueue.EnqueueAsync(new WebhookEvent("workspace.updated", id, id, JsonSerializer.SerializeToElement(new { workspaceId = id, workspace.Name, workspace.Slug }), DateTimeOffset.UtcNow), ct);
         Response.Headers.ETag = ToETag(workspace);
         return Ok(workspace);
     }

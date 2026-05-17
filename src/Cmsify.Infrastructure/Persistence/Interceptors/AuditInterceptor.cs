@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Interfaces.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -59,7 +60,7 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
                 ActorApiClientId = actor.ApiClientId,
                 Timestamp = DateTimeOffset.UtcNow,
                 ChangeDelta = delta,
-                WorkspaceId = GetGuidValue(entry, "WorkspaceId")
+                WorkspaceId = entry.Entity is Workspace ? entityId.Value : GetGuidValue(entry, "WorkspaceId")
             });
         }
     }
@@ -67,6 +68,13 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
     private (Guid? UserId, Guid? ApiClientId) ResolveActor()
     {
         var user = httpContextAccessor.HttpContext?.User;
+        if (httpContextAccessor.HttpContext?.Items.TryGetValue(CurrentActorHttpContextKeys.ItemName, out var actorItem) == true
+            && actorItem is ICurrentActor currentActor
+            && currentActor.IsAuthenticated)
+        {
+            return (currentActor.UserId, currentActor.ApiClientId);
+        }
+
         if (user?.Identity?.IsAuthenticated != true)
         {
             return (null, null);
@@ -97,6 +105,11 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
         if (entry.State == EntityState.Deleted || SoftDeleteWasSet(entry))
         {
             return AuditAction.Deleted;
+        }
+
+        if (entry.Entity is ContentItem && entry.Properties.Any(property => property.Metadata.Name == nameof(ContentItem.Status) && property.IsModified))
+        {
+            return AuditAction.StatusChanged;
         }
 
         return AuditAction.Updated;
