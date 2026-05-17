@@ -17,21 +17,23 @@ public sealed class ContentController : ControllerBase
 {
     private readonly CmsifyDbContext dbContext;
     private readonly IContentValidator contentValidator;
+    private readonly IContentSearchVectorBuilder searchVectorBuilder;
     private readonly IContentLifecycleService lifecycleService;
     private readonly ICurrentActor currentActor;
     private readonly IWebhookQueue webhookQueue;
 
-    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentLifecycleService lifecycleService, ICurrentActor currentActor, IWebhookQueue webhookQueue)
+    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, ICurrentActor currentActor, IWebhookQueue webhookQueue)
     {
         this.dbContext = dbContext;
         this.contentValidator = contentValidator;
+        this.searchVectorBuilder = searchVectorBuilder;
         this.lifecycleService = lifecycleService;
         this.currentActor = currentActor;
         this.webhookQueue = webhookQueue;
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResult<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
+    public async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
     {
         if (!CanAccess(workspaceId))
         {
@@ -119,7 +121,7 @@ public sealed class ContentController : ControllerBase
             responses.Add(await ToSummaryResponseAsync(item, ct));
         }
 
-        return Ok(new PagedResult<ContentItemSummaryResponse>(responses, total, ControllerHelpers.Offset(query.Page, query.PageSize), ControllerHelpers.Limit(query.PageSize)));
+        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
     }
 
     [HttpPost]
@@ -154,6 +156,7 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
         }
 
+        content.SearchVector = searchVectorBuilder.Build(content, version);
         await ApplyTagsAsync(content, workspaceId, request.Tags, ct);
         dbContext.ContentItems.Add(content);
         await dbContext.SaveChangesAsync(ct);
@@ -227,6 +230,7 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
         }
 
+        content.SearchVector = searchVectorBuilder.Build(content, version!);
         await dbContext.SaveChangesAsync(ct);
         await EnqueueContentEventAsync("content.updated", content, ct);
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
@@ -295,6 +299,7 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
         }
 
+        content.SearchVector = searchVectorBuilder.Build(content, target);
         content.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));

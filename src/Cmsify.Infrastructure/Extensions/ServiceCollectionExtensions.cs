@@ -36,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IContentValidator, ContentValidator>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
+        services.AddScoped<IContentSearchVectorBuilder, ContentSearchVectorBuilder>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();
         services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();
