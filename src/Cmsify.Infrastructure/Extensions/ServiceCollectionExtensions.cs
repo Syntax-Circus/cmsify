@@ -1,7 +1,14 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
+using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
+using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Persistence.Interceptors;
+using Cmsify.Infrastructure.Persistence.Repositories;
+using Cmsify.Infrastructure.Storage;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Extensions;
@@ -18,6 +25,7 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddScoped<AuditInterceptor>();
+        services.TryAddSingleton<IHttpContextAccessor, AmbientHttpContextAccessor>();
         services.AddDbContext<CmsifyDbContext>((serviceProvider, options) =>
         {
             options.UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
@@ -26,7 +34,36 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<IDbSeeder, DbSeeder>();
         services.AddScoped<ICmsifyDatabaseMigrator, CmsifyDatabaseMigrator>();
+        services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
+        services.AddScoped<ITemplateRepository, TemplateRepository>();
+        services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();
+        services.AddScoped<IContentItemRepository, ContentItemRepository>();
+        services.AddScoped<IMediaAssetRepository, MediaAssetRepository>();
+        services.AddScoped<ITagRepository, TagRepository>();
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IApiClientRepository, ApiClientRepository>();
+        services.AddScoped<IWebhookRepository, WebhookRepository>();
+        services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddStorageProvider(configuration);
+        services.AddHttpClient(nameof(WebhookDeliveryProcessor));
+        services.AddScoped<WebhookDeliveryProcessor>();
+        services.AddSingleton<IWebhookQueue, InProcessWebhookQueue>();
+        services.AddScoped<IScheduledPublishingDispatcher, InProcessScheduledPublishingDispatcher>();
+        services.AddHostedService<ScheduledPublishingService>();
+        services.AddHostedService<WebhookDispatchService>();
+        services.AddHostedService<WebhookRetryService>();
 
         return services;
+    }
+
+    internal sealed class AmbientHttpContextAccessor : IHttpContextAccessor
+    {
+        private static readonly AsyncLocal<HttpContext?> Current = new();
+
+        public HttpContext? HttpContext
+        {
+            get => Current.Value;
+            set => Current.Value = value;
+        }
     }
 }

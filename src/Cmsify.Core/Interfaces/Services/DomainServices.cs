@@ -43,3 +43,16 @@ public interface IScheduledPublishingDispatcher
 {
     Task RunOnceAsync(CancellationToken ct = default);
 }
+
+public interface IStorageProvider
+{
+    Task<StoredFile> StoreAsync(Stream content, string fileName, string mimeType, CancellationToken ct = default);
+
+    Task<Stream> RetrieveAsync(string storageKey, CancellationToken ct = default);
+
+    Task DeleteAsync(string storageKey, CancellationToken ct = default);
+
+    Task<bool> ExistsAsync(string storageKey, CancellationToken ct = default);
+}
+
+public sealed record StoredFile(string StorageKey, string Provider, long SizeBytes);

@@ -53,6 +53,8 @@ public interface IContentItemRepository
 
     Task<ContentItemDto> SetStatusAsync(Guid id, ContentStatus status, Guid actorUserId, CancellationToken ct = default);
 
+    Task<IReadOnlyList<ContentItemDto>> GetPendingScheduledPublishAsync(DateTimeOffset now, int limit = 100, CancellationToken ct = default);
+
     Task SoftDeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default);
 }
 
@@ -119,6 +121,14 @@ public interface IWebhookRepository
     Task AddDeliveryLogAsync(WebhookDeliveryLogDto log, CancellationToken ct = default);
 
     Task<PagedResult<WebhookDeliveryLogDto>> ListDeliveryLogsAsync(Guid endpointId, PageRequest page, CancellationToken ct = default);
+
+    Task<IReadOnlyList<WebhookDispatchTargetDto>> GetActiveEndpointsForEventAsync(string eventType, Guid? workspaceId, CancellationToken ct = default);
+
+    Task<IReadOnlyList<PendingWebhookDeliveryDto>> GetPendingDeliveryLogsAsync(DateTimeOffset now, int limit, CancellationToken ct = default);
+
+    Task MarkDeliverySucceededAsync(Guid deliveryLogId, int statusCode, CancellationToken ct = default);
+
+    Task MarkDeliveryFailedAsync(Guid deliveryLogId, int? statusCode, DateTimeOffset nextRetryAt, bool isFailed, CancellationToken ct = default);
 }
 
 public interface IAuditLogRepository

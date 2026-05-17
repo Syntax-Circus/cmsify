@@ -178,7 +178,31 @@ public sealed record CreateWebhookEndpointCommand(Guid WorkspaceId, string Name,
 
 public sealed record UpdateWebhookEndpointCommand(Guid Id, string Name, string Url, bool IsActive, IReadOnlyList<string> EventTypes);
 
-public sealed record WebhookDeliveryLogDto(Guid Id, Guid WebhookEndpointId, string EventType, int AttemptCount, int? StatusCode, bool IsDelivered, bool IsFailed, DateTimeOffset CreatedAt);
+public sealed record WebhookDeliveryLogDto(
+    Guid Id,
+    Guid WebhookEndpointId,
+    string EventType,
+    JsonElement Payload,
+    int AttemptCount,
+    DateTimeOffset? LastAttemptAt,
+    DateTimeOffset? NextRetryAt,
+    int? StatusCode,
+    bool IsDelivered,
+    bool IsFailed,
+    DateTimeOffset CreatedAt);
+
+public sealed record WebhookDispatchTargetDto(Guid Id, Guid WorkspaceId, string Url, string Secret);
+
+public sealed record PendingWebhookDeliveryDto(
+    Guid Id,
+    Guid WebhookEndpointId,
+    Guid WorkspaceId,
+    string EventType,
+    string Url,
+    string Secret,
+    JsonElement Payload,
+    int AttemptCount,
+    DateTimeOffset? NextRetryAt);
 
 public sealed record AuditLogDto(
     Guid Id,
