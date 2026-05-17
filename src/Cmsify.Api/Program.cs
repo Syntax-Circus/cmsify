@@ -9,9 +9,11 @@ builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddCmsifyInfrastructure();
+builder.Services.AddCmsifyInfrastructure(builder.Configuration);
 
 var app = builder.Build();
+
+await app.MigrateCmsifyDatabaseAsync();
 
 if (app.Environment.IsDevelopment())
 {

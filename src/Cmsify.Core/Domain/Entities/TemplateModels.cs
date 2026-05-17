@@ -93,7 +93,7 @@ public sealed class TemplateField : Entity
     public IList<TemplateFieldAllowedType> AllowedTypes { get; } = new List<TemplateFieldAllowedType>();
 }
 
-public sealed class TemplateFieldAllowedType
+public sealed class TemplateFieldAllowedType : Entity
 {
     public Guid FieldId { get; set; }
 

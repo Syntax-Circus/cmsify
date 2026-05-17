@@ -26,9 +26,16 @@ public sealed class TemplateGraphValidator : ITemplateGraphValidator
 
         path.Push(version.TemplateId);
 
-        foreach (var field in version.Fields.Where(field => !field.IsOpen && field.TemplateId.HasValue))
+        foreach (var field in version.Fields.Where(field => !field.IsOpen))
         {
-            if (path.Contains(field.TemplateId.Value))
+            if (!field.TemplateId.HasValue)
+            {
+                continue;
+            }
+
+            var referencedTemplateId = field.TemplateId.Value;
+
+            if (path.Contains(referencedTemplateId))
             {
                 failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' creates a circular template reference."));
                 continue;
