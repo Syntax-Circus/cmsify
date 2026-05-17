@@ -1,0 +1,19 @@
+name: .NET tests
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore Cmsify.slnx
+      - name: Test
+        run: dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal

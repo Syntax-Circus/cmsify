@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cmsify}
+      POSTGRES_USER: ${POSTGRES_USER:-cmsify}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cmsify} -d ${POSTGRES_DB:-cmsify}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Cmsify.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Cmsify: ${ConnectionStrings__Cmsify:?ConnectionStrings__Cmsify is required}
+      Auth__Bootstrap__AdminPassword: ${Auth__Bootstrap__AdminPassword:?Auth__Bootstrap__AdminPassword is required}
+      Secrets__EncryptionKey: ${Secrets__EncryptionKey:?Secrets__EncryptionKey is required}
+      Storage__Provider: ${Storage__Provider:-local}
+      Storage__Local__BasePath: /var/cmsify/media
+      Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - media_data:/var/cmsify/media
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  admin:
+    build:
+      context: .
+      dockerfile: src/Cmsify.Admin/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Admin__ApiBaseUrl: ${Admin__ApiBaseUrl:?Admin__ApiBaseUrl is required}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  media_data:

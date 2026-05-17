@@ -5,8 +5,11 @@ using Cmsify.Admin.State;
 
 var builder = WebApplication.CreateBuilder(args);
 
-LoadDotEnvFromParents(builder.Environment.ContentRootPath);
-builder.Configuration.AddEnvironmentVariables();
+if (builder.Environment.IsDevelopment())
+{
+    LoadDotEnvFromParents(builder.Environment.ContentRootPath);
+    builder.Configuration.AddEnvironmentVariables();
+}
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -51,7 +54,17 @@ app.Run();
 
 static void LoadDotEnvFromParents(string startPath)
 {
+    var directories = new Stack<DirectoryInfo>();
     for (var directory = new DirectoryInfo(startPath); directory is not null; directory = directory.Parent)
+    {
+        directories.Push(directory);
+        if (Directory.Exists(Path.Combine(directory.FullName, ".git")))
+        {
+            break;
+        }
+    }
+
+    foreach (var directory in directories)
     {
         LoadIfExists(Path.Combine(directory.FullName, ".env"));
         LoadIfExists(Path.Combine(directory.FullName, ".env.local"));

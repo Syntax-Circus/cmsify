@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: cmsify
+      POSTGRES_USER: cmsify
+      POSTGRES_PASSWORD: cmsify_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cmsify -d cmsify"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Cmsify.Api/Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Cmsify: Host=postgres;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify_dev
+      Auth__Bootstrap__AdminPassword: change-this-temporary-password
+      Storage__Provider: local
+      Storage__Local__BasePath: /var/cmsify/media
+      Api__SwaggerEnabled: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - media_data:/var/cmsify/media
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  admin:
+    build:
+      context: .
+      dockerfile: src/Cmsify.Admin/Dockerfile
+    ports:
+      - "5001:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      Admin__ApiBaseUrl: http://api:8080
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  media_data:

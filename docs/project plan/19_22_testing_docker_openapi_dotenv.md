@@ -120,16 +120,16 @@ Use a `TestDataBuilder` pattern (fluent builders) for constructing complex entit
 
 ## Tasks
 
-- [ ] Install xUnit, FluentAssertions, NSubstitute, Testcontainers in appropriate projects
-- [ ] Install `Serilog.AspNetCore`, `Serilog.Sinks.Console`, `Serilog.Sinks.File` in `Cmsify.Api`
-- [ ] Implement `TestDataBuilder` helpers for `Template`, `TemplateVersion`, `ContentItem`
-- [ ] Implement `WebApplicationFactory` setup with Testcontainers Postgres
+- [x] Install xUnit, FluentAssertions, NSubstitute, Testcontainers in appropriate projects
+- [x] Install `Serilog.AspNetCore`, `Serilog.Sinks.Console`, `Serilog.Sinks.File` in `Cmsify.Api`
+- [x] Implement `TestDataBuilder` helpers for `Template`, `TemplateVersion`, `ContentItem`
+- [x] Implement `WebApplicationFactory` setup with Testcontainers Postgres
 - [ ] Implement shared test fixture for database lifecycle (migrate + seed per collection)
 - [ ] Write all Core unit tests (cycle detection, lifecycle, validation, `IFieldConfigValidator`)
 - [ ] Write all Infrastructure unit tests (storage, interceptor, webhook signing, search vector builder)
 - [ ] Write integration tests for all controllers (happy paths + key failure cases) including ETag/If-Match, rate limit, ProblemDetails shape
-- [ ] Wire `axe-core` accessibility checks into the admin CI workflow
-- [ ] Configure CI to run `dotnet test` on PR
+- [x] Wire `axe-core` accessibility checks into the admin CI workflow
+- [x] Configure CI to run `dotnet test` on PR
 
 ---
 
@@ -249,14 +249,14 @@ Docker Compose `healthcheck` should call `/health/ready`. Upstream load balancer
 
 ## Tasks
 
-- [ ] Write `Dockerfile` for `Cmsify.Api`
-- [ ] Write `Dockerfile` for `Cmsify.Admin` (verify LibMan + SassCompiler run in build stage)
-- [ ] Write `docker-compose.yml` for local dev
-- [ ] Write `docker-compose.prod.yml` for production
-- [ ] Implement `GET /health/live` and `GET /health/ready` endpoints in `Cmsify.Api`
-- [ ] Add `media_data` volume mount to local storage provider config
+- [x] Write `Dockerfile` for `Cmsify.Api`
+- [x] Write `Dockerfile` for `Cmsify.Admin` (verify LibMan + SassCompiler run in build stage)
+- [x] Write `docker-compose.yml` for local dev
+- [x] Write `docker-compose.prod.yml` for production
+- [x] Implement `GET /health/live` and `GET /health/ready` endpoints in `Cmsify.Api`
+- [x] Add `media_data` volume mount to local storage provider config
 - [ ] Test full local dev stack: `docker compose up` → API accessible → Admin accessible → login works
-- [ ] Document `docker compose up` as the primary local dev startup in `README.md`
+- [x] Document `docker compose up` as the primary local dev startup in `README.md`
 
 ---
 
@@ -311,13 +311,13 @@ builder.Services.AddSwaggerGen(c =>
 - Endpoints using optimistic concurrency document the `If-Match` request header and `ETag` response header
 
 ## Tasks
-- [ ] Install and configure Swashbuckle or Scalar
-- [ ] Enable XML doc generation in `Cmsify.Api.csproj`
-- [ ] Add Bearer auth to Swagger UI
+- [x] Install and configure Swashbuckle or Scalar
+- [x] Enable XML doc generation in `Cmsify.Api.csproj`
+- [x] Add Bearer auth to Swagger UI
 - [ ] Add XML doc comments to all controllers and DTOs
 - [ ] Add `ProducesResponseType` attributes to all actions
 - [ ] Verify Swagger UI loads and all endpoints are documented
-- [ ] Add `Api:SwaggerEnabled` config flag (disable in production by default)
+- [x] Add `Api:SwaggerEnabled` config flag (disable in production by default)
 
 ## Deliverables
 - Swagger/Scalar UI accessible at `/swagger` in development
@@ -416,13 +416,13 @@ Admin__OidcProviderName=Authentik
 ```
 
 ## Tasks
-- [ ] Install `dotenv.net` in both `Cmsify.Api` and `Cmsify.Admin`
-- [ ] Implement parent-folder traversal DotEnv loading in both `Program.cs` files
-- [ ] Write `src/Cmsify.Api/.env.example` with all overridable keys
-- [ ] Write `src/Cmsify.Admin/.env.example` with all overridable keys
-- [ ] Add repo-root `.env.example` documenting global overrides pattern
-- [ ] Verify `.env` and `.env.local` are in `.gitignore`
-- [ ] Document the `.env` setup in `README.md`
+- [x] Install DotEnv package in both `Cmsify.Api` and `Cmsify.Admin`
+- [x] Implement parent-folder traversal DotEnv loading in both `Program.cs` files
+- [x] Write `src/Cmsify.Api/.env.example` with all overridable keys
+- [x] Write `src/Cmsify.Admin/.env.example` with all overridable keys
+- [x] Add repo-root `.env.example` documenting global overrides pattern
+- [x] Verify `.env` and `.env.local` are in `.gitignore`
+- [x] Document the `.env` setup in `README.md`
 
 ## Deliverables
 - DotEnv loading in both apps with parent-folder traversal
