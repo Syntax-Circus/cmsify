@@ -169,18 +169,18 @@ Cmsify.Admin/
 
 ## Tasks
 
-- [ ] Create GitHub repository
-- [ ] Add `.gitignore` (standard .NET template + custom entries below)
-- [ ] Scaffold solution: `dotnet new sln -n Cmsify`
-- [ ] Scaffold all projects with correct SDK types
-- [ ] Add all project references to solution
-- [ ] Add project-to-project references (`Api` → `Core` + `Infrastructure`, `Infrastructure` → `Core`, `Admin` → `Core` shared models only)
-- [ ] Install baseline NuGet packages per project
-- [ ] Configure LibMan for Bootstrap in `Cmsify.Admin`
-- [ ] Configure AspNetCore.SassCompiler in `Cmsify.Admin`
-- [ ] Set up `.env.example` files for both `Api` and `Admin`
-- [ ] Configure DotEnv with parent-folder traversal in both `Api` and `Admin` `Program.cs`
-- [ ] Verify solution builds clean from repo root
+- [x] Create GitHub repository
+- [x] Add `.gitignore` (standard .NET template + custom entries below)
+- [x] Scaffold solution: `dotnet new sln -n Cmsify`
+- [x] Scaffold all projects with correct SDK types
+- [x] Add all project references to solution
+- [x] Add project-to-project references (`Api` → `Core` + `Infrastructure`, `Infrastructure` → `Core`, `Admin` → `Core` shared models only)
+- [x] Install baseline NuGet packages per project
+- [x] Configure LibMan for Bootstrap in `Cmsify.Admin`
+- [x] Configure AspNetCore.SassCompiler in `Cmsify.Admin`
+- [x] Set up `.env.example` files for both `Api` and `Admin`
+- [x] Configure DotEnv with parent-folder traversal in both `Api` and `Admin` `Program.cs`
+- [ ] Verify solution builds clean from repo root _(blocked in current environment: `dotnet` execution returns "Permission denied and could not request permission from user")_
 
 ## `.gitignore` Custom Entries
 
@@ -202,9 +202,9 @@ wwwroot/css/
 ---
 
 ## Deliverables
-- Clean building solution with all projects scaffolded
-- LibMan restoring Bootstrap SCSS on build
-- SassCompiler compiling `app.scss` → `app.css` on build (CSS not committed)
-- DotEnv loading `.env` / `.env.local` with parent-folder traversal in both apps
-- `.env.example` files committed for both `Api` and `Admin`
-- All test projects runnable (`dotnet test`)
+- [ ] Clean building solution with all projects scaffolded _(pending `dotnet test Cmsify.slnx` / build validation outside the current permission-restricted environment)_
+- [x] LibMan restoring Bootstrap SCSS on build
+- [x] SassCompiler compiling `app.scss` → `app.css` on build (CSS not committed)
+- [x] DotEnv loading `.env` / `.env.local` with parent-folder traversal in both apps
+- [x] `.env.example` files committed for both `Api` and `Admin`
+- [ ] All test projects runnable (`dotnet test`) _(pending SDK execution outside the current permission-restricted environment)_
