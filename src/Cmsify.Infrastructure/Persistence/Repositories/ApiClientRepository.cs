@@ -61,8 +61,26 @@ public sealed class ApiClientRepository : IApiClientRepository
         await dbContext.SaveChangesAsync(ct);
     }
 
-    private IQueryable<ApiClient> Scope(IQueryable<ApiClient> query) =>
-        currentActor.WorkspaceId.HasValue
-            ? query.Where(client => client.WorkspaceId == currentActor.WorkspaceId.Value)
-            : query;
+    private IQueryable<ApiClient> Scope(IQueryable<ApiClient> query)
+    {
+        if (currentActor.IsSuperAdmin)
+        {
+            return query;
+        }
+
+        if (currentActor.WorkspaceId.HasValue)
+        {
+            return query.Where(client => client.WorkspaceId == currentActor.WorkspaceId.Value);
+        }
+
+        if (currentActor.UserId.HasValue)
+        {
+            var userId = currentActor.UserId.Value;
+            return query.Where(client =>
+                client.WorkspaceId.HasValue
+                && dbContext.UserWorkspaceAccesses.Any(access => access.UserId == userId && access.WorkspaceId == client.WorkspaceId.Value));
+        }
+
+        return query.Where(_ => false);
+    }
 }

@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -22,11 +23,13 @@ public sealed class PackagesController : ControllerBase
 
     private readonly CmsifyDbContext dbContext;
     private readonly IWebHostEnvironment environment;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
 
-    public PackagesController(CmsifyDbContext dbContext, IWebHostEnvironment environment)
+    public PackagesController(CmsifyDbContext dbContext, IWebHostEnvironment environment, IWorkspaceAuthorizationService workspaceAuthorization)
     {
         this.dbContext = dbContext;
         this.environment = environment;
+        this.workspaceAuthorization = workspaceAuthorization;
     }
 
     [HttpGet("/schema/ctp-1.0.json")]
@@ -60,6 +63,11 @@ public sealed class PackagesController : ControllerBase
     [Consumes("application/json", "multipart/form-data")]
     public async Task<ActionResult<PackageImportResponse>> Import(Guid workspaceId, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var manifest = await ReadManifestAsync(ct);
         return await ImportManifestAsync(workspaceId, manifest, ct);
     }
@@ -68,6 +76,11 @@ public sealed class PackagesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<ActionResult<PackageImportResponse>> ImportOfficial(Guid workspaceId, string packageId, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var manifest = (await LoadOfficialPackagesAsync(ct)).FirstOrDefault(package => string.Equals(package.Id, packageId, StringComparison.OrdinalIgnoreCase));
         if (manifest is null)
         {
@@ -169,6 +182,11 @@ public sealed class PackagesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<IActionResult> Export(Guid workspaceId, [FromQuery] string templateIds, [FromQuery] string packageNamespace = "custom", [FromQuery] string id = "export", [FromQuery] string version = "1.0.0", CancellationToken ct = default)
     {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var selectedIds = templateIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(value => Guid.TryParse(value, out var parsed) ? parsed : Guid.Empty)
             .Where(value => value != Guid.Empty)

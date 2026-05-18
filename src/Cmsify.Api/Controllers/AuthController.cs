@@ -43,7 +43,7 @@ public sealed class AuthController : ControllerBase
         user.LastLoginAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
 
-        return Ok(new LoginResponse(rawToken, expiresAt, user.MustChangePassword, new UserSummary(user.Id, user.Email, user.DisplayName, user.Role.ToString())));
+        return Ok(new LoginResponse(rawToken, expiresAt, user.MustChangePassword, new UserSummary(user.Id, user.Email, user.DisplayName, user.Role.ToString(), user.IsSuperAdmin)));
     }
 
     [HttpPost("logout")]
@@ -67,7 +67,7 @@ public sealed class AuthController : ControllerBase
 
     [HttpGet("me")]
     [RequireRole(Core.Domain.Enums.UserRole.Reader)]
-    public IActionResult Me() => Ok(new ActorResponse(currentActor.UserId, currentActor.ApiClientId, currentActor.Role.ToString(), currentActor.WorkspaceId));
+    public IActionResult Me() => Ok(new ActorResponse(currentActor.UserId, currentActor.ApiClientId, currentActor.Role.ToString(), currentActor.WorkspaceId, currentActor.IsSuperAdmin));
 
     [HttpPost("refresh")]
     [RequireRole(Core.Domain.Enums.UserRole.Reader)]
@@ -103,7 +103,7 @@ public sealed class AuthController : ControllerBase
         });
         await dbContext.SaveChangesAsync(ct);
 
-        return Ok(new LoginResponse(newToken, expiresAt, user.MustChangePassword, new UserSummary(user.Id, user.Email, user.DisplayName, user.Role.ToString())));
+        return Ok(new LoginResponse(newToken, expiresAt, user.MustChangePassword, new UserSummary(user.Id, user.Email, user.DisplayName, user.Role.ToString(), user.IsSuperAdmin)));
     }
 
     [HttpPost("change-password")]
@@ -141,8 +141,8 @@ public sealed record LoginRequest(string Email, string Password);
 
 public sealed record LoginResponse(string Token, DateTimeOffset ExpiresAt, bool MustChangePassword, UserSummary User);
 
-public sealed record UserSummary(Guid Id, string Email, string DisplayName, string Role);
+public sealed record UserSummary(Guid Id, string Email, string DisplayName, string Role, bool IsSuperAdmin);
 
-public sealed record ActorResponse(Guid? UserId, Guid? ApiClientId, string Role, Guid? WorkspaceId);
+public sealed record ActorResponse(Guid? UserId, Guid? ApiClientId, string Role, Guid? WorkspaceId, bool IsSuperAdmin);
 
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);

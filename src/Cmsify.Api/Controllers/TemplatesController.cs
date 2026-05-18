@@ -17,13 +17,15 @@ public sealed class TemplatesController : ControllerBase
 {
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IFieldConfigValidator fieldConfigValidator;
     private readonly IWebhookQueue webhookQueue;
 
-    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IFieldConfigValidator fieldConfigValidator, IWebhookQueue webhookQueue)
+    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IFieldConfigValidator fieldConfigValidator, IWebhookQueue webhookQueue)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
         this.fieldConfigValidator = fieldConfigValidator;
         this.webhookQueue = webhookQueue;
     }
@@ -31,7 +33,7 @@ public sealed class TemplatesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<PagedResult<TemplateSummaryResponse>>> List(Guid workspaceId, [FromQuery] bool? isSystem = null, [FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -56,7 +58,7 @@ public sealed class TemplatesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<ActionResult<TemplateResponse>> Create(Guid workspaceId, CreateTemplateRequest request, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -85,7 +87,7 @@ public sealed class TemplatesController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<TemplateResponse>> Get(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -104,6 +106,11 @@ public sealed class TemplatesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<ActionResult<TemplateResponse>> Update(Guid workspaceId, Guid id, UpdateTemplateRequest request, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var template = await dbContext.Templates.FirstOrDefaultAsync(item => item.Id == id && item.WorkspaceId == workspaceId && !item.IsDeleted, ct);
         if (template is null)
         {
@@ -128,6 +135,11 @@ public sealed class TemplatesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<IActionResult> Delete(Guid workspaceId, Guid id, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var template = await dbContext.Templates.FirstOrDefaultAsync(item => item.Id == id && item.WorkspaceId == workspaceId && !item.IsDeleted, ct);
         if (template is null)
         {
@@ -156,7 +168,7 @@ public sealed class TemplatesController : ControllerBase
     [HttpGet("{id:guid}/versions")]
     public async Task<ActionResult<IReadOnlyList<TemplateVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        if (!await TemplateExistsAsync(workspaceId, id, ct))
+        if (!await TemplateExistsAsync(workspaceId, id, requireWrite: false, ct))
         {
             return NotFound();
         }
@@ -173,7 +185,7 @@ public sealed class TemplatesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<ActionResult<TemplateVersionResponse>> CreateDraft(Guid workspaceId, Guid id, CreateTemplateVersionRequest request, CancellationToken ct)
     {
-        if (!await TemplateExistsAsync(workspaceId, id, ct))
+        if (!await TemplateExistsAsync(workspaceId, id, requireWrite: true, ct))
         {
             return NotFound();
         }
@@ -216,7 +228,7 @@ public sealed class TemplatesController : ControllerBase
     [HttpGet("{id:guid}/versions/{versionNumber:int}")]
     public async Task<ActionResult<TemplateVersionResponse>> GetVersion(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
     {
-        var version = await FindVersionAsync(workspaceId, id, versionNumber, tracking: false, ct);
+        var version = await FindVersionAsync(workspaceId, id, versionNumber, requireWrite: false, tracking: false, ct);
         if (version is null)
         {
             return NotFound();
@@ -230,7 +242,7 @@ public sealed class TemplatesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<ActionResult<TemplateVersionResponse>> Publish(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
     {
-        var version = await FindVersionAsync(workspaceId, id, versionNumber, tracking: true, ct);
+        var version = await FindVersionAsync(workspaceId, id, versionNumber, requireWrite: true, tracking: true, ct);
         if (version is null)
         {
             return NotFound();
@@ -448,14 +460,18 @@ public sealed class TemplatesController : ControllerBase
         return NoContent();
     }
 
-    private bool CanAccess(Guid workspaceId) => !currentActor.WorkspaceId.HasValue || currentActor.WorkspaceId == workspaceId;
+    private async Task<bool> TemplateExistsAsync(Guid workspaceId, Guid id, bool requireWrite, CancellationToken ct) =>
+        (requireWrite
+            ? await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct)
+            : await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        && await dbContext.Templates.AnyAsync(template => template.Id == id && template.WorkspaceId == workspaceId && !template.IsDeleted, ct);
 
-    private async Task<bool> TemplateExistsAsync(Guid workspaceId, Guid id, CancellationToken ct) =>
-        CanAccess(workspaceId) && await dbContext.Templates.AnyAsync(template => template.Id == id && template.WorkspaceId == workspaceId && !template.IsDeleted, ct);
-
-    private async Task<TemplateVersion?> FindVersionAsync(Guid workspaceId, Guid id, int versionNumber, bool tracking, CancellationToken ct)
+    private async Task<TemplateVersion?> FindVersionAsync(Guid workspaceId, Guid id, int versionNumber, bool requireWrite, bool tracking, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        var canAccess = requireWrite
+            ? await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct)
+            : await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct);
+        if (!canAccess)
         {
             return null;
         }
@@ -469,7 +485,7 @@ public sealed class TemplatesController : ControllerBase
 
     private async Task<ActionResult<TemplateVersion>> FindDraftVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
     {
-        var version = await FindVersionAsync(workspaceId, id, versionNumber, tracking: true, ct);
+        var version = await FindVersionAsync(workspaceId, id, versionNumber, requireWrite: true, tracking: true, ct);
         if (version is null)
         {
             return new NotFoundResult();

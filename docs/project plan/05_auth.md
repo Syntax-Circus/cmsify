@@ -13,7 +13,7 @@ Implement a self-contained, dependency-free auth baseline (local accounts + API 
 | API Client | Opaque API token (issued by CMS) | Machine/programmatic consumers |
 | External IdP (optional) | JWT Bearer validated against JWKS | Operators with Authentik, Auth0, Keycloak, etc. |
 
-All three resolve to the same internal permission model (`UserRole`) at the API layer.
+All three resolve to the same internal permission model (`UserRole`) at the API layer, then workspace-routed endpoints apply workspace scope checks.
 
 ---
 
@@ -52,7 +52,7 @@ UserSession
 Session expiry is **absolute**. The `POST /api/v1/auth/refresh` endpoint issues a brand-new session token with a fresh 8h window — callers must opt in to refresh; there is no automatic sliding extension on every request.
 
 ### Token Validation (per request)
-Middleware extracts `Authorization: Bearer {rawToken}`, SHA-256 hashes it, looks up `UserSession` by hash, checks expiry, resolves `User` → attaches to `HttpContext` as the current actor.
+Middleware extracts `Authorization: Bearer {rawToken}`, SHA-256 hashes it, looks up `UserSession` by hash, checks expiry, resolves `User` including `IsSuperAdmin` → attaches to `HttpContext` as the current actor.
 
 ---
 
@@ -68,7 +68,7 @@ Middleware extracts `Authorization: Bearer {rawToken}`, SHA-256 hashes it, looks
 ### Token Validation (per request)
 Same middleware: if `Authorization: Bearer cmsify_{...}` prefix detected, route to `ApiClient` lookup by BCrypt hash comparison. BCrypt verify on every request — acceptable cost at current scale; can add a short-lived cache layer if needed.
 
-**Note:** API client tokens are long-lived by design (optional `ExpiresAt`). Rotation is a manual action via the admin UI (revoke + reissue).
+**Note:** API client tokens are long-lived by design (optional `ExpiresAt`). Rotation is a manual action via the admin UI (revoke + reissue). API clients can optionally be scoped to one workspace via `WorkspaceId`; scoped tokens can only operate on that workspace, and write access still depends on role.
 
 ---
 
@@ -103,8 +103,9 @@ public interface ICurrentActor
     Guid? UserId { get; }
     Guid? ApiClientId { get; }
     UserRole Role { get; }
-    Guid? WorkspaceId { get; }    // null = all workspaces
+    Guid? WorkspaceId { get; }    // API/OIDC single-workspace scope; null for local users
     bool IsAuthenticated { get; }
+    bool IsSuperAdmin { get; }    // host account with unrestricted access
 }
 ```
 
@@ -124,6 +125,13 @@ public enum UserRole
     Admin           // full access including users, API clients, webhooks, settings
 }
 ```
+
+### Workspace Scope
+
+- The bootstrap/host account is marked `IsSuperAdmin = true` and always has access to every workspace.
+- Non-superadmin local users require explicit `UserWorkspaceAccess` grants. `Read` grants allow workspace read endpoints; `Write` grants allow workspace writes when the user's role also satisfies the endpoint's `[RequireRole]`.
+- API clients and OIDC actors continue to use a single optional `WorkspaceId` scope. If present, they are limited to that workspace.
+- Workspace-routed controllers use a shared workspace authorization service so role checks and workspace checks are applied consistently.
 
 ### Permission Matrix (MVP)
 
@@ -145,6 +153,7 @@ public enum UserRole
 - Custom `[RequireRole(UserRole.Editor)]` attribute that resolves `ICurrentActor` from DI
 - Applied at controller or action level
 - Unauthenticated requests get 401; insufficient role gets 403
+- Workspace-routed endpoints additionally call `IWorkspaceAuthorizationService` for read/write scope.
 
 ---
 
@@ -185,7 +194,7 @@ These can be added without breaking schema changes; document them in the post-MV
 
 On startup, if `Users` table is empty:
 - Create an admin user from env config: `Auth:Bootstrap:AdminEmail` + `Auth:Bootstrap:AdminPassword`
-- The bootstrap admin is created with `MustChangePassword = true` so they are forced to set a new password on first login
+- The bootstrap admin is created as the host/superadmin and with `MustChangePassword = true` so they are forced to set a new password on first login
 - Log a warning if bootstrap credentials are still default values
 - These env keys should appear in `.env.example` with strong guidance to change them
 

@@ -29,19 +29,21 @@ public sealed class WebhooksController : ControllerBase
 
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly ISecretProtector secretProtector;
 
-    public WebhooksController(CmsifyDbContext dbContext, ICurrentActor currentActor, ISecretProtector secretProtector)
+    public WebhooksController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, ISecretProtector secretProtector)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
         this.secretProtector = secretProtector;
     }
 
     [HttpGet]
     public async Task<ActionResult<PagedResponse<WebhookEndpointResponse>>> List(Guid workspaceId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -59,7 +61,7 @@ public sealed class WebhooksController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<CreateWebhookEndpointResponse>> Create(Guid workspaceId, CreateWebhookEndpointRequest request, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -96,7 +98,7 @@ public sealed class WebhooksController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<WebhookEndpointResponse>> Get(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        var endpoint = await FindEndpointAsync(workspaceId, id, tracking: false, ct);
+        var endpoint = await FindEndpointAsync(workspaceId, id, requireWrite: false, tracking: false, ct);
         if (endpoint is null)
         {
             return NotFound();
@@ -110,7 +112,7 @@ public sealed class WebhooksController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<WebhookEndpointResponse>> Update(Guid workspaceId, Guid id, UpdateWebhookEndpointRequest request, CancellationToken ct)
     {
-        var endpoint = await FindEndpointAsync(workspaceId, id, tracking: true, ct);
+        var endpoint = await FindEndpointAsync(workspaceId, id, requireWrite: true, tracking: true, ct);
         if (endpoint is null)
         {
             return NotFound();
@@ -146,7 +148,7 @@ public sealed class WebhooksController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<RotateWebhookSecretResponse>> RotateSecret(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        var endpoint = await FindEndpointAsync(workspaceId, id, tracking: true, ct);
+        var endpoint = await FindEndpointAsync(workspaceId, id, requireWrite: true, tracking: true, ct);
         if (endpoint is null)
         {
             return NotFound();
@@ -164,7 +166,7 @@ public sealed class WebhooksController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<IActionResult> Delete(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        var endpoint = await FindEndpointAsync(workspaceId, id, tracking: true, ct);
+        var endpoint = await FindEndpointAsync(workspaceId, id, requireWrite: true, tracking: true, ct);
         if (endpoint is null)
         {
             return NotFound();
@@ -187,7 +189,7 @@ public sealed class WebhooksController : ControllerBase
     [HttpGet("{id:guid}/deliveries")]
     public async Task<ActionResult<PagedResponse<WebhookDeliveryResponse>>> ListDeliveries(Guid workspaceId, Guid id, [FromQuery] bool? isDelivered = null, [FromQuery] bool? isFailed = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
     {
-        if (!await EndpointExistsAsync(workspaceId, id, ct))
+        if (!await EndpointExistsAsync(workspaceId, id, requireWrite: false, ct))
         {
             return NotFound();
         }
@@ -216,7 +218,7 @@ public sealed class WebhooksController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<IActionResult> RetryDelivery(Guid workspaceId, Guid id, Guid deliveryId, CancellationToken ct)
     {
-        if (!await EndpointExistsAsync(workspaceId, id, ct))
+        if (!await EndpointExistsAsync(workspaceId, id, requireWrite: true, ct))
         {
             return NotFound();
         }
@@ -238,9 +240,12 @@ public sealed class WebhooksController : ControllerBase
         return Accepted();
     }
 
-    private async Task<WebhookEndpoint?> FindEndpointAsync(Guid workspaceId, Guid id, bool tracking, CancellationToken ct)
+    private async Task<WebhookEndpoint?> FindEndpointAsync(Guid workspaceId, Guid id, bool requireWrite, bool tracking, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        var canAccess = requireWrite
+            ? await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct)
+            : await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct);
+        if (!canAccess)
         {
             return null;
         }
@@ -249,10 +254,11 @@ public sealed class WebhooksController : ControllerBase
         return await (tracking ? query : query.AsNoTracking()).FirstOrDefaultAsync(ct);
     }
 
-    private async Task<bool> EndpointExistsAsync(Guid workspaceId, Guid id, CancellationToken ct) =>
-        CanAccess(workspaceId) && await dbContext.WebhookEndpoints.AnyAsync(endpoint => endpoint.Id == id && endpoint.WorkspaceId == workspaceId && !endpoint.IsDeleted, ct);
-
-    private bool CanAccess(Guid workspaceId) => !currentActor.WorkspaceId.HasValue || currentActor.WorkspaceId == workspaceId;
+    private async Task<bool> EndpointExistsAsync(Guid workspaceId, Guid id, bool requireWrite, CancellationToken ct) =>
+        (requireWrite
+            ? await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct)
+            : await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        && await dbContext.WebhookEndpoints.AnyAsync(endpoint => endpoint.Id == id && endpoint.WorkspaceId == workspaceId && !endpoint.IsDeleted, ct);
 
     private static bool ValidateEvents(IReadOnlyList<string> events, out string? error)
     {

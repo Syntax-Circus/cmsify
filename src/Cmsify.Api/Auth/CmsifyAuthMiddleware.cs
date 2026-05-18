@@ -81,7 +81,7 @@ public sealed class CmsifyAuthMiddleware
         session.IpAddress = context.Connection.RemoteIpAddress?.ToString();
         await dbContext.SaveChangesAsync();
 
-        return new CurrentActorInfo(user.Id, null, user.Role, null, true);
+        return new CurrentActorInfo(user.Id, null, user.Role, null, true, user.IsSuperAdmin);
     }
 
     private static async Task<ICurrentActor> ResolveApiClientAsync(string rawToken, CmsifyDbContext dbContext)

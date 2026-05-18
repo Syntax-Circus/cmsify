@@ -1,6 +1,7 @@
 @page "/settings/api-clients"
 @rendermode InteractiveServer
 @inject ApiClientsApiClient Clients
+@inject WorkspaceApiClient WorkspacesClient
 
 <div class="cms-page-head"><div><h1>API Clients</h1><div class="lead">Issue and rotate machine tokens.</div></div><button class="btn btn-primary" @onclick="() => creating = true">Create Client</button></div>
 
@@ -12,25 +13,28 @@
 <div class="cms-card p-0">
     <table class="cms-table">
         <thead><tr><th>Name</th><th>Role</th><th>Workspace</th><th>Created</th><th>Last Used</th><th>Active</th><th>Actions</th></tr></thead>
-        <tbody>@foreach (var client in clients) { <tr><td>@client.Name</td><td><RoleBadge Role="@client.Role.ToString()" /></td><td>@client.WorkspaceId</td><td><LocalTimeDisplay Value="@client.CreatedAt" /></td><td>@(client.LastUsedAt.HasValue ? @<LocalTimeDisplay Value="@client.LastUsedAt.Value" /> : @<span>Never</span>)</td><td><StatusBadge Text="@(client.IsActive ? "Active" : "Inactive")" /></td><td><button class="btn btn-outline-secondary btn-sm" @onclick="() => RotateAsync(client.Id)">Rotate</button><button class="btn btn-danger btn-sm ms-1" @onclick="() => RevokeAsync(client.Id)">Revoke</button></td></tr> }</tbody>
+        <tbody>@foreach (var client in clients) { <tr><td>@client.Name</td><td><RoleBadge Role="@client.Role.ToString()" /></td><td>@WorkspaceName(client.WorkspaceId)</td><td><LocalTimeDisplay Value="@client.CreatedAt" /></td><td>@(client.LastUsedAt.HasValue ? @<LocalTimeDisplay Value="@client.LastUsedAt.Value" /> : @<span>Never</span>)</td><td><StatusBadge Text="@(client.IsActive ? "Active" : "Inactive")" /></td><td><button class="btn btn-outline-secondary btn-sm" @onclick="() => RotateAsync(client.Id)">Rotate</button><button class="btn btn-danger btn-sm ms-1" @onclick="() => RevokeAsync(client.Id)">Revoke</button></td></tr> }</tbody>
     </table>
 </div>
 
 @if (creating)
 {
-    <div class="modal d-block" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5>Create API Client</h5><button class="btn-close" @onclick="() => creating = false"></button></div><div class="modal-body"><label class="form-label">Name</label><InputText class="form-control mb-3" @bind-Value="name" /><label class="form-label">Role</label><InputSelect class="form-select" @bind-Value="role">@foreach (var r in Enum.GetValues<UserRole>()) { <option value="@r">@r</option> }</InputSelect></div><div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="() => creating = false">Cancel</button><button class="btn btn-primary" @onclick="CreateAsync">Create</button></div></div></div></div><div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5>Create API Client</h5><button class="btn-close" @onclick="() => creating = false"></button></div><div class="modal-body"><label class="form-label">Name</label><InputText class="form-control mb-3" @bind-Value="name" /><label class="form-label">Role</label><InputSelect class="form-select mb-3" @bind-Value="role">@foreach (var r in Enum.GetValues<UserRole>()) { <option value="@r">@r</option> }</InputSelect><label class="form-label">Workspace scope</label><select class="form-select" @bind="workspaceId"><option value="">All workspaces (superadmin only)</option>@foreach (var workspace in workspaces) { <option value="@workspace.Id">@workspace.Name</option> }</select></div><div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="() => creating = false">Cancel</button><button class="btn btn-primary" @onclick="CreateAsync">Create</button></div></div></div></div><div class="modal-backdrop show"></div>
 }
 
 @code {
     private List<ApiClientDto> clients = [];
+    private List<WorkspaceDto> workspaces = [];
     private bool creating;
     private string name = "";
     private UserRole role = UserRole.Reader;
+    private string workspaceId = "";
     private string? secret;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
-    private async Task LoadAsync() => clients = (await Clients.ListAsync()).Items.ToList();
-    private async Task CreateAsync() { var response = await Clients.CreateAsync(new CreateApiClientRequest(name, null, role, null, null)); secret = response.Token; creating = false; await LoadAsync(); }
+    private async Task LoadAsync() { clients = (await Clients.ListAsync()).Items.ToList(); workspaces = (await WorkspacesClient.ListAsync()).Items.ToList(); }
+    private async Task CreateAsync() { var scope = Guid.TryParse(workspaceId, out var parsedWorkspaceId) ? parsedWorkspaceId : (Guid?)null; var response = await Clients.CreateAsync(new CreateApiClientRequest(name, null, role, scope, null)); secret = response.Token; creating = false; name = ""; workspaceId = ""; await LoadAsync(); }
     private async Task RotateAsync(Guid id) { var response = await Clients.RotateAsync(id); secret = response.Token; await LoadAsync(); }
     private async Task RevokeAsync(Guid id) { await Clients.RevokeAsync(id); await LoadAsync(); }
+    private string WorkspaceName(Guid? id) => id.HasValue ? workspaces.FirstOrDefault(workspace => workspace.Id == id.Value)?.Name ?? id.Value.ToString() : "All workspaces";
 }

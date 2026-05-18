@@ -15,12 +15,14 @@ public sealed class WorkspacesController : ControllerBase
 {
     private readonly IWorkspaceRepository workspaceRepository;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IWebhookQueue webhookQueue;
 
-    public WorkspacesController(IWorkspaceRepository workspaceRepository, ICurrentActor currentActor, IWebhookQueue webhookQueue)
+    public WorkspacesController(IWorkspaceRepository workspaceRepository, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookQueue webhookQueue)
     {
         this.workspaceRepository = workspaceRepository;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
         this.webhookQueue = webhookQueue;
     }
 
@@ -28,15 +30,6 @@ public sealed class WorkspacesController : ControllerBase
     public async Task<ActionResult<PagedResult<WorkspaceDto>>> List([FromQuery] int offset = 0, [FromQuery] int limit = 50, CancellationToken ct = default)
     {
         var result = await workspaceRepository.ListAsync(new PageRequest(offset, limit), ct);
-        if (currentActor.WorkspaceId.HasValue)
-        {
-            result = result with
-            {
-                Items = result.Items.Where(workspace => workspace.Id == currentActor.WorkspaceId.Value).ToArray(),
-                TotalCount = result.Items.Count(workspace => workspace.Id == currentActor.WorkspaceId.Value)
-            };
-        }
-
         return Ok(result);
     }
 
@@ -44,6 +37,11 @@ public sealed class WorkspacesController : ControllerBase
     [RequireRole(UserRole.Admin)]
     public async Task<ActionResult<WorkspaceDto>> Create(CreateWorkspaceCommand command, CancellationToken ct)
     {
+        if (!currentActor.IsSuperAdmin)
+        {
+            return Forbid();
+        }
+
         var workspace = await workspaceRepository.CreateAsync(command, ct);
         Response.Headers.ETag = ToETag(workspace);
         return CreatedAtAction(nameof(Get), new { id = workspace.Id }, workspace);
@@ -52,7 +50,7 @@ public sealed class WorkspacesController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<WorkspaceDto>> Get(Guid id, CancellationToken ct)
     {
-        if (!CanAccess(id))
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(id, ct))
         {
             return Forbid();
         }
@@ -77,6 +75,11 @@ public sealed class WorkspacesController : ControllerBase
             return NotFound();
         }
 
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(id, ct))
+        {
+            return Forbid();
+        }
+
         if (!IfMatchMatches(existing))
         {
             return StatusCode(StatusCodes.Status412PreconditionFailed);
@@ -98,6 +101,11 @@ public sealed class WorkspacesController : ControllerBase
             return NotFound();
         }
 
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(id, ct))
+        {
+            return Forbid();
+        }
+
         if (!IfMatchMatches(existing))
         {
             return StatusCode(StatusCodes.Status412PreconditionFailed);
@@ -106,8 +114,6 @@ public sealed class WorkspacesController : ControllerBase
         await workspaceRepository.SoftDeleteAsync(id, currentActor.UserId!.Value, ct);
         return NoContent();
     }
-
-    private bool CanAccess(Guid workspaceId) => !currentActor.WorkspaceId.HasValue || currentActor.WorkspaceId == workspaceId;
 
     private bool IfMatchMatches(WorkspaceDto workspace)
     {

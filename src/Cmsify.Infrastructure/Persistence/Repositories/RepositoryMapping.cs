@@ -24,7 +24,21 @@ internal static class RepositoryMapping
         new(entity.Id, entity.WorkspaceId, entity.Name);
 
     public static UserDto ToDto(this User entity) =>
-        new(entity.Id, entity.Email, entity.DisplayName, entity.Role, entity.MustChangePassword, entity.TimeZoneId, entity.IsActive, entity.CreatedAt, entity.LastLoginAt);
+        new(
+            entity.Id,
+            entity.Email,
+            entity.DisplayName,
+            entity.Role,
+            entity.IsSuperAdmin,
+            entity.MustChangePassword,
+            entity.TimeZoneId,
+            entity.IsActive,
+            entity.CreatedAt,
+            entity.LastLoginAt,
+            entity.WorkspaceAccesses
+                .OrderBy(access => access.WorkspaceId)
+                .Select(access => new UserWorkspaceAccessDto(access.WorkspaceId, access.AccessLevel))
+                .ToArray());
 
     public static ApiClientDto ToDto(this ApiClient entity) =>
         new(entity.Id, entity.Name, entity.Description, entity.Role, entity.WorkspaceId, entity.IsActive, entity.ExpiresAt, entity.CreatedAt, entity.LastUsedAt);

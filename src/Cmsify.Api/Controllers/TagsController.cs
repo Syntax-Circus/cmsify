@@ -15,17 +15,19 @@ public sealed class TagsController : ControllerBase
 {
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
 
-    public TagsController(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    public TagsController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
     }
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<TagResponse>>> List(Guid workspaceId, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -42,7 +44,7 @@ public sealed class TagsController : ControllerBase
     [RequireRole(UserRole.Admin)]
     public async Task<IActionResult> Delete(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -61,7 +63,6 @@ public sealed class TagsController : ControllerBase
         return NoContent();
     }
 
-    private bool CanAccess(Guid workspaceId) => !currentActor.WorkspaceId.HasValue || currentActor.WorkspaceId == workspaceId;
 }
 
 public sealed record TagResponse(Guid Id, string Name, int UsageCount);

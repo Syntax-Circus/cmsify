@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Core.Services;
+using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Persistence.Interceptors;
@@ -38,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
         services.AddScoped<IContentSearchVectorBuilder, ContentSearchVectorBuilder>();
+        services.AddScoped<IWorkspaceAuthorizationService, WorkspaceAuthorizationService>();
         services.AddSingleton<ISecretProtector, AesSecretProtector>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();

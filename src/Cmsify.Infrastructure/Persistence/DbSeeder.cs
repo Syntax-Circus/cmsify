@@ -49,6 +49,7 @@ public sealed class DbSeeder : IDbSeeder
                 DisplayName = configuration["Auth:Bootstrap:AdminDisplayName"] ?? configuration["Seed:Admin:DisplayName"] ?? "Cmsify Admin",
                 PasswordHash = passwordHash,
                 Role = UserRole.Admin,
+                IsSuperAdmin = true,
                 MustChangePassword = true,
                 IsActive = true
             });

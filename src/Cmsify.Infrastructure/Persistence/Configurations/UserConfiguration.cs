@@ -20,7 +20,12 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(user => user.DisplayName).HasMaxLength(200).IsRequired();
         builder.Property(user => user.PasswordHash).HasMaxLength(500).IsRequired();
         builder.Property(user => user.Role).HasConversion<string>().HasMaxLength(50);
+        builder.Property(user => user.IsSuperAdmin).HasDefaultValue(false);
         builder.Property(user => user.TimeZoneId).HasMaxLength(100);
         builder.Property(user => user.Theme).HasMaxLength(20);
+        builder.HasMany(user => user.WorkspaceAccesses)
+            .WithOne(access => access.User)
+            .HasForeignKey(access => access.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

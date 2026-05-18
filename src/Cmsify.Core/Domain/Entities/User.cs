@@ -12,6 +12,8 @@ public sealed class User : SoftDeletableEntity
 
     public UserRole Role { get; set; }
 
+    public bool IsSuperAdmin { get; set; }
+
     public bool MustChangePassword { get; set; }
 
     public string? TimeZoneId { get; set; }
@@ -21,4 +23,6 @@ public sealed class User : SoftDeletableEntity
     public bool IsActive { get; set; } = true;
 
     public DateTimeOffset? LastLoginAt { get; set; }
+
+    public ICollection<UserWorkspaceAccess> WorkspaceAccesses { get; } = new List<UserWorkspaceAccess>();
 }

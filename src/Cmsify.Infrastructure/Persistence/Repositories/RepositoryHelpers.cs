@@ -34,4 +34,47 @@ internal static class RepositoryHelpers
             ? query.Where(entity => EF.Property<Guid>(entity!, "WorkspaceId") == actor.WorkspaceId.Value)
             : query;
     }
+
+    public static IQueryable<Workspace> ScopeWorkspacesToReadableActor(this IQueryable<Workspace> query, CmsifyDbContext dbContext, ICurrentActor actor)
+    {
+        if (actor.IsSuperAdmin)
+        {
+            return query;
+        }
+
+        if (actor.WorkspaceId.HasValue)
+        {
+            return query.Where(workspace => workspace.Id == actor.WorkspaceId.Value);
+        }
+
+        if (actor.UserId.HasValue)
+        {
+            var userId = actor.UserId.Value;
+            return query.Where(workspace => dbContext.UserWorkspaceAccesses.Any(access => access.UserId == userId && access.WorkspaceId == workspace.Id));
+        }
+
+        return query.Where(_ => false);
+    }
+
+    public static IQueryable<TEntity> ScopeWorkspaceEntitiesToReadableActor<TEntity>(this IQueryable<TEntity> query, CmsifyDbContext dbContext, ICurrentActor actor)
+        where TEntity : class
+    {
+        if (actor.IsSuperAdmin)
+        {
+            return query;
+        }
+
+        if (actor.WorkspaceId.HasValue)
+        {
+            return query.Where(entity => EF.Property<Guid>(entity, "WorkspaceId") == actor.WorkspaceId.Value);
+        }
+
+        if (actor.UserId.HasValue)
+        {
+            var userId = actor.UserId.Value;
+            return query.Where(entity => dbContext.UserWorkspaceAccesses.Any(access => access.UserId == userId && access.WorkspaceId == EF.Property<Guid>(entity, "WorkspaceId")));
+        }
+
+        return query.Where(_ => false);
+    }
 }

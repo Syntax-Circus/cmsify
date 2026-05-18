@@ -30,13 +30,15 @@ public sealed class MediaController : ControllerBase
     private readonly CmsifyDbContext dbContext;
     private readonly IStorageProvider storageProvider;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IConfiguration configuration;
 
-    public MediaController(CmsifyDbContext dbContext, IStorageProvider storageProvider, ICurrentActor currentActor, IConfiguration configuration)
+    public MediaController(CmsifyDbContext dbContext, IStorageProvider storageProvider, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IConfiguration configuration)
     {
         this.dbContext = dbContext;
         this.storageProvider = storageProvider;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
         this.configuration = configuration;
     }
 
@@ -45,7 +47,7 @@ public sealed class MediaController : ControllerBase
     [RequestSizeLimit(1_073_741_824)]
     public async Task<ActionResult<MediaAssetResponse>> Upload(Guid workspaceId, IFormFile file, [FromForm] string? altText, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -89,7 +91,7 @@ public sealed class MediaController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<PagedResponse<MediaAssetResponse>>> List(Guid workspaceId, [FromQuery] string? mimeType = null, [FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -118,7 +120,7 @@ public sealed class MediaController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<MediaAssetResponse>> Get(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        var asset = await FindAssetAsync(workspaceId, id, tracking: false, ct);
+        var asset = await FindAssetAsync(workspaceId, id, requireWrite: false, tracking: false, ct);
         if (asset is null)
         {
             return NotFound();
@@ -131,7 +133,7 @@ public sealed class MediaController : ControllerBase
     [HttpGet("{id:guid}/file")]
     public async Task<IActionResult> GetFile(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        var asset = await FindAssetAsync(workspaceId, id, tracking: false, ct);
+        var asset = await FindAssetAsync(workspaceId, id, requireWrite: false, tracking: false, ct);
         if (asset is null)
         {
             return NotFound();
@@ -151,7 +153,7 @@ public sealed class MediaController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<MediaAssetResponse>> Update(Guid workspaceId, Guid id, UpdateMediaAssetRequest request, CancellationToken ct)
     {
-        var asset = await FindAssetAsync(workspaceId, id, tracking: true, ct);
+        var asset = await FindAssetAsync(workspaceId, id, requireWrite: true, tracking: true, ct);
         if (asset is null)
         {
             return NotFound();
@@ -173,7 +175,7 @@ public sealed class MediaController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<IActionResult> Delete(Guid workspaceId, Guid id, CancellationToken ct)
     {
-        var asset = await FindAssetAsync(workspaceId, id, tracking: true, ct);
+        var asset = await FindAssetAsync(workspaceId, id, requireWrite: true, tracking: true, ct);
         if (asset is null)
         {
             return NotFound();
@@ -203,9 +205,12 @@ public sealed class MediaController : ControllerBase
         return NoContent();
     }
 
-    private async Task<MediaAsset?> FindAssetAsync(Guid workspaceId, Guid id, bool tracking, CancellationToken ct)
+    private async Task<MediaAsset?> FindAssetAsync(Guid workspaceId, Guid id, bool requireWrite, bool tracking, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        var canAccess = requireWrite
+            ? await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct)
+            : await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct);
+        if (!canAccess)
         {
             return null;
         }
@@ -228,8 +233,6 @@ public sealed class MediaController : ControllerBase
             ? mimeType.StartsWith(allowedType, StringComparison.OrdinalIgnoreCase)
             : mimeType.Equals(allowedType, StringComparison.OrdinalIgnoreCase) || mimeType.StartsWith($"{allowedType}.", StringComparison.OrdinalIgnoreCase));
     }
-
-    private bool CanAccess(Guid workspaceId) => !currentActor.WorkspaceId.HasValue || currentActor.WorkspaceId == workspaceId;
 
     private static MediaAssetResponse ToResponse(MediaAsset asset) =>
         new(asset.Id, asset.FileName, asset.MimeType, asset.SizeBytes, asset.AltText, $"/api/v1/workspaces/{asset.WorkspaceId}/media/{asset.Id}/file", asset.CreatedAt, asset.UpdatedAt);

@@ -20,22 +20,24 @@ public sealed class ContentController : ControllerBase
     private readonly IContentSearchVectorBuilder searchVectorBuilder;
     private readonly IContentLifecycleService lifecycleService;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IWebhookQueue webhookQueue;
 
-    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, ICurrentActor currentActor, IWebhookQueue webhookQueue)
+    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookQueue webhookQueue)
     {
         this.dbContext = dbContext;
         this.contentValidator = contentValidator;
         this.searchVectorBuilder = searchVectorBuilder;
         this.lifecycleService = lifecycleService;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
         this.webhookQueue = webhookQueue;
     }
 
     [HttpGet]
     public async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -128,7 +130,7 @@ public sealed class ContentController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<ContentItemDetailResponse>> Create(Guid workspaceId, CreateContentItemRequest request, CancellationToken ct)
     {
-        if (!CanAccess(workspaceId))
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
             return Forbid();
         }
@@ -168,6 +170,11 @@ public sealed class ContentController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ContentItemDetailResponse>> Get(Guid workspaceId, Guid id, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var content = await BaseContentQuery(workspaceId).AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
         if (content is null)
         {
@@ -181,6 +188,11 @@ public sealed class ContentController : ControllerBase
     [HttpGet("by-slug/{slug}")]
     public async Task<ActionResult<ContentItemDetailResponse>> GetBySlug(Guid workspaceId, string slug, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var content = await BaseContentQuery(workspaceId).AsNoTracking().FirstOrDefaultAsync(item => item.Slug == slug, ct);
         if (content is null)
         {
@@ -356,6 +368,11 @@ public sealed class ContentController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<IReadOnlyList<ContentItemSummaryResponse>>> LinkTranslation(Guid workspaceId, Guid id, LinkTranslationRequest request, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var source = await BaseContentQuery(workspaceId).FirstOrDefaultAsync(content => content.Id == id, ct);
         var target = await BaseContentQuery(workspaceId).FirstOrDefaultAsync(content => content.Id == request.TargetContentItemId, ct);
         if (source is null || target is null)
@@ -373,6 +390,11 @@ public sealed class ContentController : ControllerBase
     [HttpGet("{id:guid}/translations")]
     public async Task<ActionResult<IReadOnlyList<ContentItemSummaryResponse>>> GetTranslations(Guid workspaceId, Guid id, CancellationToken ct)
     {
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var source = await BaseContentQuery(workspaceId).AsNoTracking().FirstOrDefaultAsync(content => content.Id == id, ct);
         if (source is null)
         {
@@ -425,13 +447,20 @@ public sealed class ContentController : ControllerBase
     }
 
     private IQueryable<ContentItem> BaseContentQuery(Guid workspaceId) =>
-        dbContext.ContentItems.Where(content => content.WorkspaceId == workspaceId && !content.IsDeleted && CanAccess(workspaceId));
+        dbContext.ContentItems.Where(content => content.WorkspaceId == workspaceId && !content.IsDeleted);
 
-    private async Task<ContentItem?> LoadContentForEditAsync(Guid workspaceId, Guid id, CancellationToken ct) =>
-        await BaseContentQuery(workspaceId)
+    private async Task<ContentItem?> LoadContentForEditAsync(Guid workspaceId, Guid id, CancellationToken ct)
+    {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return null;
+        }
+
+        return await BaseContentQuery(workspaceId)
             .Include(content => content.FieldValues)
             .Include(content => content.Tags)
             .FirstOrDefaultAsync(content => content.Id == id, ct);
+    }
 
     private async Task<TemplateVersion?> LoadTemplateVersionAsync(Guid id, CancellationToken ct) =>
         await dbContext.TemplateVersions
@@ -538,8 +567,6 @@ public sealed class ContentController : ControllerBase
         var payload = JsonSerializer.SerializeToElement(new { contentItemId = content.Id, workspaceId = content.WorkspaceId, templateVersionId = content.TemplateVersionId, status = content.Status.ToString() });
         await webhookQueue.EnqueueAsync(new WebhookEvent(eventType, content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow), ct);
     }
-
-    private bool CanAccess(Guid workspaceId) => !currentActor.WorkspaceId.HasValue || currentActor.WorkspaceId == workspaceId;
 
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
 }

@@ -23,4 +23,6 @@ public sealed class HttpContextCurrentActor : ICurrentActor
     public Guid? WorkspaceId => Current.WorkspaceId;
 
     public bool IsAuthenticated => Current.IsAuthenticated;
+
+    public bool IsSuperAdmin => Current.IsSuperAdmin;
 }

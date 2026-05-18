@@ -26,6 +26,7 @@ public sealed partial class ModelConfigurationTests
             typeof(Tag),
             typeof(ContentItemTag),
             typeof(User),
+            typeof(UserWorkspaceAccess),
             typeof(UserSession),
             typeof(ApiClient),
             typeof(WebhookEndpoint),

@@ -14,26 +14,28 @@ public sealed class AuditController : ControllerBase
 {
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
 
-    public AuditController(CmsifyDbContext dbContext, ICurrentActor currentActor)
+    public AuditController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
     }
 
     [HttpGet("api/v1/audit")]
     public Task<ActionResult<PagedResponse<AuditLogResponse>>> QueryGlobal([FromQuery] AuditQueryRequest request, CancellationToken ct) =>
-        Query(workspaceId: currentActor.WorkspaceId, request, ct);
+        Query(workspaceId: null, request, ct);
 
     [HttpGet("api/v1/workspaces/{workspaceId:guid}/audit")]
-    public Task<ActionResult<PagedResponse<AuditLogResponse>>> QueryWorkspace(Guid workspaceId, [FromQuery] AuditQueryRequest request, CancellationToken ct)
+    public async Task<ActionResult<PagedResponse<AuditLogResponse>>> QueryWorkspace(Guid workspaceId, [FromQuery] AuditQueryRequest request, CancellationToken ct)
     {
-        if (currentActor.WorkspaceId.HasValue && currentActor.WorkspaceId != workspaceId)
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Task.FromResult<ActionResult<PagedResponse<AuditLogResponse>>>(Forbid());
+            return Forbid();
         }
 
-        return Query(workspaceId, request, ct);
+        return await Query(workspaceId, request, ct);
     }
 
     private async Task<ActionResult<PagedResponse<AuditLogResponse>>> Query(Guid? workspaceId, AuditQueryRequest request, CancellationToken ct)
@@ -42,6 +44,22 @@ public sealed class AuditController : ControllerBase
         if (workspaceId.HasValue)
         {
             query = query.Where(log => log.WorkspaceId == workspaceId.Value);
+        }
+        else if (!currentActor.IsSuperAdmin)
+        {
+            if (currentActor.WorkspaceId.HasValue)
+            {
+                query = query.Where(log => log.WorkspaceId == currentActor.WorkspaceId.Value);
+            }
+            else if (currentActor.UserId.HasValue)
+            {
+                var userId = currentActor.UserId.Value;
+                query = query.Where(log => log.WorkspaceId.HasValue && dbContext.UserWorkspaceAccesses.Any(access => access.UserId == userId && access.WorkspaceId == log.WorkspaceId.Value));
+            }
+            else
+            {
+                query = query.Where(_ => false);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(request.EntityType))

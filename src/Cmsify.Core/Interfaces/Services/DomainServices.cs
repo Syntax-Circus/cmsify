@@ -43,11 +43,20 @@ public interface ICurrentActor
     Guid? WorkspaceId { get; }
 
     bool IsAuthenticated { get; }
+
+    bool IsSuperAdmin { get; }
 }
 
-public sealed record CurrentActorInfo(Guid? UserId, Guid? ApiClientId, UserRole Role, Guid? WorkspaceId, bool IsAuthenticated) : ICurrentActor
+public sealed record CurrentActorInfo(Guid? UserId, Guid? ApiClientId, UserRole Role, Guid? WorkspaceId, bool IsAuthenticated, bool IsSuperAdmin = false) : ICurrentActor
 {
     public static CurrentActorInfo Anonymous { get; } = new(null, null, UserRole.Reader, null, false);
+}
+
+public interface IWorkspaceAuthorizationService
+{
+    Task<bool> CanReadWorkspaceAsync(Guid workspaceId, CancellationToken ct = default);
+
+    Task<bool> CanWriteWorkspaceAsync(Guid workspaceId, CancellationToken ct = default);
 }
 
 public static class CurrentActorHttpContextKeys

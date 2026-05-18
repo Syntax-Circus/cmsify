@@ -13,12 +13,14 @@ public sealed class ApiClientsController : ControllerBase
 {
     private readonly IApiClientRepository apiClientRepository;
     private readonly ICurrentActor currentActor;
+    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IConfiguration configuration;
 
-    public ApiClientsController(IApiClientRepository apiClientRepository, ICurrentActor currentActor, IConfiguration configuration)
+    public ApiClientsController(IApiClientRepository apiClientRepository, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IConfiguration configuration)
     {
         this.apiClientRepository = apiClientRepository;
         this.currentActor = currentActor;
+        this.workspaceAuthorization = workspaceAuthorization;
         this.configuration = configuration;
     }
 
@@ -32,6 +34,11 @@ public sealed class ApiClientsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<CreateApiClientResponse>> Create(CreateApiClientRequest request, CancellationToken ct)
     {
+        if (!await CanManageClientScopeAsync(request.WorkspaceId, ct))
+        {
+            return Forbid();
+        }
+
         var rawToken = TokenUtility.GenerateApiToken();
         var tokenHash = BCrypt.Net.BCrypt.HashPassword(rawToken, configuration.GetValue("Auth:BcryptCost", 12));
         var command = new CreateApiClientCommand(request.Name, request.Description, request.Role, request.WorkspaceId, request.ExpiresAt, currentActor.UserId!.Value);
@@ -73,6 +80,11 @@ public sealed class ApiClientsController : ControllerBase
         var created = await apiClientRepository.CreateAsync(new CreateApiClientCommand(client.Name, client.Description, client.Role, client.WorkspaceId, client.ExpiresAt, currentActor.UserId!.Value), tokenHash, ct);
         return Ok(new CreateApiClientResponse(created, rawToken, "Store this token securely - it cannot be retrieved again."));
     }
+
+    private Task<bool> CanManageClientScopeAsync(Guid? workspaceId, CancellationToken ct) =>
+        workspaceId.HasValue
+            ? workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId.Value, ct)
+            : Task.FromResult(currentActor.IsSuperAdmin);
 }
 
 public sealed record CreateApiClientRequest(string Name, string? Description, UserRole Role, Guid? WorkspaceId, DateTimeOffset? ExpiresAt);

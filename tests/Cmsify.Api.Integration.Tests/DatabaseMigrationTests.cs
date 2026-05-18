@@ -51,6 +51,8 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
         Assert.Contains("ix_template_versions_one_draft_per_template", await QueryStringsAsync(connection, "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'template_versions';"));
         Assert.Contains("ix_content_items_search_vector", await QueryStringsAsync(connection, "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'content_items';"));
         Assert.Contains("ix_user_sessions_token_hash", await QueryStringsAsync(connection, "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'user_sessions';"));
+        Assert.Contains("ix_user_workspace_accesses_user_id_workspace_id", await QueryStringsAsync(connection, "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'user_workspace_accesses';"));
+        Assert.Equal(["true"], await QueryStringsAsync(connection, "SELECT is_super_admin::text FROM users WHERE email = 'admin@example.test';"));
     }
 
     private static async Task<IReadOnlyList<string>> QueryStringsAsync(NpgsqlConnection connection, string sql)

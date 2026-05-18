@@ -24,7 +24,7 @@ public sealed class ProblemDetailsException : Exception
     public IReadOnlyDictionary<string, string[]>? Errors { get; }
 }
 
-public sealed record UserSummary(Guid Id, string Email, string DisplayName, string Role);
+public sealed record UserSummary(Guid Id, string Email, string DisplayName, string Role, bool IsSuperAdmin);
 
 public sealed record LoginResponse(string Token, DateTimeOffset ExpiresAt, bool MustChangePassword, UserSummary User);
 
@@ -76,11 +76,13 @@ public sealed record MediaAssetResponse(Guid Id, string FileName, string MimeTyp
 
 public sealed record UpdateMediaAssetRequest(string? AltText);
 
-public sealed record UserDto(Guid Id, string Email, string DisplayName, UserRole Role, bool MustChangePassword, string? TimeZoneId, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset? LastLoginAt);
+public sealed record UserWorkspaceAccessDto(Guid WorkspaceId, WorkspaceAccessLevel AccessLevel);
 
-public sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role, string TemporaryPassword, string? TimeZoneId);
+public sealed record UserDto(Guid Id, string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, bool MustChangePassword, string? TimeZoneId, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset? LastLoginAt, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
 
-public sealed record UpdateUserRequest(string Email, string DisplayName, UserRole Role, string? TimeZoneId, bool IsActive);
+public sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role, string TemporaryPassword, bool IsSuperAdmin, string? TimeZoneId, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
+
+public sealed record UpdateUserRequest(string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, string? TimeZoneId, bool IsActive, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
 
 public sealed record ResetPasswordRequest(string TemporaryPassword);
 

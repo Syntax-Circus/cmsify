@@ -49,7 +49,5 @@ public sealed class WorkspaceRepository : IWorkspaceRepository
     }
 
     private IQueryable<Workspace> Scope(IQueryable<Workspace> query) =>
-        currentActor.WorkspaceId.HasValue
-            ? query.Where(workspace => workspace.Id == currentActor.WorkspaceId.Value)
-            : query;
+        query.ScopeWorkspacesToReadableActor(dbContext, currentActor);
 }

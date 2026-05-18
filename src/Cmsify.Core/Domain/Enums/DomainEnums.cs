@@ -59,6 +59,12 @@ public enum UserRole
     Admin
 }
 
+public enum WorkspaceAccessLevel
+{
+    Read,
+    Write
+}
+
 public enum AuditAction
 {
     Created,

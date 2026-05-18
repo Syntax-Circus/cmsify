@@ -160,11 +160,13 @@ public sealed record TagDto(Guid Id, Guid WorkspaceId, string Name);
 
 public sealed record UpsertTagCommand(Guid WorkspaceId, string Name);
 
-public sealed record UserDto(Guid Id, string Email, string DisplayName, UserRole Role, bool MustChangePassword, string? TimeZoneId, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset? LastLoginAt);
+public sealed record UserWorkspaceAccessDto(Guid WorkspaceId, WorkspaceAccessLevel AccessLevel);
 
-public sealed record CreateUserCommand(string Email, string DisplayName, string TemporaryPassword, UserRole Role, string? TimeZoneId);
+public sealed record UserDto(Guid Id, string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, bool MustChangePassword, string? TimeZoneId, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset? LastLoginAt, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
 
-public sealed record UpdateUserCommand(Guid Id, string Email, string DisplayName, UserRole Role, string? TimeZoneId, bool IsActive);
+public sealed record CreateUserCommand(string Email, string DisplayName, string TemporaryPassword, UserRole Role, bool IsSuperAdmin, string? TimeZoneId, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
+
+public sealed record UpdateUserCommand(Guid Id, string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, string? TimeZoneId, bool IsActive, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
 
 public sealed record ApiClientDto(Guid Id, string Name, string? Description, UserRole Role, Guid? WorkspaceId, bool IsActive, DateTimeOffset? ExpiresAt, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
 
