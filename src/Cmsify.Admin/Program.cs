@@ -17,7 +17,7 @@ builder.Services.AddHttpClient("CmsifyApi", client =>
 {
     var baseUrl = builder.Configuration["Admin:ApiBaseUrl"]
         ?? builder.Configuration["Api:BaseUrl"]
-        ?? "https://localhost:7001";
+        ?? "https://localhost:61241";
     client.BaseAddress = new Uri(baseUrl);
 });
 builder.Services.AddScoped<BrowserStorage>();

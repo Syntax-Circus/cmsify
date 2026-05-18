@@ -39,8 +39,12 @@
                 <div class="modal-body">
                     <label class="form-label">Email</label><InputText class="form-control mb-3" @bind-Value="form.Email" />
                     <label class="form-label">Display name</label><InputText class="form-control mb-3" @bind-Value="form.DisplayName" />
-                    <label class="form-label">Role</label><InputSelect class="form-select mb-3" @bind-Value="form.Role">@foreach (var role in Enum.GetValues<UserRole>()) { <option value="@role">@role</option> }</InputSelect>
-                    <div class="form-check form-switch mb-3"><InputCheckbox class="form-check-input" @bind-Value="form.IsSuperAdmin" /><label class="form-check-label">Host superadmin with access to every workspace</label></div>
+                    <label class="form-label">Role</label><InputSelect class="form-select mb-3" @bind-Value="form.Role" disabled="@IsProtectedLastSuperAdmin">@foreach (var role in Enum.GetValues<UserRole>()) { <option value="@role">@role</option> }</InputSelect>
+                    <div class="form-check form-switch mb-3"><InputCheckbox class="form-check-input" @bind-Value="form.IsSuperAdmin" disabled="@IsProtectedLastSuperAdmin" /><label class="form-check-label">Host superadmin with access to every workspace</label></div>
+                    @if (IsProtectedLastSuperAdmin)
+                    {
+                        <div class="alert alert-info py-2 small mb-3">This is the only host superadmin. They cannot be demoted, disabled, or have their role changed until another active superadmin exists.</div>
+                    }
                     @if (!form.IsSuperAdmin)
                     {
                         <label class="form-label">Workspace access</label>
@@ -62,7 +66,7 @@
                     {
                         <label class="form-label">Temporary password</label><InputText class="form-control mb-3" @bind-Value="form.TemporaryPassword" />
                     }
-                    <div class="form-check form-switch"><InputCheckbox class="form-check-input" @bind-Value="form.IsActive" /><label class="form-check-label">Active</label></div>
+                    <div class="form-check form-switch"><InputCheckbox class="form-check-input" @bind-Value="form.IsActive" disabled="@IsProtectedLastSuperAdmin" /><label class="form-check-label">Active</label></div>
                 </div>
                 <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="Close">Cancel</button><button class="btn btn-primary" @onclick="SaveAsync">Save</button></div>
             </div>
@@ -114,19 +118,32 @@
 
     private async Task SaveAsync()
     {
-        if (editing is null)
+        try
         {
-            var response = await UsersClient.CreateAsync(new CreateUserRequest(form.Email, form.DisplayName, form.Role, form.TemporaryPassword, form.IsSuperAdmin, form.TimeZoneId, SelectedWorkspaceAccesses()));
-            oneTimeSecret = response.TemporaryPassword;
+            if (editing is null)
+            {
+                var response = await UsersClient.CreateAsync(new CreateUserRequest(form.Email, form.DisplayName, form.Role, form.TemporaryPassword, form.IsSuperAdmin, form.TimeZoneId, SelectedWorkspaceAccesses()));
+                oneTimeSecret = response.TemporaryPassword;
+            }
+            else
+            {
+                await UsersClient.UpdateAsync(editing.Id, new UpdateUserRequest(form.Email, form.DisplayName, form.Role, form.IsSuperAdmin, form.TimeZoneId, form.IsActive, SelectedWorkspaceAccesses()));
+            }
         }
-        else
+        catch (ProblemDetailsException ex)
         {
-            await UsersClient.UpdateAsync(editing.Id, new UpdateUserRequest(form.Email, form.DisplayName, form.Role, form.IsSuperAdmin, form.TimeZoneId, form.IsActive, SelectedWorkspaceAccesses()));
+            toast = ex.Detail ?? ex.Title;
+            return;
         }
 
         Close();
         await LoadAsync();
     }
+
+    private bool IsProtectedLastSuperAdmin =>
+        editing is not null
+        && editing.IsSuperAdmin
+        && !users.Any(user => user.Id != editing.Id && user.IsSuperAdmin && user.IsActive);
 
     private async Task ResetAsync(UserDto user)
     {
