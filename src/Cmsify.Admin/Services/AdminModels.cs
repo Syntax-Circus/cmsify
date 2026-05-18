@@ -113,3 +113,11 @@ public sealed record AuditLogResponse(Guid Id, string EntityType, Guid EntityId,
 public sealed record StorageConfigResponse(string Provider, bool IsConfigured);
 
 public sealed record StorageTestResponse(string Provider, bool Success, string Message);
+
+public sealed record OfficialPackageResponse(string PackageNamespace, string Id, string Version, string Name, string? Description, string? Author, string? License, string? Homepage, int TemplateCount, IReadOnlyList<OfficialPackageTemplateResponse> Templates);
+
+public sealed record OfficialPackageTemplateResponse(string Slug, string Name, string? Description);
+
+public sealed record PackageImportResponse(string PackageNamespace, string Id, string Version, IReadOnlyList<PackageTemplateImportResult> Imported, IReadOnlyList<string> Skipped, IReadOnlyList<string> Errors);
+
+public sealed record PackageTemplateImportResult(Guid TemplateId, string Slug, string Name, Guid TemplateVersionId, int VersionNumber);

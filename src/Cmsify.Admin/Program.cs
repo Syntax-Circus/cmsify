@@ -34,6 +34,7 @@ builder.Services.AddScoped<AuditApiClient>();
 builder.Services.AddScoped<UserApiClient>();
 builder.Services.AddScoped<ApiClientsApiClient>();
 builder.Services.AddScoped<SettingsApiClient>();
+builder.Services.AddScoped<PackagesApiClient>();
 
 var app = builder.Build();
 

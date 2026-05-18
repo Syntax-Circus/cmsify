@@ -280,3 +280,14 @@ public sealed class SettingsApiClient : ApiClientBase
 
     public Task<StorageTestResponse> TestStorageAsync(CancellationToken ct = default) => PostAsync<StorageTestResponse>("/api/v1/settings/storage/test", ct: ct);
 }
+
+public sealed class PackagesApiClient : ApiClientBase
+{
+    public PackagesApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+
+    public Task<IReadOnlyList<OfficialPackageResponse>> ListOfficialAsync(CancellationToken ct = default) =>
+        GetAsync<IReadOnlyList<OfficialPackageResponse>>("/api/v1/packages/official", ct);
+
+    public Task<PackageImportResponse> ImportOfficialAsync(Guid workspaceId, string packageId, CancellationToken ct = default) =>
+        PostAsync<PackageImportResponse>($"/api/v1/workspaces/{workspaceId}/packages/import/official/{Uri.EscapeDataString(packageId)}", ct: ct);
+}

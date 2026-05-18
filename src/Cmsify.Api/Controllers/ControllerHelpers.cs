@@ -21,7 +21,7 @@ internal static class ControllerHelpers
     {
         var problem = new ProblemDetails
         {
-            Type = $"https://cmsify.dev/errors/{code}",
+            Type = CmsifyError.TypeUri(code),
             Title = title,
             Status = status,
             Detail = detail,

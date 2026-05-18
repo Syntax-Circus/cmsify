@@ -1,0 +1,70 @@
+@page "/settings/packages"
+@rendermode InteractiveServer
+@inject PackagesApiClient PackageClient
+@inject WorkspaceState Workspace
+
+<div class="cms-page-head">
+    <div>
+        <h1>Packages</h1>
+        <div class="lead">Install bundled official template packages.</div>
+    </div>
+</div>
+
+@if (Workspace.Current is null)
+{
+    <div class="alert alert-warning">Select a workspace before importing packages.</div>
+}
+else if (packages is null)
+{
+    <div class="cms-card">Loading packages...</div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var package in packages)
+        {
+            <div class="col-md-6">
+                <div class="cms-card">
+                    <div class="d-flex justify-content-between gap-3">
+                        <div>
+                            <h2 class="h5">@package.Name</h2>
+                            <div class="small text-muted">@package.PackageNamespace/@package.Id @package.Version</div>
+                        </div>
+                        <button class="btn btn-primary" disabled="@importing.Contains(package.Id)" @onclick="() => ImportAsync(package.Id)">Import</button>
+                    </div>
+                    <p class="text-muted mt-3">@package.Description</p>
+                    <div class="small">@package.TemplateCount templates: @string.Join(", ", package.Templates.Select(template => template.Name))</div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert alert-info mt-3">@message</div>
+}
+
+@code {
+    private IReadOnlyList<OfficialPackageResponse>? packages;
+    private readonly HashSet<string> importing = new(StringComparer.OrdinalIgnoreCase);
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        packages = await PackageClient.ListOfficialAsync();
+    }
+
+    private async Task ImportAsync(string packageId)
+    {
+        if (Workspace.Current is null)
+        {
+            return;
+        }
+
+        importing.Add(packageId);
+        var result = await PackageClient.ImportOfficialAsync(Workspace.Current.Id, packageId);
+        message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+        importing.Remove(packageId);
+    }
+}

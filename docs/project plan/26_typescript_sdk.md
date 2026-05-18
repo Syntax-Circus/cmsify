@@ -126,20 +126,20 @@ sdk/typescript/
 
 ## Tasks
 
-- [ ] Scaffold `sdk/typescript/` with `package.json`, `tsconfig.json`, ESM+CJS build
-- [ ] Install `openapi-typescript`, `openapi-fetch`, `vitest`, `tsup` (or equivalent bundler)
-- [ ] Implement `scripts/generate.ts` to regenerate from the API's OpenAPI document
-- [ ] Commit the initial generated output
-- [ ] Implement `CmsifyClient` ergonomic wrapper for the MVP surface area
-- [ ] Implement `CmsifyApiError` mapping ProblemDetails responses
-- [ ] Implement automatic ETag tracking and `If-Match` echo
-- [ ] Implement retry policy (`429` + transient `5xx`)
-- [ ] Implement `listAll` async iterable pagination helper
-- [ ] Write Vitest tests for client behaviour (auth header, ETag round-trip, error mapping, retry)
-- [ ] Set up CI drift check (regenerate from API → diff against committed → fail on drift)
-- [ ] Write `README.md` with install + usage
-- [ ] Author one example per framework (Next.js App Router, Astro, SvelteKit) under `examples/`
-- [ ] Configure npm publish workflow (manual `npm publish` from a release tag for MVP)
+- [x] Scaffold `sdk/typescript/` with `package.json`, `tsconfig.json`, ESM+CJS build
+- [x] Install `openapi-typescript`, `openapi-fetch`, `vitest`, `tsup` (or equivalent bundler)
+- [x] Implement `scripts/generate.ts` to regenerate from the API's OpenAPI document
+- [x] Commit the initial generated output
+- [x] Implement `CmsifyClient` ergonomic wrapper for the MVP surface area
+- [x] Implement `CmsifyApiError` mapping ProblemDetails responses
+- [x] Implement automatic ETag tracking and `If-Match` echo
+- [x] Implement retry policy (`429` + transient `5xx`)
+- [x] Implement `listAll` async iterable pagination helper
+- [x] Write Vitest tests for client behaviour (auth header, ETag round-trip, error mapping, retry)
+- [x] Set up CI drift check (regenerate from API → diff against committed → fail on drift)
+- [x] Write `README.md` with install + usage
+- [x] Author one example per framework (Next.js App Router, Astro, SvelteKit) under `examples/`
+- [x] Configure npm publish workflow (manual `npm publish` from a release tag for MVP)
 
 ---
 
