@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:17
+    restart: unless-stopped    
     environment:
       POSTGRES_DB: cmsify
       POSTGRES_USER: cmsify
@@ -8,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./local/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cmsify -d cmsify"]
       interval: 10s
@@ -33,7 +34,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - media_data:/var/cmsify/media
+      - ./local/media:/var/cmsify/media
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
       interval: 10s
@@ -53,7 +54,3 @@ services:
     depends_on:
       api:
         condition: service_healthy
-
-volumes:
-  postgres_data:
-  media_data:

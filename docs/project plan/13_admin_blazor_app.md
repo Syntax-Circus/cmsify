@@ -93,18 +93,13 @@ Cmsify.Admin/
 }
 ```
 
-### SassCompiler Configuration (`compilerconfig.json`)
+### SassCompiler Configuration (`sasscompiler.json`)
 ```json
-[
-  {
-    "outputFile": "wwwroot/css/app.css",
-    "inputFile": "wwwroot/scss/app.scss",
-    "options": {
-      "sourceMap": false,
-      "style": "compressed"
-    }
-  }
-]
+{
+  "Source": "wwwroot/scss/app.scss",
+  "Target": "wwwroot/css/app.css",
+  "Arguments": "--style=compressed"
+}
 ```
 
 ### SCSS Entry Point (`wwwroot/scss/app.scss`)

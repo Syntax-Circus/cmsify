@@ -1,3 +1,13 @@
 @import "variables";
 @import "../lib/bootstrap/scss/bootstrap";
 @import "custom";
+
+h1 {
+    //user-select: none;
+    //pointer-events: none;
+    --bs-highlight-color: transparent;
+
+    &:focus {
+        outline: none;
+    }
+}

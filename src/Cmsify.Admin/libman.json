@@ -6,21 +6,7 @@
       "library": "bootstrap@5.3.8",
       "destination": "wwwroot/lib/bootstrap/",
       "files": [
-        "scss/bootstrap.scss",
-        "scss/_functions.scss",
-        "scss/_variables.scss",
-        "scss/_variables-dark.scss",
-        "scss/_maps.scss",
-        "scss/_mixins.scss",
-        "scss/_utilities.scss",
-        "scss/_root.scss",
-        "scss/_reboot.scss",
-        "scss/_type.scss",
-        "scss/_containers.scss",
-        "scss/_grid.scss",
-        "scss/_helpers.scss",
-        "scss/_utilities.scss",
-        "scss/utilities/_api.scss"
+        "scss/**"
       ]
     }
   ]
