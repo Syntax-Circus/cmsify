@@ -1,0 +1,37 @@
+@using Cmsify.Admin.State
+@inject AuthState Auth
+@inject NavigationManager Navigation
+
+@if (ready)
+{
+    <RouteView RouteData="RouteData" DefaultLayout="DefaultLayout" />
+}
+
+@code {
+    [Parameter, EditorRequired] public RouteData RouteData { get; set; } = default!;
+    [Parameter] public Type? DefaultLayout { get; set; }
+
+    private bool ready;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await Auth.InitializeAsync();
+        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
+        var isLogin = path.Equals("/login", StringComparison.OrdinalIgnoreCase);
+        var isChangePassword = path.Equals("/account/change-password", StringComparison.OrdinalIgnoreCase);
+
+        if (!Auth.IsAuthenticated && !isLogin)
+        {
+            Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(path)}", replace: true);
+            return;
+        }
+
+        if (Auth.IsAuthenticated && Auth.MustChangePassword && !isChangePassword && !isLogin)
+        {
+            Navigation.NavigateTo($"/account/change-password?returnUrl={Uri.EscapeDataString(path)}", replace: true);
+            return;
+        }
+
+        ready = true;
+    }
+}

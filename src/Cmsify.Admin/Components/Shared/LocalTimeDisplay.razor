@@ -1,0 +1,23 @@
+<time datetime="@Value.ToString("O")">@Formatted</time>
+
+@code {
+    [Inject] public UserPreferencesState Preferences { get; set; } = default!;
+    [Parameter, EditorRequired] public DateTimeOffset Value { get; set; }
+    [Parameter] public string Format { get; set; } = "g";
+
+    private string Formatted
+    {
+        get
+        {
+            try
+            {
+                var zone = TimeZoneInfo.FindSystemTimeZoneById(Preferences.TimeZoneId);
+                return TimeZoneInfo.ConvertTime(Value, zone).ToString(Format);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                return Value.LocalDateTime.ToString(Format);
+            }
+        }
+    }
+}

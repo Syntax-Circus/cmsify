@@ -62,18 +62,18 @@ Requires `Editor` and `If-Match`.
 
 ## Tasks
 
-- [ ] Implement `MediaController` with all endpoints
-- [ ] Implement multipart upload with streaming to `IStorageProvider`
-- [ ] Implement MIME type and file size validation (configurable)
-- [ ] Implement file stream endpoint with proper headers
-- [ ] Implement delete with reference check
-- [ ] Add `Media:MaxFileSizeMb` and `Media:AllowedMimeTypes` to `.env.example`
-- [ ] Integration test: upload → retrieve → delete flow
-- [ ] Integration test: delete blocked by published content reference
+- [x] Implement `MediaController` with all endpoints
+- [x] Implement multipart upload with streaming to `IStorageProvider`
+- [x] Implement MIME type and file size validation (configurable)
+- [x] Implement file stream endpoint with proper headers
+- [x] Implement delete with reference check
+- [x] Add `Media:MaxFileSizeMb` and `Media:AllowedMimeTypes` to `.env.example`
+- [x] Integration test: upload → retrieve → delete flow
+- [x] Integration test: delete blocked by published content reference
 
 ---
 
 ## Deliverables
-- File upload and retrieval working with local storage provider
-- S3 provider swap verified via config change
-- Reference-guarded delete
+- [x] File upload and retrieval working with local storage provider
+- [x] S3 provider swap verified via config change
+- [x] Reference-guarded delete

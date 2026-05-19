@@ -1,0 +1,79 @@
+@page "/login"
+@layout Cmsify.Admin.Components.Layout.MainLayout
+@rendermode InteractiveServer
+@inject AuthState Auth
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
+
+<div class="cms-auth-card">
+    <div class="text-center mb-3">
+        <div class="cms-logo mx-auto mb-2" style="width:44px;height:44px;border-radius:12px">C</div>
+        <h1 class="h4 mb-1">Sign in to Cmsify</h1>
+        <p class="text-muted small mb-0">Use your admin account to continue.</p>
+    </div>
+    <EditForm Model="form" OnValidSubmit="SubmitAsync">
+        <DataAnnotationsValidator />
+        <div class="mb-3">
+            <label class="form-label" for="email">Email</label>
+            <InputText id="email" type="email" class="form-control" @bind-Value="form.Email" autofocus />
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="password">Password</label>
+            <InputText id="password" type="password" class="form-control" @bind-Value="form.Password" />
+        </div>
+        <div class="form-check mb-3">
+            <InputCheckbox id="remember" class="form-check-input" @bind-Value="form.RememberMe" />
+            <label class="form-check-label" for="remember">Remember me</label>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(error))
+        {
+            <div class="alert alert-danger">@error</div>
+        }
+        <button class="btn btn-primary w-100" disabled="@busy">
+            @if (busy) { <LoadingSpinner /> }
+            Sign In
+        </button>
+        @if (OidcEnabled)
+        {
+            <div class="text-center text-muted small my-3">or</div>
+            <a class="btn btn-outline-secondary w-100" href="/signin-oidc">Sign in with @OidcProviderName</a>
+        }
+    </EditForm>
+    <div class="text-center text-muted small mt-3">Cmsify Admin</div>
+</div>
+
+@code {
+    private readonly LoginForm form = new();
+    private bool busy;
+    private string? error;
+
+    private bool OidcEnabled => Configuration.GetValue("Auth:Oidc:Enabled", false);
+    private string OidcProviderName => Configuration["Admin:OidcProviderName"] ?? "OIDC";
+
+    private async Task SubmitAsync()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            await Auth.LoginAsync(form.Email, form.Password, form.RememberMe);
+            var returnUrl = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Navigation.Uri).Query).TryGetValue("returnUrl", out var value) ? value.ToString() : "/workspaces";
+            Navigation.NavigateTo(Auth.MustChangePassword ? $"/account/change-password?returnUrl={Uri.EscapeDataString(returnUrl)}" : returnUrl, replace: true);
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.StatusCode == 401 ? "Invalid email or password" : ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private sealed class LoginForm
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public bool RememberMe { get; set; }
+    }
+}

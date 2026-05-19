@@ -1,0 +1,75 @@
+@page "/workspaces/{WorkspaceId:guid}/content"
+@rendermode InteractiveServer
+@inject ContentApiClient Content
+@inject TemplateApiClient Templates
+@inject NavigationManager Navigation
+
+<div class="cms-page-head">
+    <div><h1>Content</h1><div class="lead">Find, filter, and move content through the lifecycle.</div></div>
+    <button class="btn btn-primary" @onclick="NewContent">New Content</button>
+</div>
+
+<div class="cms-card mb-3">
+    <div class="row g-2">
+        <div class="col-md-3"><input class="form-control" placeholder="Full-text search" @bind="q" /></div>
+        <div class="col-md-2"><InputSelect class="form-select" @bind-Value="status"><option value="">Any status</option>@foreach (var s in Enum.GetValues<ContentStatus>()) { <option value="@s">@s</option> }</InputSelect></div>
+        <div class="col-md-3"><InputSelect class="form-select" @bind-Value="templateId"><option value="">Any template</option>@foreach (var t in templates) { <option value="@t.Id">@t.Name</option> }</InputSelect></div>
+        <div class="col-md-2"><input class="form-control" placeholder="Locale" @bind="locale" /></div>
+        <div class="col-md-2"><button class="btn btn-outline-secondary w-100" @onclick="LoadAsync">Filter</button></div>
+    </div>
+</div>
+
+<div class="cms-card p-0">
+    <table class="cms-table">
+        <thead><tr><th>Title / Slug</th><th>Template</th><th>Status</th><th>Locale</th><th>Updated</th><th>Actions</th></tr></thead>
+        <tbody>
+        @foreach (var item in items)
+        {
+            <tr>
+                <td><strong>@(item.Slug ?? item.Id.ToString())</strong><div class="small text-muted">@string.Join(", ", item.Tags)</div></td>
+                <td>@item.TemplateName</td>
+                <td><StatusBadge Status="@item.Status" /></td>
+                <td>@item.LocaleCode</td>
+                <td><LocalTimeDisplay Value="@item.UpdatedAt" /></td>
+                <td class="d-flex gap-1">
+                    <a class="btn btn-primary btn-sm" href="/workspaces/@WorkspaceId/content/@item.Id">Edit</a>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, SubmitAction)">Submit</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ApproveAction)">Approve</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, PublishAction)">Publish</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ArchiveAction)">Archive</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    private List<ContentItemSummaryResponse> items = [];
+    private IReadOnlyList<TemplateSummaryResponse> templates = [];
+    private ContentStatus? status;
+    private Guid? templateId;
+    private string? locale;
+    private string? q;
+    private const string SubmitAction = "submit";
+    private const string ApproveAction = "approve";
+    private const string PublishAction = "publish";
+    private const string ArchiveAction = "archive";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        templates = (await Templates.ListAsync(WorkspaceId)).Items;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => items = (await Content.ListAsync(WorkspaceId, status, templateId, locale, null, q)).Items.ToList();
+
+    private void NewContent() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/new");
+
+    private async Task TransitionAsync(Guid id, string action)
+    {
+        await Content.TransitionAsync(WorkspaceId, id, action, action == "publish" ? new PublishContentRequest(null) : null);
+        await LoadAsync();
+    }
+}

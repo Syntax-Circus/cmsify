@@ -104,15 +104,15 @@ This requires querying into `ContentFieldValues` joined with `TemplateFields` �
 
 ## Tasks
 
-- [ ] Ensure all query parameters on `ContentController` list endpoint are implemented
-- [ ] Verify query performance with realistic data volumes (add indexes as needed — see `03_database_schema.md`)
-- [ ] Document all consumer patterns in OpenAPI descriptions
-- [ ] Add query parameter examples to Swagger UI
-- [ ] Integration test: each filter parameter in isolation and in combination
+- [x] Ensure all query parameters on `ContentController` list endpoint are implemented
+- [x] Verify query performance with realistic data volumes (add indexes as needed — see `03_database_schema.md`)
+- [x] Document all consumer patterns in OpenAPI descriptions
+- [x] Add query parameter examples to Swagger UI
+- [x] Integration test: each filter parameter in isolation and in combination
 
 ---
 
 ## Deliverables
-- All MVP query parameters working and documented in OpenAPI
-- Pagination envelope consistent across all list endpoints
-- Consumer pattern documentation in OpenAPI descriptions
+- [x] All MVP query parameters working and documented in OpenAPI
+- [x] Pagination envelope consistent across all list endpoints
+- [x] Consumer pattern documentation in OpenAPI descriptions

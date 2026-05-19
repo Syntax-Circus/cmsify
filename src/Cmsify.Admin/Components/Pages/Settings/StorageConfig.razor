@@ -1,0 +1,23 @@
+@page "/settings/storage"
+@rendermode InteractiveServer
+@inject SettingsApiClient Settings
+
+<div class="cms-page-head"><div><h1>Storage</h1><div class="lead">Current media storage provider status.</div></div><button class="btn btn-primary" @onclick="TestAsync">Test connection</button></div>
+
+<div class="cms-card" style="max-width:640px">
+    <div class="small text-muted">Provider</div>
+    <div class="h5">@config?.Provider</div>
+    <StatusBadge Text="@(config?.IsConfigured == true ? "Active" : "Inactive")" />
+    <p class="text-muted mt-3">Storage provider configuration is controlled by environment variables and appsettings, not edited in the admin UI.</p>
+    @if (test is not null)
+    {
+        <div class="alert @(test.Success ? "alert-success" : "alert-danger")">@test.Message</div>
+    }
+</div>
+
+@code {
+    private StorageConfigResponse? config;
+    private StorageTestResponse? test;
+    protected override async Task OnInitializedAsync() => config = await Settings.GetStorageAsync();
+    private async Task TestAsync() => test = await Settings.TestStorageAsync();
+}

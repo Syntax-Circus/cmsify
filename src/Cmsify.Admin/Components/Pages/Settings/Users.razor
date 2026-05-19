@@ -1,0 +1,221 @@
+@page "/settings/users"
+@rendermode InteractiveServer
+@inject UserApiClient UsersClient
+@inject WorkspaceApiClient WorkspacesClient
+
+<div class="cms-page-head">
+    <div><h1>Users</h1><div class="lead">Create users, assign roles, workspace grants, and temporary passwords.</div></div>
+    <button class="btn btn-primary" @onclick="() => creating = true">Create User</button>
+</div>
+
+<Toast Message="@toast" />
+
+<div class="cms-card p-0">
+    <table class="cms-table">
+        <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Workspace Access</th><th>Last Login</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody>
+        @foreach (var user in users)
+        {
+            <tr>
+                <td>@user.Email</td>
+                <td>@user.DisplayName</td>
+                <td><RoleBadge Role="@(user.IsSuperAdmin ? "Superadmin" : user.Role.ToString())" /></td>
+                <td>@DescribeAccess(user)</td>
+                <td>@(user.LastLoginAt.HasValue ? @<LocalTimeDisplay Value="@user.LastLoginAt.Value" /> : @<span>Never</span>)</td>
+                <td><StatusBadge Text="@(user.IsActive ? "Active" : "Inactive")" /></td>
+                <td class="d-flex gap-1"><button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(user)">Edit</button><button class="btn btn-outline-secondary btn-sm" @onclick="() => ResetAsync(user)">Reset Password</button></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+@if (creating || editing is not null)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">@(editing is null ? "Create User" : "Edit User")</h5><button class="btn-close" @onclick="Close"></button></div>
+                <div class="modal-body">
+                    <label class="form-label">Email</label><InputText class="form-control mb-3" @bind-Value="form.Email" />
+                    <label class="form-label">Display name</label><InputText class="form-control mb-3" @bind-Value="form.DisplayName" />
+                    <label class="form-label">Role</label><InputSelect class="form-select mb-3" @bind-Value="form.Role" disabled="@IsProtectedLastSuperAdmin">@foreach (var role in Enum.GetValues<UserRole>()) { <option value="@role">@role</option> }</InputSelect>
+                    <div class="form-check form-switch mb-3"><InputCheckbox class="form-check-input" @bind-Value="form.IsSuperAdmin" disabled="@IsProtectedLastSuperAdmin" /><label class="form-check-label">Host superadmin with access to every workspace</label></div>
+                    @if (IsProtectedLastSuperAdmin)
+                    {
+                        <div class="alert alert-info py-2 small mb-3">This is the only host superadmin. They cannot be demoted, disabled, or have their role changed until another active superadmin exists.</div>
+                    }
+                    @if (!form.IsSuperAdmin)
+                    {
+                        <label class="form-label">Workspace access</label>
+                        <div class="border rounded mb-3">
+                            @foreach (var grant in form.WorkspaceAccesses)
+                            {
+                                <div class="d-flex align-items-center justify-content-between border-bottom p-2">
+                                    <span>@grant.Name</span>
+                                    <select class="form-select w-auto" @bind="grant.Access">
+                                        <option value="@WorkspaceGrantOption.None">No access</option>
+                                        <option value="@WorkspaceGrantOption.Read">Read</option>
+                                        <option value="@WorkspaceGrantOption.Write">Write</option>
+                                    </select>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (editing is null)
+                    {
+                        <label class="form-label">Temporary password</label><InputText class="form-control mb-3" @bind-Value="form.TemporaryPassword" />
+                    }
+                    <div class="form-check form-switch"><InputCheckbox class="form-check-input" @bind-Value="form.IsActive" disabled="@IsProtectedLastSuperAdmin" /><label class="form-check-label">Active</label></div>
+                </div>
+                <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="Close">Cancel</button><button class="btn btn-primary" @onclick="SaveAsync">Save</button></div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@if (!string.IsNullOrWhiteSpace(oneTimeSecret))
+{
+    <div class="alert alert-warning mt-3"><strong>Temporary password:</strong> <code>@oneTimeSecret</code> — copy it now. It will not be shown again.</div>
+}
+
+@code {
+    private List<UserDto> users = [];
+    private List<WorkspaceDto> workspaces = [];
+    private bool creating;
+    private UserDto? editing;
+    private UserForm form = new();
+    private string? oneTimeSecret;
+    private string? toast;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        users = (await UsersClient.ListAsync()).Items.ToList();
+        workspaces = (await WorkspacesClient.ListAsync()).Items.ToList();
+        if (form.WorkspaceAccesses.Count == 0)
+        {
+            ResetWorkspaceGrantForm([]);
+        }
+    }
+
+    private void Edit(UserDto user)
+    {
+        editing = user;
+        form = new UserForm { Email = user.Email, DisplayName = user.DisplayName, Role = user.Role, IsSuperAdmin = user.IsSuperAdmin, IsActive = user.IsActive, TimeZoneId = user.TimeZoneId };
+        ResetWorkspaceGrantForm(user.WorkspaceAccesses);
+    }
+
+    private void Close()
+    {
+        creating = false;
+        editing = null;
+        form = new();
+        ResetWorkspaceGrantForm([]);
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            if (editing is null)
+            {
+                var response = await UsersClient.CreateAsync(new CreateUserRequest(form.Email, form.DisplayName, form.Role, form.TemporaryPassword, form.IsSuperAdmin, form.TimeZoneId, SelectedWorkspaceAccesses()));
+                oneTimeSecret = response.TemporaryPassword;
+            }
+            else
+            {
+                await UsersClient.UpdateAsync(editing.Id, new UpdateUserRequest(form.Email, form.DisplayName, form.Role, form.IsSuperAdmin, form.TimeZoneId, form.IsActive, SelectedWorkspaceAccesses()));
+            }
+        }
+        catch (ProblemDetailsException ex)
+        {
+            toast = ex.Detail ?? ex.Title;
+            return;
+        }
+
+        Close();
+        await LoadAsync();
+    }
+
+    private bool IsProtectedLastSuperAdmin =>
+        editing is not null
+        && editing.IsSuperAdmin
+        && !users.Any(user => user.Id != editing.Id && user.IsSuperAdmin && user.IsActive);
+
+    private async Task ResetAsync(UserDto user)
+    {
+        var password = $"Temp-{Guid.NewGuid():N}"[..18];
+        var response = await UsersClient.ResetPasswordAsync(user.Id, password);
+        oneTimeSecret = response.TemporaryPassword;
+        toast = "Password reset";
+        await LoadAsync();
+    }
+
+    private IReadOnlyList<UserWorkspaceAccessDto> SelectedWorkspaceAccesses() =>
+        form.IsSuperAdmin
+            ? []
+            : form.WorkspaceAccesses
+                .Where(access => access.Access != WorkspaceGrantOption.None)
+                .Select(access => new UserWorkspaceAccessDto(access.WorkspaceId, access.Access == WorkspaceGrantOption.Write ? WorkspaceAccessLevel.Write : WorkspaceAccessLevel.Read))
+                .ToArray();
+
+    private void ResetWorkspaceGrantForm(IReadOnlyList<UserWorkspaceAccessDto> existing)
+    {
+        var byWorkspace = existing.ToDictionary(access => access.WorkspaceId, access => access.AccessLevel);
+        form.WorkspaceAccesses = workspaces
+            .Select(workspace => new WorkspaceAccessForm
+            {
+                WorkspaceId = workspace.Id,
+                Name = workspace.Name,
+                Access = byWorkspace.TryGetValue(workspace.Id, out var access)
+                    ? access == WorkspaceAccessLevel.Write ? WorkspaceGrantOption.Write : WorkspaceGrantOption.Read
+                    : WorkspaceGrantOption.None
+            })
+            .ToList();
+    }
+
+    private string DescribeAccess(UserDto user)
+    {
+        if (user.IsSuperAdmin)
+        {
+            return "All workspaces";
+        }
+
+        if (user.WorkspaceAccesses.Count == 0)
+        {
+            return "No workspace access";
+        }
+
+        var names = workspaces.ToDictionary(workspace => workspace.Id, workspace => workspace.Name);
+        return string.Join(", ", user.WorkspaceAccesses.Select(access => $"{(names.TryGetValue(access.WorkspaceId, out var name) ? name : access.WorkspaceId)} ({access.AccessLevel})"));
+    }
+
+    private sealed class UserForm
+    {
+        public string Email { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public UserRole Role { get; set; } = UserRole.Reader;
+        public bool IsSuperAdmin { get; set; }
+        public string TemporaryPassword { get; set; } = $"Temp-{Guid.NewGuid():N}"[..18];
+        public string? TimeZoneId { get; set; }
+        public bool IsActive { get; set; } = true;
+        public List<WorkspaceAccessForm> WorkspaceAccesses { get; set; } = [];
+    }
+
+    private sealed class WorkspaceAccessForm
+    {
+        public Guid WorkspaceId { get; set; }
+        public string Name { get; set; } = "";
+        public WorkspaceGrantOption Access { get; set; }
+    }
+
+    private enum WorkspaceGrantOption
+    {
+        None,
+        Read,
+        Write
+    }
+}

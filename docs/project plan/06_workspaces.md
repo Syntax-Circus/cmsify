@@ -34,11 +34,11 @@ Soft-deletes the workspace (sets `IsDeleted = true`, populates `DeletedAt` and `
 
 ## Tasks
 
-- [ ] Implement `WorkspacesController` with all endpoints
-- [ ] Implement `IWorkspaceRepository` and `WorkspaceRepository`
-- [ ] Add workspace scoping checks to all other repositories (ensure queries filter by `WorkspaceId` from `ICurrentActor`)
-- [ ] Integration test: workspace CRUD, access scoping by role
-- [ ] Integration test: cross-workspace data isolation (actor scoped to workspace A cannot see workspace B content)
+- [x] Implement `WorkspacesController` with all endpoints
+- [x] Implement `IWorkspaceRepository` and `WorkspaceRepository`
+- [x] Add workspace scoping checks to all other repositories (ensure queries filter by `WorkspaceId` from `ICurrentActor`)
+- [x] Integration test: workspace CRUD, access scoping by role
+- [x] Integration test: cross-workspace data isolation (actor scoped to workspace A cannot see workspace B content)
 
 ---
 

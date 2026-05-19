@@ -94,22 +94,22 @@ See `04_infrastructure.md` for `WebhookDispatchService` and `WebhookRetryService
 
 ## Tasks
 
-- [ ] Implement `WebhooksController` with all endpoints
-- [ ] Implement secret encryption at rest (AES-256)
-- [ ] Implement secret rotation endpoint
-- [ ] Implement `WebhookEvent` emission from all relevant service methods
-- [ ] Implement delivery log list and manual retry endpoints
-- [ ] Add `Secrets:EncryptionKey` to `.env.example`
-- [ ] Integration test: register endpoint → trigger event → verify delivery log
-- [ ] Integration test: HMAC signature verification
-- [ ] Integration test: retry flow (simulate failed delivery, trigger retry)
+- [x] Implement `WebhooksController` with all endpoints
+- [x] Implement secret encryption at rest (AES-256)
+- [x] Implement secret rotation endpoint
+- [x] Implement `WebhookEvent` emission from all relevant service methods
+- [x] Implement delivery log list and manual retry endpoints
+- [x] Add `Secrets:EncryptionKey` to `.env.example`
+- [x] Integration test: register endpoint → trigger event → verify delivery log
+- [x] Integration test: HMAC signature verification
+- [x] Integration test: retry flow (simulate failed delivery, trigger retry)
 
 ---
 
 ## Deliverables
-- Webhook registration and management endpoints
-- Event emission wired to all content and template lifecycle transitions
-- HMAC-signed delivery with retry and delivery log
+- [x] Webhook registration and management endpoints
+- [x] Event emission wired to all content and template lifecycle transitions
+- [x] HMAC-signed delivery with retry and delivery log
 
 ---
 
@@ -178,15 +178,15 @@ Response item:
 
 ## Tasks
 
-- [ ] Implement `AuditController` with workspace-scoped and global endpoints
-- [ ] Implement `IAuditLogRepository` filtering and pagination
-- [ ] Verify `AuditInterceptor` capturing all entity types correctly
-- [ ] Integration test: create content item → verify audit log entry exists with correct delta
-- [ ] Integration test: lifecycle transition → verify `StatusChanged` entry with before/after status
+- [x] Implement `AuditController` with workspace-scoped and global endpoints
+- [x] Implement `IAuditLogRepository` filtering and pagination
+- [x] Verify `AuditInterceptor` capturing all entity types correctly
+- [x] Integration test: create content item → verify audit log entry exists with correct delta
+- [x] Integration test: lifecycle transition → verify `StatusChanged` entry with before/after status
 
 ---
 
 ## Deliverables
-- Audit log queryable via API with full filter support
-- Change delta correctly capturing before/after state for updates
-- Access correctly restricted to `TemplateAdmin` and `Admin`
+- [x] Audit log queryable via API with full filter support
+- [x] Change delta correctly capturing before/after state for updates
+- [x] Access correctly restricted to `TemplateAdmin` and `Admin`

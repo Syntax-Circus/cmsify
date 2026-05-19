@@ -1,0 +1,16 @@
+<div class="cms-empty">
+    <div class="cms-empty__icon"><i class="bi @Icon"></i></div>
+    <h5>@Title</h5>
+    <div class="mb-3">@Body</div>
+    @if (ChildContent is not null)
+    {
+        @ChildContent
+    }
+</div>
+
+@code {
+    [Parameter] public string Icon { get; set; } = "bi-inbox";
+    [Parameter] public string Title { get; set; } = "Nothing here yet";
+    [Parameter] public string Body { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

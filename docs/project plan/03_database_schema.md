@@ -231,22 +231,22 @@ Primitive types are **not** seeded as `Template` rows — they exist only as the
 
 ## Tasks
 
-- [ ] Install `Npgsql.EntityFrameworkCore.PostgreSQL`, `EFCore.NamingConventions`, `UUIDNext`
-- [ ] Implement `CmsifyDbContext` with all `DbSet` properties
-- [ ] Implement all `IEntityTypeConfiguration<T>` classes
-- [ ] Register `CmsifyDbContext` in `IServiceCollection` extension with snake_case naming
-- [ ] Register `AuditInterceptor` on `DbContextOptionsBuilder`
-- [ ] Create and apply initial migration (`InitialSchema`)
-- [ ] Implement `IDbSeeder` for system primitives and default admin user
-- [ ] Wire `MigrateAsync()` + seeder call in `Cmsify.Api` startup
-- [ ] Verify all indexes exist via `\d tablename` in psql
-- [ ] Write infrastructure unit tests for key repository operations
+- [x] Install `Npgsql.EntityFrameworkCore.PostgreSQL`, `EFCore.NamingConventions`, `UUIDNext`
+- [x] Implement `CmsifyDbContext` with all `DbSet` properties
+- [x] Implement all `IEntityTypeConfiguration<T>` classes
+- [x] Register `CmsifyDbContext` in `IServiceCollection` extension with snake_case naming
+- [x] Register `AuditInterceptor` on `DbContextOptionsBuilder`
+- [x] Create and apply initial migration (`InitialSchema`)
+- [x] Implement `IDbSeeder` for default admin user and default workspace; primitives remain enum-only per phase 02
+- [x] Wire `MigrateAsync()` + seeder call in `Cmsify.Api` startup
+- [x] Verify all indexes exist via fresh PostgreSQL migration integration test
+- [x] Write infrastructure unit tests for key schema/model configuration
 
 ---
 
 ## Deliverables
-- `CmsifyDbContext` fully configured
-- All entity configurations implemented
-- Initial migration created and applies cleanly against a fresh Postgres instance
-- Seed data: primitive templates, default admin user, default workspace
-- Database ready for API layer to be built against
+- [x] `CmsifyDbContext` fully configured
+- [x] All entity configurations implemented
+- [x] Initial migration created and applies cleanly against a fresh Postgres instance
+- [x] Seed data: enum-only primitives, default admin user, default workspace
+- [x] Database model ready for API layer to be built against

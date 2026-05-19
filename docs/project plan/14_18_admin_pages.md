@@ -34,13 +34,13 @@ Implement the login UI, session management, and optional OIDC wiring in the Blaz
 - `OidcProviderName` configurable via `Admin:OidcProviderName` (e.g. "Authentik")
 
 ## Tasks
-- [ ] Implement `Login.razor` with email/password form
-- [ ] Implement `ChangePassword.razor` and wire the `MustChangePassword` routing guard
-- [ ] Implement `AuthService` login/logout/changePassword methods
-- [ ] Implement token persistence (sessionStorage/localStorage toggle)
-- [ ] Implement absolute-expiry check and auto-redirect on navigation
-- [ ] Implement optional OIDC button and callback handling
-- [ ] Add `Admin:OidcProviderName` to `.env.example`
+- [x] Implement `Login.razor` with email/password form
+- [x] Implement `ChangePassword.razor` and wire the `MustChangePassword` routing guard
+- [x] Implement `AuthService` login/logout/changePassword methods
+- [x] Implement token persistence (sessionStorage/localStorage toggle)
+- [x] Implement absolute-expiry check and auto-redirect on navigation
+- [x] Implement optional OIDC button and callback handling
+- [x] Add `Admin:OidcProviderName` to `.env.example`
 
 ## Deliverables
 - Working login/logout/change-password flow
@@ -97,15 +97,15 @@ The most complex page in the admin. Allows visual editing of a template's struct
 ---
 
 ## Tasks
-- [ ] Implement `WorkspaceList.razor` and `WorkspaceDetail.razor`
-- [ ] Implement `TemplateList.razor` with search and new template button
-- [ ] Implement `TemplateBuilder.razor` with section/field tree and detail panel
-- [ ] Implement drag-and-drop reordering (use `SortableJS` via JS interop or a Blazor-compatible library)
-- [ ] Implement field type picker with primitive and template options
-- [ ] Implement allowed types multi-select for constrained fields
-- [ ] Implement client-side cycle detection hint (visual warning before save)
-- [ ] Implement `VersionHistory.razor`
-- [ ] Implement publish version confirmation dialog
+- [x] Implement `WorkspaceList.razor` and `WorkspaceDetail.razor`
+- [x] Implement `TemplateList.razor` with search and new template button
+- [x] Implement `TemplateBuilder.razor` with section/field tree and detail panel
+- [x] Implement drag-and-drop reordering (use `SortableJS` via JS interop or a Blazor-compatible library)
+- [x] Implement field type picker with primitive and template options
+- [x] Implement allowed types multi-select for constrained fields
+- [x] Implement client-side cycle detection hint (visual warning before save)
+- [x] Implement `VersionHistory.razor`
+- [x] Implement publish version confirmation dialog
 
 ## Deliverables
 - Workspace switcher working
@@ -173,17 +173,17 @@ If the template has sections, fields are grouped under collapsible section headi
 ---
 
 ## Tasks
-- [ ] Implement `ContentList.razor` with filters and inline lifecycle actions
-- [ ] Implement `ContentEditor.razor` with dynamic field rendering
-- [ ] Implement all primitive field input components
-- [ ] Implement rich text editor via JS interop
-- [ ] Implement markdown textarea with preview
-- [ ] Implement media picker modal (integrates with MediaLibrary)
-- [ ] Implement inline sub-form for Inline Template fields (recursive)
-- [ ] Implement reference picker for Reference Template fields
-- [ ] Implement multi-occurrence field list with drag reorder
-- [ ] Implement lifecycle sidebar with transition buttons
-- [ ] Implement translation link UI
+- [x] Implement `ContentList.razor` with filters and inline lifecycle actions
+- [x] Implement `ContentEditor.razor` with dynamic field rendering
+- [x] Implement all primitive field input components
+- [x] Implement rich text editor via JS interop
+- [x] Implement markdown textarea with preview
+- [x] Implement media picker modal (integrates with MediaLibrary)
+- [x] Implement inline sub-form for Inline Template fields (recursive)
+- [x] Implement reference picker for Reference Template fields
+- [x] Implement multi-occurrence field list with drag reorder
+- [x] Implement lifecycle sidebar with transition buttons
+- [x] Implement translation link UI
 
 ## Deliverables
 - Content list with filtering working
@@ -220,13 +220,13 @@ Implement the media management UI including upload, browse, preview, and selecti
 ---
 
 ## Tasks
-- [ ] Implement `MediaLibrary.razor` (standalone page)
-- [ ] Implement media grid/list with filter and search
-- [ ] Implement drag-and-drop upload with progress
-- [ ] Implement asset detail panel with alt text edit
-- [ ] Implement delete with published-content warning
-- [ ] Implement `MediaPickerModal.razor` for use in content editor
-- [ ] Wire media picker into Media and File field components
+- [x] Implement `MediaLibrary.razor` (standalone page)
+- [x] Implement media grid/list with filter and search
+- [x] Implement drag-and-drop upload with progress
+- [x] Implement asset detail panel with alt text edit
+- [x] Implement delete with published-content warning
+- [x] Implement `MediaPickerModal.razor` for use in content editor
+- [x] Wire media picker into Media and File field components
 
 ## Deliverables
 - Media library page working with upload, browse, and delete
@@ -281,14 +281,14 @@ Implement all settings pages: user management, API clients, webhooks, storage co
 ---
 
 ## Tasks
-- [ ] Implement `Users.razor` with list, create (temp password reveal), edit role, reset password, deactivate
-- [ ] Implement `Preferences.razor` with time zone, theme, change-password link
-- [ ] Implement `ApiClients.razor` with list, create (token reveal), revoke, rotate
-- [ ] Implement `Webhooks.razor` with list, create/edit, delivery log, manual retry
-- [ ] Implement `StorageConfig.razor` with provider display and test connection
-- [ ] Implement `AuditLog.razor` with filter and delta expand
-- [ ] Add `POST /api/v1/settings/storage/test` endpoint to API
-- [ ] Add `GET`/`PUT /api/v1/account/preferences` endpoints to API
+- [x] Implement `Users.razor` with list, create (temp password reveal), edit role, reset password, deactivate
+- [x] Implement `Preferences.razor` with time zone, theme, change-password link
+- [x] Implement `ApiClients.razor` with list, create (token reveal), revoke, rotate
+- [x] Implement `Webhooks.razor` with list, create/edit, delivery log, manual retry
+- [x] Implement `StorageConfig.razor` with provider display and test connection
+- [x] Implement `AuditLog.razor` with filter and delta expand
+- [x] Add `POST /api/v1/settings/storage/test` endpoint to API
+- [x] Add `GET`/`PUT /api/v1/account/preferences` endpoints to API
 
 ## Deliverables
 - All settings pages functional

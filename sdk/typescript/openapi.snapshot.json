@@ -1,0 +1,17 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Cmsify API",
+    "version": "v1"
+  },
+  "paths": {
+    "/health/live": { "get": { "responses": { "200": { "description": "Live" } } } },
+    "/health/ready": { "get": { "responses": { "200": { "description": "Ready" }, "503": { "description": "Not ready" } } } },
+    "/api/v1/workspaces": { "get": { "responses": { "200": { "description": "Workspaces" } } } },
+    "/api/v1/workspaces/{workspaceId}/content": { "get": { "responses": { "200": { "description": "Content list" } } } },
+    "/api/v1/workspaces/{workspaceId}/content/{id}": { "get": { "responses": { "200": { "description": "Content detail" } } } },
+    "/api/v1/workspaces/{workspaceId}/content/by-slug/{slug}": { "get": { "responses": { "200": { "description": "Content detail" } } } },
+    "/api/v1/workspaces/{workspaceId}/templates": { "get": { "responses": { "200": { "description": "Templates" } } } },
+    "/api/v1/workspaces/{workspaceId}/media": { "get": { "responses": { "200": { "description": "Media" } } } }
+  }
+}

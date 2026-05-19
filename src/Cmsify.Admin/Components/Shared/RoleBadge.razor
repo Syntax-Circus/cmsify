@@ -1,0 +1,14 @@
+<span class="cms-role @CssClass">@Role</span>
+
+@code {
+    [Parameter] public string? Role { get; set; }
+
+    private string CssClass => Role switch
+    {
+        "Superadmin" => "cms-role--admin",
+        "Admin" => "cms-role--admin",
+        "TemplateAdmin" => "cms-role--tpladm",
+        "Editor" => "cms-role--editor",
+        _ => "cms-role--reader"
+    };
+}

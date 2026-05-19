@@ -1,0 +1,200 @@
+@page "/workspaces/{WorkspaceId:guid}/templates/{TemplateId:guid}"
+@rendermode InteractiveServer
+@inject TemplateApiClient Templates
+
+<div class="cms-builder">
+    <div class="cms-builder__top">
+        <div>
+            <h1 class="h5 mb-1">@template?.Name</h1>
+            @if (version is not null)
+            {
+                <StatusBadge Status="@version.Status" />
+                <span class="ms-2 text-muted small">Version @version.VersionNumber</span>
+            }
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!CanEdit)" @onclick="AddSectionAsync">Add Section</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!CanEdit)" @onclick="AddFieldAsync">Add Field</button>
+            <button class="btn btn-primary btn-sm" disabled="@(!CanEdit)" @onclick="() => confirmPublish = true">Publish Version</button>
+        </div>
+    </div>
+    <div class="cms-builder__body">
+        <aside class="cms-builder__tree">
+            <h2 class="h6 text-muted">Structure</h2>
+            @foreach (var section in Sections)
+            {
+                <div class="cms-tree-section">@section.Name</div>
+                @foreach (var field in Fields.Where(f => f.SectionId == section.Id))
+                {
+                    <button class="cms-tree-field @(selected?.Id == field.Id ? "is-active" : "")" draggable="true" @onclick="() => Select(field)">
+                        <i class="bi bi-grip-vertical"></i> @field.Label
+                    </button>
+                }
+            }
+            @foreach (var field in Fields.Where(f => f.SectionId is null))
+            {
+                <button class="cms-tree-field @(selected?.Id == field.Id ? "is-active" : "")" draggable="true" @onclick="() => Select(field)">
+                    <i class="bi bi-grip-vertical"></i> @field.Label
+                </button>
+            }
+        </aside>
+        <section class="cms-builder__detail">
+            @if (selected is null)
+            {
+                <EmptyState Title="Select a field" Body="Choose a field from the structure tree to edit its details." />
+            }
+            else
+            {
+                <div class="cms-card">
+                    <h2 class="h6">Field details</h2>
+                    <label class="form-label">Label</label>
+                    <InputText class="form-control mb-3" @bind-Value="edit.Label" disabled="@(!CanEdit)" />
+                    <label class="form-label">Key</label>
+                    <InputText class="form-control mb-3 font-monospace" @bind-Value="edit.Key" disabled="@(!CanEdit)" />
+                    <label class="form-label">Help text</label>
+                    <InputTextArea class="form-control mb-3" @bind-Value="edit.HelpText" disabled="@(!CanEdit)" />
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Primitive type</label>
+                            <InputSelect class="form-select" @bind-Value="edit.PrimitiveType" disabled="@(!CanEdit)">
+                                @foreach (var type in Enum.GetValues<PrimitiveType>())
+                                {
+                                    <option value="@type">@type</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Composition</label>
+                            <InputSelect class="form-select" @bind-Value="edit.CompositionMode" disabled="@(!CanEdit)">
+                                <option value="@CompositionMode.Inline">Inline</option>
+                                <option value="@CompositionMode.Reference">Reference</option>
+                            </InputSelect>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Max occurrences</label>
+                            <InputNumber class="form-control" @bind-Value="edit.MaxOccurrences" disabled="@(!CanEdit)" />
+                        </div>
+                    </div>
+                    <div class="form-check form-switch my-3">
+                        <InputCheckbox class="form-check-input" @bind-Value="edit.IsRequired" disabled="@(!CanEdit)" />
+                        <label class="form-check-label">Required</label>
+                    </div>
+                    @if (CycleWarning)
+                    {
+                        <div class="alert alert-warning">This selection may create a template cycle. The server validates cycles again when you save.</div>
+                    }
+                    <button class="btn btn-primary" disabled="@(!CanEdit)" @onclick="SaveFieldAsync">Save field</button>
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+<ConfirmDialog Visible="@confirmPublish" Title="Confirm Publish" Message="Publishing archives the previous published version and makes this draft live." ConfirmText="Publish" ButtonClass="btn-warning" OnCancel="() => confirmPublish = false" OnConfirm="PublishAsync" />
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public Guid TemplateId { get; set; }
+
+    private TemplateResponse? template;
+    private TemplateVersionResponse? version;
+    private TemplateFieldResponse? selected;
+    private FieldEdit edit = new();
+    private bool confirmPublish;
+
+    private bool CanEdit => version?.Status == TemplateVersionStatus.Draft;
+    private IEnumerable<TemplateSectionResponse> Sections => version is null ? Enumerable.Empty<TemplateSectionResponse>() : version.Sections.OrderBy(item => item.Order);
+    private IEnumerable<TemplateFieldResponse> Fields => version is null ? Enumerable.Empty<TemplateFieldResponse>() : version.Fields.OrderBy(item => item.Order);
+    private bool CycleWarning => edit.TemplateId == TemplateId;
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var result = await Templates.GetAsync(WorkspaceId, TemplateId);
+        template = result.Body;
+        version = template.CurrentVersion ?? await EnsureDraftAsync();
+    }
+
+    private async Task<TemplateVersionResponse> EnsureDraftAsync()
+    {
+        var versions = await Templates.ListVersionsAsync(WorkspaceId, TemplateId);
+        var draft = versions.FirstOrDefault(v => v.Status == TemplateVersionStatus.Draft);
+        return draft is null
+            ? await Templates.CreateDraftAsync(WorkspaceId, TemplateId, "Initial draft")
+            : await Templates.GetVersionAsync(WorkspaceId, TemplateId, draft.VersionNumber);
+    }
+
+    private void Select(TemplateFieldResponse field)
+    {
+        selected = field;
+        edit = new FieldEdit(field);
+    }
+
+    private async Task AddSectionAsync()
+    {
+        if (version is null) return;
+        await Templates.AddSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, new TemplateSectionRequest("New Section", null, Sections.Count(), true));
+        await LoadAsync();
+    }
+
+    private async Task AddFieldAsync()
+    {
+        if (version is null) return;
+        await Templates.AddFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, new TemplateFieldRequest(null, "new_field", "New Field", null, Fields.Count(), false, 0, 1, true, CompositionMode.Inline, PrimitiveType.Text, null, [], null));
+        await LoadAsync();
+    }
+
+    private async Task SaveFieldAsync()
+    {
+        if (version is null || selected is null) return;
+        var request = new TemplateFieldRequest(edit.SectionId, edit.Key, edit.Label, edit.HelpText, edit.Order, edit.IsRequired, edit.MinOccurrences, edit.MaxOccurrences, edit.IsOpen, edit.CompositionMode, edit.PrimitiveType, edit.TemplateId, edit.AllowedTypes, null);
+        await Templates.UpdateFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, selected.Id, request);
+        await LoadAsync();
+    }
+
+    private async Task PublishAsync()
+    {
+        if (version is not null)
+        {
+            await Templates.PublishAsync(WorkspaceId, TemplateId, version.VersionNumber);
+            confirmPublish = false;
+            await LoadAsync();
+        }
+    }
+
+    private sealed class FieldEdit
+    {
+        public FieldEdit() { }
+        public FieldEdit(TemplateFieldResponse field)
+        {
+            SectionId = field.SectionId;
+            Key = field.Key;
+            Label = field.Label;
+            HelpText = field.HelpText;
+            Order = field.Order;
+            IsRequired = field.IsRequired;
+            MinOccurrences = field.MinOccurrences;
+            MaxOccurrences = field.MaxOccurrences;
+            IsOpen = field.IsOpen;
+            CompositionMode = field.CompositionMode;
+            PrimitiveType = field.PrimitiveType;
+            TemplateId = field.TemplateId;
+            AllowedTypes = field.AllowedTypes.Select(t => new TemplateFieldAllowedTypeRequest(t.PrimitiveType, t.AllowedTemplateId)).ToArray();
+        }
+
+        public Guid? SectionId { get; set; }
+        public string Key { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string? HelpText { get; set; }
+        public int Order { get; set; }
+        public bool IsRequired { get; set; }
+        public int MinOccurrences { get; set; }
+        public int? MaxOccurrences { get; set; }
+        public bool IsOpen { get; set; } = true;
+        public CompositionMode CompositionMode { get; set; }
+        public PrimitiveType? PrimitiveType { get; set; } = Cmsify.Core.Domain.Enums.PrimitiveType.Text;
+        public Guid? TemplateId { get; set; }
+        public IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes { get; set; } = [];
+    }
+}

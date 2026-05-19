@@ -1,0 +1,5 @@
+{
+  "Source": "wwwroot/scss/app.scss",
+  "Target": "wwwroot/css/app.css",
+  "Arguments": "--style=compressed"
+}

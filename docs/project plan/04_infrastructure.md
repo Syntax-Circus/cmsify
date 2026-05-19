@@ -196,28 +196,28 @@ public static IServiceCollection AddCmsifyInfrastructure(
 
 ## Tasks
 
-- [ ] Implement all repository classes in `Cmsify.Infrastructure/Persistence/Repositories/`
-- [ ] Implement DTO mapping at every repository boundary so EF entities remain internal
-- [ ] Implement `PagedResult<T>` and `ContentItemQuery` models
-- [ ] Implement `IStorageProvider` interface (in Core)
-- [ ] Implement `LocalFileSystemStorageProvider`
-- [ ] Implement `S3BlobStorageProvider`
-- [ ] Implement `AddStorageProvider` extension method (config-driven selection)
-- [ ] Implement `AuditInterceptor` with before/after JSONB diff
-- [ ] Implement `WebhookEvent` channel and `WebhookDispatchService`
-- [ ] Implement `WebhookRetryService`
-- [ ] Implement `ScheduledPublishingService`
-- [ ] Implement `AddCmsifyInfrastructure` service registration extension
-- [ ] Unit test: `LocalFileSystemStorageProvider` store/retrieve/delete
-- [ ] Unit test: HMAC signing in webhook dispatcher
-- [ ] Unit test: exponential backoff calculation
-- [ ] Unit test: `AuditInterceptor` delta computation
+- [x] Implement all repository classes in `Cmsify.Infrastructure/Persistence/Repositories/`
+- [x] Implement DTO mapping at every repository boundary so EF entities remain internal
+- [x] Implement `PagedResult<T>` and `ContentItemQuery` models
+- [x] Implement `IStorageProvider` interface (in Core)
+- [x] Implement `LocalFileSystemStorageProvider`
+- [x] Implement `S3BlobStorageProvider`
+- [x] Implement `AddStorageProvider` extension method (config-driven selection)
+- [x] Implement `AuditInterceptor` with before/after JSONB diff
+- [x] Implement `WebhookEvent` channel and `WebhookDispatchService`
+- [x] Implement `WebhookRetryService`
+- [x] Implement `ScheduledPublishingService`
+- [x] Implement `AddCmsifyInfrastructure` service registration extension
+- [x] Unit test: `LocalFileSystemStorageProvider` store/retrieve/delete
+- [x] Unit test: HMAC signing in webhook dispatcher
+- [x] Unit test: exponential backoff calculation
+- [x] Unit test: `AuditInterceptor` delta computation
 
 ---
 
 ## Deliverables
-- All repositories implemented and registered with DTO-only boundaries and `AsNoTracking()`-first reads
-- Storage abstraction working with local filesystem; S3 provider implemented and config-switchable
-- Audit interceptor firing on all entity changes
-- All three background services running and tested
-- `AddCmsifyInfrastructure` one-line registration for consuming projects
+- [x] All repositories implemented and registered with DTO-only boundaries and `AsNoTracking()`-first reads
+- [x] Storage abstraction working with local filesystem; S3 provider implemented and config-switchable
+- [x] Audit interceptor firing on all entity changes
+- [x] All three background services running and tested
+- [x] `AddCmsifyInfrastructure` one-line registration for consuming projects

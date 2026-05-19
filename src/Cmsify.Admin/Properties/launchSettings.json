@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "Cmsify.Admin": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:61240;http://localhost:61243"
+    }
+  }
+}

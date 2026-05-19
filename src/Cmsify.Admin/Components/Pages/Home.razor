@@ -1,0 +1,14 @@
+@page "/"
+@inject NavigationManager Navigation
+@inject WorkspaceApiClient Workspaces
+
+<h1>Loading Cmsify</h1>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var workspaces = await Workspaces.ListAsync();
+        var first = workspaces.Items.FirstOrDefault();
+        Navigation.NavigateTo(first is null ? "/workspaces" : $"/workspaces/{first.Id}", replace: true);
+    }
+}

@@ -93,18 +93,13 @@ Cmsify.Admin/
 }
 ```
 
-### SassCompiler Configuration (`compilerconfig.json`)
+### SassCompiler Configuration (`sasscompiler.json`)
 ```json
-[
-  {
-    "outputFile": "wwwroot/css/app.css",
-    "inputFile": "wwwroot/scss/app.scss",
-    "options": {
-      "sourceMap": false,
-      "style": "compressed"
-    }
-  }
-]
+{
+  "Source": "wwwroot/scss/app.scss",
+  "Target": "wwwroot/css/app.css",
+  "Arguments": "--style=compressed"
+}
 ```
 
 ### SCSS Entry Point (`wwwroot/scss/app.scss`)
@@ -224,21 +219,21 @@ The admin UI targets **WCAG 2.1 AA**:
 
 ## Tasks
 
-- [ ] Scaffold Blazor Unified Web App with correct render modes
-- [ ] Configure LibMan and restore Bootstrap SCSS
-- [ ] Configure AspNetCore.SassCompiler and verify CSS compilation on build
-- [ ] Create `_variables.scss`, `_custom.scss`, `app.scss` with correct import order
-- [ ] Verify Bootstrap CSS not committed (only SCSS)
-- [ ] Implement `ApiClientBase` and all typed API client services
-- [ ] Implement `AuthState` cascading state with token storage
-- [ ] Implement `WorkspaceState` cascading state for current workspace context
-- [ ] Implement `MainLayout`, `NavMenu`, `AuthLayout`
-- [ ] Implement all shared components (Pagination, StatusBadge, ConfirmDialog, ConcurrencyConflictDialog, Toast, LoadingSpinner)
-- [ ] Implement route structure and navigation guards (redirect to login if unauthenticated; force `/account/change-password` when `MustChangePassword`)
-- [ ] Wire `UserPreferencesState` and `LocalTimeDisplay` for time-zone-aware rendering
-- [ ] Configure `HttpClient` with base URL from config (`Admin:ApiBaseUrl`)
-- [ ] Add `Admin:ApiBaseUrl` to `.env.example`
-- [ ] Add `axe-core` accessibility checks to the admin CI workflow against representative pages
+- [x] Scaffold Blazor Unified Web App with correct render modes
+- [x] Configure LibMan and restore Bootstrap SCSS
+- [x] Configure AspNetCore.SassCompiler and verify CSS compilation on build
+- [x] Create `_variables.scss`, `_custom.scss`, `app.scss` with correct import order
+- [x] Verify Bootstrap CSS not committed (only SCSS)
+- [x] Implement `ApiClientBase` and all typed API client services
+- [x] Implement `AuthState` cascading state with token storage
+- [x] Implement `WorkspaceState` cascading state for current workspace context
+- [x] Implement `MainLayout`, `NavMenu`, `AuthLayout`
+- [x] Implement all shared components (Pagination, StatusBadge, ConfirmDialog, ConcurrencyConflictDialog, Toast, LoadingSpinner)
+- [x] Implement route structure and navigation guards (redirect to login if unauthenticated; force `/account/change-password` when `MustChangePassword`)
+- [x] Wire `UserPreferencesState` and `LocalTimeDisplay` for time-zone-aware rendering
+- [x] Configure `HttpClient` with base URL from config (`Admin:ApiBaseUrl`)
+- [x] Add `Admin:ApiBaseUrl` to `.env.example`
+- [x] Add `axe-core` accessibility checks to the admin CI workflow against representative pages
 
 ---
 

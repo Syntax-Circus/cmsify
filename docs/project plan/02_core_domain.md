@@ -515,25 +515,25 @@ public interface IScheduledPublishingDispatcher
 
 ## Tasks
 
-- [ ] Define all enums in `Cmsify.Core/Domain/Enums/`
-- [ ] Define all entity classes in `Cmsify.Core/Domain/Entities/`
-- [ ] Define value objects (e.g. `LocaleCode`, `Slug`) in `Cmsify.Core/Domain/ValueObjects/`
-- [ ] Define all repository interfaces in `Cmsify.Core/Interfaces/Repositories/`
-- [ ] Define repository input/output DTO contracts for all repository interfaces
-- [ ] Define all domain service interfaces in `Cmsify.Core/Interfaces/Services/`
-- [ ] Implement `ITemplateGraphValidator` (DFS cycle detection)
-- [ ] Implement `IContentLifecycleService` (transition guard + state machine)
-- [ ] Implement `IContentValidator` (field cardinality, required field checks)
-- [ ] Write FluentValidation validators for all create/update request models
-- [ ] Unit test: cycle detection (direct cycle, transitive cycle, no cycle)
-- [ ] Unit test: lifecycle transitions (all valid and invalid paths)
-- [ ] Unit test: content validation (missing required fields, cardinality violations)
+- [x] Define all enums in `Cmsify.Core/Domain/Enums/`
+- [x] Define all entity classes in `Cmsify.Core/Domain/Entities/`
+- [x] Define value objects (e.g. `LocaleCode`, `Slug`) in `Cmsify.Core/Domain/ValueObjects/`
+- [x] Define all repository interfaces in `Cmsify.Core/Interfaces/Repositories/`
+- [x] Define repository input/output DTO contracts for all repository interfaces
+- [x] Define all domain service interfaces in `Cmsify.Core/Interfaces/Services/`
+- [x] Implement `ITemplateGraphValidator` (DFS cycle detection)
+- [x] Implement `IContentLifecycleService` (transition guard + state machine)
+- [x] Implement `IContentValidator` (field cardinality, required field checks)
+- [x] Write FluentValidation validators for all create/update request models
+- [x] Unit test: cycle detection (direct cycle, transitive cycle, no cycle)
+- [x] Unit test: lifecycle transitions (all valid and invalid paths)
+- [x] Unit test: content validation (missing required fields, cardinality violations)
 
 ---
 
 ## Deliverables
-- All domain entities defined in `Cmsify.Core`
-- All repository DTO contracts and repository/service interfaces defined
-- Template cycle detection implemented and unit tested
-- Content lifecycle state machine implemented and unit tested
-- Content field validation implemented and unit tested
+- [x] All domain entities defined in `Cmsify.Core`
+- [x] All repository DTO contracts and repository/service interfaces defined
+- [x] Template cycle detection implemented and unit tested
+- [x] Content lifecycle state machine implemented and unit tested
+- [x] Content field validation implemented and unit tested

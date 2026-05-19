@@ -168,20 +168,20 @@ Add these keys to `src/Cmsify.Api/.env.example` (see `22_dotenv.md`).
 
 ## Tasks
 
-- [ ] Add URL versioning: route prefix `/api/v1/` on all controllers
-- [ ] Install `Serilog.AspNetCore`, `Serilog.Sinks.Console`, `Serilog.Sinks.File`
-- [ ] Configure Serilog bootstrap logger + host integration in `Program.cs`
-- [ ] Implement `CorrelationIdMiddleware`
-- [ ] Register `AddProblemDetails()` and customise to include `traceId` + `extensions`
-- [ ] Implement `ExceptionHandlingMiddleware` mapping domain exceptions → ProblemDetails
-- [ ] Define a `CmsifyError` static class with stable `type` URIs and codes
-- [ ] Map `xmin` as concurrency token on all versioned entities in EF configurations
-- [ ] Implement `ETagMiddleware` (or controller filter) that emits weak ETags on read responses
-- [ ] Enforce `If-Match` on update/delete endpoints for versioned entities (`412` on mismatch, `428` on missing)
-- [ ] Configure CORS policy from `Cors:AllowedOrigins`
-- [ ] Configure `RateLimiter` with the two stacked policies
-- [ ] Implement `/health/live` and `/health/ready` endpoints (split from the single `/health` in `20_docker.md`)
-- [ ] Add Serilog/CORS/RateLimit/health keys to `.env.example`
+- [x] Add URL versioning: route prefix `/api/v1/` on all controllers
+- [x] Install `Serilog.AspNetCore`, `Serilog.Sinks.Console`, `Serilog.Sinks.File`
+- [x] Configure Serilog bootstrap logger + host integration in `Program.cs`
+- [x] Implement `CorrelationIdMiddleware`
+- [x] Register `AddProblemDetails()` and customise to include `traceId` + `extensions`
+- [x] Implement `ExceptionHandlingMiddleware` mapping domain exceptions → ProblemDetails
+- [x] Define a `CmsifyError` static class with stable `type` URIs and codes
+- [x] Map `xmin` as concurrency token on all versioned entities in EF configurations
+- [x] Implement `ETagMiddleware` (or controller filter) that emits weak ETags on read responses
+- [x] Enforce `If-Match` on update/delete endpoints for versioned entities (`412` on mismatch, `428` on missing)
+- [x] Configure CORS policy from `Cors:AllowedOrigins`
+- [x] Configure `RateLimiter` with the two stacked policies
+- [x] Implement `/health/live` and `/health/ready` endpoints (split from the single `/health` in `20_docker.md`)
+- [x] Add Serilog/CORS/RateLimit/health keys to `.env.example`
 - [ ] Unit test: `ETag` round-trip and `If-Match` mismatch behaviour
 - [ ] Unit test: ProblemDetails shape includes `traceId`
 - [ ] Integration test: rate limit triggers `429` after permit exhausted

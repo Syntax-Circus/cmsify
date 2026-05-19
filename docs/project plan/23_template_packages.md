@@ -198,22 +198,22 @@ No additional tables required for MVP of this feature. A future `InstalledPackag
 
 ## Tasks
 
-- [ ] Define `.ctp` JSON schema (publish to `/schema/ctp-1.0.json` from the API)
-- [ ] Implement `POST /api/v1/workspaces/{workspaceId}/packages/import`
-  - [ ] Parse + validate `.ctp` manifest
-  - [ ] Conflict detection (same namespace/id/version)
-  - [ ] Topological sort for dependency import order
-  - [ ] Cycle detection including existing workspace templates
-  - [ ] Template + version creation with package provenance fields
-- [ ] Implement `GET /api/v1/workspaces/{workspaceId}/packages/export`
-  - [ ] Dependency resolution (recursive)
-  - [ ] `.ctp` manifest generation
-  - [ ] File download response
-- [ ] Implement `GET /api/v1/packages/official` (bundled packages list)
-- [ ] Embed official `.ctp` files as assembly resources
-- [ ] Author all official packages (`blog`, `portfolio`, `docs`, `product`)
-- [ ] Implement onboarding flow in Admin (`/onboarding/templates`)
-- [ ] Implement `Settings → Packages` page in Admin
+- [x] Define `.ctp` JSON schema (publish to `/schema/ctp-1.0.json` from the API)
+- [x] Implement `POST /api/v1/workspaces/{workspaceId}/packages/import`
+  - [x] Parse + validate `.ctp` manifest
+  - [x] Conflict detection (same namespace/id/version)
+  - [x] Topological sort for dependency import order
+  - [x] Cycle detection including existing workspace templates
+  - [x] Template + version creation with package provenance fields
+- [x] Implement `GET /api/v1/workspaces/{workspaceId}/packages/export`
+  - [x] Dependency resolution (recursive)
+  - [x] `.ctp` manifest generation
+  - [x] File download response
+- [x] Implement `GET /api/v1/packages/official` (bundled packages list)
+- [x] Embed official `.ctp` files as assembly resources
+- [x] Author all official packages (`blog`, `portfolio`, `docs`, `product`)
+- [x] Implement onboarding flow in Admin (`/onboarding/templates`)
+- [x] Implement `Settings → Packages` page in Admin
   - [ ] File upload import
   - [ ] URL import
   - [ ] Installed package list

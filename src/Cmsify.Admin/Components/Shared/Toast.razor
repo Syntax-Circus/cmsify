@@ -1,0 +1,12 @@
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="cms-toast @(Variant == "danger" ? "cms-toast--danger" : null)" role="status">
+        <i class="bi @(Variant == "danger" ? "bi-x-octagon-fill" : "bi-check-circle-fill")"></i>
+        <span>@Message</span>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public string Variant { get; set; } = "success";
+}

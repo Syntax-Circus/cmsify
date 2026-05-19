@@ -1,0 +1,18 @@
+@page "/settings/audit"
+@rendermode InteractiveServer
+@inject AuditApiClient Audit
+@inject WorkspaceState Workspace
+
+<div class="cms-page-head"><div><h1>Audit Log</h1><div class="lead">Inspect entity changes and actor activity.</div></div></div>
+
+<div class="cms-card mb-3"><div class="row g-2"><div class="col-md-4"><input class="form-control" placeholder="Entity type" @bind="entityType" /></div><div class="col-md-3"><InputSelect class="form-select" @bind-Value="action"><option value="">Any action</option>@foreach (var a in Enum.GetValues<AuditAction>()) { <option value="@a">@a</option> }</InputSelect></div><div class="col-md-2"><button class="btn btn-outline-secondary" @onclick="LoadAsync">Filter</button></div></div></div>
+
+<div class="cms-card p-0"><table class="cms-table"><thead><tr><th>Time</th><th>Entity</th><th>Action</th><th>Actor</th><th>Delta</th></tr></thead><tbody>@foreach (var log in logs) { <tr><td><LocalTimeDisplay Value="@log.Timestamp" /></td><td>@log.EntityType<br /><span class="small text-muted">@log.EntityId</span></td><td><StatusBadge Text="@log.Action.ToString()" /></td><td>@log.Actor?.DisplayName</td><td><details><summary>View JSON</summary><pre>@log.ChangeDelta</pre></details></td></tr> }</tbody></table></div>
+
+@code {
+    private List<AuditLogResponse> logs = [];
+    private string? entityType;
+    private string? action;
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() => logs = (await Audit.QueryAsync(Workspace.Current?.Id, entityType, action)).Items.ToList();
+}
