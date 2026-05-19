@@ -4,6 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <script>
+        (() => {
+            const theme = localStorage.getItem("cmsify.theme") ?? "auto";
+            const effectiveTheme = theme === "auto"
+                ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+                : (theme === "dark" ? "dark" : "light");
+            document.documentElement.dataset.bsTheme = effectiveTheme;
+        })();
+    </script>
     <link rel="stylesheet" href="css/app.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />

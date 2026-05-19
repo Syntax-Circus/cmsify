@@ -4,7 +4,7 @@
 @inject UserPreferencesState Preferences
 @inject NavigationManager Navigation
 
-<div class="cms-shell" data-bs-theme="@EffectiveTheme">
+<div class="cms-shell">
     @if (ShowChrome)
     {
         <aside class="cms-sidebar">
@@ -69,7 +69,7 @@
 @code {
     private bool ShowChrome => !Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("login", StringComparison.OrdinalIgnoreCase);
 
-    private string EffectiveTheme => Preferences.Theme == "dark" ? "dark" : "light";
+    private string EffectiveTheme => Preferences.EffectiveTheme;
 
     private string Initials => string.Join("", (Auth.User?.DisplayName ?? "User").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => part[0])).ToUpperInvariant();
 

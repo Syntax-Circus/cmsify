@@ -1,6 +1,7 @@
 @using Cmsify.Admin.State
 @inject AuthState Auth
 @inject NavigationManager Navigation
+@inject UserPreferencesState Preferences
 
 @if (ready)
 {
@@ -15,6 +16,8 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        ready = false;
+        await Preferences.InitializeAsync();
         await Auth.InitializeAsync();
         var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
         var isLogin = path.Equals("/login", StringComparison.OrdinalIgnoreCase);

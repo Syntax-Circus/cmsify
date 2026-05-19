@@ -24,6 +24,11 @@ public sealed class BrowserStorage
     public ValueTask<string?> GetThemeAsync() =>
         jsRuntime.InvokeAsync<string?>("cmsifyStorage.getTheme");
 
-    public ValueTask SetThemeAsync(string theme) =>
-        jsRuntime.InvokeVoidAsync("cmsifyStorage.setTheme", theme);
+    public ValueTask<BrowserThemeState> InitializeThemeAsync() =>
+        jsRuntime.InvokeAsync<BrowserThemeState>("cmsifyStorage.initTheme");
+
+    public ValueTask<string> SetThemeAsync(string theme) =>
+        jsRuntime.InvokeAsync<string>("cmsifyStorage.setTheme", theme);
+
+    public sealed record BrowserThemeState(string Theme, string EffectiveTheme);
 }
