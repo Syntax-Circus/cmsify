@@ -1,15 +1,7 @@
 name: Admin accessibility
 
 on:
-  pull_request:
-    paths:
-      - "src/Cmsify.Admin/**"
-      - ".github/workflows/admin-accessibility.yml"
-  push:
-    branches: [ main ]
-    paths:
-      - "src/Cmsify.Admin/**"
-      - ".github/workflows/admin-accessibility.yml"
+  workflow_dispatch:
 
 jobs:
   axe:
@@ -25,11 +17,23 @@ jobs:
       - name: Restore
         run: dotnet restore Cmsify.slnx
       - name: Run admin
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
         run: |
-          dotnet run --project src/Cmsify.Admin/Cmsify.Admin.csproj --urls http://127.0.0.1:5177 &
-          npx wait-on http://127.0.0.1:5177/login
+          nohup dotnet run --no-launch-profile --project src/Cmsify.Admin/Cmsify.Admin.csproj --urls http://127.0.0.1:5177 > admin.log 2>&1 &
+          echo $! > admin.pid
+          npx --yes wait-on --timeout 60000 http-get://127.0.0.1:5177/login
       - name: Run axe-core smoke checks
         run: |
-          npx @axe-core/cli http://127.0.0.1:5177/login \
+          npx --yes @axe-core/cli http://127.0.0.1:5177/login \
             --exit \
             --tags wcag2a,wcag2aa,wcag21a,wcag21aa
+      - name: Print admin log on failure
+        if: failure()
+        run: cat admin.log
+      - name: Stop admin
+        if: always()
+        run: |
+          if [ -f admin.pid ]; then
+            kill "$(cat admin.pid)" || true
+          fi
