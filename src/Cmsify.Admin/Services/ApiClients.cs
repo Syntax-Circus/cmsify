@@ -131,6 +131,15 @@ public sealed class ContentApiClient : ApiClientBase
 
     public Task<IReadOnlyList<ContentItemSummaryResponse>> LinkTranslationAsync(Guid workspaceId, Guid contentId, Guid targetId, CancellationToken ct = default) =>
         PostAsync<IReadOnlyList<ContentItemSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/content/{contentId}/link-translation", new LinkTranslationRequest(targetId), ct);
+
+    public Task<IReadOnlyList<ContentVersionSummaryResponse>> ListVersionsAsync(Guid workspaceId, Guid contentId, CancellationToken ct = default) =>
+        GetAsync<IReadOnlyList<ContentVersionSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions", ct);
+
+    public Task<ContentVersionDetailResponse> GetVersionAsync(Guid workspaceId, Guid contentId, int versionNumber, CancellationToken ct = default) =>
+        GetAsync<ContentVersionDetailResponse>($"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}", ct);
+
+    public Task<ContentItemDetailResponse> RollbackAsync(Guid workspaceId, Guid contentId, int versionNumber, CancellationToken ct = default) =>
+        PostAsync<ContentItemDetailResponse>($"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}/rollback", new { }, ct);
 }
 
 public sealed class MediaApiClient : ApiClientBase

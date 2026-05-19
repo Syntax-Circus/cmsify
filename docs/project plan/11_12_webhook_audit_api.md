@@ -17,6 +17,7 @@ All endpoints follow the API conventions in `25_cross_cutting.md`: URL prefix `/
 | `content.published` | Content item transitions to Published |
 | `content.archived` | Content item transitions to Archived |
 | `content.deleted` | Content item deleted |
+| `content.rolled_back` | Content item rolled back to a prior version snapshot |
 | `template.version_published` | A template version is published |
 | `workspace.updated` | Workspace metadata changed |
 

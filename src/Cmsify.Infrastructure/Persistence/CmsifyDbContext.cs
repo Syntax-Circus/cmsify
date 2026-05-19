@@ -32,6 +32,10 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<ContentItemTag> ContentItemTags => Set<ContentItemTag>();
 
+    public DbSet<ContentVersion> ContentVersions => Set<ContentVersion>();
+
+    public DbSet<ContentVersionFieldValue> ContentVersionFieldValues => Set<ContentVersionFieldValue>();
+
     public DbSet<User> Users => Set<User>();
 
     public DbSet<UserWorkspaceAccess> UserWorkspaceAccesses => Set<UserWorkspaceAccess>();

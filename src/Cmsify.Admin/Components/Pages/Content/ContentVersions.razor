@@ -1,0 +1,210 @@
+@page "/workspaces/{WorkspaceId:guid}/content/{ContentId:guid}/versions"
+@rendermode InteractiveServer
+@inject ContentApiClient Content
+@inject NavigationManager Navigation
+
+<div class="cms-page-head">
+    <div>
+        <h1>Version History</h1>
+        <div class="lead">Inspect prior published snapshots and roll back when needed.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/content/@ContentId">Back to editor</a>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@if (versions.Count == 0)
+{
+    <EmptyState Title="No versions yet" Message="A version snapshot is created each time this content item is published." />
+}
+else
+{
+    <div class="cms-card p-0">
+        <table class="cms-table">
+            <thead>
+                <tr>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Published</th>
+                    <th>Retired</th>
+                    <th>Notes</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var version in versions)
+                {
+                    <tr>
+                        <td>
+                            <button class="btn btn-link p-0" type="button" @onclick="() => InspectAsync(version.VersionNumber)">v@(version.VersionNumber)</button>
+                        </td>
+                        <td><StatusBadge Status="@version.Status" /></td>
+                        <td><LocalTimeDisplay Value="@version.PublishedAt" /></td>
+                        <td>
+                            @if (version.RetiredAt.HasValue)
+                            {
+                                <LocalTimeDisplay Value="@version.RetiredAt.Value" />
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td>
+                            @if (version.RolledBackFromVersionNumber.HasValue)
+                            {
+                                <span class="text-muted">rolled back from v@(version.RolledBackFromVersionNumber.Value)</span>
+                            }
+                        </td>
+                        <td class="text-end">
+                            @if (version.Status != ContentVersionStatus.Published)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm" type="button" @onclick="() => PromptRollback(version.VersionNumber)">Roll back to this version</button>
+                            }
+                            else
+                            {
+                                <span class="cms-badge cms-badge--published"><i class="bi bi-circle-fill"></i> Active</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (inspected is not null)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Version @inspected.VersionNumber &mdash; @inspected.TemplateName</h5>
+                    <button type="button" class="btn-close" @onclick="() => inspected = null" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="row mb-3">
+                        <dt class="col-sm-3">Status</dt>
+                        <dd class="col-sm-9"><StatusBadge Status="@inspected.Status" /></dd>
+                        <dt class="col-sm-3">Slug</dt>
+                        <dd class="col-sm-9">@(inspected.Slug ?? "—")</dd>
+                        <dt class="col-sm-3">Locale</dt>
+                        <dd class="col-sm-9">@(inspected.LocaleCode ?? "—")</dd>
+                        <dt class="col-sm-3">Tags</dt>
+                        <dd class="col-sm-9">@(inspected.Tags.Count == 0 ? "—" : string.Join(", ", inspected.Tags))</dd>
+                        <dt class="col-sm-3">Published</dt>
+                        <dd class="col-sm-9"><LocalTimeDisplay Value="@inspected.PublishedAt" /></dd>
+                        @if (inspected.RetiredAt.HasValue)
+                        {
+                            <dt class="col-sm-3">Retired</dt>
+                            <dd class="col-sm-9"><LocalTimeDisplay Value="@inspected.RetiredAt.Value" /></dd>
+                        }
+                    </dl>
+                    <h6>Field values</h6>
+                    <table class="cms-table">
+                        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                        <tbody>
+                        @foreach (var field in inspected.Fields)
+                        {
+                            <tr>
+                                <td>@(field.Label ?? field.Key ?? field.FieldId.ToString())</td>
+                                <td>@DisplayValue(field)</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" type="button" @onclick="() => inspected = null">Close</button>
+                    @if (inspected.Status != ContentVersionStatus.Published)
+                    {
+                        <button class="btn btn-primary" type="button" @onclick="() => PromptRollback(inspected.VersionNumber)">Roll back to this version</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+<ConfirmDialog Visible="@confirmVersion.HasValue"
+               Title="Roll back content"
+               Message="@($"Replace the currently-active content with version {confirmVersion} and retire the active version? This creates a new published snapshot.")"
+               ConfirmText="Roll back"
+               ButtonClass="btn-primary"
+               OnCancel="() => confirmVersion = null"
+               OnConfirm="ConfirmRollbackAsync" />
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public Guid ContentId { get; set; }
+
+    private IReadOnlyList<ContentVersionSummaryResponse> versions = [];
+    private ContentVersionDetailResponse? inspected;
+    private int? confirmVersion;
+    private string? error;
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            versions = await Content.ListVersionsAsync(WorkspaceId, ContentId);
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.Detail ?? ex.Title;
+        }
+    }
+
+    private async Task InspectAsync(int versionNumber)
+    {
+        try
+        {
+            inspected = await Content.GetVersionAsync(WorkspaceId, ContentId, versionNumber);
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.Detail ?? ex.Title;
+        }
+    }
+
+    private void PromptRollback(int versionNumber)
+    {
+        confirmVersion = versionNumber;
+        inspected = null;
+    }
+
+    private async Task ConfirmRollbackAsync()
+    {
+        if (!confirmVersion.HasValue)
+        {
+            return;
+        }
+
+        var target = confirmVersion.Value;
+        confirmVersion = null;
+        try
+        {
+            await Content.RollbackAsync(WorkspaceId, ContentId, target);
+            await ReloadAsync();
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.Detail ?? ex.Title;
+        }
+    }
+
+    private static string DisplayValue(ContentVersionFieldValueResponse field) => field.ValueKind switch
+    {
+        ValueKind.Boolean => field.BoolValue == true ? "true" : "false",
+        ValueKind.Media => field.MediaAssetId?.ToString() ?? "—",
+        ValueKind.File => field.FileAssetId?.ToString() ?? "—",
+        ValueKind.ChildContent => field.ChildContentItemId?.ToString() ?? "—",
+        _ => string.IsNullOrEmpty(field.TextValue) ? (field.JsonValue?.ToString() ?? "—") : field.TextValue!
+    };
+}

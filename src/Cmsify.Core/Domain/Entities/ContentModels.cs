@@ -63,3 +63,57 @@ public sealed class ContentItemTag
 
     public Guid TagId { get; set; }
 }
+
+public sealed class ContentVersion : Entity
+{
+    public Guid ContentItemId { get; set; }
+
+    public Guid WorkspaceId { get; set; }
+
+    public int VersionNumber { get; set; }
+
+    public ContentVersionStatus Status { get; set; } = ContentVersionStatus.Published;
+
+    public Guid TemplateVersionId { get; set; }
+
+    public string? Slug { get; set; }
+
+    public string? LocaleCode { get; set; }
+
+    public Guid? TranslationGroupId { get; set; }
+
+    public IList<string> Tags { get; set; } = new List<string>();
+
+    public DateTimeOffset PublishedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public DateTimeOffset? RetiredAt { get; set; }
+
+    public Guid? PublishedByUserId { get; set; }
+
+    public int? RolledBackFromVersionNumber { get; set; }
+
+    public IList<ContentVersionFieldValue> FieldValues { get; } = new List<ContentVersionFieldValue>();
+}
+
+public sealed class ContentVersionFieldValue : Entity
+{
+    public Guid ContentVersionId { get; set; }
+
+    public Guid FieldId { get; set; }
+
+    public int Order { get; set; }
+
+    public ValueKind ValueKind { get; set; }
+
+    public string? TextValue { get; set; }
+
+    public bool? BoolValue { get; set; }
+
+    public Guid? MediaAssetId { get; set; }
+
+    public Guid? FileAssetId { get; set; }
+
+    public Guid? ChildContentItemId { get; set; }
+
+    public JsonElement? JsonValue { get; set; }
+}

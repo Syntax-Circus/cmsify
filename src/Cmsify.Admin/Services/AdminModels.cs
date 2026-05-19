@@ -72,6 +72,12 @@ public sealed record PublishContentRequest(DateTimeOffset? PublishAt);
 
 public sealed record LinkTranslationRequest(Guid TargetContentItemId);
 
+public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string? Slug, string? LocaleCode, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags);
+
+public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
+
+public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, IReadOnlyList<ContentVersionFieldValueResponse> Fields);
+
 public sealed record MediaAssetResponse(Guid Id, string FileName, string MimeType, long SizeBytes, string? AltText, string Url, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 public sealed record UpdateMediaAssetRequest(string? AltText);

@@ -7,7 +7,13 @@
 
 <div class="cms-page-head">
     <div><h1>@(ContentId.HasValue ? "Edit Content" : "New Content")</h1><div class="lead">Dynamic form generated from the selected template version.</div></div>
-    <button class="btn btn-primary" @onclick="SaveAsync">Save Draft</button>
+    <div class="d-flex gap-2">
+        @if (ContentId.HasValue)
+        {
+            <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/content/@ContentId/versions">Versions</a>
+        }
+        <button class="btn btn-primary" @onclick="SaveAsync">Save Draft</button>
+    </div>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(error))

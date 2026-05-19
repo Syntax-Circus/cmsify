@@ -433,6 +433,7 @@ public sealed class ContentController : ControllerBase
         if (targetStatus == ContentStatus.Published)
         {
             content.PublishAt = null;
+            await SnapshotPublishedAsync(content, rolledBackFromVersionNumber: null, ct);
         }
 
         await dbContext.SaveChangesAsync(ct);
@@ -444,6 +445,234 @@ public sealed class ContentController : ControllerBase
 
         _ = reason;
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
+    }
+
+    private async Task<ContentVersion> SnapshotPublishedAsync(ContentItem content, int? rolledBackFromVersionNumber, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var priorPublished = await dbContext.ContentVersions
+            .Where(version => version.ContentItemId == content.Id && version.Status == ContentVersionStatus.Published)
+            .ToListAsync(ct);
+        foreach (var prior in priorPublished)
+        {
+            prior.Status = ContentVersionStatus.Retired;
+            prior.RetiredAt = now;
+        }
+
+        var nextNumber = await dbContext.ContentVersions
+            .Where(version => version.ContentItemId == content.Id)
+            .Select(version => (int?)version.VersionNumber)
+            .MaxAsync(ct) ?? 0;
+        nextNumber += 1;
+
+        var tagNames = await dbContext.ContentItemTags.AsNoTracking()
+            .Where(join => join.ContentItemId == content.Id)
+            .Join(dbContext.Tags.AsNoTracking(), join => join.TagId, tag => tag.Id, (_, tag) => tag.Name)
+            .OrderBy(name => name)
+            .ToListAsync(ct);
+
+        var snapshot = new ContentVersion
+        {
+            ContentItemId = content.Id,
+            WorkspaceId = content.WorkspaceId,
+            VersionNumber = nextNumber,
+            Status = ContentVersionStatus.Published,
+            TemplateVersionId = content.TemplateVersionId,
+            Slug = content.Slug,
+            LocaleCode = content.LocaleCode,
+            TranslationGroupId = content.TranslationGroupId,
+            Tags = tagNames.ToList(),
+            PublishedAt = now,
+            PublishedByUserId = currentActor.UserId,
+            RolledBackFromVersionNumber = rolledBackFromVersionNumber
+        };
+        foreach (var value in content.FieldValues)
+        {
+            snapshot.FieldValues.Add(new ContentVersionFieldValue
+            {
+                ContentVersionId = snapshot.Id,
+                FieldId = value.FieldId,
+                Order = value.Order,
+                ValueKind = value.ValueKind,
+                TextValue = value.TextValue,
+                BoolValue = value.BoolValue,
+                MediaAssetId = value.MediaAssetId,
+                FileAssetId = value.FileAssetId,
+                ChildContentItemId = value.ChildContentItemId,
+                JsonValue = value.JsonValue?.Clone()
+            });
+        }
+
+        dbContext.ContentVersions.Add(snapshot);
+        return snapshot;
+    }
+
+    [HttpGet("{id:guid}/versions")]
+    public async Task<ActionResult<IReadOnlyList<ContentVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, CancellationToken ct)
+    {
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
+        var content = await BaseContentQuery(workspaceId).AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (content is null)
+        {
+            return NotFound();
+        }
+
+        var versions = await dbContext.ContentVersions.AsNoTracking()
+            .Where(version => version.ContentItemId == id)
+            .OrderByDescending(version => version.VersionNumber)
+            .ToListAsync(ct);
+        return Ok(versions.Select(ToVersionSummary).ToList());
+    }
+
+    [HttpGet("{id:guid}/versions/{versionNumber:int}")]
+    public async Task<ActionResult<ContentVersionDetailResponse>> GetVersion(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
+    {
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        {
+            return Forbid();
+        }
+
+        var content = await BaseContentQuery(workspaceId).AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (content is null)
+        {
+            return NotFound();
+        }
+
+        var version = await dbContext.ContentVersions.AsNoTracking()
+            .Include(version => version.FieldValues)
+            .FirstOrDefaultAsync(version => version.ContentItemId == id && version.VersionNumber == versionNumber, ct);
+        if (version is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(await ToVersionDetailAsync(version, ct));
+    }
+
+    [HttpPost("{id:guid}/versions/{versionNumber:int}/rollback")]
+    [RequireRole(UserRole.Editor)]
+    public async Task<ActionResult<ContentItemDetailResponse>> Rollback(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
+    {
+        var content = await LoadContentForEditAsync(workspaceId, id, ct);
+        if (content is null)
+        {
+            return NotFound();
+        }
+
+        var target = await dbContext.ContentVersions
+            .Include(version => version.FieldValues)
+            .FirstOrDefaultAsync(version => version.ContentItemId == id && version.VersionNumber == versionNumber, ct);
+        if (target is null)
+        {
+            return NotFound();
+        }
+
+        if (target.Status is not (ContentVersionStatus.Published or ContentVersionStatus.Retired))
+        {
+            return this.Error(StatusCodes.Status409Conflict, "conflict", "Only published or retired versions can be rolled back to");
+        }
+
+        var templateVersion = await LoadTemplateVersionAsync(target.TemplateVersionId, ct);
+        if (templateVersion is null)
+        {
+            return this.Error(StatusCodes.Status409Conflict, "template-version-unavailable", "The template version this snapshot was created against is no longer available");
+        }
+
+        content.TemplateVersionId = target.TemplateVersionId;
+        content.Slug = target.Slug;
+        content.LocaleCode = target.LocaleCode;
+        content.TranslationGroupId = target.TranslationGroupId;
+        dbContext.ContentFieldValues.RemoveRange(content.FieldValues);
+        content.FieldValues.Clear();
+        foreach (var value in target.FieldValues)
+        {
+            content.FieldValues.Add(new ContentFieldValue
+            {
+                ContentItemId = content.Id,
+                FieldId = value.FieldId,
+                Order = value.Order,
+                ValueKind = value.ValueKind,
+                TextValue = value.TextValue,
+                BoolValue = value.BoolValue,
+                MediaAssetId = value.MediaAssetId,
+                FileAssetId = value.FileAssetId,
+                ChildContentItemId = value.ChildContentItemId,
+                JsonValue = value.JsonValue?.Clone()
+            });
+        }
+
+        dbContext.ContentItemTags.RemoveRange(content.Tags);
+        content.Tags.Clear();
+        await ApplyTagsAsync(content, workspaceId, target.Tags, ct);
+
+        var validation = contentValidator.Validate(content, templateVersion);
+        if (!validation.IsValid)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Snapshot does not satisfy its template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
+        }
+
+        var previousActiveNumber = await dbContext.ContentVersions.AsNoTracking()
+            .Where(version => version.ContentItemId == id && version.Status == ContentVersionStatus.Published)
+            .Select(version => (int?)version.VersionNumber)
+            .FirstOrDefaultAsync(ct);
+
+        content.SearchVector = searchVectorBuilder.Build(content, templateVersion);
+        content.UpdatedAt = DateTimeOffset.UtcNow;
+        content.UpdatedByUserId = currentActor.UserId;
+        content.Status = ContentStatus.Published;
+        content.PublishedAt = DateTimeOffset.UtcNow;
+        content.PublishAt = null;
+        content.ArchivedAt = null;
+
+        var snapshot = await SnapshotPublishedAsync(content, target.VersionNumber, ct);
+        await dbContext.SaveChangesAsync(ct);
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            contentItemId = content.Id,
+            workspaceId = content.WorkspaceId,
+            fromVersionNumber = previousActiveNumber,
+            toVersionNumber = target.VersionNumber,
+            newVersionNumber = snapshot.VersionNumber
+        });
+        await webhookQueue.EnqueueAsync(new WebhookEvent("content.rolled_back", content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow), ct);
+        await EnqueueContentEventAsync("content.published", content, ct);
+        return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
+    }
+
+    private static ContentVersionSummaryResponse ToVersionSummary(ContentVersion version) =>
+        new(version.Id, version.ContentItemId, version.VersionNumber, version.Status, version.TemplateVersionId,
+            version.Slug, version.LocaleCode, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
+            version.RolledBackFromVersionNumber, version.Tags.ToList());
+
+    private async Task<ContentVersionDetailResponse> ToVersionDetailAsync(ContentVersion version, CancellationToken ct)
+    {
+        var templateName = await dbContext.TemplateVersions.AsNoTracking()
+            .Where(tv => tv.Id == version.TemplateVersionId)
+            .Select(tv => dbContext.Templates.Where(template => template.Id == tv.TemplateId).Select(template => template.Name).First())
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+        var templateFields = await dbContext.TemplateFields.AsNoTracking()
+            .Where(field => field.TemplateVersionId == version.TemplateVersionId)
+            .ToDictionaryAsync(field => field.Id, ct);
+        var fields = version.FieldValues
+            .OrderBy(value => templateFields.GetValueOrDefault(value.FieldId)?.Order ?? 0)
+            .ThenBy(value => value.Order)
+            .Select(value =>
+            {
+                templateFields.TryGetValue(value.FieldId, out var field);
+                return new ContentVersionFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order,
+                    value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId,
+                    value.ChildContentItemId, value.JsonValue?.Clone());
+            })
+            .ToList();
+        return new ContentVersionDetailResponse(version.Id, version.ContentItemId, version.VersionNumber,
+            version.Status, version.TemplateVersionId, templateName, version.Slug, version.LocaleCode,
+            version.TranslationGroupId, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
+            version.RolledBackFromVersionNumber, version.Tags.ToList(), fields);
     }
 
     private IQueryable<ContentItem> BaseContentQuery(Guid workspaceId) =>
@@ -581,3 +810,9 @@ public sealed record LinkTranslationRequest(Guid TargetContentItemId);
 public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt);
 public sealed record ContentItemDetailResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt, IReadOnlyList<ContentFieldValueResponse> Fields);
 public sealed record ContentFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentItemDetailResponse? Child, JsonElement? JsonValue);
+
+public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string? Slug, string? LocaleCode, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags);
+
+public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
+
+public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, IReadOnlyList<ContentVersionFieldValueResponse> Fields);
