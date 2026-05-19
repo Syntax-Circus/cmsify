@@ -1,15 +1,7 @@
 name: Admin accessibility
 
 on:
-  pull_request:
-    paths:
-      - "src/Cmsify.Admin/**"
-      - ".github/workflows/admin-accessibility.yml"
-  push:
-    branches: [ main ]
-    paths:
-      - "src/Cmsify.Admin/**"
-      - ".github/workflows/admin-accessibility.yml"
+  workflow_dispatch:
 
 jobs:
   axe:
