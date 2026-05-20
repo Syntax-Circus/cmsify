@@ -60,6 +60,7 @@
                             <h2 class="h6 mb-1">Field details</h2>
                             <div class="text-muted small">Choose the section and order to control where this field appears.</div>
                         </div>
+                        <button class="btn btn-outline-danger btn-sm" disabled="@(!CanEdit)" @onclick="BeginDeleteField">Delete Field</button>
                     </div>
                     <label class="form-label mt-3">Label</label>
                     <InputText class="form-control mb-3" @bind-Value="fieldEdit.Label" disabled="@(!CanEdit)" />
@@ -148,7 +149,10 @@
                             <h2 class="h6 mb-1">Section details</h2>
                             <div class="text-muted small">Edit the section metadata, then add fields directly into it.</div>
                         </div>
-                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!CanEdit)" @onclick="AddFieldAsync">Add Field Here</button>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-secondary btn-sm" disabled="@(!CanEdit)" @onclick="AddFieldAsync">Add Field Here</button>
+                            <button class="btn btn-outline-danger btn-sm" disabled="@(!CanEdit)" @onclick="BeginDeleteSection">Delete Section</button>
+                        </div>
                     </div>
                     <label class="form-label mt-3">Name</label>
                     <InputText class="form-control mb-3" @bind-Value="sectionEdit.Name" disabled="@(!CanEdit)" />
@@ -176,6 +180,8 @@
 </div>
 
 <ConfirmDialog Visible="@confirmPublish" Title="Confirm Publish" Message="Publishing archives the previous published version and makes this draft live." ConfirmText="Publish" ButtonClass="btn-warning" OnCancel="() => confirmPublish = false" OnConfirm="PublishAsync" />
+<ConfirmDialog Visible="@confirmDeleteSection" Title="Delete Section" Message="@DeleteSectionMessage" ConfirmText="Delete" OnCancel="CancelDeleteSection" OnConfirm="DeleteSectionAsync" />
+<ConfirmDialog Visible="@confirmDeleteField" Title="Delete Field" Message="@DeleteFieldMessage" ConfirmText="Delete" OnCancel="CancelDeleteField" OnConfirm="DeleteFieldAsync" />
 
 @code {
     [Parameter] public Guid WorkspaceId { get; set; }
@@ -189,6 +195,10 @@
     private FieldEdit fieldEdit = new();
     private List<PickListSummaryResponse> picklists = [];
     private bool confirmPublish;
+    private bool confirmDeleteSection;
+    private bool confirmDeleteField;
+    private Guid? deleteSectionId;
+    private Guid? deleteFieldId;
     private string? error;
 
     private bool CanEdit => version?.Status == TemplateVersionStatus.Draft;
@@ -198,6 +208,12 @@
     private TemplateFieldResponse? SelectedField => selectedFieldId.HasValue ? Fields.FirstOrDefault(candidate => candidate.Id == selectedFieldId.Value) : null;
     private string FieldSectionValue => fieldEdit.SectionId?.ToString() ?? string.Empty;
     private bool CycleWarning => fieldEdit.TemplateId == TemplateId;
+    private string DeleteSectionMessage => SelectedSection is null
+        ? "This section will be deleted from the draft. Fields in this section will be moved to Ungrouped."
+        : $"Delete section \"{SelectedSection.Name}\" from this draft? Fields in this section will be moved to Ungrouped.";
+    private string DeleteFieldMessage => SelectedField is null
+        ? "This field will be deleted from the draft."
+        : $"Delete field \"{SelectedField.Label}\" from this draft?";
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
@@ -325,6 +341,83 @@
         await RunMutationAsync(async () =>
         {
             await Templates.UpdateSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, SelectedSection.Id, new TemplateSectionRequest(sectionEdit.Name, sectionEdit.Description, sectionEdit.Order, sectionEdit.IsCollapsible));
+            await LoadAsync();
+        });
+    }
+
+    private void BeginDeleteSection()
+    {
+        if (!CanEdit || SelectedSection is null)
+        {
+            return;
+        }
+
+        deleteSectionId = SelectedSection.Id;
+        confirmDeleteSection = true;
+    }
+
+    private void CancelDeleteSection()
+    {
+        confirmDeleteSection = false;
+        deleteSectionId = null;
+    }
+
+    private async Task DeleteSectionAsync()
+    {
+        if (version is null || deleteSectionId is null)
+        {
+            return;
+        }
+
+        var sectionId = deleteSectionId.Value;
+        await RunMutationAsync(async () =>
+        {
+            await Templates.DeleteSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, sectionId);
+            if (selectedSectionId == sectionId)
+            {
+                selectedSectionId = null;
+                selectedFieldId = null;
+            }
+
+            CancelDeleteSection();
+            await LoadAsync();
+        });
+    }
+
+    private void BeginDeleteField()
+    {
+        if (!CanEdit || SelectedField is null)
+        {
+            return;
+        }
+
+        deleteFieldId = SelectedField.Id;
+        confirmDeleteField = true;
+    }
+
+    private void CancelDeleteField()
+    {
+        confirmDeleteField = false;
+        deleteFieldId = null;
+    }
+
+    private async Task DeleteFieldAsync()
+    {
+        if (version is null || deleteFieldId is null)
+        {
+            return;
+        }
+
+        var fieldId = deleteFieldId.Value;
+        await RunMutationAsync(async () =>
+        {
+            await Templates.DeleteFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, fieldId);
+            if (selectedFieldId == fieldId)
+            {
+                selectedFieldId = null;
+            }
+
+            CancelDeleteField();
             await LoadAsync();
         });
     }

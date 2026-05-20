@@ -100,11 +100,17 @@ public sealed class TemplateApiClient : ApiClientBase
     public Task<TemplateSectionResponse> UpdateSectionAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid sectionId, TemplateSectionRequest request, CancellationToken ct = default) =>
         PutAsync<TemplateSectionResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/sections/{sectionId}", request, ct: ct);
 
+    public Task DeleteSectionAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid sectionId, CancellationToken ct = default) =>
+        DeleteAsync($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/sections/{sectionId}", ct: ct);
+
     public Task<TemplateFieldResponse> AddFieldAsync(Guid workspaceId, Guid templateId, int versionNumber, TemplateFieldRequest request, CancellationToken ct = default) =>
         PostAsync<TemplateFieldResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields", request, ct);
 
     public Task<TemplateFieldResponse> UpdateFieldAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid fieldId, TemplateFieldRequest request, CancellationToken ct = default) =>
         PutAsync<TemplateFieldResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields/{fieldId}", request, ct: ct);
+
+    public Task DeleteFieldAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid fieldId, CancellationToken ct = default) =>
+        DeleteAsync($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields/{fieldId}", ct: ct);
 
     public Task ReorderFieldsAsync(Guid workspaceId, Guid templateId, int versionNumber, IReadOnlyList<ReorderFieldRequest> request, CancellationToken ct = default) =>
         PutAsync<object>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields/reorder", request, ct: ct);
@@ -320,23 +326,47 @@ public sealed class PackagesApiClient : ApiClientBase
     public Task<IReadOnlyList<OfficialPackageResponse>> ListOfficialAsync(CancellationToken ct = default) =>
         GetAsync<IReadOnlyList<OfficialPackageResponse>>("/api/v1/packages/official", ct);
 
-    public Task<PackageImportResponse> ImportOfficialAsync(Guid workspaceId, string packageId, CancellationToken ct = default) =>
-        PostAsync<PackageImportResponse>($"/api/v1/workspaces/{workspaceId}/packages/import/official/{Uri.EscapeDataString(packageId)}", ct: ct);
+    public Task<PackageImportResponse> ImportOfficialAsync(Guid workspaceId, string packageId, PackageImportResolutionsRequest? resolutions = null, CancellationToken ct = default) =>
+        PostAsync<PackageImportResponse>($"/api/v1/workspaces/{workspaceId}/packages/import/official/{Uri.EscapeDataString(packageId)}", resolutions, ct);
 
-    public async Task<PackageImportResponse> ImportAsync(Guid workspaceId, IBrowserFile file, CancellationToken ct = default)
+    public Task<PackageImportPreviewResponse> PreviewOfficialAsync(Guid workspaceId, string packageId, CancellationToken ct = default) =>
+        PostAsync<PackageImportPreviewResponse>($"/api/v1/workspaces/{workspaceId}/packages/import/official/{Uri.EscapeDataString(packageId)}/preview", ct: ct);
+
+    public async Task<PackageImportPreviewResponse> PreviewCustomAsync(Guid workspaceId, IBrowserFile file, CancellationToken ct = default)
     {
-        using var content = new MultipartFormDataContent();
-        var stream = file.OpenReadStream(1_073_741_824, ct);
-        var fileContent = new StreamContent(stream);
-        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(string.IsNullOrWhiteSpace(file.ContentType) ? "application/json" : file.ContentType);
-        content.Add(fileContent, "file", file.Name);
+        using var content = BuildImportForm(file, null);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/workspaces/{workspaceId}/packages/import/preview")
+        {
+            Content = content
+        };
+        using var response = await SendAsync(request, ct);
+        return await ReadAsync<PackageImportPreviewResponse>(response, ct);
+    }
 
+    public async Task<PackageImportResponse> ImportAsync(Guid workspaceId, IBrowserFile file, PackageImportResolutionsRequest? resolutions = null, CancellationToken ct = default)
+    {
+        using var content = BuildImportForm(file, resolutions);
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/workspaces/{workspaceId}/packages/import")
         {
             Content = content
         };
         using var response = await SendAsync(request, ct);
         return await ReadAsync<PackageImportResponse>(response, ct);
+    }
+
+    private static MultipartFormDataContent BuildImportForm(IBrowserFile file, PackageImportResolutionsRequest? resolutions)
+    {
+        var content = new MultipartFormDataContent();
+        var stream = file.OpenReadStream(1_073_741_824);
+        var fileContent = new StreamContent(stream);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(string.IsNullOrWhiteSpace(file.ContentType) ? "application/json" : file.ContentType);
+        content.Add(fileContent, "file", file.Name);
+        if (resolutions is not null)
+        {
+            content.Add(new StringContent(System.Text.Json.JsonSerializer.Serialize(resolutions, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))), "resolutions");
+        }
+
+        return content;
     }
 
     public async Task<FileDownloadResponse> ExportAsync(Guid workspaceId, Guid templateId, string packageNamespace, string id, string version, CancellationToken ct = default)

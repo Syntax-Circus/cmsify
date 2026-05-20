@@ -138,6 +138,40 @@ public sealed record OfficialPackageResponse(string PackageNamespace, string Id,
 
 public sealed record OfficialPackageTemplateResponse(string Slug, string Name, string? Description);
 
-public sealed record PackageImportResponse(string PackageNamespace, string Id, string Version, IReadOnlyList<PackageTemplateImportResult> Imported, IReadOnlyList<string> Skipped, IReadOnlyList<string> Errors);
+public sealed record PackageImportResponse(
+    string PackageNamespace,
+    string Id,
+    string Version,
+    IReadOnlyList<PackageTemplateImportResult> Imported,
+    IReadOnlyList<string> Skipped,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<PackagePickListImportResult>? PickLists = null);
 
 public sealed record PackageTemplateImportResult(Guid TemplateId, string Slug, string Name, Guid TemplateVersionId, int VersionNumber);
+
+public sealed record PackagePickListImportResult(string Slug, string ResolvedSlug, Guid PickListId, string Action);
+
+public sealed record PackageImportPreviewResponse(
+    string PackageNamespace,
+    string Id,
+    string Version,
+    IReadOnlyList<PackagePickListPreview> PickLists,
+    IReadOnlyList<PackageTemplatePreview> Templates);
+
+public sealed record PackagePickListPreview(
+    string Slug,
+    string Name,
+    string? Description,
+    IReadOnlyList<PackagePickListOptionPreview> Options,
+    string Status,
+    Guid? ExistingId,
+    string? ExistingName,
+    string? ExistingDescription,
+    IReadOnlyList<PackagePickListOptionPreview>? ExistingOptions,
+    string SuggestedAction);
+
+public sealed record PackagePickListOptionPreview(string Label, string Value, int Order);
+
+public sealed record PackageTemplatePreview(string Slug, string Name, string Status);
+
+public sealed record PackageImportResolutionsRequest(IReadOnlyDictionary<string, string>? PickLists);

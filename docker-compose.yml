@@ -26,7 +26,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Cmsify: Host=postgres;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify_dev
-      Auth__Bootstrap__AdminPassword: change-this-temporary-password
+      Seed__Admin__Password: change-this-temporary-password
       Storage__Provider: local
       Storage__Local__BasePath: /var/cmsify/media
       Api__SwaggerEnabled: "true"

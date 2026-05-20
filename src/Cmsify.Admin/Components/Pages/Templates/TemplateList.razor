@@ -49,10 +49,12 @@ else
                     <td><strong>@template.Name</strong><div class="small text-muted">@template.Description</div></td>
                     <td class="font-monospace">@template.Slug</td>
                     <td>@(template.CurrentVersionId.HasValue ? "Current" : "Draft only")</td>
-                    <td class="d-flex gap-2">
-                        <button class="btn btn-primary btn-sm" @onclick="() => Edit(template)">Edit</button>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => BeginExport(template)">Export</button>
-                        <a class="btn btn-outline-secondary btn-sm" href="/workspaces/@WorkspaceId/templates/@template.Id/versions">Versions</a>
+                    <td>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary btn-sm" @onclick="() => Edit(template)">Edit</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => BeginExport(template)">Export</button>
+                            <a class="btn btn-outline-secondary btn-sm" href="/workspaces/@WorkspaceId/templates/@template.Id/versions">Versions</a>
+                        </div>
                     </td>
                 </tr>
             }

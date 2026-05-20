@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Services;
@@ -88,5 +89,68 @@ public sealed class ContentValidatorTests
         var result = new ContentValidator().Validate(item, version);
 
         Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Validate_ReturnsFailure_WhenValidateFormatIsOnAndJsonIsInvalid()
+    {
+        var field = new TemplateField
+        {
+            TemplateVersionId = Guid.CreateVersion7(),
+            Key = "payload",
+            Label = "Payload",
+            PrimitiveType = PrimitiveType.Text,
+            FieldConfig = JsonDocument.Parse("{\"formatHint\":\"json\",\"validateFormat\":true}").RootElement
+        };
+        var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
+        version.Fields.Add(field);
+        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "{not json}" });
+
+        var result = new ContentValidator().Validate(item, version);
+
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Validate_ReturnsSuccess_WhenValidateFormatIsOnAndJsonIsValid()
+    {
+        var field = new TemplateField
+        {
+            TemplateVersionId = Guid.CreateVersion7(),
+            Key = "payload",
+            Label = "Payload",
+            PrimitiveType = PrimitiveType.Text,
+            FieldConfig = JsonDocument.Parse("{\"formatHint\":\"json\",\"validateFormat\":true}").RootElement
+        };
+        var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
+        version.Fields.Add(field);
+        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "{\"ok\":true}" });
+
+        var result = new ContentValidator().Validate(item, version);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void Validate_SkipsFormatCheck_WhenValidateFormatIsOff()
+    {
+        var field = new TemplateField
+        {
+            TemplateVersionId = Guid.CreateVersion7(),
+            Key = "payload",
+            Label = "Payload",
+            PrimitiveType = PrimitiveType.Text,
+            FieldConfig = JsonDocument.Parse("{\"formatHint\":\"json\"}").RootElement
+        };
+        var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
+        version.Fields.Add(field);
+        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "not valid json" });
+
+        var result = new ContentValidator().Validate(item, version);
+
+        Assert.True(result.IsValid);
     }
 }

@@ -42,9 +42,11 @@ else
                     <td><strong>@picklist.Name</strong><div class="small text-muted">@picklist.Description</div></td>
                     <td class="font-monospace">@picklist.Slug</td>
                     <td>@picklist.OptionCount</td>
-                    <td class="d-flex gap-2">
-                        <button class="btn btn-primary btn-sm" @onclick="() => Edit(picklist)">Edit</button>
-                        <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(picklist)">Delete</button>
+                    <td>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary btn-sm" @onclick="() => Edit(picklist)">Edit</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(picklist)">Delete</button>
+                        </div>
                     </td>
                 </tr>
             }

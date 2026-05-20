@@ -31,12 +31,14 @@
                 <td><StatusBadge Status="@item.Status" /></td>
                 <td>@item.LocaleCode</td>
                 <td><LocalTimeDisplay Value="@item.UpdatedAt" /></td>
-                <td class="d-flex gap-1">
-                    <a class="btn btn-primary btn-sm" href="/workspaces/@WorkspaceId/content/@item.Id">Edit</a>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, SubmitAction)">Submit</button>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ApproveAction)">Approve</button>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, PublishAction)">Publish</button>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ArchiveAction)">Archive</button>
+                <td>
+                    <div class="d-flex gap-1">
+                        <a class="btn btn-primary btn-sm" href="/workspaces/@WorkspaceId/content/@item.Id">Edit</a>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, SubmitAction)">Submit</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ApproveAction)">Approve</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, PublishAction)">Publish</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ArchiveAction)">Archive</button>
+                    </div>
                 </td>
             </tr>
         }

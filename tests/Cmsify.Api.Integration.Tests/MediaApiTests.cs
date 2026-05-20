@@ -31,8 +31,8 @@ public sealed class MediaApiTests : IAsyncLifetime
         storagePath = Path.Combine(Path.GetTempPath(), "cmsify-media-tests", Guid.NewGuid().ToString("N"));
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminEmail", "admin@example.test");
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminPassword", "change-this-temporary-password");
+        Environment.SetEnvironmentVariable("Seed__Admin__Email", "admin@example.test");
+        Environment.SetEnvironmentVariable("Seed__Admin__Password", "change-this-temporary-password");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Name", "Default");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
         Environment.SetEnvironmentVariable("Storage__Provider", "local");
@@ -171,8 +171,8 @@ public sealed class MediaApiTests : IAsyncLifetime
         foreach (var key in new[]
         {
             "ConnectionStrings__Cmsify",
-            "Auth__Bootstrap__AdminEmail",
-            "Auth__Bootstrap__AdminPassword",
+            "Seed__Admin__Email",
+            "Seed__Admin__Password",
             "Seed__DefaultWorkspace__Name",
             "Seed__DefaultWorkspace__Slug",
             "Storage__Provider",

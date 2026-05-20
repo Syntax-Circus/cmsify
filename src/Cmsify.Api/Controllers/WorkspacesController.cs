@@ -50,11 +50,6 @@ public sealed class WorkspacesController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<WorkspaceDto>> Get(Guid id, CancellationToken ct)
     {
-        if (!await workspaceAuthorization.CanReadWorkspaceAsync(id, ct))
-        {
-            return Forbid();
-        }
-
         var workspace = await workspaceRepository.GetAsync(id, ct);
         if (workspace is null)
         {
@@ -77,7 +72,7 @@ public sealed class WorkspacesController : ControllerBase
 
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(id, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         if (!IfMatchMatches(existing))
@@ -103,7 +98,7 @@ public sealed class WorkspacesController : ControllerBase
 
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(id, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         if (!IfMatchMatches(existing))

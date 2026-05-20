@@ -23,7 +23,7 @@
                 <td>@DescribeAccess(user)</td>
                 <td>@(user.LastLoginAt.HasValue ? @<LocalTimeDisplay Value="@user.LastLoginAt.Value" /> : @<span>Never</span>)</td>
                 <td><StatusBadge Text="@(user.IsActive ? "Active" : "Inactive")" /></td>
-                <td class="d-flex gap-1"><button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(user)">Edit</button><button class="btn btn-outline-secondary btn-sm" @onclick="() => ResetAsync(user)">Reset Password</button></td>
+                <td><div class="d-flex gap-1"><button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(user)">Edit</button><button class="btn btn-outline-secondary btn-sm" @onclick="() => ResetAsync(user)">Reset Password</button></div></td>
             </tr>
         }
         </tbody>

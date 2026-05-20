@@ -34,7 +34,7 @@ else
                     <div class="small text-muted mt-2">Upload a custom package exported from another workspace.</div>
                 }
             </div>
-            <button class="btn btn-outline-primary" disabled="@(customPackageFile is null || importingCustom)" @onclick="ImportCustomAsync">Import custom package</button>
+            <button class="btn btn-outline-primary" disabled="@(customPackageFile is null || importingCustom)" @onclick="StartCustomImportAsync">Import custom package</button>
         </div>
     </div>
 
@@ -51,7 +51,7 @@ else
                             <h2 class="h5">@package.Name</h2>
                             <div class="small text-muted">@package.PackageNamespace/@package.Id @package.Version</div>
                         </div>
-                        <button class="btn btn-primary" disabled="@importing.Contains(package.Id)" @onclick="() => ImportAsync(package.Id)">Import</button>
+                        <button class="btn btn-primary" disabled="@importing.Contains(package.Id)" @onclick="() => StartOfficialImportAsync(package.Id)">Import</button>
                     </div>
                     <p class="text-muted mt-3">@package.Description</p>
                     <div class="small">@package.TemplateCount templates: @string.Join(", ", package.Templates.Select(template => template.Name))</div>
@@ -59,6 +59,13 @@ else
             </div>
         }
     </div>
+}
+
+@if (pendingPreview is not null)
+{
+    <PackageImportConflictDialog Preview="pendingPreview"
+                                 OnConfirm="ConfirmImportAsync"
+                                 OnCancel="CancelImport" />
 }
 
 @if (!string.IsNullOrWhiteSpace(message))
@@ -79,6 +86,10 @@ else
     private string? message;
     private string? error;
 
+    private PackageImportPreviewResponse? pendingPreview;
+    private string? pendingOfficialPackageId;
+    private IBrowserFile? pendingCustomFile;
+
     protected override async Task OnInitializedAsync()
     {
         packages = await PackageClient.ListOfficialAsync();
@@ -87,7 +98,7 @@ else
     private void SelectCustomPackage(InputFileChangeEventArgs args) =>
         customPackageFile = args.FileCount > 0 ? args.File : null;
 
-    private async Task ImportCustomAsync()
+    private async Task StartCustomImportAsync()
     {
         if (Workspace.Current is null || customPackageFile is null)
         {
@@ -100,9 +111,17 @@ else
 
         try
         {
-            var result = await PackageClient.ImportAsync(Workspace.Current.Id, customPackageFile);
-            message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
-            customPackageFile = null;
+            var preview = await PackageClient.PreviewCustomAsync(Workspace.Current.Id, customPackageFile);
+            if (HasConflicts(preview))
+            {
+                pendingCustomFile = customPackageFile;
+                pendingOfficialPackageId = null;
+                pendingPreview = preview;
+            }
+            else
+            {
+                await DoCustomImportAsync(customPackageFile, null);
+            }
         }
         catch (ProblemDetailsException ex)
         {
@@ -118,7 +137,7 @@ else
         }
     }
 
-    private async Task ImportAsync(string packageId)
+    private async Task StartOfficialImportAsync(string packageId)
     {
         if (Workspace.Current is null)
         {
@@ -131,8 +150,17 @@ else
 
         try
         {
-            var result = await PackageClient.ImportOfficialAsync(Workspace.Current.Id, packageId);
-            message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+            var preview = await PackageClient.PreviewOfficialAsync(Workspace.Current.Id, packageId);
+            if (HasConflicts(preview))
+            {
+                pendingOfficialPackageId = packageId;
+                pendingCustomFile = null;
+                pendingPreview = preview;
+            }
+            else
+            {
+                await DoOfficialImportAsync(packageId, null);
+            }
         }
         catch (ProblemDetailsException ex)
         {
@@ -147,4 +175,62 @@ else
             importing.Remove(packageId);
         }
     }
+
+    private async Task ConfirmImportAsync(PackageImportResolutionsRequest resolutions)
+    {
+        if (Workspace.Current is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (pendingOfficialPackageId is not null)
+            {
+                await DoOfficialImportAsync(pendingOfficialPackageId, resolutions);
+            }
+            else if (pendingCustomFile is not null)
+            {
+                await DoCustomImportAsync(pendingCustomFile, resolutions);
+            }
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ProblemDetailsDisplay.Format(ex);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            pendingPreview = null;
+            pendingOfficialPackageId = null;
+            pendingCustomFile = null;
+        }
+    }
+
+    private void CancelImport()
+    {
+        pendingPreview = null;
+        pendingOfficialPackageId = null;
+        pendingCustomFile = null;
+    }
+
+    private async Task DoCustomImportAsync(IBrowserFile file, PackageImportResolutionsRequest? resolutions)
+    {
+        var result = await PackageClient.ImportAsync(Workspace.Current!.Id, file, resolutions);
+        message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+        customPackageFile = null;
+    }
+
+    private async Task DoOfficialImportAsync(string packageId, PackageImportResolutionsRequest? resolutions)
+    {
+        var result = await PackageClient.ImportOfficialAsync(Workspace.Current!.Id, packageId, resolutions);
+        message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+    }
+
+    private static bool HasConflicts(PackageImportPreviewResponse preview) =>
+        preview.PickLists.Any(picklist => picklist.Status == "conflict");
 }
+

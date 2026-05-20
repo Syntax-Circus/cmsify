@@ -49,7 +49,7 @@ public sealed class MediaController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         if (file.Length == 0)
@@ -93,7 +93,7 @@ public sealed class MediaController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var query = dbContext.MediaAssets.AsNoTracking().Where(asset => asset.WorkspaceId == workspaceId && !asset.IsDeleted);

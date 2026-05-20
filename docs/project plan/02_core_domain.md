@@ -166,7 +166,7 @@ The `FieldConfig` shape is determined by `PrimitiveType`. Validated by `IFieldCo
 
 | PrimitiveType | FieldConfig shape |
 |---------------|-------------------|
-| `Text` | `{ "maxLength": 500, "pattern": "regex?", "multiline": false }` |
+| `Text` | `{ "maxLength": 500, "pattern": "regex?", "multiline": false, "formatHint": "plaintext", "formatLanguage": "typescript?", "validateFormat": false }` |
 | `RichText` | `{ "maxLength": null, "allowedTags": ["p","strong","em","a","ul","ol","li","blockquote","code","pre","h1","h2","h3"] }` |
 | `Markdown` | `{ "maxLength": null }` |
 | `Boolean` | `{ "trueLabel": "Yes", "falseLabel": "No" }` |
@@ -178,6 +178,18 @@ The `FieldConfig` shape is determined by `PrimitiveType`. Validated by `IFieldCo
 | `Separator` | `{}` (no config) |
 
 For Template-typed fields, `FieldConfig` is `null` (the referenced template defines its own structure).
+
+#### Text formatting hints
+
+`Text` fields support an optional `formatHint` (advisory only) used by consumers to choose an appropriate renderer. Allowed values:
+
+`plaintext` (default), `html`, `markdown`, `json`, `xml`, `yaml`, `csv`, `toml`, `sql`, `code`, `url`, `email`, `regex`.
+
+- `formatLanguage` is only valid when `formatHint == "code"` (e.g. `"typescript"`, `"python"`).
+- `validateFormat` (boolean, default `false`) opts in to syntactic validation of saved values against the hint. When `false`, the hint is purely a rendering signal and any string is accepted.
+- `formatHint` is rejected on non-Text primitives. The `RichText` and `Markdown` primitives remain first-class types and do not accept a `formatHint`.
+- Unknown hint values are tolerated on read (fall back to `plaintext`) but rejected on write.
+- Text fields with structured-format hints (`json`, `xml`, `yaml`, `csv`, `toml`, `sql`, `code`, `url`, `email`, `regex`) are excluded from the full-text search vector.
 
 ---
 
