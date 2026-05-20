@@ -24,6 +24,8 @@ public sealed class ProblemDetailsException : Exception
     public IReadOnlyDictionary<string, string[]>? Errors { get; }
 }
 
+public sealed record FileDownloadResponse(string FileName, string ContentType, byte[] Content);
+
 public sealed record UserSummary(Guid Id, string Email, string DisplayName, string Role, bool IsSuperAdmin);
 
 public sealed record LoginResponse(string Token, DateTimeOffset ExpiresAt, bool MustChangePassword, UserSummary User);
@@ -45,6 +47,16 @@ public sealed record TemplateSectionResponse(Guid Id, string Name, string? Descr
 public sealed record TemplateFieldAllowedTypeResponse(Guid Id, PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
 
 public sealed record TemplateFieldResponse(Guid Id, Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeResponse> AllowedTypes, JsonElement? FieldConfig);
+
+public sealed record PickListSummaryResponse(Guid Id, string Name, string Slug, string? Description, int OptionCount);
+
+public sealed record PickListResponse(Guid Id, string Name, string Slug, string? Description, IReadOnlyList<PickListOptionResponse> Options);
+
+public sealed record PickListOptionResponse(Guid Id, string Label, string Value, int Order);
+
+public sealed record PickListOptionRequest(string Label, string Value, int? Order);
+
+public sealed record PickListRequest(string Name, string Slug, string? Description, IReadOnlyList<PickListOptionRequest> Options);
 
 public sealed record CreateTemplateRequest(string Name, string Slug, string? Description);
 

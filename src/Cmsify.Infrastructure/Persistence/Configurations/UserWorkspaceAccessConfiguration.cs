@@ -9,6 +9,7 @@ public sealed class UserWorkspaceAccessConfiguration : IEntityTypeConfiguration<
     public void Configure(EntityTypeBuilder<UserWorkspaceAccess> builder)
     {
         builder.ConfigureEntityId();
+        builder.HasQueryFilter(access => !access.User!.IsDeleted && !access.Workspace!.IsDeleted);
 
         builder.Property(access => access.AccessLevel).HasConversion<string>().HasMaxLength(20);
 

@@ -22,6 +22,7 @@
             <nav class="cms-nav">
                 <NavLink class="cms-nav__item" href="@WorkspaceHref("")" Match="NavLinkMatch.All"><i class="bi bi-speedometer2"></i><span>Dashboard</span></NavLink>
                 <NavLink class="cms-nav__item" href="@WorkspaceHref("templates")"><i class="bi bi-puzzle"></i><span>Templates</span></NavLink>
+                <NavLink class="cms-nav__item" href="@WorkspaceHref("picklists")"><i class="bi bi-list-check"></i><span>Picklists</span></NavLink>
                 <NavLink class="cms-nav__item" href="@WorkspaceHref("content")"><i class="bi bi-file-earmark-text"></i><span>Content</span></NavLink>
                 <NavLink class="cms-nav__item" href="@WorkspaceHref("media")"><i class="bi bi-images"></i><span>Media</span></NavLink>
                 <NavLink class="cms-nav__item" href="/settings/users"><i class="bi bi-gear"></i><span>Settings</span></NavLink>
@@ -48,7 +49,20 @@
         @if (ShowChrome)
         {
             <div class="cms-topbar">
-                <div class="cms-breadcrumb d-none d-md-flex">@Breadcrumb</div>
+                <nav class="cms-breadcrumb d-none d-md-flex" aria-label="Breadcrumb">
+                    @foreach (var item in BreadcrumbItems)
+                    {
+                        if (item.IsCurrent)
+                        {
+                            <span class="cms-breadcrumb__current" aria-current="page">@item.Label</span>
+                        }
+                        else
+                        {
+                            <a class="cms-breadcrumb__link" href="@item.Href">@item.Label</a>
+                            <span class="cms-breadcrumb__sep">/</span>
+                        }
+                    }
+                </nav>
                 <div class="cms-topbar__right">
                     <button class="cms-iconbtn" title="Toggle theme" @onclick="ToggleThemeAsync"><i class="bi @(EffectiveTheme == "dark" ? "bi-sun" : "bi-moon-stars")"></i></button>
                     <button class="cms-iconbtn" title="Notifications"><i class="bi bi-bell"></i></button>
@@ -73,14 +87,7 @@
 
     private string Initials => string.Join("", (Auth.User?.DisplayName ?? "User").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => part[0])).ToUpperInvariant();
 
-    private string Breadcrumb
-    {
-        get
-        {
-            var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
-            return string.IsNullOrWhiteSpace(path) ? "Dashboard" : path.Replace("/", " / ");
-        }
-    }
+    private IReadOnlyList<BreadcrumbItem> BreadcrumbItems => BuildBreadcrumbItems();
 
     protected override void OnInitialized()
     {
@@ -108,4 +115,42 @@
         await Auth.LogoutAsync();
         Navigation.NavigateTo("/login", replace: true);
     }
+
+    private IReadOnlyList<BreadcrumbItem> BuildBreadcrumbItems()
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return [new BreadcrumbItem("Dashboard", WorkspaceHref(""), IsCurrent: true)];
+        }
+
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var items = new List<BreadcrumbItem>(segments.Length);
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var segment = segments[i];
+            items.Add(new BreadcrumbItem(
+                GetBreadcrumbLabel(segments, i),
+                "/" + string.Join('/', segments.Take(i + 1)),
+                IsCurrent: i == segments.Length - 1));
+        }
+
+        return items;
+    }
+
+    private string GetBreadcrumbLabel(string[] segments, int index)
+    {
+        var segment = segments[index];
+        if (index == 1
+            && string.Equals(segments[0], "workspaces", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(segment, out var workspaceId)
+            && Workspace.Current?.Id == workspaceId)
+        {
+            return Workspace.Current.Name;
+        }
+
+        return segment.Replace("-", " ", StringComparison.Ordinal);
+    }
+
+    private sealed record BreadcrumbItem(string Label, string Href, bool IsCurrent);
 }

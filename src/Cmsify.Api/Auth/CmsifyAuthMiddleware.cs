@@ -56,7 +56,7 @@ public sealed class CmsifyAuthMiddleware
             : CurrentActorInfo.Anonymous;
     }
 
-    private static async Task<ICurrentActor> ResolveUserSessionAsync(string rawToken, HttpContext context, CmsifyDbContext dbContext)
+    private async Task<ICurrentActor> ResolveUserSessionAsync(string rawToken, HttpContext context, CmsifyDbContext dbContext)
     {
         var tokenHash = TokenUtility.Sha256Hash(rawToken);
         var now = DateTimeOffset.UtcNow;
@@ -78,8 +78,10 @@ public sealed class CmsifyAuthMiddleware
         }
 
         session.LastSeenAt = now;
+        session.ExpiresAt = LocalSessionLifetime.CalculateExpiresAt(configuration, now);
         session.IpAddress = context.Connection.RemoteIpAddress?.ToString();
         await dbContext.SaveChangesAsync();
+        context.Response.Headers[LocalSessionLifetime.ExpiresAtHeaderName] = session.ExpiresAt.ToString("O");
 
         return new CurrentActorInfo(user.Id, null, user.Role, null, true, user.IsSuperAdmin);
     }

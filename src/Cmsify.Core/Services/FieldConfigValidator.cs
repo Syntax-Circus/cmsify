@@ -26,6 +26,21 @@ public sealed class FieldConfigValidator : IFieldConfigValidator
             failures.Add(new ValidationFailure("fieldConfig.maxLength", "Text maxLength must be a positive integer."));
         }
 
+        if (type == PrimitiveType.PickList)
+        {
+            if (config.Value.TryGetProperty("picklistId", out var picklistId)
+                && picklistId.ValueKind != JsonValueKind.Null
+                && (picklistId.ValueKind != JsonValueKind.String || !Guid.TryParse(picklistId.GetString(), out _)))
+            {
+                failures.Add(new ValidationFailure("fieldConfig.picklistId", "PickList picklistId must be a GUID."));
+            }
+
+            if (config.Value.TryGetProperty("multiple", out var multiple) && multiple.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
+            {
+                failures.Add(new ValidationFailure("fieldConfig.multiple", "PickList multiple must be a boolean."));
+            }
+        }
+
         return new ValidationResult(failures);
     }
 }

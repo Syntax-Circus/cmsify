@@ -1,8 +1,10 @@
 @page "/workspaces/{WorkspaceId:guid}/content/new"
 @page "/workspaces/{WorkspaceId:guid}/content/{ContentId:guid}"
 @rendermode InteractiveServer
+@using System.Text.Json
 @inject ContentApiClient Content
 @inject TemplateApiClient Templates
+@inject PickListApiClient PickLists
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -89,6 +91,8 @@
     private readonly Dictionary<Guid, string?> textValues = [];
     private readonly Dictionary<Guid, bool> boolValues = [];
     private readonly Dictionary<Guid, Guid?> assetValues = [];
+    private readonly Dictionary<Guid, List<string>> multiPickValues = [];
+    private Dictionary<Guid, PickListResponse> picklistCache = new();
 
     private IEnumerable<TemplateFieldResponse> fields => templateVersion is null ? Enumerable.Empty<TemplateFieldResponse>() : templateVersion.Fields.OrderBy(item => item.Order);
 
@@ -114,6 +118,15 @@
                 textValues[value.FieldId] = value.TextValue;
                 boolValues[value.FieldId] = value.BoolValue ?? false;
                 assetValues[value.FieldId] = value.MediaAssetId ?? value.FileAssetId;
+                if (!string.IsNullOrWhiteSpace(value.TextValue))
+                {
+                    if (!multiPickValues.TryGetValue(value.FieldId, out var existing))
+                    {
+                        existing = [];
+                        multiPickValues[value.FieldId] = existing;
+                    }
+                    existing.Add(value.TextValue);
+                }
             }
         }
     }
@@ -130,6 +143,58 @@
     {
         var template = await Templates.GetAsync(WorkspaceId, templateId);
         templateVersion = template.Body.CurrentVersion ?? await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version");
+        await LoadPicklistsForFieldsAsync();
+    }
+
+    private async Task LoadPicklistsForFieldsAsync()
+    {
+        if (templateVersion is null)
+        {
+            return;
+        }
+
+        var ids = templateVersion.Fields
+            .Where(field => field.PrimitiveType == PrimitiveType.PickList)
+            .Select(field => GetPicklistBinding(field).PicklistId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        foreach (var id in ids)
+        {
+            if (picklistCache.ContainsKey(id))
+            {
+                continue;
+            }
+
+            try
+            {
+                var loaded = await PickLists.GetAsync(WorkspaceId, id);
+                picklistCache[id] = loaded.Body;
+            }
+            catch (ProblemDetailsException) { }
+        }
+    }
+
+    private static (Guid? PicklistId, bool Multiple) GetPicklistBinding(TemplateFieldResponse field)
+    {
+        if (field.FieldConfig is JsonElement config && config.ValueKind == JsonValueKind.Object)
+        {
+            Guid? picklistId = null;
+            var multiple = false;
+            if (config.TryGetProperty("picklistId", out var pickProp) && pickProp.ValueKind == JsonValueKind.String && Guid.TryParse(pickProp.GetString(), out var parsed))
+            {
+                picklistId = parsed;
+            }
+            if (config.TryGetProperty("multiple", out var multiProp) && (multiProp.ValueKind == JsonValueKind.True || multiProp.ValueKind == JsonValueKind.False))
+            {
+                multiple = multiProp.GetBoolean();
+            }
+            return (picklistId, multiple);
+        }
+
+        return (null, false);
     }
 
     private RenderFragment RenderField(TemplateFieldResponse field) => builder =>
@@ -169,6 +234,65 @@
             builder.AddContent(sequence++, assetValues.GetValueOrDefault(field.Id)?.ToString() ?? "Select asset");
             builder.CloseElement();
         }
+        else if (field.PrimitiveType == PrimitiveType.PickList)
+        {
+            var binding = GetPicklistBinding(field);
+            if (!binding.PicklistId.HasValue || !picklistCache.TryGetValue(binding.PicklistId.Value, out var picklist))
+            {
+                builder.OpenElement(sequence++, "div");
+                builder.AddAttribute(sequence++, "class", "alert alert-warning py-2 px-3 small mb-0");
+                builder.AddContent(sequence++, "This field has no picklist bound. Edit the template to bind one.");
+                builder.CloseElement();
+            }
+            else if (binding.Multiple)
+            {
+                builder.OpenElement(sequence++, "select");
+                builder.AddAttribute(sequence++, "class", "form-select");
+                builder.AddAttribute(sequence++, "multiple", true);
+                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e =>
+                {
+                    var values = e.Value switch
+                    {
+                        string[] arr => arr.ToList(),
+                        IEnumerable<object> enumerable => enumerable.Select(x => x?.ToString() ?? "").ToList(),
+                        _ => new List<string>()
+                    };
+                    multiPickValues[field.Id] = values;
+                }));
+                var selected = multiPickValues.GetValueOrDefault(field.Id) ?? [];
+                foreach (var option in picklist.Options.OrderBy(o => o.Order))
+                {
+                    builder.OpenElement(sequence++, "option");
+                    builder.AddAttribute(sequence++, "value", option.Value);
+                    if (selected.Contains(option.Value))
+                    {
+                        builder.AddAttribute(sequence++, "selected", true);
+                    }
+                    builder.AddContent(sequence++, option.Label);
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.OpenElement(sequence++, "select");
+                builder.AddAttribute(sequence++, "class", "form-select");
+                builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id) ?? "");
+                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
+                builder.OpenElement(sequence++, "option");
+                builder.AddAttribute(sequence++, "value", "");
+                builder.AddContent(sequence++, field.IsRequired ? "— Select —" : "— None —");
+                builder.CloseElement();
+                foreach (var option in picklist.Options.OrderBy(o => o.Order))
+                {
+                    builder.OpenElement(sequence++, "option");
+                    builder.AddAttribute(sequence++, "value", option.Value);
+                    builder.AddContent(sequence++, option.Label);
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+            }
+        }
         else
         {
             builder.OpenElement(sequence++, "input");
@@ -201,24 +325,52 @@
             return;
         }
 
-        var values = fields.Select(field => new ContentFieldValueRequest(
-            field.Id,
-            field.Order,
-            field.PrimitiveType switch
+        var values = new List<ContentFieldValueRequest>();
+        foreach (var field in fields)
+        {
+            if (field.PrimitiveType == PrimitiveType.PickList)
             {
-                PrimitiveType.Boolean => ValueKind.Boolean,
-                PrimitiveType.Media => ValueKind.Media,
-                PrimitiveType.File => ValueKind.File,
-                PrimitiveType.Markdown => ValueKind.Markdown,
-                PrimitiveType.RichText => ValueKind.RichText,
-                _ => ValueKind.Text
-            },
-            textValues.GetValueOrDefault(field.Id),
-            boolValues.GetValueOrDefault(field.Id),
-            field.PrimitiveType == PrimitiveType.Media ? assetValues.GetValueOrDefault(field.Id) : null,
-            field.PrimitiveType == PrimitiveType.File ? assetValues.GetValueOrDefault(field.Id) : null,
-            null,
-            null)).ToArray();
+                var binding = GetPicklistBinding(field);
+                if (binding.Multiple)
+                {
+                    var selected = multiPickValues.GetValueOrDefault(field.Id) ?? [];
+                    var index = 0;
+                    foreach (var selectedValue in selected)
+                    {
+                        values.Add(new ContentFieldValueRequest(field.Id, field.Order + index, ValueKind.PickList, selectedValue, null, null, null, null, null));
+                        index++;
+                    }
+                }
+                else
+                {
+                    var single = textValues.GetValueOrDefault(field.Id);
+                    if (!string.IsNullOrWhiteSpace(single))
+                    {
+                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.PickList, single, null, null, null, null, null));
+                    }
+                }
+                continue;
+            }
+
+            values.Add(new ContentFieldValueRequest(
+                field.Id,
+                field.Order,
+                field.PrimitiveType switch
+                {
+                    PrimitiveType.Boolean => ValueKind.Boolean,
+                    PrimitiveType.Media => ValueKind.Media,
+                    PrimitiveType.File => ValueKind.File,
+                    PrimitiveType.Markdown => ValueKind.Markdown,
+                    PrimitiveType.RichText => ValueKind.RichText,
+                    _ => ValueKind.Text
+                },
+                textValues.GetValueOrDefault(field.Id),
+                boolValues.GetValueOrDefault(field.Id),
+                field.PrimitiveType == PrimitiveType.Media ? assetValues.GetValueOrDefault(field.Id) : null,
+                field.PrimitiveType == PrimitiveType.File ? assetValues.GetValueOrDefault(field.Id) : null,
+                null,
+                null));
+        }
         var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (ContentId.HasValue)
         {

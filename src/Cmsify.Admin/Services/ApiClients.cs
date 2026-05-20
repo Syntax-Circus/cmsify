@@ -97,6 +97,9 @@ public sealed class TemplateApiClient : ApiClientBase
     public Task<TemplateSectionResponse> AddSectionAsync(Guid workspaceId, Guid templateId, int versionNumber, TemplateSectionRequest request, CancellationToken ct = default) =>
         PostAsync<TemplateSectionResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/sections", request, ct);
 
+    public Task<TemplateSectionResponse> UpdateSectionAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid sectionId, TemplateSectionRequest request, CancellationToken ct = default) =>
+        PutAsync<TemplateSectionResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/sections/{sectionId}", request, ct: ct);
+
     public Task<TemplateFieldResponse> AddFieldAsync(Guid workspaceId, Guid templateId, int versionNumber, TemplateFieldRequest request, CancellationToken ct = default) =>
         PostAsync<TemplateFieldResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields", request, ct);
 
@@ -105,6 +108,26 @@ public sealed class TemplateApiClient : ApiClientBase
 
     public Task ReorderFieldsAsync(Guid workspaceId, Guid templateId, int versionNumber, IReadOnlyList<ReorderFieldRequest> request, CancellationToken ct = default) =>
         PutAsync<object>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields/reorder", request, ct: ct);
+}
+
+public sealed class PickListApiClient : ApiClientBase
+{
+    public PickListApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+
+    public Task<IReadOnlyList<PickListSummaryResponse>> ListAsync(Guid workspaceId, string? search = null, CancellationToken ct = default) =>
+        GetAsync<IReadOnlyList<PickListSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/picklists?search={Uri.EscapeDataString(search ?? string.Empty)}", ct);
+
+    public Task<(PickListResponse Body, string? ETag)> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) =>
+        GetWithETagAsync<PickListResponse>($"/api/v1/workspaces/{workspaceId}/picklists/{id}", ct);
+
+    public Task<PickListResponse> CreateAsync(Guid workspaceId, PickListRequest request, CancellationToken ct = default) =>
+        PostAsync<PickListResponse>($"/api/v1/workspaces/{workspaceId}/picklists", request, ct);
+
+    public Task<PickListResponse> UpdateAsync(Guid workspaceId, Guid id, PickListRequest request, CancellationToken ct = default) =>
+        PutAsync<PickListResponse>($"/api/v1/workspaces/{workspaceId}/picklists/{id}", request, ct: ct);
+
+    public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default) =>
+        DeleteAsync($"/api/v1/workspaces/{workspaceId}/picklists/{id}", ct: ct);
 }
 
 public sealed class ContentApiClient : ApiClientBase
@@ -299,4 +322,34 @@ public sealed class PackagesApiClient : ApiClientBase
 
     public Task<PackageImportResponse> ImportOfficialAsync(Guid workspaceId, string packageId, CancellationToken ct = default) =>
         PostAsync<PackageImportResponse>($"/api/v1/workspaces/{workspaceId}/packages/import/official/{Uri.EscapeDataString(packageId)}", ct: ct);
+
+    public async Task<PackageImportResponse> ImportAsync(Guid workspaceId, IBrowserFile file, CancellationToken ct = default)
+    {
+        using var content = new MultipartFormDataContent();
+        var stream = file.OpenReadStream(1_073_741_824, ct);
+        var fileContent = new StreamContent(stream);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(string.IsNullOrWhiteSpace(file.ContentType) ? "application/json" : file.ContentType);
+        content.Add(fileContent, "file", file.Name);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/workspaces/{workspaceId}/packages/import")
+        {
+            Content = content
+        };
+        using var response = await SendAsync(request, ct);
+        return await ReadAsync<PackageImportResponse>(response, ct);
+    }
+
+    public async Task<FileDownloadResponse> ExportAsync(Guid workspaceId, Guid templateId, string packageNamespace, string id, string version, CancellationToken ct = default)
+    {
+        var url = $"/api/v1/workspaces/{workspaceId}/packages/export?templateIds={Uri.EscapeDataString(templateId.ToString())}&packageNamespace={Uri.EscapeDataString(packageNamespace)}&id={Uri.EscapeDataString(id)}&version={Uri.EscapeDataString(version)}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);
+
+        var content = await response.Content.ReadAsByteArrayAsync(ct);
+        var disposition = response.Content.Headers.ContentDisposition;
+        var fileName = disposition?.FileNameStar ?? disposition?.FileName?.Trim('"') ?? $"{packageNamespace}.{id}@{version}.ctp";
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+        return new FileDownloadResponse(fileName, contentType, content);
+    }
 }

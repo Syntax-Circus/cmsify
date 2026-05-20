@@ -1,6 +1,8 @@
 @page "/workspaces/{WorkspaceId:guid}/templates"
 @rendermode InteractiveServer
 @inject TemplateApiClient Templates
+@inject PackagesApiClient PackageClient
+@inject BrowserDownloads Downloads
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -18,6 +20,16 @@
     </div>
     <button class="btn btn-outline-secondary" @onclick="LoadAsync">Search</button>
 </div>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert alert-info">@message</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
 
 @if (templates.Count == 0)
 {
@@ -39,6 +51,7 @@ else
                     <td>@(template.CurrentVersionId.HasValue ? "Current" : "Draft only")</td>
                     <td class="d-flex gap-2">
                         <button class="btn btn-primary btn-sm" @onclick="() => Edit(template)">Edit</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => BeginExport(template)">Export</button>
                         <a class="btn btn-outline-secondary btn-sm" href="/workspaces/@WorkspaceId/templates/@template.Id/versions">Versions</a>
                     </td>
                 </tr>
@@ -72,6 +85,33 @@ else
     <div class="modal-backdrop show"></div>
 }
 
+@if (exportTemplate is not null)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Export @exportTemplate.Name</h5>
+                    <button class="btn-close" @onclick="CancelExport"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label">Package namespace</label>
+                    <InputText class="form-control mb-3" @bind-Value="exportPackageNamespace" />
+                    <label class="form-label">Package ID</label>
+                    <InputText class="form-control mb-3" @bind-Value="exportPackageId" />
+                    <label class="form-label">Version</label>
+                    <InputText class="form-control" @bind-Value="exportVersion" />
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CancelExport">Cancel</button>
+                    <button class="btn btn-primary" disabled="@exporting" @onclick="ExportAsync">Download package</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
 @code {
     [Parameter] public Guid WorkspaceId { get; set; }
     private List<TemplateSummaryResponse> templates = [];
@@ -80,6 +120,13 @@ else
     private string newName = "";
     private string newSlug = "";
     private string? newDescription;
+    private TemplateSummaryResponse? exportTemplate;
+    private string exportPackageNamespace = "custom";
+    private string exportPackageId = "";
+    private string exportVersion = "1.0.0";
+    private bool exporting;
+    private string? message;
+    private string? error;
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
@@ -101,4 +148,53 @@ else
     }
 
     private void Edit(TemplateSummaryResponse template) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/templates/{template.Id}");
+
+    private void BeginExport(TemplateSummaryResponse template)
+    {
+        exportTemplate = template;
+        exportPackageNamespace = "custom";
+        exportPackageId = template.Slug;
+        exportVersion = "1.0.0";
+        message = null;
+        error = null;
+    }
+
+    private void CancelExport()
+    {
+        exportTemplate = null;
+        exporting = false;
+    }
+
+    private async Task ExportAsync()
+    {
+        if (exportTemplate is null)
+        {
+            return;
+        }
+
+        exporting = true;
+        message = null;
+        error = null;
+
+        try
+        {
+            var template = exportTemplate;
+            var file = await PackageClient.ExportAsync(WorkspaceId, template.Id, exportPackageNamespace, exportPackageId, exportVersion);
+            await Downloads.SaveAsync(file);
+            message = $"Exported {template.Name} to {file.FileName}.";
+            exportTemplate = null;
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ProblemDetailsDisplay.Format(ex);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            exporting = false;
+        }
+    }
 }

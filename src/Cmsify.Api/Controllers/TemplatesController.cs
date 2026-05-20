@@ -286,6 +286,7 @@ public sealed class TemplatesController : ControllerBase
 
         var section = new TemplateSection { TemplateVersionId = version.Value!.Id, Name = request.Name, Description = request.Description, Order = request.Order, IsCollapsible = request.IsCollapsible };
         version.Value.Sections.Add(section);
+        dbContext.TemplateSections.Add(section);
         version.Value.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
         return CreatedAtAction(nameof(GetVersion), new { workspaceId, id, versionNumber }, ToSectionResponse(section));
@@ -353,7 +354,7 @@ public sealed class TemplatesController : ControllerBase
             return version.Result;
         }
 
-        var validation = ValidateFieldRequest(request);
+        var validation = ValidateFieldRequest(version.Value!, request);
         if (validation is not null)
         {
             return validation;
@@ -361,6 +362,7 @@ public sealed class TemplatesController : ControllerBase
 
         var field = ToField(version.Value!.Id, request);
         version.Value.Fields.Add(field);
+        dbContext.TemplateFields.Add(field);
         var cycle = await DetectCycleAsync(workspaceId, id, version.Value, ct);
         if (cycle.Count > 0)
         {
@@ -388,7 +390,7 @@ public sealed class TemplatesController : ControllerBase
             return NotFound();
         }
 
-        var validation = ValidateFieldRequest(request);
+        var validation = ValidateFieldRequest(version.Value!, request, field.Id);
         if (validation is not null)
         {
             return validation;
@@ -399,7 +401,9 @@ public sealed class TemplatesController : ControllerBase
         field.AllowedTypes.Clear();
         foreach (var allowedType in request.AllowedTypes)
         {
-            field.AllowedTypes.Add(new TemplateFieldAllowedType { FieldId = field.Id, PrimitiveType = allowedType.PrimitiveType, AllowedTemplateId = allowedType.AllowedTemplateId });
+            var entry = new TemplateFieldAllowedType { FieldId = field.Id, PrimitiveType = allowedType.PrimitiveType, AllowedTemplateId = allowedType.AllowedTemplateId };
+            field.AllowedTypes.Add(entry);
+            dbContext.TemplateFieldAllowedTypes.Add(entry);
         }
 
         var cycle = await DetectCycleAsync(workspaceId, id, version.Value, ct);
@@ -537,8 +541,18 @@ public sealed class TemplatesController : ControllerBase
     private static TemplateFieldResponse ToFieldResponse(TemplateField field) =>
         new(field.Id, field.SectionId, field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, field.TemplateId, field.AllowedTypes.Select(type => new TemplateFieldAllowedTypeResponse(type.Id, type.PrimitiveType, type.AllowedTemplateId)).ToArray(), field.FieldConfig.Clone());
 
-    private ObjectResult? ValidateFieldRequest(TemplateFieldRequest request)
+    private ObjectResult? ValidateFieldRequest(TemplateVersion version, TemplateFieldRequest request, Guid? currentFieldId = null)
     {
+        if (request.SectionId.HasValue && version.Sections.All(section => section.Id != request.SectionId.Value))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid section", "The selected section does not exist in this template version.");
+        }
+
+        if (version.Fields.Any(field => field.Id != currentFieldId && string.Equals(field.Key, request.Key, StringComparison.OrdinalIgnoreCase)))
+        {
+            return this.Error(StatusCodes.Status409Conflict, "conflict", "Field key already exists", $"A field with key '{request.Key}' already exists in this template version.");
+        }
+
         if (!request.IsOpen && (request.PrimitiveType.HasValue == request.TemplateId.HasValue))
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid field type", "Constrained fields must define exactly one primitiveType or templateId.");

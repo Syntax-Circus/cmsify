@@ -1,0 +1,140 @@
+@page "/workspaces/{WorkspaceId:guid}/picklists/new"
+@page "/workspaces/{WorkspaceId:guid}/picklists/{PickListId:guid}"
+@rendermode InteractiveServer
+@inject PickListApiClient PickLists
+@inject NavigationManager Navigation
+
+<div class="cms-page-head">
+    <div>
+        <h1>@(PickListId.HasValue ? "Edit Picklist" : "New Picklist")</h1>
+        <div class="lead">Define a reusable set of options for picklist fields.</div>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/picklists">Back</a>
+        <button class="btn btn-primary" @onclick="SaveAsync">Save</button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+<div class="row g-3">
+    <div class="col-lg-5">
+        <div class="cms-card">
+            <h2 class="h6">Details</h2>
+            <label class="form-label mt-2">Name</label>
+            <InputText class="form-control mb-3" @bind-Value="name" />
+            <label class="form-label">Slug</label>
+            <InputText class="form-control mb-3 font-monospace" @bind-Value="slug" />
+            <label class="form-label">Description</label>
+            <InputTextArea class="form-control" @bind-Value="description" />
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="cms-card">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2 class="h6 mb-0">Options</h2>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="AddOption"><i class="bi bi-plus-lg"></i> Add Option</button>
+            </div>
+            @if (options.Count == 0)
+            {
+                <div class="text-muted small mt-3">No options yet. Add at least one option for this picklist to be useful.</div>
+            }
+            else
+            {
+                <table class="cms-table mt-3">
+                    <thead><tr><th style="width:45%">Label</th><th style="width:35%">Value</th><th style="width:12%">Order</th><th></th></tr></thead>
+                    <tbody>
+                    @for (var i = 0; i < options.Count; i++)
+                    {
+                        var index = i;
+                        <tr>
+                            <td><input class="form-control" @bind="options[index].Label" /></td>
+                            <td><input class="form-control font-monospace" @bind="options[index].Value" /></td>
+                            <td><input type="number" class="form-control" @bind="options[index].Order" /></td>
+                            <td><button class="btn btn-outline-danger btn-sm" @onclick="() => Remove(index)"><i class="bi bi-trash"></i></button></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public Guid? PickListId { get; set; }
+
+    private string name = "";
+    private string slug = "";
+    private string? description;
+    private List<OptionEdit> options = [];
+    private string? error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (PickListId.HasValue)
+        {
+            try
+            {
+                var loaded = await PickLists.GetAsync(WorkspaceId, PickListId.Value);
+                name = loaded.Body.Name;
+                slug = loaded.Body.Slug;
+                description = loaded.Body.Description;
+                options = loaded.Body.Options.Select(option => new OptionEdit { Label = option.Label, Value = option.Value, Order = option.Order }).ToList();
+            }
+            catch (ProblemDetailsException ex)
+            {
+                error = ex.Detail ?? ex.Title;
+            }
+        }
+        else
+        {
+            options = [new OptionEdit { Label = "", Value = "", Order = 0 }];
+        }
+    }
+
+    private void AddOption() => options.Add(new OptionEdit { Label = "", Value = "", Order = options.Count == 0 ? 0 : options.Max(option => option.Order) + 1 });
+
+    private void Remove(int index) => options.RemoveAt(index);
+
+    private async Task SaveAsync()
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            slug = string.Join('-', (name ?? "").ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        var request = new PickListRequest(name ?? "", slug, description, options.Select(option => new PickListOptionRequest(option.Label, option.Value, option.Order)).ToArray());
+        try
+        {
+            if (PickListId.HasValue)
+            {
+                await PickLists.UpdateAsync(WorkspaceId, PickListId.Value, request);
+            }
+            else
+            {
+                var created = await PickLists.CreateAsync(WorkspaceId, request);
+                Navigation.NavigateTo($"/workspaces/{WorkspaceId}/picklists/{created.Id}");
+                return;
+            }
+
+            Navigation.NavigateTo($"/workspaces/{WorkspaceId}/picklists");
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.Detail ?? ex.Title;
+        }
+    }
+
+    private sealed class OptionEdit
+    {
+        public string Label { get; set; } = "";
+        public string Value { get; set; } = "";
+        public int Order { get; set; }
+    }
+}

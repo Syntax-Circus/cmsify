@@ -9,6 +9,7 @@ namespace Cmsify.Admin.Services;
 public abstract class ApiClientBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string SessionExpiresAtHeaderName = "X-Session-Expires-At";
     private readonly Dictionary<string, string> etags = new(StringComparer.OrdinalIgnoreCase);
     private readonly IHttpClientFactory httpClientFactory;
     private readonly AuthState authState;
@@ -72,16 +73,9 @@ public abstract class ApiClientBase
     private string? FindETag(string url) =>
         etags.TryGetValue(url, out var etag) ? etag : null;
 
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, object? body, string? ifMatch, CancellationToken ct)
+    protected async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, object? body, string? ifMatch, CancellationToken ct)
     {
-        var http = httpClientFactory.CreateClient("CmsifyApi");
         using var request = new HttpRequestMessage(method, url);
-        request.Headers.Add("X-Correlation-Id", Guid.CreateVersion7().ToString());
-        if (!string.IsNullOrWhiteSpace(authState.Token))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authState.Token);
-        }
-
         if (!string.IsNullOrWhiteSpace(ifMatch))
         {
             request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
@@ -92,17 +86,36 @@ public abstract class ApiClientBase
             request.Content = JsonContent.Create(body, options: JsonOptions);
         }
 
-        return await http.SendAsync(request, ct);
+        return await SendAsync(request, ct);
     }
 
-    private static async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken ct)
+    protected async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        var http = httpClientFactory.CreateClient("CmsifyApi");
+        request.Headers.Add("X-Correlation-Id", Guid.CreateVersion7().ToString());
+        if (!string.IsNullOrWhiteSpace(authState.Token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authState.Token);
+        }
+
+        var response = await http.SendAsync(request, ct);
+        if (response.Headers.TryGetValues(SessionExpiresAtHeaderName, out var expiresAtValues)
+            && DateTimeOffset.TryParse(expiresAtValues.FirstOrDefault(), out var expiresAt))
+        {
+            await authState.UpdateExpiresAtAsync(expiresAt);
+        }
+
+        return response;
+    }
+
+    protected static async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken ct)
     {
         await EnsureSuccessAsync(response, ct);
         var result = await response.Content.ReadFromJsonAsync<T>(JsonOptions, ct);
         return result is null ? throw new InvalidOperationException("API returned an empty response body.") : result;
     }
 
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken ct)
+    protected static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken ct)
     {
         if (response.IsSuccessStatusCode)
         {
