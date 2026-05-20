@@ -26,8 +26,8 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminEmail", "admin@example.test");
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminPassword", "change-this-temporary-password");
+        Environment.SetEnvironmentVariable("Seed__Admin__Email", "admin@example.test");
+        Environment.SetEnvironmentVariable("Seed__Admin__Password", "change-this-temporary-password");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Name", "Default");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
     }
@@ -111,8 +111,8 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
     private static void ClearEnvironment()
     {
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", null);
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminEmail", null);
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminPassword", null);
+        Environment.SetEnvironmentVariable("Seed__Admin__Email", null);
+        Environment.SetEnvironmentVariable("Seed__Admin__Password", null);
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Name", null);
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", null);
     }

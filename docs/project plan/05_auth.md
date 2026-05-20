@@ -193,7 +193,7 @@ These can be added without breaking schema changes; document them in the post-MV
 ## First-Run Bootstrap
 
 On startup, if `Users` table is empty:
-- Create an admin user from env config: `Auth:Bootstrap:AdminEmail` + `Auth:Bootstrap:AdminPassword`
+- Create an admin user from env config: `Seed:Admin:Email` + `Seed:Admin:Password`
 - The bootstrap admin is created as the host/superadmin and with `MustChangePassword = true` so they are forced to set a new password on first login
 - Log a warning if bootstrap credentials are still default values
 - These env keys should appear in `.env.example` with strong guidance to change them
@@ -213,7 +213,7 @@ On startup, if `Users` table is empty:
 - [x] Implement OIDC/JWT layer behind `Auth:Oidc:Enabled` feature flag
 - [x] Implement claims mapping from JWT to `ICurrentActor`
 - [x] Implement first-run admin bootstrap
-- [x] Add `Auth:Bootstrap:AdminEmail` and `Auth:Bootstrap:AdminPassword` to `.env.example`
+- [x] Add `Seed:Admin:Email` and `Seed:Admin:Password` to `.env.example`
 - [x] Unit test: BCrypt verify
 - [x] Unit test: `[RequireRole]` attribute for all role combinations
 - [x] Integration test: login flow, token use, logout, expired token rejection

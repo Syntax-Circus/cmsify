@@ -8,6 +8,20 @@
   "author": "Cmsify Team",
   "license": "MIT",
   "homepage": "https://cmsify.dev/packages/product",
+  "picklists": [
+    {
+      "slug": "review-rating",
+      "name": "Review Rating",
+      "description": "1\u20135 star product review rating.",
+      "options": [
+        { "label": "1 star", "value": "1", "order": 0 },
+        { "label": "2 stars", "value": "2", "order": 1 },
+        { "label": "3 stars", "value": "3", "order": 2 },
+        { "label": "4 stars", "value": "4", "order": 3 },
+        { "label": "5 stars", "value": "5", "order": 4 }
+      ]
+    }
+  ],
   "templates": [
     {
       "slug": "review",
@@ -15,7 +29,7 @@
       "description": "A product review.",
       "sections": [],
       "fields": [
-        { "key": "rating", "label": "Rating", "order": 0, "isRequired": true, "minOccurrences": 1, "maxOccurrences": 1, "isOpen": false, "compositionMode": "Inline", "primitiveType": "PickList" },
+        { "key": "rating", "label": "Rating", "order": 0, "isRequired": true, "minOccurrences": 1, "maxOccurrences": 1, "isOpen": false, "compositionMode": "Inline", "primitiveType": "PickList", "fieldConfig": { "picklistRef": "review-rating", "multiple": false } },
         { "key": "body", "label": "Body", "order": 1, "isRequired": false, "minOccurrences": 0, "maxOccurrences": 1, "isOpen": false, "compositionMode": "Inline", "primitiveType": "Markdown" }
       ]
     },

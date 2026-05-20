@@ -26,8 +26,8 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminEmail", "admin@example.test");
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminPassword", "change-this-temporary-password");
+        Environment.SetEnvironmentVariable("Seed__Admin__Email", "admin@example.test");
+        Environment.SetEnvironmentVariable("Seed__Admin__Password", "change-this-temporary-password");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Name", "Default");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
         Environment.SetEnvironmentVariable("Secrets__EncryptionKey", "integration-test-secret-key-with-enough-length");
@@ -150,8 +150,8 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         foreach (var key in new[]
         {
             "ConnectionStrings__Cmsify",
-            "Auth__Bootstrap__AdminEmail",
-            "Auth__Bootstrap__AdminPassword",
+            "Seed__Admin__Email",
+            "Seed__Admin__Password",
             "Seed__DefaultWorkspace__Name",
             "Seed__DefaultWorkspace__Slug",
             "Secrets__EncryptionKey"

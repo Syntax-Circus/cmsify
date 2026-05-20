@@ -22,7 +22,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Cmsify: ${ConnectionStrings__Cmsify:?ConnectionStrings__Cmsify is required}
-      Auth__Bootstrap__AdminPassword: ${Auth__Bootstrap__AdminPassword:?Auth__Bootstrap__AdminPassword is required}
+      Seed__Admin__Password: ${Seed__Admin__Password:?Seed__Admin__Password is required}
       Secrets__EncryptionKey: ${Secrets__EncryptionKey:?Secrets__EncryptionKey is required}
       Storage__Provider: ${Storage__Provider:-local}
       Storage__Local__BasePath: /var/cmsify/media

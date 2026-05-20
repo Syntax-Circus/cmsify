@@ -1,0 +1,157 @@
+@using Cmsify.Admin.Services
+
+@if (Preview is not null)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" style="background:rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Resolve package import conflicts</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted">
+                        Package <strong>@Preview.PackageNamespace/@Preview.Id @Preview.Version</strong> contains items that already exist in this workspace.
+                        Choose how to resolve each picklist conflict before importing.
+                    </p>
+
+                    @if (Preview.PickLists.Count == 0)
+                    {
+                        <div class="alert alert-info">No picklists in this package.</div>
+                    }
+                    else
+                    {
+                        @foreach (var picklist in Preview.PickLists)
+                        {
+                            <div class="cms-card mb-3">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <h6 class="mb-1">@picklist.Name <small class="text-muted">(@picklist.Slug)</small></h6>
+                                        <div class="small">
+                                            @switch (picklist.Status)
+                                            {
+                                                case "new":
+                                                    <span class="badge bg-success">New</span>
+                                                    break;
+                                                case "identical":
+                                                    <span class="badge bg-secondary">Already present (identical)</span>
+                                                    break;
+                                                default:
+                                                    <span class="badge bg-warning text-dark">Conflict</span>
+                                                    break;
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+
+                                @if (picklist.Status != "new")
+                                {
+                                    <div class="row g-3 mt-2 small">
+                                        <div class="col-md-6">
+                                            <div class="text-muted text-uppercase small mb-1">Incoming</div>
+                                            <ul class="list-unstyled mb-0">
+                                                @foreach (var option in picklist.Options)
+                                                {
+                                                    <li>@option.Label <span class="text-muted">(@option.Value)</span></li>
+                                                }
+                                            </ul>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="text-muted text-uppercase small mb-1">Existing</div>
+                                            <ul class="list-unstyled mb-0">
+                                                @foreach (var option in picklist.ExistingOptions ?? Array.Empty<PackagePickListOptionPreview>())
+                                                {
+                                                    <li>@option.Label <span class="text-muted">(@option.Value)</span></li>
+                                                }
+                                            </ul>
+                                        </div>
+                                    </div>
+                                }
+
+                                @if (picklist.Status != "new")
+                                {
+                                    var slug = picklist.Slug;
+                                    var selected = resolutions.TryGetValue(slug, out var value) ? value : picklist.SuggestedAction;
+                                    <div class="mt-3">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" id="@($"pl-{slug}-use")"
+                                                   checked="@(selected == "useExisting")"
+                                                   @onchange="@(() => SetResolution(slug, "useExisting"))" />
+                                            <label class="form-check-label" for="@($"pl-{slug}-use")">Use existing (keep current options; bind incoming references to it)</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" id="@($"pl-{slug}-replace")"
+                                                   checked="@(selected == "replace")"
+                                                   @onchange="@(() => SetResolution(slug, "replace"))" />
+                                            <label class="form-check-label" for="@($"pl-{slug}-replace")">Replace existing options with the incoming set</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" id="@($"pl-{slug}-new")"
+                                                   checked="@(selected == "importAsNew")"
+                                                   @onchange="@(() => SetResolution(slug, "importAsNew"))" />
+                                            <label class="form-check-label" for="@($"pl-{slug}-new")">Import as new (auto-suffix slug)</label>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+
+                    @if (Preview.Templates.Count > 0)
+                    {
+                        <div class="cms-card">
+                            <h6 class="mb-2">Templates</h6>
+                            <ul class="list-unstyled small mb-0">
+                                @foreach (var template in Preview.Templates)
+                                {
+                                    <li>
+                                        @template.Name <span class="text-muted">(@template.Slug)</span>
+                                        @if (template.Status == "update")
+                                        {
+                                            <span class="badge bg-warning text-dark ms-1">Will create new version</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-success ms-1">New</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="Confirm">Import</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public PackageImportPreviewResponse? Preview { get; set; }
+    [Parameter] public EventCallback<PackageImportResolutionsRequest> OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private Dictionary<string, string> resolutions = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override void OnParametersSet()
+    {
+        if (Preview is not null)
+        {
+            resolutions = Preview.PickLists
+                .Where(picklist => picklist.Status != "new")
+                .ToDictionary(picklist => picklist.Slug, picklist => picklist.SuggestedAction, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private void SetResolution(string slug, string action)
+    {
+        resolutions[slug] = action;
+    }
+
+    private Task Confirm() => OnConfirm.InvokeAsync(new PackageImportResolutionsRequest(resolutions));
+
+    private Task Cancel() => OnCancel.InvokeAsync();
+}

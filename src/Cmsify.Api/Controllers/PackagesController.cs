@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -68,13 +69,27 @@ public sealed class PackagesController : ControllerBase
             return NotFound();
         }
 
-        var manifest = await ReadManifestAsync(ct);
-        return await ImportManifestAsync(workspaceId, manifest, ct);
+        var (manifest, resolutions) = await ReadManifestAndResolutionsAsync(ct);
+        return await ImportManifestAsync(workspaceId, manifest, resolutions, ct);
     }
 
-    [HttpPost("/api/v1/workspaces/{workspaceId:guid}/packages/import/official/{packageId}")]
+    [HttpPost("/api/v1/workspaces/{workspaceId:guid}/packages/import/preview")]
     [RequireRole(UserRole.TemplateAdmin)]
-    public async Task<ActionResult<PackageImportResponse>> ImportOfficial(Guid workspaceId, string packageId, CancellationToken ct)
+    [Consumes("application/json", "multipart/form-data")]
+    public async Task<ActionResult<PackageImportPreviewResponse>> ImportPreview(Guid workspaceId, CancellationToken ct)
+    {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return NotFound();
+        }
+
+        var (manifest, _) = await ReadManifestAndResolutionsAsync(ct);
+        return await BuildPreviewAsync(workspaceId, manifest, ct);
+    }
+
+    [HttpPost("/api/v1/workspaces/{workspaceId:guid}/packages/import/official/{packageId}/preview")]
+    [RequireRole(UserRole.TemplateAdmin)]
+    public async Task<ActionResult<PackageImportPreviewResponse>> ImportOfficialPreview(Guid workspaceId, string packageId, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
@@ -87,10 +102,28 @@ public sealed class PackagesController : ControllerBase
             return this.Error(StatusCodes.Status404NotFound, CmsifyError.NotFound, "Official package not found");
         }
 
-        return await ImportManifestAsync(workspaceId, manifest, ct);
+        return await BuildPreviewAsync(workspaceId, manifest, ct);
     }
 
-    private async Task<ActionResult<PackageImportResponse>> ImportManifestAsync(Guid workspaceId, CtpPackageManifest manifest, CancellationToken ct)
+    [HttpPost("/api/v1/workspaces/{workspaceId:guid}/packages/import/official/{packageId}")]
+    [RequireRole(UserRole.TemplateAdmin)]
+    public async Task<ActionResult<PackageImportResponse>> ImportOfficial(Guid workspaceId, string packageId, [FromBody] PackageImportResolutions? resolutions, CancellationToken ct)
+    {
+        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
+        {
+            return NotFound();
+        }
+
+        var manifest = (await LoadOfficialPackagesAsync(ct)).FirstOrDefault(package => string.Equals(package.Id, packageId, StringComparison.OrdinalIgnoreCase));
+        if (manifest is null)
+        {
+            return this.Error(StatusCodes.Status404NotFound, CmsifyError.NotFound, "Official package not found");
+        }
+
+        return await ImportManifestAsync(workspaceId, manifest, resolutions, ct);
+    }
+
+    private async Task<ActionResult<PackageImportResponse>> ImportManifestAsync(Guid workspaceId, CtpPackageManifest manifest, PackageImportResolutions? resolutions, CancellationToken ct)
     {
         var validationErrors = ValidateManifest(manifest);
         if (validationErrors.Count > 0)
@@ -115,6 +148,101 @@ public sealed class PackagesController : ControllerBase
                 "Package version already installed",
                 $"Package {manifest.PackageNamespace}/{manifest.Id}@{manifest.Version} is already installed or older than the installed version.",
                 new Dictionary<string, object?> { ["installedVersions"] = existingPackageVersions });
+        }
+
+        var existingPickLists = await dbContext.PickLists
+            .Include(picklist => picklist.Options)
+            .Where(picklist => picklist.WorkspaceId == workspaceId && !picklist.IsDeleted)
+            .ToListAsync(ct);
+        var existingBySlug = existingPickLists.ToDictionary(picklist => picklist.Slug, picklist => picklist, StringComparer.OrdinalIgnoreCase);
+        var existingSlugs = new HashSet<string>(existingPickLists.Select(picklist => picklist.Slug), StringComparer.OrdinalIgnoreCase);
+
+        var picklistResolutions = resolutions?.PickLists ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var picklistIdBySlug = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var importedPickLists = new List<PackagePickListImportResult>();
+        var unresolvedConflicts = new List<string>();
+
+        foreach (var packagePickList in (manifest.PickLists ?? []))
+        {
+            if (!existingBySlug.TryGetValue(packagePickList.Slug, out var existing))
+            {
+                var picklist = CreatePickListFromPackage(workspaceId, packagePickList.Slug, packagePickList.Name, packagePickList.Description, packagePickList.Options);
+                dbContext.PickLists.Add(picklist);
+                existingSlugs.Add(picklist.Slug);
+                picklistIdBySlug[packagePickList.Slug] = picklist.Id;
+                importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, picklist.Slug, picklist.Id, "imported"));
+                continue;
+            }
+
+            var action = picklistResolutions.TryGetValue(packagePickList.Slug, out var resolvedAction) ? resolvedAction : null;
+            if (action is null)
+            {
+                if (PickListsMatch(existing, packagePickList))
+                {
+                    action = PackagePickListResolution.UseExisting;
+                }
+                else
+                {
+                    unresolvedConflicts.Add(packagePickList.Slug);
+                    continue;
+                }
+            }
+
+            switch (action)
+            {
+                case PackagePickListResolution.UseExisting:
+                    picklistIdBySlug[packagePickList.Slug] = existing.Id;
+                    importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, existing.Slug, existing.Id, "useExisting"));
+                    break;
+                case PackagePickListResolution.Replace:
+                    existing.Name = packagePickList.Name;
+                    existing.Description = packagePickList.Description;
+                    existing.UpdatedAt = DateTimeOffset.UtcNow;
+                    dbContext.PickListOptions.RemoveRange(existing.Options);
+                    existing.Options.Clear();
+                    foreach (var option in OrderedOptionsForImport(packagePickList.Options))
+                    {
+                        var entity = new PickListOption
+                        {
+                            PickListId = existing.Id,
+                            Label = option.Label,
+                            Value = option.Value,
+                            Order = option.Order
+                        };
+                        existing.Options.Add(entity);
+                        dbContext.PickListOptions.Add(entity);
+                    }
+
+                    picklistIdBySlug[packagePickList.Slug] = existing.Id;
+                    importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, existing.Slug, existing.Id, "replaced"));
+                    break;
+                case PackagePickListResolution.ImportAsNew:
+                    var newSlug = NextAvailableSlug(packagePickList.Slug, existingSlugs);
+                    var picklist = CreatePickListFromPackage(workspaceId, newSlug, packagePickList.Name, packagePickList.Description, packagePickList.Options);
+                    dbContext.PickLists.Add(picklist);
+                    existingSlugs.Add(newSlug);
+                    picklistIdBySlug[packagePickList.Slug] = picklist.Id;
+                    importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, newSlug, picklist.Id, "importedAsNew"));
+                    break;
+                default:
+                    return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Invalid picklist resolution",
+                        $"Resolution '{action}' is not supported for picklist '{packagePickList.Slug}'.");
+            }
+        }
+
+        if (unresolvedConflicts.Count > 0)
+        {
+            var preview = await BuildPreviewPayloadAsync(workspaceId, manifest, ct);
+            return this.Error(
+                StatusCodes.Status409Conflict,
+                CmsifyError.Conflict,
+                "Package import has unresolved conflicts",
+                "Provide resolutions for the listed picklists and try again.",
+                new Dictionary<string, object?>
+                {
+                    ["unresolvedPicklists"] = unresolvedConflicts,
+                    ["preview"] = preview
+                });
         }
 
         var sortedTemplates = TopologicalSort(manifest);
@@ -164,7 +292,7 @@ public sealed class PackagesController : ControllerBase
                 Notes = $"Imported from {manifest.PackageNamespace}/{manifest.Id}@{manifest.Version}"
             };
 
-            AddStructure(version, packageTemplate, templatesBySlug);
+            AddStructure(version, packageTemplate, templatesBySlug, picklistIdBySlug);
             await dbContext.TemplateVersions
                 .Where(candidate => candidate.TemplateId == template.Id && candidate.Status == TemplateVersionStatus.Published)
                 .ExecuteUpdateAsync(updates => updates.SetProperty(candidate => candidate.Status, TemplateVersionStatus.Archived), ct);
@@ -183,7 +311,7 @@ public sealed class PackagesController : ControllerBase
         }
 
         await dbContext.SaveChangesAsync(ct);
-        return Ok(new PackageImportResponse(manifest.PackageNamespace, manifest.Id, manifest.Version, imported, [], []));
+        return Ok(new PackageImportResponse(manifest.PackageNamespace, manifest.Id, manifest.Version, imported, [], [], importedPickLists));
     }
 
     [HttpGet("/api/v1/workspaces/{workspaceId:guid}/packages/export")]
@@ -205,6 +333,22 @@ public sealed class PackagesController : ControllerBase
         }
 
         var templates = await ResolveTemplatesAsync(workspaceId, selectedIds, ct);
+
+        var pickListIds = templates
+            .SelectMany(version => version.Fields)
+            .Select(field => ExtractPickListId(field.PrimitiveType, field.FieldConfig))
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .Distinct()
+            .ToArray();
+        var pickLists = pickListIds.Length == 0
+            ? []
+            : await dbContext.PickLists.AsNoTracking()
+                .Include(picklist => picklist.Options)
+                .Where(picklist => picklist.WorkspaceId == workspaceId && !picklist.IsDeleted && pickListIds.Contains(picklist.Id))
+                .ToListAsync(ct);
+        var picklistSlugById = pickLists.ToDictionary(picklist => picklist.Id, picklist => picklist.Slug);
+
         var manifest = new CtpPackageManifest(
             "1.0",
             packageNamespace,
@@ -215,13 +359,18 @@ public sealed class PackagesController : ControllerBase
             null,
             null,
             null,
-            templates.Select(ToPackageTemplate).OrderBy(template => template.Name).ToArray());
+            templates.Select(templateVersion => ToPackageTemplate(templateVersion, picklistSlugById)).OrderBy(template => template.Name).ToArray(),
+            pickLists.OrderBy(picklist => picklist.Slug).Select(picklist => new CtpPickList(
+                picklist.Slug,
+                picklist.Name,
+                picklist.Description,
+                picklist.Options.OrderBy(option => option.Order).Select(option => new CtpPickListOption(option.Label, option.Value, option.Order)).ToArray())).ToArray());
 
         var json = JsonSerializer.Serialize(manifest, JsonOptions);
         return File(Encoding.UTF8.GetBytes(json), "application/json", $"{packageNamespace}.{id}@{version}.ctp");
     }
 
-    private async Task<CtpPackageManifest> ReadManifestAsync(CancellationToken ct)
+    private async Task<(CtpPackageManifest Manifest, PackageImportResolutions? Resolutions)> ReadManifestAndResolutionsAsync(CancellationToken ct)
     {
         if (Request.HasFormContentType)
         {
@@ -232,13 +381,40 @@ public sealed class PackagesController : ControllerBase
                 throw new ArgumentException("Multipart import requires a .ctp file.");
             }
 
-            await using var stream = file.OpenReadStream();
-            return await JsonSerializer.DeserializeAsync<CtpPackageManifest>(stream, JsonOptions, ct)
-                ?? throw new ArgumentException("Package manifest is empty.");
+            CtpPackageManifest manifest;
+            await using (var stream = file.OpenReadStream())
+            {
+                manifest = await JsonSerializer.DeserializeAsync<CtpPackageManifest>(stream, JsonOptions, ct)
+                    ?? throw new ArgumentException("Package manifest is empty.");
+            }
+
+            PackageImportResolutions? resolutions = null;
+            if (form.TryGetValue("resolutions", out var resolutionsValue) && !string.IsNullOrWhiteSpace(resolutionsValue))
+            {
+                resolutions = JsonSerializer.Deserialize<PackageImportResolutions>(resolutionsValue.ToString(), JsonOptions);
+            }
+
+            return (manifest, resolutions);
         }
 
-        return await JsonSerializer.DeserializeAsync<CtpPackageManifest>(Request.Body, JsonOptions, ct)
+        using var document = await JsonDocument.ParseAsync(Request.Body, cancellationToken: ct);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("manifest", out var manifestElement))
+        {
+            var manifest = manifestElement.Deserialize<CtpPackageManifest>(JsonOptions)
+                ?? throw new ArgumentException("Package manifest is empty.");
+            PackageImportResolutions? resolutions = null;
+            if (root.TryGetProperty("resolutions", out var resolutionsElement) && resolutionsElement.ValueKind != JsonValueKind.Null)
+            {
+                resolutions = resolutionsElement.Deserialize<PackageImportResolutions>(JsonOptions);
+            }
+
+            return (manifest, resolutions);
+        }
+
+        var bare = root.Deserialize<CtpPackageManifest>(JsonOptions)
             ?? throw new ArgumentException("Package manifest is empty.");
+        return (bare, null);
     }
 
     private static IReadOnlyList<string> ValidateManifest(CtpPackageManifest manifest)
@@ -264,6 +440,34 @@ public sealed class PackagesController : ControllerBase
             errors.Add("version is required.");
         }
 
+        var picklistSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var picklist in (manifest.PickLists ?? []))
+        {
+            if (string.IsNullOrWhiteSpace(picklist.Slug))
+            {
+                errors.Add("PickList slug is required.");
+                continue;
+            }
+
+            if (!picklistSlugs.Add(picklist.Slug))
+            {
+                errors.Add($"Duplicate picklist slug '{picklist.Slug}'.");
+            }
+
+            var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var option in picklist.Options)
+            {
+                if (string.IsNullOrWhiteSpace(option.Label) || string.IsNullOrWhiteSpace(option.Value))
+                {
+                    errors.Add($"PickList '{picklist.Slug}' has an option missing a label or value.");
+                }
+                else if (!values.Add(option.Value))
+                {
+                    errors.Add($"PickList '{picklist.Slug}' has duplicate option value '{option.Value}'.");
+                }
+            }
+        }
+
         var slugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var template in manifest.Templates)
         {
@@ -283,6 +487,12 @@ public sealed class PackagesController : ControllerBase
             if (field.PrimitiveType.HasValue == !string.IsNullOrWhiteSpace(field.TemplateRef))
             {
                 errors.Add($"Field '{field.Key}' must define exactly one primitiveType or templateRef.");
+            }
+
+            var picklistRef = ExtractPickListRef(field.FieldConfig);
+            if (!string.IsNullOrWhiteSpace(picklistRef) && !picklistSlugs.Contains(picklistRef))
+            {
+                errors.Add($"Field '{field.Key}' references unknown picklist '{picklistRef}'.");
             }
         }
 
@@ -331,7 +541,7 @@ public sealed class PackagesController : ControllerBase
         }
     }
 
-    private static void AddStructure(TemplateVersion version, CtpTemplate packageTemplate, IReadOnlyDictionary<string, Template> templatesBySlug)
+    private static void AddStructure(TemplateVersion version, CtpTemplate packageTemplate, IReadOnlyDictionary<string, Template> templatesBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug)
     {
         foreach (var packageSection in packageTemplate.Sections.OrderBy(section => section.Order))
         {
@@ -347,17 +557,17 @@ public sealed class PackagesController : ControllerBase
 
             foreach (var packageField in packageSection.Fields.OrderBy(field => field.Order))
             {
-                version.Fields.Add(ToField(version.Id, section.Id, packageField, templatesBySlug));
+                version.Fields.Add(ToField(version.Id, section.Id, packageField, templatesBySlug, picklistIdBySlug));
             }
         }
 
         foreach (var packageField in packageTemplate.Fields.OrderBy(field => field.Order))
         {
-            version.Fields.Add(ToField(version.Id, null, packageField, templatesBySlug));
+            version.Fields.Add(ToField(version.Id, null, packageField, templatesBySlug, picklistIdBySlug));
         }
     }
 
-    private static TemplateField ToField(Guid versionId, Guid? sectionId, CtpField packageField, IReadOnlyDictionary<string, Template> templatesBySlug) =>
+    private static TemplateField ToField(Guid versionId, Guid? sectionId, CtpField packageField, IReadOnlyDictionary<string, Template> templatesBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug) =>
         new()
         {
             TemplateVersionId = versionId,
@@ -373,7 +583,7 @@ public sealed class PackagesController : ControllerBase
             CompositionMode = packageField.CompositionMode,
             PrimitiveType = packageField.PrimitiveType,
             TemplateId = string.IsNullOrWhiteSpace(packageField.TemplateRef) ? null : templatesBySlug[packageField.TemplateRef].Id,
-            FieldConfig = packageField.FieldConfig?.Clone()
+            FieldConfig = RewriteFieldConfigForImport(packageField.FieldConfig, picklistIdBySlug)
         };
 
     private async Task<IReadOnlyList<TemplateVersion>> ResolveTemplatesAsync(Guid workspaceId, IReadOnlyList<Guid> selectedIds, CancellationToken ct)
@@ -412,7 +622,7 @@ public sealed class PackagesController : ControllerBase
         return resolved.Values.ToArray();
     }
 
-    private CtpTemplate ToPackageTemplate(TemplateVersion version)
+    private CtpTemplate ToPackageTemplate(TemplateVersion version, IReadOnlyDictionary<Guid, string> picklistSlugById)
     {
         var template = dbContext.Templates.AsNoTracking().First(item => item.Id == version.TemplateId);
         return new CtpTemplate(
@@ -424,11 +634,11 @@ public sealed class PackagesController : ControllerBase
                 section.Description,
                 section.Order,
                 section.IsCollapsible,
-                version.Fields.Where(field => field.SectionId == section.Id).OrderBy(field => field.Order).Select(field => ToPackageField(field)).ToArray())).ToArray(),
-            version.Fields.Where(field => field.SectionId is null).OrderBy(field => field.Order).Select(ToPackageField).ToArray());
+                version.Fields.Where(field => field.SectionId == section.Id).OrderBy(field => field.Order).Select(field => ToPackageField(field, picklistSlugById)).ToArray())).ToArray(),
+            version.Fields.Where(field => field.SectionId is null).OrderBy(field => field.Order).Select(field => ToPackageField(field, picklistSlugById)).ToArray());
     }
 
-    private CtpField ToPackageField(TemplateField field)
+    private CtpField ToPackageField(TemplateField field, IReadOnlyDictionary<Guid, string> picklistSlugById)
     {
         string? templateRef = null;
         if (field.TemplateId.HasValue)
@@ -436,7 +646,8 @@ public sealed class PackagesController : ControllerBase
             templateRef = dbContext.Templates.AsNoTracking().Where(template => template.Id == field.TemplateId.Value).Select(template => template.Slug).FirstOrDefault();
         }
 
-        return new CtpField(field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, templateRef, field.FieldConfig);
+        var fieldConfig = RewriteFieldConfigForExport(field.FieldConfig, field.PrimitiveType, picklistSlugById);
+        return new CtpField(field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, templateRef, fieldConfig);
     }
 
     private async Task<IReadOnlyList<CtpPackageManifest>> LoadOfficialPackagesAsync(CancellationToken ct)
@@ -484,6 +695,224 @@ public sealed class PackagesController : ControllerBase
 
         return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }
+
+    private async Task<ActionResult<PackageImportPreviewResponse>> BuildPreviewAsync(Guid workspaceId, CtpPackageManifest manifest, CancellationToken ct)
+    {
+        var validationErrors = ValidateManifest(manifest);
+        if (validationErrors.Count > 0)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, CmsifyError.ValidationFailed, "Package manifest is invalid", extensions: new Dictionary<string, object?> { ["errors"] = validationErrors });
+        }
+
+        return Ok(await BuildPreviewPayloadAsync(workspaceId, manifest, ct));
+    }
+
+    private async Task<PackageImportPreviewResponse> BuildPreviewPayloadAsync(Guid workspaceId, CtpPackageManifest manifest, CancellationToken ct)
+    {
+        var existingPickLists = await dbContext.PickLists.AsNoTracking()
+            .Include(picklist => picklist.Options)
+            .Where(picklist => picklist.WorkspaceId == workspaceId && !picklist.IsDeleted)
+            .ToListAsync(ct);
+        var existingBySlug = existingPickLists.ToDictionary(picklist => picklist.Slug, picklist => picklist, StringComparer.OrdinalIgnoreCase);
+
+        var picklistPreviews = (manifest.PickLists ?? []).Select(picklist =>
+        {
+            var incomingOptions = picklist.Options
+                .OrderBy(option => option.Order)
+                .Select(option => new PackagePickListOptionPreview(option.Label, option.Value, option.Order))
+                .ToArray();
+            if (!existingBySlug.TryGetValue(picklist.Slug, out var existing))
+            {
+                return new PackagePickListPreview(picklist.Slug, picklist.Name, picklist.Description, incomingOptions, "new", null, null, null, null, PackagePickListResolution.ImportAsNew);
+            }
+
+            var existingOptions = existing.Options
+                .OrderBy(option => option.Order)
+                .Select(option => new PackagePickListOptionPreview(option.Label, option.Value, option.Order))
+                .ToArray();
+            var identical = PickListsMatch(existing, picklist);
+            var status = identical ? "identical" : "conflict";
+            var suggested = identical ? PackagePickListResolution.UseExisting : PackagePickListResolution.ImportAsNew;
+            return new PackagePickListPreview(picklist.Slug, picklist.Name, picklist.Description, incomingOptions, status, existing.Id, existing.Name, existing.Description, existingOptions, suggested);
+        }).ToArray();
+
+        var existingTemplateSlugs = await dbContext.Templates.AsNoTracking()
+            .Where(template => template.WorkspaceId == workspaceId && !template.IsDeleted)
+            .Select(template => template.Slug)
+            .ToListAsync(ct);
+        var existingTemplateSet = new HashSet<string>(existingTemplateSlugs, StringComparer.OrdinalIgnoreCase);
+        var templatePreviews = manifest.Templates.Select(template => new PackageTemplatePreview(
+            template.Slug,
+            template.Name,
+            existingTemplateSet.Contains(template.Slug) ? "update" : "new")).ToArray();
+
+        return new PackageImportPreviewResponse(manifest.PackageNamespace, manifest.Id, manifest.Version, picklistPreviews, templatePreviews);
+    }
+
+    private static bool PickListsMatch(PickList existing, CtpPickList incoming)
+    {
+        if (existing.Options.Count != incoming.Options.Count)
+        {
+            return false;
+        }
+
+        var existingOrdered = existing.Options.OrderBy(option => option.Order).ToArray();
+        var incomingOrdered = incoming.Options.OrderBy(option => option.Order).ToArray();
+        for (var i = 0; i < existingOrdered.Length; i++)
+        {
+            if (!string.Equals(existingOrdered[i].Label, incomingOrdered[i].Label, StringComparison.Ordinal)
+                || !string.Equals(existingOrdered[i].Value, incomingOrdered[i].Value, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static PickList CreatePickListFromPackage(Guid workspaceId, string slug, string name, string? description, IReadOnlyList<CtpPickListOption> options)
+    {
+        var picklist = new PickList
+        {
+            WorkspaceId = workspaceId,
+            Slug = slug,
+            Name = name,
+            Description = description
+        };
+
+        foreach (var option in OrderedOptionsForImport(options))
+        {
+            picklist.Options.Add(new PickListOption
+            {
+                PickListId = picklist.Id,
+                Label = option.Label,
+                Value = option.Value,
+                Order = option.Order
+            });
+        }
+
+        return picklist;
+    }
+
+    private static IEnumerable<CtpPickListOption> OrderedOptionsForImport(IReadOnlyList<CtpPickListOption> options) =>
+        options.Select((option, index) => new CtpPickListOption(option.Label, option.Value, option.Order == 0 && index != 0 ? index : option.Order))
+            .OrderBy(option => option.Order);
+
+    private static string NextAvailableSlug(string baseSlug, ISet<string> taken)
+    {
+        for (var i = 2; i < int.MaxValue; i++)
+        {
+            var candidate = $"{baseSlug}-{i}";
+            if (!taken.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException($"Could not find an available slug derived from '{baseSlug}'.");
+    }
+
+    private static Guid? ExtractPickListId(PrimitiveType? primitiveType, JsonElement? fieldConfig)
+    {
+        if (primitiveType != PrimitiveType.PickList || !fieldConfig.HasValue || fieldConfig.Value.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!fieldConfig.Value.TryGetProperty("picklistId", out var idElement)
+            || idElement.ValueKind != JsonValueKind.String
+            || !Guid.TryParse(idElement.GetString(), out var id))
+        {
+            return null;
+        }
+
+        return id;
+    }
+
+    private static string? ExtractPickListRef(JsonElement? fieldConfig)
+    {
+        if (!fieldConfig.HasValue || fieldConfig.Value.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!fieldConfig.Value.TryGetProperty("picklistRef", out var refElement) || refElement.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return refElement.GetString();
+    }
+
+    private static JsonElement? RewriteFieldConfigForImport(JsonElement? fieldConfig, IReadOnlyDictionary<string, Guid> picklistIdBySlug)
+    {
+        if (!fieldConfig.HasValue || fieldConfig.Value.ValueKind != JsonValueKind.Object)
+        {
+            return fieldConfig?.Clone();
+        }
+
+        var picklistRef = ExtractPickListRef(fieldConfig);
+        if (picklistRef is null || !picklistIdBySlug.TryGetValue(picklistRef, out var id))
+        {
+            return fieldConfig?.Clone();
+        }
+
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(ms))
+        {
+            writer.WriteStartObject();
+            foreach (var property in fieldConfig.Value.EnumerateObject())
+            {
+                if (property.NameEquals("picklistRef") || property.NameEquals("picklistId"))
+                {
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteString("picklistId", id.ToString());
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(ms.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static JsonElement? RewriteFieldConfigForExport(JsonElement? fieldConfig, PrimitiveType? primitiveType, IReadOnlyDictionary<Guid, string> picklistSlugById)
+    {
+        if (primitiveType != PrimitiveType.PickList || !fieldConfig.HasValue || fieldConfig.Value.ValueKind != JsonValueKind.Object)
+        {
+            return fieldConfig?.Clone();
+        }
+
+        var picklistId = ExtractPickListId(primitiveType, fieldConfig);
+        if (picklistId is null || !picklistSlugById.TryGetValue(picklistId.Value, out var slug))
+        {
+            return fieldConfig?.Clone();
+        }
+
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(ms))
+        {
+            writer.WriteStartObject();
+            foreach (var property in fieldConfig.Value.EnumerateObject())
+            {
+                if (property.NameEquals("picklistId") || property.NameEquals("picklistRef"))
+                {
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteString("picklistRef", slug);
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(ms.ToArray());
+        return document.RootElement.Clone();
+    }
 }
 
 public sealed record CtpPackageManifest(
@@ -496,7 +925,12 @@ public sealed record CtpPackageManifest(
     string? Author,
     string? License,
     string? Homepage,
-    IReadOnlyList<CtpTemplate> Templates);
+    IReadOnlyList<CtpTemplate> Templates,
+    [property: JsonPropertyName("picklists")] IReadOnlyList<CtpPickList>? PickLists = null);
+
+public sealed record CtpPickList(string Slug, string Name, string? Description, IReadOnlyList<CtpPickListOption> Options);
+
+public sealed record CtpPickListOption(string Label, string Value, int Order);
 
 public sealed record CtpTemplate(string Slug, string Name, string? Description, IReadOnlyList<CtpSection> Sections, IReadOnlyList<CtpField> Fields);
 
@@ -516,9 +950,50 @@ public sealed record CtpField(
     string? TemplateRef,
     JsonElement? FieldConfig);
 
-public sealed record PackageImportResponse(string PackageNamespace, string Id, string Version, IReadOnlyList<PackageTemplateImportResult> Imported, IReadOnlyList<string> Skipped, IReadOnlyList<string> Errors);
+public sealed record PackageImportResponse(
+    string PackageNamespace,
+    string Id,
+    string Version,
+    IReadOnlyList<PackageTemplateImportResult> Imported,
+    IReadOnlyList<string> Skipped,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<PackagePickListImportResult> PickLists);
 
 public sealed record PackageTemplateImportResult(Guid TemplateId, string Slug, string Name, Guid TemplateVersionId, int VersionNumber);
+
+public sealed record PackagePickListImportResult(string Slug, string ResolvedSlug, Guid PickListId, string Action);
+
+public sealed record PackageImportResolutions(IReadOnlyDictionary<string, string>? PickLists);
+
+public sealed record PackageImportPreviewResponse(
+    string PackageNamespace,
+    string Id,
+    string Version,
+    IReadOnlyList<PackagePickListPreview> PickLists,
+    IReadOnlyList<PackageTemplatePreview> Templates);
+
+public sealed record PackagePickListPreview(
+    string Slug,
+    string Name,
+    string? Description,
+    IReadOnlyList<PackagePickListOptionPreview> Options,
+    string Status,
+    Guid? ExistingId,
+    string? ExistingName,
+    string? ExistingDescription,
+    IReadOnlyList<PackagePickListOptionPreview>? ExistingOptions,
+    string SuggestedAction);
+
+public sealed record PackagePickListOptionPreview(string Label, string Value, int Order);
+
+public sealed record PackageTemplatePreview(string Slug, string Name, string Status);
+
+public static class PackagePickListResolution
+{
+    public const string UseExisting = "useExisting";
+    public const string Replace = "replace";
+    public const string ImportAsNew = "importAsNew";
+}
 
 public sealed record OfficialPackageResponse(string PackageNamespace, string Id, string Version, string Name, string? Description, string? Author, string? License, string? Homepage, int TemplateCount, IReadOnlyList<OfficialPackageTemplateResponse> Templates);
 
@@ -544,7 +1019,8 @@ internal static class CtpSchema
             ["author"] = new { type = new[] { "string", "null" } },
             ["license"] = new { type = new[] { "string", "null" } },
             ["homepage"] = new { type = new[] { "string", "null" } },
-            ["templates"] = new { type = "array", minItems = 1 }
+            ["templates"] = new { type = "array", minItems = 1 },
+            ["picklists"] = new { type = new[] { "array", "null" } }
         }
     };
 }

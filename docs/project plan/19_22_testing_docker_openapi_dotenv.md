@@ -366,8 +366,8 @@ ConnectionStrings__DefaultConnection=Host=localhost;Database=cmsify;Username=cms
 # Auth
 Auth__BcryptCost=12
 Auth__SessionExpiryHours=8
-Auth__Bootstrap__AdminEmail=admin@example.com
-Auth__Bootstrap__AdminPassword=CHANGE_ME_ON_FIRST_RUN
+Seed__Admin__Email=admin@example.com
+Seed__Admin__Password=CHANGE_ME_ON_FIRST_RUN
 
 # OIDC (optional)
 Auth__Oidc__Enabled=false

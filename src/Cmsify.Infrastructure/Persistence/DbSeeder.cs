@@ -30,23 +30,21 @@ public sealed class DbSeeder : IDbSeeder
 
         if (!await dbContext.Users.AnyAsync(ct))
         {
-            var adminEmail = configuration["Auth:Bootstrap:AdminEmail"]
-                ?? configuration["Seed:Admin:Email"]
-                ?? "admin@localhost";
-            var adminPassword = configuration["Auth:Bootstrap:AdminPassword"];
+            var adminEmail = configuration["Seed:Admin:Email"] ?? "admin@localhost";
+            var adminPassword = configuration["Seed:Admin:Password"];
             var passwordHash = !string.IsNullOrWhiteSpace(adminPassword)
                 ? BCrypt.Net.BCrypt.HashPassword(adminPassword, configuration.GetValue("Auth:BcryptCost", 12))
                 : configuration["Seed:Admin:PasswordHash"];
 
             if (string.IsNullOrWhiteSpace(passwordHash))
             {
-                throw new InvalidOperationException("Auth:Bootstrap:AdminPassword must be configured before the default admin user can be seeded.");
+                throw new InvalidOperationException("Seed:Admin:Password or Seed:Admin:PasswordHash must be configured before the default admin user can be seeded.");
             }
 
             dbContext.Users.Add(new User
             {
                 Email = adminEmail,
-                DisplayName = configuration["Auth:Bootstrap:AdminDisplayName"] ?? configuration["Seed:Admin:DisplayName"] ?? "Cmsify Admin",
+                DisplayName = configuration["Seed:Admin:DisplayName"] ?? "Cmsify Admin",
                 PasswordHash = passwordHash,
                 Role = UserRole.Admin,
                 IsSuperAdmin = true,

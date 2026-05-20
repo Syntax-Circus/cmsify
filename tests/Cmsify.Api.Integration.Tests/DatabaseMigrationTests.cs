@@ -25,8 +25,8 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Auth:Bootstrap:AdminEmail"] = "admin@example.test",
-                ["Auth:Bootstrap:AdminPassword"] = "change-this-temporary-password",
+                ["Seed:Admin:Email"] = "admin@example.test",
+                ["Seed:Admin:Password"] = "change-this-temporary-password",
                 ["Seed:DefaultWorkspace:Name"] = "Default",
                 ["Seed:DefaultWorkspace:Slug"] = "default"
             })

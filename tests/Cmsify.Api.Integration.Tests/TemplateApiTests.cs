@@ -27,8 +27,8 @@ public sealed class TemplateApiTests : IAsyncLifetime
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminEmail", "admin@example.test");
-        Environment.SetEnvironmentVariable("Auth__Bootstrap__AdminPassword", "change-this-temporary-password");
+        Environment.SetEnvironmentVariable("Seed__Admin__Email", "admin@example.test");
+        Environment.SetEnvironmentVariable("Seed__Admin__Password", "change-this-temporary-password");
         Environment.SetEnvironmentVariable("Auth__SessionSlidingExpiryMinutes", "30");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Name", "Default");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
@@ -187,6 +187,228 @@ public sealed class TemplateApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ImportPackage_WithPickList_CreatesPickListAndBindsField()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var picklistConfig = System.Text.Json.JsonDocument.Parse("{\"picklistRef\":\"rating\",\"multiple\":false}").RootElement;
+        var manifest = new CtpPackageManifest(
+            "1.0", "test", "picklist-base", "1.0.0", "PickList Base", null, null, null, null,
+            [
+                new CtpTemplate("review", "Review", null, [],
+                [
+                    new CtpField("rating", "Rating", null, 0, true, 1, 1, false, CompositionMode.Inline, PrimitiveType.PickList, null, picklistConfig)
+                ])
+            ],
+            [
+                new CtpPickList("rating", "Rating", null,
+                [
+                    new CtpPickListOption("1", "1", 0),
+                    new CtpPickListOption("2", "2", 1)
+                ])
+            ]);
+
+        using var importResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest);
+        importResponse.EnsureSuccessStatusCode();
+        var importBody = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        Assert.NotNull(importBody);
+        Assert.NotNull(importBody.PickLists);
+        Assert.Single(importBody.PickLists!);
+        Assert.Equal("imported", importBody.PickLists![0].Action);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var picklist = await dbContext.PickLists.Include(item => item.Options).FirstAsync(item => item.WorkspaceId == workspaceId && item.Slug == "rating");
+        Assert.Equal(2, picklist.Options.Count);
+
+        var field = await dbContext.TemplateFields.AsNoTracking()
+            .Where(item => item.Key == "rating" && item.PrimitiveType == PrimitiveType.PickList)
+            .FirstAsync();
+        Assert.NotNull(field.FieldConfig);
+        Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistId", out var idElement));
+        Assert.Equal(picklist.Id.ToString(), idElement.GetString());
+        Assert.False(field.FieldConfig!.Value.TryGetProperty("picklistRef", out _));
+    }
+
+    [Fact]
+    public async Task ImportPackage_ConflictingPickList_RequiresResolution()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using (var seedResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/picklists",
+            new PickListRequest("Severity", "severity", null,
+            [
+                new PickListOptionRequest("Low", "low", 0),
+                new PickListOptionRequest("High", "high", 1)
+            ])))
+        {
+            seedResponse.EnsureSuccessStatusCode();
+        }
+
+        var conflictingManifest = new CtpPackageManifest(
+            "1.0", "test", "conflicting", "1.0.0", "Conflicting Package", null, null, null, null,
+            [
+                new CtpTemplate("ticket", "Ticket", null, [],
+                [
+                    new CtpField("severity", "Severity", null, 0, true, 1, 1, false, CompositionMode.Inline, PrimitiveType.PickList, null,
+                        System.Text.Json.JsonDocument.Parse("{\"picklistRef\":\"severity\"}").RootElement)
+                ])
+            ],
+            [
+                new CtpPickList("severity", "Severity", null,
+                [
+                    new CtpPickListOption("Critical", "critical", 0),
+                    new CtpPickListOption("Warning", "warning", 1)
+                ])
+            ]);
+
+        using var unresolvedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", conflictingManifest);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, unresolvedResponse.StatusCode);
+
+        using var previewResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import/preview", conflictingManifest);
+        previewResponse.EnsureSuccessStatusCode();
+        var preview = await previewResponse.Content.ReadFromJsonAsync<PackageImportPreviewResponse>();
+        Assert.NotNull(preview);
+        var severityPreview = Assert.Single(preview!.PickLists);
+        Assert.Equal("conflict", severityPreview.Status);
+        Assert.Equal("importAsNew", severityPreview.SuggestedAction);
+
+        var envelope = new
+        {
+            manifest = conflictingManifest,
+            resolutions = new { pickLists = new Dictionary<string, string> { ["severity"] = "importAsNew" } }
+        };
+        using var resolvedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", envelope);
+        resolvedResponse.EnsureSuccessStatusCode();
+        var resolvedBody = await resolvedResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        Assert.NotNull(resolvedBody);
+        var picklistResult = Assert.Single(resolvedBody!.PickLists!);
+        Assert.Equal("importedAsNew", picklistResult.Action);
+        Assert.Equal("severity-2", picklistResult.ResolvedSlug);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var picklists = await dbContext.PickLists.AsNoTracking()
+            .Where(item => item.WorkspaceId == workspaceId && !item.IsDeleted)
+            .OrderBy(item => item.Slug)
+            .ToListAsync();
+        Assert.Equal(2, picklists.Count);
+        Assert.Equal("severity", picklists[0].Slug);
+        Assert.Equal("severity-2", picklists[1].Slug);
+    }
+
+    [Fact]
+    public async Task ImportPackage_ReplaceResolution_UpdatesExistingPickList()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using (var seedResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/picklists",
+            new PickListRequest("Priority", "priority", null,
+            [
+                new PickListOptionRequest("Low", "low", 0)
+            ])))
+        {
+            seedResponse.EnsureSuccessStatusCode();
+        }
+
+        var manifest = new CtpPackageManifest(
+            "1.0", "test", "priority-pack", "1.0.0", "Priority Pack", null, null, null, null,
+            [
+                new CtpTemplate("task", "Task", null, [],
+                [
+                    new CtpField("priority", "Priority", null, 0, true, 1, 1, false, CompositionMode.Inline, PrimitiveType.PickList, null,
+                        System.Text.Json.JsonDocument.Parse("{\"picklistRef\":\"priority\"}").RootElement)
+                ])
+            ],
+            [
+                new CtpPickList("priority", "Priority", null,
+                [
+                    new CtpPickListOption("Low", "low", 0),
+                    new CtpPickListOption("Medium", "medium", 1),
+                    new CtpPickListOption("High", "high", 2)
+                ])
+            ]);
+
+        var envelope = new
+        {
+            manifest,
+            resolutions = new { pickLists = new Dictionary<string, string> { ["priority"] = "replace" } }
+        };
+        using var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", envelope);
+        response.EnsureSuccessStatusCode();
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var picklist = await dbContext.PickLists.Include(item => item.Options).AsNoTracking()
+            .FirstAsync(item => item.WorkspaceId == workspaceId && item.Slug == "priority");
+        Assert.Equal(3, picklist.Options.Count);
+        Assert.Contains(picklist.Options, option => option.Value == "high");
+    }
+
+    [Fact]
+    public async Task ExportPackage_WithPickListField_EmitsPickListAndRefSlug()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var manifest = new CtpPackageManifest(
+            "1.0", "test", "export-source", "1.0.0", "Export Source", null, null, null, null,
+            [
+                new CtpTemplate("survey", "Survey", null, [],
+                [
+                    new CtpField("answer", "Answer", null, 0, true, 1, 1, false, CompositionMode.Inline, PrimitiveType.PickList, null,
+                        System.Text.Json.JsonDocument.Parse("{\"picklistRef\":\"yesno\"}").RootElement)
+                ])
+            ],
+            [
+                new CtpPickList("yesno", "Yes/No", null,
+                [
+                    new CtpPickListOption("Yes", "yes", 0),
+                    new CtpPickListOption("No", "no", 1)
+                ])
+            ]);
+
+        using var importResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest);
+        importResponse.EnsureSuccessStatusCode();
+        var importBody = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        var templateId = importBody!.Imported.Single().TemplateId;
+
+        using var exportResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/packages/export?templateIds={templateId}&packageNamespace=test&id=export-out&version=1.0.0");
+        exportResponse.EnsureSuccessStatusCode();
+        var exportJsonOptions = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+        };
+        var exported = await exportResponse.Content.ReadFromJsonAsync<CtpPackageManifest>(exportJsonOptions);
+        Assert.NotNull(exported);
+        Assert.NotNull(exported!.PickLists);
+        Assert.Single(exported.PickLists!);
+        Assert.Equal("yesno", exported.PickLists![0].Slug);
+        var field = exported.Templates.Single().Fields.Single();
+        Assert.NotNull(field.FieldConfig);
+        Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistRef", out var refElement));
+        Assert.Equal("yesno", refElement.GetString());
+        Assert.False(field.FieldConfig!.Value.TryGetProperty("picklistId", out _));
+    }
+
+    [Fact]
     public async Task AuthenticatedRequest_ExtendsSlidingExpiry_AndReturnsHeader()
     {
         await using var factory = new WebApplicationFactory<Program>();
@@ -243,8 +465,8 @@ public sealed class TemplateApiTests : IAsyncLifetime
         foreach (var key in new[]
         {
             "ConnectionStrings__Cmsify",
-            "Auth__Bootstrap__AdminEmail",
-            "Auth__Bootstrap__AdminPassword",
+            "Seed__Admin__Email",
+            "Seed__Admin__Password",
             "Auth__SessionSlidingExpiryMinutes",
             "Seed__DefaultWorkspace__Name",
             "Seed__DefaultWorkspace__Slug"
