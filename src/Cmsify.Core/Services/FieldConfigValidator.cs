@@ -26,6 +26,43 @@ public sealed class FieldConfigValidator : IFieldConfigValidator
             failures.Add(new ValidationFailure("fieldConfig.maxLength", "Text maxLength must be a positive integer."));
         }
 
+        if (config.Value.TryGetProperty(TextFormatHints.ConfigKey, out var formatHint))
+        {
+            if (type != PrimitiveType.Text)
+            {
+                failures.Add(new ValidationFailure($"fieldConfig.{TextFormatHints.ConfigKey}", "formatHint is only supported on Text fields."));
+            }
+            else if (formatHint.ValueKind != JsonValueKind.String || !TextFormatHints.TryParse(formatHint.GetString(), out _))
+            {
+                failures.Add(new ValidationFailure($"fieldConfig.{TextFormatHints.ConfigKey}", "formatHint must be one of: plaintext, html, markdown, json, xml, yaml, csv, toml, sql, code, url, email, regex."));
+            }
+        }
+
+        if (config.Value.TryGetProperty(TextFormatHints.LanguageConfigKey, out var formatLanguage))
+        {
+            var effectiveHint = TextFormatHints.GetEffectiveHint(config);
+            if (type != PrimitiveType.Text || effectiveHint != TextFormatHint.Code)
+            {
+                failures.Add(new ValidationFailure($"fieldConfig.{TextFormatHints.LanguageConfigKey}", "formatLanguage is only valid when formatHint is 'code'."));
+            }
+            else if (formatLanguage.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(formatLanguage.GetString()))
+            {
+                failures.Add(new ValidationFailure($"fieldConfig.{TextFormatHints.LanguageConfigKey}", "formatLanguage must be a non-empty string."));
+            }
+        }
+
+        if (config.Value.TryGetProperty(TextFormatHints.ValidateFormatConfigKey, out var validateFormat))
+        {
+            if (type != PrimitiveType.Text)
+            {
+                failures.Add(new ValidationFailure($"fieldConfig.{TextFormatHints.ValidateFormatConfigKey}", "validateFormat is only supported on Text fields."));
+            }
+            else if (validateFormat.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                failures.Add(new ValidationFailure($"fieldConfig.{TextFormatHints.ValidateFormatConfigKey}", "validateFormat must be a boolean."));
+            }
+        }
+
         if (type == PrimitiveType.PickList)
         {
             if (config.Value.TryGetProperty("picklistId", out var picklistId)

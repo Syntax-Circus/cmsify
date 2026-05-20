@@ -91,6 +91,16 @@ public sealed class ContentValidator : IContentValidator
         if (value.ValueKind != expected)
         {
             failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' expects {expected} values."));
+            return;
+        }
+
+        if (field.PrimitiveType == PrimitiveType.Text && TextFormatHints.ShouldValidateFormat(field.FieldConfig))
+        {
+            var hint = TextFormatHints.GetEffectiveHint(field.FieldConfig);
+            if (!TextFormatHints.TryValidateValue(hint, value.TextValue, out var error))
+            {
+                failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' value is not valid {hint.ToString().ToLowerInvariant()}: {error}"));
+            }
         }
     }
 }

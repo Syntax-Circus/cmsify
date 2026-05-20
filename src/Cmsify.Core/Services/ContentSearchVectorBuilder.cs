@@ -14,6 +14,7 @@ public sealed partial class ContentSearchVectorBuilder : IContentSearchVectorBui
 
         var searchableFieldIds = version.Fields
             .Where(field => field.PrimitiveType is PrimitiveType.Text or PrimitiveType.RichText or PrimitiveType.Markdown or PrimitiveType.PickList or PrimitiveType.Link or PrimitiveType.Quote)
+            .Where(field => field.PrimitiveType != PrimitiveType.Text || TextFormatHints.IsSearchIndexable(TextFormatHints.GetEffectiveHint(field.FieldConfig)))
             .Select(field => field.Id)
             .ToHashSet();
 

@@ -29,7 +29,7 @@ public sealed class TagsController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var tags = await dbContext.Tags.AsNoTracking()
@@ -46,7 +46,7 @@ public sealed class TagsController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var tag = await dbContext.Tags.FirstOrDefaultAsync(tag => tag.Id == id && tag.WorkspaceId == workspaceId && !tag.IsDeleted, ct);

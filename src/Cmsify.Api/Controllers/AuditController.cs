@@ -32,7 +32,7 @@ public sealed class AuditController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         return await Query(workspaceId, request, ct);

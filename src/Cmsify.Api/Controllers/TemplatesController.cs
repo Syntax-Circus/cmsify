@@ -35,7 +35,7 @@ public sealed class TemplatesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var query = dbContext.Templates.AsNoTracking().Where(template => template.WorkspaceId == workspaceId && !template.IsDeleted);
@@ -60,7 +60,7 @@ public sealed class TemplatesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var template = new Template
@@ -89,7 +89,7 @@ public sealed class TemplatesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var template = await dbContext.Templates.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id && item.WorkspaceId == workspaceId && !item.IsDeleted, ct);
@@ -108,7 +108,7 @@ public sealed class TemplatesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var template = await dbContext.Templates.FirstOrDefaultAsync(item => item.Id == id && item.WorkspaceId == workspaceId && !item.IsDeleted, ct);
@@ -137,7 +137,7 @@ public sealed class TemplatesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var template = await dbContext.Templates.FirstOrDefaultAsync(item => item.Id == id && item.WorkspaceId == workspaceId && !item.IsDeleted, ct);

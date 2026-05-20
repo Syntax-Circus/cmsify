@@ -45,7 +45,7 @@ public sealed class WebhooksController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var query = dbContext.WebhookEndpoints.AsNoTracking()
@@ -63,7 +63,7 @@ public sealed class WebhooksController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         if (!ValidateEvents(request.Events, out var eventError))

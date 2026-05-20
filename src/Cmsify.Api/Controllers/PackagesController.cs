@@ -65,7 +65,7 @@ public sealed class PackagesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var manifest = await ReadManifestAsync(ct);
@@ -78,7 +78,7 @@ public sealed class PackagesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var manifest = (await LoadOfficialPackagesAsync(ct)).FirstOrDefault(package => string.Equals(package.Id, packageId, StringComparison.OrdinalIgnoreCase));
@@ -192,7 +192,7 @@ public sealed class PackagesController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var selectedIds = templateIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

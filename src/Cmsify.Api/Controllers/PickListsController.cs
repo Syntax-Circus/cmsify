@@ -29,7 +29,7 @@ public sealed class PickListsController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var query = dbContext.PickLists.AsNoTracking()
@@ -51,7 +51,7 @@ public sealed class PickListsController : ControllerBase
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var picklist = await dbContext.PickLists.AsNoTracking()
@@ -72,7 +72,7 @@ public sealed class PickListsController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var validation = ValidateRequest(request);
@@ -118,7 +118,7 @@ public sealed class PickListsController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var validation = ValidateRequest(request);
@@ -177,7 +177,7 @@ public sealed class PickListsController : ControllerBase
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
-            return Forbid();
+            return NotFound();
         }
 
         var picklist = await dbContext.PickLists.FirstOrDefaultAsync(item => item.Id == id && item.WorkspaceId == workspaceId && !item.IsDeleted, ct);

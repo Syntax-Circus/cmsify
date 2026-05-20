@@ -57,6 +57,23 @@ public enum ValueKind
     ChildContent
 }
 
+public enum TextFormatHint
+{
+    PlainText,
+    Html,
+    Markdown,
+    Json,
+    Xml,
+    Yaml,
+    Csv,
+    Toml,
+    Sql,
+    Code,
+    Url,
+    Email,
+    Regex
+}
+
 public enum UserRole
 {
     Reader,
