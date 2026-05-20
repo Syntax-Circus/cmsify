@@ -1,6 +1,9 @@
 @page "/workspaces/{WorkspaceId:guid}/templates/{TemplateId:guid}"
 @rendermode InteractiveServer
+@using System.Text.Json
+@using System.Text.Json.Nodes
 @inject TemplateApiClient Templates
+@inject PickListApiClient PickLists
 
 <div class="cms-builder">
     <div class="cms-builder__top">
@@ -21,42 +24,65 @@
     <div class="cms-builder__body">
         <aside class="cms-builder__tree">
             <h2 class="h6 text-muted">Structure</h2>
+            @if (!string.IsNullOrWhiteSpace(error))
+            {
+                <div class="alert alert-danger py-2 px-3 small">@error</div>
+            }
             @foreach (var section in Sections)
             {
-                <div class="cms-tree-section">@section.Name</div>
+                <button type="button" class="cms-tree-section cms-tree-section--button @(selectedSectionId == section.Id ? "is-active" : "")" @onclick="() => Select(section)">
+                    @section.Name
+                </button>
                 @foreach (var field in Fields.Where(f => f.SectionId == section.Id))
                 {
-                    <button class="cms-tree-field @(selected?.Id == field.Id ? "is-active" : "")" draggable="true" @onclick="() => Select(field)">
+                    <button type="button" class="cms-tree-field @(selectedFieldId == field.Id ? "is-active" : "")" draggable="true" @onclick="() => Select(field)">
                         <i class="bi bi-grip-vertical"></i> @field.Label
                     </button>
                 }
             }
-            @foreach (var field in Fields.Where(f => f.SectionId is null))
+            @if (Fields.Any(f => f.SectionId is null))
             {
-                <button class="cms-tree-field @(selected?.Id == field.Id ? "is-active" : "")" draggable="true" @onclick="() => Select(field)">
-                    <i class="bi bi-grip-vertical"></i> @field.Label
-                </button>
+                <div class="cms-tree-section">Ungrouped</div>
+                @foreach (var field in Fields.Where(f => f.SectionId is null))
+                {
+                    <button type="button" class="cms-tree-field @(selectedFieldId == field.Id ? "is-active" : "")" draggable="true" @onclick="() => Select(field)">
+                        <i class="bi bi-grip-vertical"></i> @field.Label
+                    </button>
+                }
             }
         </aside>
         <section class="cms-builder__detail">
-            @if (selected is null)
-            {
-                <EmptyState Title="Select a field" Body="Choose a field from the structure tree to edit its details." />
-            }
-            else
+            @if (SelectedField is not null)
             {
                 <div class="cms-card">
-                    <h2 class="h6">Field details</h2>
-                    <label class="form-label">Label</label>
-                    <InputText class="form-control mb-3" @bind-Value="edit.Label" disabled="@(!CanEdit)" />
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <div>
+                            <h2 class="h6 mb-1">Field details</h2>
+                            <div class="text-muted small">Choose the section and order to control where this field appears.</div>
+                        </div>
+                    </div>
+                    <label class="form-label mt-3">Label</label>
+                    <InputText class="form-control mb-3" @bind-Value="fieldEdit.Label" disabled="@(!CanEdit)" />
                     <label class="form-label">Key</label>
-                    <InputText class="form-control mb-3 font-monospace" @bind-Value="edit.Key" disabled="@(!CanEdit)" />
+                    <InputText class="form-control mb-3 font-monospace" @bind-Value="fieldEdit.Key" disabled="@(!CanEdit)" />
+                    <label class="form-label">Section</label>
+                    <select class="form-select mb-3" value="@FieldSectionValue" @onchange="OnFieldSectionChanged" disabled="@(!CanEdit)">
+                        <option value="">No section</option>
+                        @foreach (var section in Sections)
+                        {
+                            <option value="@section.Id">@section.Name</option>
+                        }
+                    </select>
                     <label class="form-label">Help text</label>
-                    <InputTextArea class="form-control mb-3" @bind-Value="edit.HelpText" disabled="@(!CanEdit)" />
+                    <InputTextArea class="form-control mb-3" @bind-Value="fieldEdit.HelpText" disabled="@(!CanEdit)" />
                     <div class="row g-3">
                         <div class="col-md-4">
+                            <label class="form-label">Order</label>
+                            <InputNumber class="form-control" @bind-Value="fieldEdit.Order" disabled="@(!CanEdit)" />
+                        </div>
+                        <div class="col-md-4">
                             <label class="form-label">Primitive type</label>
-                            <InputSelect class="form-select" @bind-Value="edit.PrimitiveType" disabled="@(!CanEdit)">
+                            <InputSelect class="form-select" @bind-Value="fieldEdit.PrimitiveType" disabled="@(!CanEdit)">
                                 @foreach (var type in Enum.GetValues<PrimitiveType>())
                                 {
                                     <option value="@type">@type</option>
@@ -65,26 +91,85 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Composition</label>
-                            <InputSelect class="form-select" @bind-Value="edit.CompositionMode" disabled="@(!CanEdit)">
+                            <InputSelect class="form-select" @bind-Value="fieldEdit.CompositionMode" disabled="@(!CanEdit)">
                                 <option value="@CompositionMode.Inline">Inline</option>
                                 <option value="@CompositionMode.Reference">Reference</option>
                             </InputSelect>
                         </div>
                         <div class="col-md-4">
+                            <label class="form-label">Min occurrences</label>
+                            <InputNumber class="form-control" @bind-Value="fieldEdit.MinOccurrences" disabled="@(!CanEdit)" />
+                        </div>
+                        <div class="col-md-4">
                             <label class="form-label">Max occurrences</label>
-                            <InputNumber class="form-control" @bind-Value="edit.MaxOccurrences" disabled="@(!CanEdit)" />
+                            <InputNumber class="form-control" @bind-Value="fieldEdit.MaxOccurrences" disabled="@(!CanEdit)" />
                         </div>
                     </div>
                     <div class="form-check form-switch my-3">
-                        <InputCheckbox class="form-check-input" @bind-Value="edit.IsRequired" disabled="@(!CanEdit)" />
+                        <InputCheckbox class="form-check-input" @bind-Value="fieldEdit.IsRequired" disabled="@(!CanEdit)" />
                         <label class="form-check-label">Required</label>
                     </div>
+                    @if (fieldEdit.PrimitiveType == PrimitiveType.PickList)
+                    {
+                        <div class="cms-card cms-card--inset mb-3">
+                            <h3 class="h6 mb-2">Picklist binding</h3>
+                            <label class="form-label">Picklist</label>
+                            <select class="form-select mb-3" value="@(fieldEdit.PicklistId?.ToString() ?? string.Empty)" @onchange="OnPicklistChanged" disabled="@(!CanEdit)">
+                                <option value="">— Select a picklist —</option>
+                                @foreach (var picklist in picklists)
+                                {
+                                    <option value="@picklist.Id">@picklist.Name (@picklist.OptionCount options)</option>
+                                }
+                            </select>
+                            @if (picklists.Count == 0)
+                            {
+                                <div class="alert alert-info py-2 px-3 small mb-3">
+                                    No picklists in this workspace yet. <a href="/workspaces/@WorkspaceId/picklists/new">Create one</a>.
+                                </div>
+                            }
+                            <div class="form-check form-switch">
+                                <InputCheckbox class="form-check-input" @bind-Value="fieldEdit.Multiple" disabled="@(!CanEdit)" />
+                                <label class="form-check-label">Allow multiple selections</label>
+                            </div>
+                        </div>
+                    }
                     @if (CycleWarning)
                     {
                         <div class="alert alert-warning">This selection may create a template cycle. The server validates cycles again when you save.</div>
                     }
                     <button class="btn btn-primary" disabled="@(!CanEdit)" @onclick="SaveFieldAsync">Save field</button>
                 </div>
+            }
+            else if (SelectedSection is not null)
+            {
+                <div class="cms-card">
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <div>
+                            <h2 class="h6 mb-1">Section details</h2>
+                            <div class="text-muted small">Edit the section metadata, then add fields directly into it.</div>
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!CanEdit)" @onclick="AddFieldAsync">Add Field Here</button>
+                    </div>
+                    <label class="form-label mt-3">Name</label>
+                    <InputText class="form-control mb-3" @bind-Value="sectionEdit.Name" disabled="@(!CanEdit)" />
+                    <label class="form-label">Description</label>
+                    <InputTextArea class="form-control mb-3" @bind-Value="sectionEdit.Description" disabled="@(!CanEdit)" />
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Order</label>
+                            <InputNumber class="form-control" @bind-Value="sectionEdit.Order" disabled="@(!CanEdit)" />
+                        </div>
+                    </div>
+                    <div class="form-check form-switch my-3">
+                        <InputCheckbox class="form-check-input" @bind-Value="sectionEdit.IsCollapsible" disabled="@(!CanEdit)" />
+                        <label class="form-check-label">Collapsible</label>
+                    </div>
+                    <button class="btn btn-primary" disabled="@(!CanEdit)" @onclick="SaveSectionAsync">Save section</button>
+                </div>
+            }
+            else
+            {
+                <EmptyState Title="Select a section or field" Body="Choose a section or field from the structure tree to edit its details." />
             }
         </section>
     </div>
@@ -98,14 +183,21 @@
 
     private TemplateResponse? template;
     private TemplateVersionResponse? version;
-    private TemplateFieldResponse? selected;
-    private FieldEdit edit = new();
+    private Guid? selectedSectionId;
+    private Guid? selectedFieldId;
+    private SectionEdit sectionEdit = new();
+    private FieldEdit fieldEdit = new();
+    private List<PickListSummaryResponse> picklists = [];
     private bool confirmPublish;
+    private string? error;
 
     private bool CanEdit => version?.Status == TemplateVersionStatus.Draft;
     private IEnumerable<TemplateSectionResponse> Sections => version is null ? Enumerable.Empty<TemplateSectionResponse>() : version.Sections.OrderBy(item => item.Order);
     private IEnumerable<TemplateFieldResponse> Fields => version is null ? Enumerable.Empty<TemplateFieldResponse>() : version.Fields.OrderBy(item => item.Order);
-    private bool CycleWarning => edit.TemplateId == TemplateId;
+    private TemplateSectionResponse? SelectedSection => selectedSectionId.HasValue ? Sections.FirstOrDefault(section => section.Id == selectedSectionId.Value) : null;
+    private TemplateFieldResponse? SelectedField => selectedFieldId.HasValue ? Fields.FirstOrDefault(candidate => candidate.Id == selectedFieldId.Value) : null;
+    private string FieldSectionValue => fieldEdit.SectionId?.ToString() ?? string.Empty;
+    private bool CycleWarning => fieldEdit.TemplateId == TemplateId;
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
@@ -114,6 +206,12 @@
         var result = await Templates.GetAsync(WorkspaceId, TemplateId);
         template = result.Body;
         version = template.CurrentVersion ?? await EnsureDraftAsync();
+        try
+        {
+            picklists = (await PickLists.ListAsync(WorkspaceId)).ToList();
+        }
+        catch (ProblemDetailsException) { }
+        RestoreSelection();
     }
 
     private async Task<TemplateVersionResponse> EnsureDraftAsync()
@@ -127,40 +225,198 @@
 
     private void Select(TemplateFieldResponse field)
     {
-        selected = field;
-        edit = new FieldEdit(field);
+        error = null;
+        selectedFieldId = field.Id;
+        selectedSectionId = field.SectionId;
+        fieldEdit = new FieldEdit(field);
+    }
+
+    private void Select(TemplateSectionResponse section)
+    {
+        error = null;
+        selectedSectionId = section.Id;
+        selectedFieldId = null;
+        sectionEdit = new SectionEdit(section);
     }
 
     private async Task AddSectionAsync()
     {
-        if (version is null) return;
-        await Templates.AddSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, new TemplateSectionRequest("New Section", null, Sections.Count(), true));
-        await LoadAsync();
+        if (version is null)
+        {
+            return;
+        }
+
+        await RunMutationAsync(async () =>
+        {
+            var created = await Templates.AddSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, new TemplateSectionRequest("New Section", null, NextSectionOrder(), true));
+            selectedSectionId = created.Id;
+            selectedFieldId = null;
+            await LoadAsync();
+        });
     }
 
     private async Task AddFieldAsync()
     {
-        if (version is null) return;
-        await Templates.AddFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, new TemplateFieldRequest(null, "new_field", "New Field", null, Fields.Count(), false, 0, 1, true, CompositionMode.Inline, PrimitiveType.Text, null, [], null));
-        await LoadAsync();
+        if (version is null)
+        {
+            return;
+        }
+
+        await RunMutationAsync(async () =>
+        {
+            var sectionId = GetAddFieldSectionId();
+            var key = BuildNextFieldKey();
+            var label = BuildNextFieldLabel(key);
+            var created = await Templates.AddFieldAsync(
+                WorkspaceId,
+                TemplateId,
+                version.VersionNumber,
+                new TemplateFieldRequest(sectionId, key, label, null, NextFieldOrder(sectionId), false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null));
+            selectedFieldId = created.Id;
+            selectedSectionId = created.SectionId;
+            await LoadAsync();
+        });
     }
 
     private async Task SaveFieldAsync()
     {
-        if (version is null || selected is null) return;
-        var request = new TemplateFieldRequest(edit.SectionId, edit.Key, edit.Label, edit.HelpText, edit.Order, edit.IsRequired, edit.MinOccurrences, edit.MaxOccurrences, edit.IsOpen, edit.CompositionMode, edit.PrimitiveType, edit.TemplateId, edit.AllowedTypes, null);
-        await Templates.UpdateFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, selected.Id, request);
-        await LoadAsync();
+        if (version is null || SelectedField is null)
+        {
+            return;
+        }
+
+        await RunMutationAsync(async () =>
+        {
+            var request = new TemplateFieldRequest(fieldEdit.SectionId, fieldEdit.Key, fieldEdit.Label, fieldEdit.HelpText, fieldEdit.Order, fieldEdit.IsRequired, fieldEdit.MinOccurrences, fieldEdit.MaxOccurrences, fieldEdit.IsOpen, fieldEdit.CompositionMode, fieldEdit.PrimitiveType, fieldEdit.TemplateId, fieldEdit.AllowedTypes, BuildFieldConfig(fieldEdit));
+            await Templates.UpdateFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, SelectedField.Id, request);
+            await LoadAsync();
+        });
+    }
+
+    private static JsonElement? BuildFieldConfig(FieldEdit edit)
+    {
+        if (edit.PrimitiveType == PrimitiveType.PickList && (edit.PicklistId.HasValue || edit.Multiple))
+        {
+            var node = new JsonObject();
+            if (edit.PicklistId.HasValue)
+            {
+                node["picklistId"] = edit.PicklistId.Value.ToString();
+            }
+            node["multiple"] = edit.Multiple;
+            return JsonSerializer.SerializeToElement(node);
+        }
+
+        return null;
+    }
+
+    private void OnPicklistChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        fieldEdit.PicklistId = Guid.TryParse(value, out var id) ? id : null;
+    }
+
+    private async Task SaveSectionAsync()
+    {
+        if (version is null || SelectedSection is null)
+        {
+            return;
+        }
+
+        await RunMutationAsync(async () =>
+        {
+            await Templates.UpdateSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, SelectedSection.Id, new TemplateSectionRequest(sectionEdit.Name, sectionEdit.Description, sectionEdit.Order, sectionEdit.IsCollapsible));
+            await LoadAsync();
+        });
     }
 
     private async Task PublishAsync()
     {
         if (version is not null)
         {
-            await Templates.PublishAsync(WorkspaceId, TemplateId, version.VersionNumber);
-            confirmPublish = false;
-            await LoadAsync();
+            await RunMutationAsync(async () =>
+            {
+                await Templates.PublishAsync(WorkspaceId, TemplateId, version.VersionNumber);
+                confirmPublish = false;
+                await LoadAsync();
+            });
         }
+    }
+
+    private void OnFieldSectionChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        fieldEdit.SectionId = Guid.TryParse(value, out var sectionId) ? sectionId : null;
+    }
+
+    private Guid? GetAddFieldSectionId() => SelectedField?.SectionId ?? selectedSectionId;
+
+    private int NextSectionOrder() => Sections.Any() ? Sections.Max(section => section.Order) + 1 : 0;
+
+    private int NextFieldOrder(Guid? sectionId)
+    {
+        var scoped = Fields.Where(field => field.SectionId == sectionId);
+        return scoped.Any() ? scoped.Max(field => field.Order) + 1 : 0;
+    }
+
+    private string BuildNextFieldKey()
+    {
+        const string rootKey = "new_field";
+        var existing = Fields.Select(field => field.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!existing.Contains(rootKey))
+        {
+            return rootKey;
+        }
+
+        var suffix = 2;
+        while (existing.Contains($"{rootKey}_{suffix}"))
+        {
+            suffix++;
+        }
+
+        return $"{rootKey}_{suffix}";
+    }
+
+    private static string BuildNextFieldLabel(string key)
+    {
+        if (string.Equals(key, "new_field", StringComparison.OrdinalIgnoreCase))
+        {
+            return "New Field";
+        }
+
+        var suffix = key["new_field_".Length..];
+        return $"New Field {suffix}";
+    }
+
+    private async Task RunMutationAsync(Func<Task> operation)
+    {
+        error = null;
+        try
+        {
+            await operation();
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.Detail ?? ex.Title;
+        }
+    }
+
+    private void RestoreSelection()
+    {
+        if (SelectedField is not null)
+        {
+            fieldEdit = new FieldEdit(SelectedField);
+            selectedSectionId = SelectedField.SectionId;
+            return;
+        }
+
+        if (SelectedSection is not null)
+        {
+            sectionEdit = new SectionEdit(SelectedSection);
+            return;
+        }
+
+        selectedFieldId = null;
+        selectedSectionId = null;
     }
 
     private sealed class FieldEdit
@@ -181,6 +437,17 @@
             PrimitiveType = field.PrimitiveType;
             TemplateId = field.TemplateId;
             AllowedTypes = field.AllowedTypes.Select(t => new TemplateFieldAllowedTypeRequest(t.PrimitiveType, t.AllowedTemplateId)).ToArray();
+            if (field.FieldConfig is JsonElement config && config.ValueKind == JsonValueKind.Object)
+            {
+                if (config.TryGetProperty("picklistId", out var picklistIdProp) && picklistIdProp.ValueKind == JsonValueKind.String && Guid.TryParse(picklistIdProp.GetString(), out var pickId))
+                {
+                    PicklistId = pickId;
+                }
+                if (config.TryGetProperty("multiple", out var multipleProp) && (multipleProp.ValueKind == JsonValueKind.True || multipleProp.ValueKind == JsonValueKind.False))
+                {
+                    Multiple = multipleProp.GetBoolean();
+                }
+            }
         }
 
         public Guid? SectionId { get; set; }
@@ -196,5 +463,25 @@
         public PrimitiveType? PrimitiveType { get; set; } = Cmsify.Core.Domain.Enums.PrimitiveType.Text;
         public Guid? TemplateId { get; set; }
         public IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes { get; set; } = [];
+        public Guid? PicklistId { get; set; }
+        public bool Multiple { get; set; }
+    }
+
+    private sealed class SectionEdit
+    {
+        public SectionEdit() { }
+
+        public SectionEdit(TemplateSectionResponse section)
+        {
+            Name = section.Name;
+            Description = section.Description;
+            Order = section.Order;
+            IsCollapsible = section.IsCollapsible;
+        }
+
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public int Order { get; set; }
+        public bool IsCollapsible { get; set; }
     }
 }

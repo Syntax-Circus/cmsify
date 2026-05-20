@@ -94,6 +94,17 @@ public sealed class AuthState
         Changed?.Invoke();
     }
 
+    public async Task UpdateExpiresAtAsync(DateTimeOffset expiresAt)
+    {
+        if (string.IsNullOrWhiteSpace(Token) || !ExpiresAt.HasValue || expiresAt <= ExpiresAt.Value)
+        {
+            return;
+        }
+
+        ExpiresAt = expiresAt;
+        await StoreAsync();
+    }
+
     private async Task StoreAsync()
     {
         var saved = new SavedAuth(Token!, ExpiresAt!.Value, User!, MustChangePassword);

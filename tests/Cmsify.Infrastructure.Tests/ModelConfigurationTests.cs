@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Cmsify.Infrastructure.Tests;
@@ -91,6 +92,22 @@ public sealed partial class ModelConfigurationTests
         Assert.NotNull(xmin);
         Assert.True(xmin.IsConcurrencyToken);
         Assert.Equal("xid", xmin.GetColumnType());
+    }
+
+    [Fact]
+    public void Model_DoesNotWarnForRequiredFilteredNavigationsOnUserWorkspaceAccess()
+    {
+        var options = new DbContextOptionsBuilder<CmsifyDbContext>()
+            .UseNpgsql(
+                "Host=localhost;Database=cmsify;Username=cmsify;Password=cmsify",
+                npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
+            .UseSnakeCaseNamingConvention()
+            .ConfigureWarnings(warnings => warnings.Throw(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning))
+            .Options;
+
+        using var context = new CmsifyDbContext(options);
+
+        _ = context.Model;
     }
 
     [Theory]

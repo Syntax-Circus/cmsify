@@ -53,6 +53,11 @@ else
     {
         <div class="alert alert-info mt-3">@message</div>
     }
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="alert alert-danger mt-3">@error</div>
+    }
 }
 
 @code {
@@ -60,6 +65,7 @@ else
     private readonly HashSet<string> selected = new(StringComparer.OrdinalIgnoreCase);
     private bool installing;
     private string? message;
+    private string? error;
 
     protected override async Task OnInitializedAsync()
     {
@@ -86,16 +92,33 @@ else
         }
 
         installing = true;
-        var imported = 0;
-        foreach (var packageId in selected)
-        {
-            var result = await Packages.ImportOfficialAsync(Workspace.Current.Id, packageId);
-            imported += result.Imported.Count;
-        }
+        message = null;
+        error = null;
 
-        message = $"Installed {imported} templates.";
-        installing = false;
-        Navigation.NavigateTo($"/workspaces/{Workspace.Current.Id}/templates");
+        try
+        {
+            var imported = 0;
+            foreach (var packageId in selected)
+            {
+                var result = await Packages.ImportOfficialAsync(Workspace.Current.Id, packageId);
+                imported += result.Imported.Count;
+            }
+
+            message = $"Installed {imported} templates.";
+            Navigation.NavigateTo($"/workspaces/{Workspace.Current.Id}/templates");
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ProblemDetailsDisplay.Format(ex);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            installing = false;
+        }
     }
 
     private void Skip() => Navigation.NavigateTo("/");

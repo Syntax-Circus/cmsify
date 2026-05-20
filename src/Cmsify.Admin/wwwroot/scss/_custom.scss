@@ -51,6 +51,10 @@ html, body { min-height: 100%; background: var(--cms-bg); color: var(--cms-text)
 .cms-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .cms-topbar { height: 56px; padding: 0 20px; border-bottom: 1px solid var(--cms-border); background: var(--cms-surface); display: flex; align-items: center; gap: 16px; }
 .cms-breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--cms-text-muted); text-transform: capitalize; }
+.cms-breadcrumb__link { color: inherit; text-decoration: none; }
+.cms-breadcrumb__link:hover { color: var(--cms-text); text-decoration: underline; }
+.cms-breadcrumb__current { color: var(--cms-text); }
+.cms-breadcrumb__sep { color: var(--cms-text-muted); }
 .cms-topbar__right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .cms-iconbtn { width: 36px; height: 36px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--cms-text-muted); display: grid; place-items: center; cursor: pointer; }
 .cms-iconbtn:hover { background: var(--cms-surface-2); color: var(--cms-text); }
@@ -100,6 +104,8 @@ html, body { min-height: 100%; background: var(--cms-bg); color: var(--cms-text)
 .cms-builder__tree { width: 300px; border-right: 1px solid var(--cms-border); padding: 16px; overflow: auto; }
 .cms-builder__detail { flex: 1; padding: 20px; overflow: auto; }
 .cms-tree-section { margin: 12px 0 6px; color: var(--cms-text-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+.cms-tree-section--button { width: 100%; border: 1px solid transparent; background: transparent; text-align: left; border-radius: 6px; padding: 7px 8px; }
+.cms-tree-section--button:hover, .cms-tree-section--button.is-active { background: var(--cms-surface-2); border-color: var(--cms-border); color: var(--cms-text); }
 .cms-tree-field { width: 100%; border: 1px solid transparent; background: transparent; text-align: left; border-radius: 6px; padding: 7px 8px; color: var(--cms-text); }
 .cms-tree-field:hover, .cms-tree-field.is-active { background: var(--cms-surface-2); border-color: var(--cms-border); }
 .cms-side-panel { position: fixed; top: 56px; right: 0; bottom: 0; width: 380px; background: var(--cms-surface); border-left: 1px solid var(--cms-border); padding: 20px; z-index: 50; box-shadow: -12px 0 28px rgba(0,0,0,.12); }

@@ -21,12 +21,14 @@ builder.Services.AddHttpClient("CmsifyApi", client =>
     client.BaseAddress = new Uri(baseUrl);
 });
 builder.Services.AddScoped<BrowserStorage>();
+builder.Services.AddScoped<BrowserDownloads>();
 builder.Services.AddScoped<AuthState>();
 builder.Services.AddScoped<WorkspaceState>();
 builder.Services.AddScoped<UserPreferencesState>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<WorkspaceApiClient>();
 builder.Services.AddScoped<TemplateApiClient>();
+builder.Services.AddScoped<PickListApiClient>();
 builder.Services.AddScoped<ContentApiClient>();
 builder.Services.AddScoped<MediaApiClient>();
 builder.Services.AddScoped<WebhookApiClient>();

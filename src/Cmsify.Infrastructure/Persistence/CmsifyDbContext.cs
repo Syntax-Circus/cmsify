@@ -52,6 +52,10 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    public DbSet<PickList> PickLists => Set<PickList>();
+
+    public DbSet<PickListOption> PickListOptions => Set<PickListOption>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasPostgresExtension("pgcrypto");

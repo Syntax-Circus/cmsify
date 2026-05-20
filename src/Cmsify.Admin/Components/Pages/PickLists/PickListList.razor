@@ -1,0 +1,94 @@
+@page "/workspaces/{WorkspaceId:guid}/picklists"
+@rendermode InteractiveServer
+@inject PickListApiClient PickLists
+@inject NavigationManager Navigation
+
+<div class="cms-page-head">
+    <div>
+        <h1>Picklists</h1>
+        <div class="lead">Reusable option lists you can bind to template fields.</div>
+    </div>
+    <button class="btn btn-primary" @onclick="NewPicklist">New Picklist</button>
+</div>
+
+<div class="d-flex gap-2 mb-3">
+    <div class="cms-search" style="max-width:320px">
+        <i class="bi bi-search"></i>
+        <input class="form-control" placeholder="Search picklists" @bind="search" @bind:event="oninput" />
+    </div>
+    <button class="btn btn-outline-secondary" @onclick="LoadAsync">Search</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@if (picklists.Count == 0)
+{
+    <EmptyState Title="No picklists yet" Body="Create a picklist to define a reusable set of options.">
+        <button class="btn btn-primary btn-sm" @onclick="NewPicklist">New Picklist</button>
+    </EmptyState>
+}
+else
+{
+    <div class="cms-card p-0">
+        <table class="cms-table">
+            <thead><tr><th>Name</th><th>Slug</th><th>Options</th><th>Actions</th></tr></thead>
+            <tbody>
+            @foreach (var picklist in picklists)
+            {
+                <tr>
+                    <td><strong>@picklist.Name</strong><div class="small text-muted">@picklist.Description</div></td>
+                    <td class="font-monospace">@picklist.Slug</td>
+                    <td>@picklist.OptionCount</td>
+                    <td class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="() => Edit(picklist)">Edit</button>
+                        <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(picklist)">Delete</button>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    private List<PickListSummaryResponse> picklists = [];
+    private string? search;
+    private string? error;
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        error = null;
+        try
+        {
+            picklists = (await PickLists.ListAsync(WorkspaceId, search)).ToList();
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.Detail ?? ex.Title;
+        }
+    }
+
+    private void NewPicklist() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/picklists/new");
+
+    private void Edit(PickListSummaryResponse picklist) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/picklists/{picklist.Id}");
+
+    private async Task DeleteAsync(PickListSummaryResponse picklist)
+    {
+        error = null;
+        try
+        {
+            await PickLists.DeleteAsync(WorkspaceId, picklist.Id);
+            await LoadAsync();
+        }
+        catch (ProblemDetailsException ex)
+        {
+            error = ex.Detail ?? ex.Title;
+        }
+    }
+}

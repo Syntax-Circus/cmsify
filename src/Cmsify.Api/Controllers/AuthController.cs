@@ -31,8 +31,9 @@ public sealed class AuthController : ControllerBase
             return Unauthorized();
         }
 
+        var now = DateTimeOffset.UtcNow;
         var rawToken = TokenUtility.GenerateSessionToken();
-        var expiresAt = DateTimeOffset.UtcNow.AddHours(configuration.GetValue("Auth:SessionAbsoluteExpiryHours", 8));
+        var expiresAt = LocalSessionLifetime.CalculateExpiresAt(configuration, now);
         dbContext.UserSessions.Add(new UserSession
         {
             UserId = user.Id,
@@ -40,7 +41,7 @@ public sealed class AuthController : ControllerBase
             ExpiresAt = expiresAt,
             IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString()
         });
-        user.LastLoginAt = DateTimeOffset.UtcNow;
+        user.LastLoginAt = now;
         await dbContext.SaveChangesAsync(ct);
 
         return Ok(new LoginResponse(rawToken, expiresAt, user.MustChangePassword, new UserSummary(user.Id, user.Email, user.DisplayName, user.Role.ToString(), user.IsSuperAdmin)));
@@ -92,8 +93,9 @@ public sealed class AuthController : ControllerBase
             dbContext.UserSessions.Remove(oldSession);
         }
 
+        var now = DateTimeOffset.UtcNow;
         var newToken = TokenUtility.GenerateSessionToken();
-        var expiresAt = DateTimeOffset.UtcNow.AddHours(configuration.GetValue("Auth:SessionAbsoluteExpiryHours", 8));
+        var expiresAt = LocalSessionLifetime.CalculateExpiresAt(configuration, now);
         dbContext.UserSessions.Add(new UserSession
         {
             UserId = user.Id,

@@ -123,6 +123,7 @@ public sealed class PackagesController : ControllerBase
             .ToDictionaryAsync(template => template.Slug, template => template, StringComparer.OrdinalIgnoreCase, ct);
 
         var imported = new List<PackageTemplateImportResult>();
+        var importedVersions = new List<(Template Template, TemplateVersion Version)>();
         foreach (var packageTemplate in sortedTemplates)
         {
             if (!templatesBySlug.TryGetValue(packageTemplate.Slug, out var template))
@@ -169,9 +170,16 @@ public sealed class PackagesController : ControllerBase
                 .ExecuteUpdateAsync(updates => updates.SetProperty(candidate => candidate.Status, TemplateVersionStatus.Archived), ct);
 
             dbContext.TemplateVersions.Add(version);
+            template.UpdatedAt = DateTimeOffset.UtcNow;
+            importedVersions.Add((template, version));
+            imported.Add(new PackageTemplateImportResult(template.Id, template.Slug, template.Name, version.Id, version.VersionNumber));
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+        foreach (var (template, version) in importedVersions)
+        {
             template.CurrentVersionId = version.Id;
             template.UpdatedAt = DateTimeOffset.UtcNow;
-            imported.Add(new PackageTemplateImportResult(template.Id, template.Slug, template.Name, version.Id, version.VersionNumber));
         }
 
         await dbContext.SaveChangesAsync(ct);
