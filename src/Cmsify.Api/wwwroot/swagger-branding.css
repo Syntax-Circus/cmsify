@@ -1,0 +1,14 @@
+.swagger-ui .topbar {
+  background: #0F0B22;
+}
+
+.swagger-ui .topbar-wrapper .link {
+  width: 168px;
+  height: 40px;
+  background: url("/cmsify-logo-full_400x-Photoroom.png") left center / contain no-repeat;
+}
+
+.swagger-ui .topbar-wrapper .link img,
+.swagger-ui .topbar-wrapper .link span {
+  display: none;
+}

@@ -100,11 +100,17 @@ public sealed class TemplateApiClient : ApiClientBase
     public Task<TemplateSectionResponse> UpdateSectionAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid sectionId, TemplateSectionRequest request, CancellationToken ct = default) =>
         PutAsync<TemplateSectionResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/sections/{sectionId}", request, ct: ct);
 
+    public Task DeleteSectionAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid sectionId, CancellationToken ct = default) =>
+        DeleteAsync($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/sections/{sectionId}", ct: ct);
+
     public Task<TemplateFieldResponse> AddFieldAsync(Guid workspaceId, Guid templateId, int versionNumber, TemplateFieldRequest request, CancellationToken ct = default) =>
         PostAsync<TemplateFieldResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields", request, ct);
 
     public Task<TemplateFieldResponse> UpdateFieldAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid fieldId, TemplateFieldRequest request, CancellationToken ct = default) =>
         PutAsync<TemplateFieldResponse>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields/{fieldId}", request, ct: ct);
+
+    public Task DeleteFieldAsync(Guid workspaceId, Guid templateId, int versionNumber, Guid fieldId, CancellationToken ct = default) =>
+        DeleteAsync($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields/{fieldId}", ct: ct);
 
     public Task ReorderFieldsAsync(Guid workspaceId, Guid templateId, int versionNumber, IReadOnlyList<ReorderFieldRequest> request, CancellationToken ct = default) =>
         PutAsync<object>($"/api/v1/workspaces/{workspaceId}/templates/{templateId}/versions/{versionNumber}/fields/reorder", request, ct: ct);
