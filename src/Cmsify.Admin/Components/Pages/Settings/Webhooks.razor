@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject WebhookApiClient WebhooksClient
 @inject WorkspaceState Workspace
+@inject ToastState Toasts
 
 <div class="cms-page-head"><div><h1>Webhooks</h1><div class="lead">Manage endpoint subscriptions and delivery retries.</div></div><button class="btn btn-primary" disabled="@(Workspace.Current is null)" @onclick="() => creating = true">New Endpoint</button></div>
 
@@ -35,7 +36,7 @@ else
 
     protected override async Task OnInitializedAsync() { if (Workspace.Current is not null) await LoadAsync(); }
     private async Task LoadAsync() { hooks = (await WebhooksClient.ListAsync(Workspace.Current!.Id)).Items.ToList(); }
-    private async Task CreateAsync() { await WebhooksClient.CreateAsync(Workspace.Current!.Id, new CreateWebhookEndpointRequest(name, url, null, events.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))); creating = false; await LoadAsync(); }
+    private async Task CreateAsync() { await WebhooksClient.CreateAsync(Workspace.Current!.Id, new CreateWebhookEndpointRequest(name, url, null, events.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))); creating = false; await LoadAsync(); Toasts.Success("Webhook saved"); }
     private async Task LoadDeliveriesAsync(WebhookEndpointResponse hook) { selected = hook; deliveries = (await WebhooksClient.ListDeliveriesAsync(hook.WorkspaceId, hook.Id)).Items.ToList(); }
     private async Task RetryAsync(WebhookDeliveryResponse delivery) { if (selected is not null) await WebhooksClient.RetryAsync(selected.WorkspaceId, selected.Id, delivery.Id); await LoadDeliveriesAsync(selected!); }
 }

@@ -4,6 +4,7 @@
 @inject PackagesApiClient PackageClient
 @inject BrowserDownloads Downloads
 @inject NavigationManager Navigation
+@inject ToastState Toasts
 
 <div class="cms-page-head">
     <div>
@@ -146,6 +147,7 @@ else
         }
 
         var created = await Templates.CreateAsync(WorkspaceId, new CreateTemplateRequest(newName, newSlug, newDescription));
+        Toasts.Success("Template created");
         Navigation.NavigateTo($"/workspaces/{WorkspaceId}/templates/{created.Id}");
     }
 

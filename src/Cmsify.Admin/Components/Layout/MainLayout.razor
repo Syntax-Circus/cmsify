@@ -2,6 +2,7 @@
 @inject AuthState Auth
 @inject WorkspaceState Workspace
 @inject UserPreferencesState Preferences
+@inject ToastState Toasts
 @inject NavigationManager Navigation
 
 <div class="cms-shell">
@@ -80,7 +81,13 @@
     </div>
 </div>
 
+<Toast Message="@Toasts.Message" Variant="@Toasts.Variant" />
+
+@implements IDisposable
+
 @code {
+    private CancellationTokenSource? toastCancellation;
+
     private bool ShowChrome => !Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("login", StringComparison.OrdinalIgnoreCase);
 
     private string EffectiveTheme => Preferences.EffectiveTheme;
@@ -94,6 +101,47 @@
         Auth.Changed += StateHasChanged;
         Workspace.Changed += StateHasChanged;
         Preferences.Changed += StateHasChanged;
+        Toasts.Changed += OnToastChanged;
+    }
+
+    public void Dispose()
+    {
+        Auth.Changed -= StateHasChanged;
+        Workspace.Changed -= StateHasChanged;
+        Preferences.Changed -= StateHasChanged;
+        Toasts.Changed -= OnToastChanged;
+        toastCancellation?.Cancel();
+        toastCancellation?.Dispose();
+    }
+
+    private void OnToastChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+        if (string.IsNullOrWhiteSpace(Toasts.Message))
+        {
+            return;
+        }
+
+        toastCancellation?.Cancel();
+        toastCancellation?.Dispose();
+        toastCancellation = new CancellationTokenSource();
+        var version = Toasts.Version;
+        _ = DismissToastAsync(version, toastCancellation.Token);
+    }
+
+    private async Task DismissToastAsync(int version, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
+            if (!cancellationToken.IsCancellationRequested && Toasts.Version == version)
+            {
+                Toasts.Clear();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     private string WorkspaceHref(string section)

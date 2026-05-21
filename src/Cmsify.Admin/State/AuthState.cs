@@ -1,4 +1,5 @@
 using Cmsify.Admin.Services;
+using Microsoft.JSInterop;
 
 namespace Cmsify.Admin.State;
 
@@ -102,7 +103,14 @@ public sealed class AuthState
         }
 
         ExpiresAt = expiresAt;
-        await StoreAsync();
+        try
+        {
+            await StoreAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Session lifetime refresh is opportunistic; the next live circuit can refresh storage again.
+        }
     }
 
     private async Task StoreAsync()

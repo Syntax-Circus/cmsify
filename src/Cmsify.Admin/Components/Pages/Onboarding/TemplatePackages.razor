@@ -3,6 +3,7 @@
 @inject PackagesApiClient Packages
 @inject WorkspaceState Workspace
 @inject NavigationManager Navigation
+@inject ToastState Toasts
 
 <div class="cms-page-head">
     <div>
@@ -105,6 +106,7 @@ else
             }
 
             message = $"Installed {imported} templates.";
+            Toasts.Success(message);
             Navigation.NavigateTo($"/workspaces/{Workspace.Current.Id}/templates");
         }
         catch (ProblemDetailsException ex)

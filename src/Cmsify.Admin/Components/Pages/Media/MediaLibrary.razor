@@ -1,6 +1,7 @@
 @page "/workspaces/{WorkspaceId:guid}/media"
 @rendermode InteractiveServer
 @inject MediaApiClient Media
+@inject ToastState Toasts
 
 <div class="cms-page-head">
     <div><h1>Media Library</h1><div class="lead">Upload, browse, preview, and maintain media assets.</div></div>
@@ -111,6 +112,7 @@ else
         {
             selected = await Media.UpdateAsync(WorkspaceId, selected.Id, altText);
             await LoadAsync();
+            Toasts.Success("Alt text saved");
         }
     }
 

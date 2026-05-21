@@ -25,6 +25,7 @@ builder.Services.AddScoped<BrowserDownloads>();
 builder.Services.AddScoped<AuthState>();
 builder.Services.AddScoped<WorkspaceState>();
 builder.Services.AddScoped<UserPreferencesState>();
+builder.Services.AddScoped<ToastState>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<WorkspaceApiClient>();
 builder.Services.AddScoped<TemplateApiClient>();

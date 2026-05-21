@@ -2,6 +2,7 @@
 @page "/workspaces/{WorkspaceId:guid}/picklists/{PickListId:guid}"
 @rendermode InteractiveServer
 @inject PickListApiClient PickLists
+@inject ToastState Toasts
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -115,10 +116,12 @@
             if (PickListId.HasValue)
             {
                 await PickLists.UpdateAsync(WorkspaceId, PickListId.Value, request);
+                Toasts.Success("Picklist saved");
             }
             else
             {
                 var created = await PickLists.CreateAsync(WorkspaceId, request);
+                Toasts.Success("Picklist created");
                 Navigation.NavigateTo($"/workspaces/{WorkspaceId}/picklists/{created.Id}");
                 return;
             }

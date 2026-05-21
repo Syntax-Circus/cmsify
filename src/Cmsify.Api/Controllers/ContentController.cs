@@ -229,12 +229,20 @@ public sealed class ContentController : ControllerBase
         content.PublishAt = request.PublishAt;
         content.UpdatedAt = DateTimeOffset.UtcNow;
         content.UpdatedByUserId = currentActor.UserId;
-        dbContext.ContentFieldValues.RemoveRange(content.FieldValues);
-        content.FieldValues.Clear();
-        ApplyFieldValues(content, request.Fields);
-        dbContext.ContentItemTags.RemoveRange(content.Tags);
-        content.Tags.Clear();
-        await ApplyTagsAsync(content, workspaceId, request.Tags, ct);
+        if (!FieldValuesMatch(content.FieldValues, request.Fields))
+        {
+            dbContext.ContentFieldValues.RemoveRange(content.FieldValues);
+            content.FieldValues.Clear();
+            ApplyFieldValues(content, request.Fields);
+        }
+
+        var existingTags = await GetTagNamesAsync(content.Id, ct);
+        if (!TagsMatch(existingTags, request.Tags))
+        {
+            dbContext.ContentItemTags.RemoveRange(content.Tags);
+            content.Tags.Clear();
+            await ApplyTagsAsync(content, workspaceId, request.Tags, ct);
+        }
 
         var version = await LoadTemplateVersionAsync(content.TemplateVersionId, ct);
         var validation = contentValidator.Validate(content, version!);
@@ -244,7 +252,15 @@ public sealed class ContentController : ControllerBase
         }
 
         content.SearchVector = searchVectorBuilder.Build(content, version!);
-        await dbContext.SaveChangesAsync(ct);
+        try
+        {
+            await dbContext.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
+        }
+
         await EnqueueContentEventAsync("content.updated", content, ct);
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
@@ -733,6 +749,51 @@ public sealed class ContentController : ControllerBase
             content.Tags.Add(new ContentItemTag { ContentItemId = content.Id, TagId = tag.Id });
         }
     }
+
+    private static bool FieldValuesMatch(IEnumerable<ContentFieldValue> existing, IEnumerable<ContentFieldValueRequest> requested)
+    {
+        var existingValues = existing
+            .OrderBy(value => value.FieldId)
+            .ThenBy(value => value.Order)
+            .ToList();
+        var requestedValues = requested
+            .OrderBy(value => value.FieldId)
+            .ThenBy(value => value.Order)
+            .ToList();
+
+        if (existingValues.Count != requestedValues.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < existingValues.Count; index++)
+        {
+            var current = existingValues[index];
+            var next = requestedValues[index];
+            if (current.FieldId != next.FieldId
+                || current.Order != next.Order
+                || current.ValueKind != next.ValueKind
+                || current.TextValue != next.TextValue
+                || current.BoolValue != next.BoolValue
+                || current.MediaAssetId != next.MediaAssetId
+                || current.FileAssetId != next.FileAssetId
+                || current.ChildContentItemId != next.ChildContentItemId
+                || !JsonValuesMatch(current.JsonValue, next.JsonValue))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TagsMatch(IEnumerable<string> existing, IEnumerable<string> requested) =>
+        existing.Select(NormalizeTag).Where(tag => tag.Length > 0).Distinct().Order()
+            .SequenceEqual(requested.Select(NormalizeTag).Where(tag => tag.Length > 0).Distinct().Order());
+
+    private static bool JsonValuesMatch(JsonElement? left, JsonElement? right) =>
+        left.HasValue == right.HasValue
+        && (!left.HasValue || left.Value.GetRawText() == right!.Value.GetRawText());
 
     private async Task<ContentItemSummaryResponse> ToSummaryResponseAsync(ContentItem content, CancellationToken ct)
     {

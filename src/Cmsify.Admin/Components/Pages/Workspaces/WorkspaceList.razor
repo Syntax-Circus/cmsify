@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject WorkspaceApiClient Workspaces
 @inject WorkspaceState WorkspaceState
+@inject ToastState Toasts
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -120,6 +121,7 @@ else
         items.RemoveAll(item => item.Id == saved.Id);
         items.Add(saved);
         editing = null;
+        Toasts.Success("Workspace saved");
     }
 
     private static string Slugify(string value) => string.Join('-', value.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));

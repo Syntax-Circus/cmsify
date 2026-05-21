@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject PackagesApiClient PackageClient
 @inject WorkspaceState Workspace
+@inject ToastState Toasts
 
 <div class="cms-page-head">
     <div>
@@ -222,15 +223,16 @@ else
         var result = await PackageClient.ImportAsync(Workspace.Current!.Id, file, resolutions);
         message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         customPackageFile = null;
+        Toasts.Success("Package imported");
     }
 
     private async Task DoOfficialImportAsync(string packageId, PackageImportResolutionsRequest? resolutions)
     {
         var result = await PackageClient.ImportOfficialAsync(Workspace.Current!.Id, packageId, resolutions);
         message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+        Toasts.Success("Package imported");
     }
 
     private static bool HasConflicts(PackageImportPreviewResponse preview) =>
         preview.PickLists.Any(picklist => picklist.Status == "conflict");
 }
-
