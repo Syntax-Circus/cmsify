@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject UserPreferencesState PrefState
 @inject SettingsApiClient Settings
+@inject ToastState Toasts
 
 <div class="cms-page-head">
     <div>
@@ -10,8 +11,6 @@
     </div>
     <a class="btn btn-outline-secondary" href="/account/change-password">Change password</a>
 </div>
-
-<Toast Message="@toast" />
 
 <div class="cms-card" style="max-width:680px">
     <div class="mb-3">
@@ -38,7 +37,6 @@
     private AccountPreferencesResponse? account;
     private string timeZoneId = TimeZoneInfo.Local.Id;
     private string theme = "auto";
-    private string? toast;
 
     protected override async Task OnInitializedAsync()
     {
@@ -50,6 +48,6 @@
     private async Task SaveAsync()
     {
         await PrefState.SaveAsync(timeZoneId, theme);
-        toast = "Preferences saved";
+        Toasts.Success("Preferences saved");
     }
 }

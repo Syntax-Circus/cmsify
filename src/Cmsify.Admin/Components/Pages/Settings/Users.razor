@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject UserApiClient UsersClient
 @inject WorkspaceApiClient WorkspacesClient
+@inject ToastState Toasts
 
 <div class="cms-page-head">
     <div><h1>Users</h1><div class="lead">Create users, assign roles, workspace grants, and temporary passwords.</div></div>
@@ -124,10 +125,12 @@
             {
                 var response = await UsersClient.CreateAsync(new CreateUserRequest(form.Email, form.DisplayName, form.Role, form.TemporaryPassword, form.IsSuperAdmin, form.TimeZoneId, SelectedWorkspaceAccesses()));
                 oneTimeSecret = response.TemporaryPassword;
+                Toasts.Success("User created");
             }
             else
             {
                 await UsersClient.UpdateAsync(editing.Id, new UpdateUserRequest(form.Email, form.DisplayName, form.Role, form.IsSuperAdmin, form.TimeZoneId, form.IsActive, SelectedWorkspaceAccesses()));
+                Toasts.Success("User saved");
             }
         }
         catch (ProblemDetailsException ex)
@@ -150,7 +153,7 @@
         var password = $"Temp-{Guid.NewGuid():N}"[..18];
         var response = await UsersClient.ResetPasswordAsync(user.Id, password);
         oneTimeSecret = response.TemporaryPassword;
-        toast = "Password reset";
+        Toasts.Success("Password reset");
         await LoadAsync();
     }
 

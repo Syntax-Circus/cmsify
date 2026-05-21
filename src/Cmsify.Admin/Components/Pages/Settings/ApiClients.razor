@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject ApiClientsApiClient Clients
 @inject WorkspaceApiClient WorkspacesClient
+@inject ToastState Toasts
 
 <div class="cms-page-head"><div><h1>API Clients</h1><div class="lead">Issue and rotate machine tokens.</div></div><button class="btn btn-primary" @onclick="() => creating = true">Create Client</button></div>
 
@@ -33,8 +34,8 @@
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
     private async Task LoadAsync() { clients = (await Clients.ListAsync()).Items.ToList(); workspaces = (await WorkspacesClient.ListAsync()).Items.ToList(); }
-    private async Task CreateAsync() { var scope = Guid.TryParse(workspaceId, out var parsedWorkspaceId) ? parsedWorkspaceId : (Guid?)null; var response = await Clients.CreateAsync(new CreateApiClientRequest(name, null, role, scope, null)); secret = response.Token; creating = false; name = ""; workspaceId = ""; await LoadAsync(); }
-    private async Task RotateAsync(Guid id) { var response = await Clients.RotateAsync(id); secret = response.Token; await LoadAsync(); }
-    private async Task RevokeAsync(Guid id) { await Clients.RevokeAsync(id); await LoadAsync(); }
+    private async Task CreateAsync() { var scope = Guid.TryParse(workspaceId, out var parsedWorkspaceId) ? parsedWorkspaceId : (Guid?)null; var response = await Clients.CreateAsync(new CreateApiClientRequest(name, null, role, scope, null)); secret = response.Token; creating = false; name = ""; workspaceId = ""; await LoadAsync(); Toasts.Success("API client created"); }
+    private async Task RotateAsync(Guid id) { var response = await Clients.RotateAsync(id); secret = response.Token; await LoadAsync(); Toasts.Success("API client token rotated"); }
+    private async Task RevokeAsync(Guid id) { await Clients.RevokeAsync(id); await LoadAsync(); Toasts.Success("API client revoked"); }
     private string WorkspaceName(Guid? id) => id.HasValue ? workspaces.FirstOrDefault(workspace => workspace.Id == id.Value)?.Name ?? id.Value.ToString() : "All workspaces";
 }

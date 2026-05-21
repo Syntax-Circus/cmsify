@@ -5,6 +5,7 @@
 @inject ContentApiClient Content
 @inject TemplateApiClient Templates
 @inject PickListApiClient PickLists
+@inject ToastState Toasts
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -29,7 +30,7 @@
             @if (!ContentId.HasValue)
             {
                 <label class="form-label">Template</label>
-                <InputSelect class="form-select mb-3" @bind-Value="selectedTemplateId" @onchange="LoadTemplateAsync">
+                <InputSelect class="form-select mb-3" @bind-Value="selectedTemplateId" @bind-Value:after="LoadSelectedTemplateAsync">
                     <option value="">Select template</option>
                     @foreach (var template in templates)
                     {
@@ -91,8 +92,10 @@
     private readonly Dictionary<Guid, string?> textValues = [];
     private readonly Dictionary<Guid, bool> boolValues = [];
     private readonly Dictionary<Guid, Guid?> assetValues = [];
+    private readonly Dictionary<Guid, Guid?> referenceValues = [];
     private readonly Dictionary<Guid, List<string>> multiPickValues = [];
     private Dictionary<Guid, PickListResponse> picklistCache = new();
+    private Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = new();
 
     private IEnumerable<TemplateFieldResponse> fields => templateVersion is null ? Enumerable.Empty<TemplateFieldResponse>() : templateVersion.Fields.OrderBy(item => item.Order);
 
@@ -101,38 +104,57 @@
         templates = (await Templates.ListAsync(WorkspaceId)).Items;
         if (ContentId.HasValue)
         {
-            var loaded = await Content.GetAsync(WorkspaceId, ContentId.Value);
-            item = loaded.Body;
-            slug = item.Slug;
-            locale = item.LocaleCode;
-            tags = string.Join(",", item.Tags);
-            var template = templates.FirstOrDefault(t => t.CurrentVersionId == item.TemplateVersionId);
-            if (template is not null)
-            {
-                selectedTemplateId = template.Id;
-                await LoadTemplateVersionAsync(template.Id);
-            }
+            await LoadContentAsync();
+        }
+    }
 
-            foreach (var value in item.Fields)
+    private async Task LoadContentAsync()
+    {
+        if (!ContentId.HasValue)
+        {
+            return;
+        }
+
+        textValues.Clear();
+        boolValues.Clear();
+        assetValues.Clear();
+        referenceValues.Clear();
+        multiPickValues.Clear();
+
+        var loaded = await Content.GetAsync(WorkspaceId, ContentId.Value);
+        item = loaded.Body;
+        slug = item.Slug;
+        locale = item.LocaleCode;
+        tags = string.Join(",", item.Tags);
+        var template = templates.FirstOrDefault(t => t.CurrentVersionId == item.TemplateVersionId);
+        if (template is not null)
+        {
+            selectedTemplateId = template.Id;
+            await LoadTemplateVersionAsync(template.Id);
+        }
+
+        foreach (var value in item.Fields)
+        {
+            textValues[value.FieldId] = value.TextValue;
+            boolValues[value.FieldId] = value.BoolValue ?? false;
+            assetValues[value.FieldId] = value.MediaAssetId ?? value.FileAssetId;
+            referenceValues[value.FieldId] = value.ChildContentItemId;
+            if (!string.IsNullOrWhiteSpace(value.TextValue))
             {
-                textValues[value.FieldId] = value.TextValue;
-                boolValues[value.FieldId] = value.BoolValue ?? false;
-                assetValues[value.FieldId] = value.MediaAssetId ?? value.FileAssetId;
-                if (!string.IsNullOrWhiteSpace(value.TextValue))
+                if (!multiPickValues.TryGetValue(value.FieldId, out var existing))
                 {
-                    if (!multiPickValues.TryGetValue(value.FieldId, out var existing))
-                    {
-                        existing = [];
-                        multiPickValues[value.FieldId] = existing;
-                    }
-                    existing.Add(value.TextValue);
+                    existing = [];
+                    multiPickValues[value.FieldId] = existing;
                 }
+                existing.Add(value.TextValue);
             }
         }
     }
 
-    private async Task LoadTemplateAsync(ChangeEventArgs _)
+    private async Task LoadSelectedTemplateAsync()
     {
+        error = null;
+        templateVersion = null;
         if (selectedTemplateId.HasValue)
         {
             await LoadTemplateVersionAsync(selectedTemplateId.Value);
@@ -144,6 +166,7 @@
         var template = await Templates.GetAsync(WorkspaceId, templateId);
         templateVersion = template.Body.CurrentVersion ?? await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version");
         await LoadPicklistsForFieldsAsync();
+        await LoadReferenceOptionsForFieldsAsync();
     }
 
     private async Task LoadPicklistsForFieldsAsync()
@@ -197,10 +220,90 @@
         return (null, false);
     }
 
+    private async Task LoadReferenceOptionsForFieldsAsync()
+    {
+        if (templateVersion is null)
+        {
+            return;
+        }
+
+        var templateIds = templateVersion.Fields
+            .SelectMany(GetReferenceTemplateIds)
+            .Distinct()
+            .ToList();
+
+        foreach (var templateId in templateIds)
+        {
+            if (referenceOptionsByTemplateId.ContainsKey(templateId))
+            {
+                continue;
+            }
+
+            var content = await Content.ListAsync(WorkspaceId, null, templateId, null, null, null);
+            referenceOptionsByTemplateId[templateId] = content.Items;
+        }
+    }
+
+    private static IEnumerable<Guid> GetReferenceTemplateIds(TemplateFieldResponse field)
+    {
+        if (field.TemplateId.HasValue)
+        {
+            yield return field.TemplateId.Value;
+        }
+
+        foreach (var allowedType in field.AllowedTypes)
+        {
+            if (allowedType.AllowedTemplateId.HasValue)
+            {
+                yield return allowedType.AllowedTemplateId.Value;
+            }
+        }
+    }
+
     private RenderFragment RenderField(TemplateFieldResponse field) => builder =>
     {
         var sequence = 0;
-        if (field.PrimitiveType == PrimitiveType.Boolean)
+        if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
+        {
+            if (field.CompositionMode == CompositionMode.Reference)
+            {
+                var options = GetReferenceTemplateIds(field)
+                    .SelectMany(templateId => referenceOptionsByTemplateId.GetValueOrDefault(templateId) ?? [])
+                    .Where(option => option.Id != ContentId)
+                    .GroupBy(option => option.Id)
+                    .Select(group => group.First())
+                    .OrderBy(option => option.Slug ?? option.Id.ToString())
+                    .ToList();
+
+                builder.OpenElement(sequence++, "select");
+                builder.AddAttribute(sequence++, "class", "form-select");
+                builder.AddAttribute(sequence++, "value", referenceValues.GetValueOrDefault(field.Id)?.ToString() ?? "");
+                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e =>
+                {
+                    referenceValues[field.Id] = Guid.TryParse(e.Value?.ToString(), out var selected) ? selected : null;
+                }));
+                builder.OpenElement(sequence++, "option");
+                builder.AddAttribute(sequence++, "value", "");
+                builder.AddContent(sequence++, field.IsRequired ? "Select referenced content" : "None");
+                builder.CloseElement();
+                foreach (var option in options)
+                {
+                    builder.OpenElement(sequence++, "option");
+                    builder.AddAttribute(sequence++, "value", option.Id.ToString());
+                    builder.AddContent(sequence++, $"{option.Slug ?? option.Id.ToString()} ({option.Status})");
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.OpenElement(sequence++, "div");
+                builder.AddAttribute(sequence++, "class", "alert alert-warning py-2 px-3 small mb-0");
+                builder.AddContent(sequence++, "Inline child content editing is not available yet. Use a reference field or create the child content separately.");
+                builder.CloseElement();
+            }
+        }
+        else if (field.PrimitiveType == PrimitiveType.Boolean)
         {
             builder.OpenElement(sequence++, "input");
             builder.AddAttribute(sequence++, "type", "checkbox");
@@ -293,6 +396,30 @@
                 builder.CloseElement();
             }
         }
+        else if (field.PrimitiveType == PrimitiveType.Link)
+        {
+            builder.OpenElement(sequence++, "input");
+            builder.AddAttribute(sequence++, "type", "url");
+            builder.AddAttribute(sequence++, "class", "form-control");
+            builder.AddAttribute(sequence++, "placeholder", "https://example.com");
+            builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id));
+            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
+            builder.CloseElement();
+        }
+        else if (field.PrimitiveType == PrimitiveType.Quote)
+        {
+            builder.OpenElement(sequence++, "textarea");
+            builder.AddAttribute(sequence++, "class", "form-control");
+            builder.AddAttribute(sequence++, "rows", "4");
+            builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id));
+            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
+            builder.CloseElement();
+        }
+        else if (field.PrimitiveType == PrimitiveType.Separator)
+        {
+            builder.OpenElement(sequence++, "hr");
+            builder.CloseElement();
+        }
         else
         {
             builder.OpenElement(sequence++, "input");
@@ -328,6 +455,16 @@
         var values = new List<ContentFieldValueRequest>();
         foreach (var field in fields)
         {
+            if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
+            {
+                if (referenceValues.GetValueOrDefault(field.Id) is Guid referencedId)
+                {
+                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
+                }
+
+                continue;
+            }
+
             if (field.PrimitiveType == PrimitiveType.PickList)
             {
                 var binding = GetPicklistBinding(field);
@@ -362,6 +499,9 @@
                     PrimitiveType.File => ValueKind.File,
                     PrimitiveType.Markdown => ValueKind.Markdown,
                     PrimitiveType.RichText => ValueKind.RichText,
+                    PrimitiveType.Link => ValueKind.Link,
+                    PrimitiveType.Quote => ValueKind.Quote,
+                    PrimitiveType.Separator => ValueKind.Separator,
                     _ => ValueKind.Text
                 },
                 textValues.GetValueOrDefault(field.Id),
@@ -372,14 +512,29 @@
                 null));
         }
         var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (ContentId.HasValue)
+        try
         {
-            item = await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(slug, locale, item?.TranslationGroupId, null, tagList, values));
+            error = null;
+            if (ContentId.HasValue)
+            {
+                item = await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(slug, locale, item?.TranslationGroupId, null, tagList, values));
+                Toasts.Success("Draft saved");
+            }
+            else
+            {
+                item = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, slug, locale, null, tagList, values));
+                Toasts.Success("Draft created");
+                Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
+            }
         }
-        else
+        catch (ProblemDetailsException ex)
         {
-            item = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, slug, locale, null, tagList, values));
-            Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
+            error = string.IsNullOrWhiteSpace(ex.Detail) ? ex.Message : ex.Detail;
+            if (ex.StatusCode == StatusCodes.Status412PreconditionFailed && ContentId.HasValue)
+            {
+                await LoadContentAsync();
+                error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
+            }
         }
     }
 
@@ -387,7 +542,15 @@
     {
         if (ContentId.HasValue && Guid.TryParse(translationTarget, out var targetId))
         {
-            await Content.LinkTranslationAsync(WorkspaceId, ContentId.Value, targetId);
+            try
+            {
+                error = null;
+                await Content.LinkTranslationAsync(WorkspaceId, ContentId.Value, targetId);
+            }
+            catch (ProblemDetailsException ex)
+            {
+                error = string.IsNullOrWhiteSpace(ex.Detail) ? ex.Message : ex.Detail;
+            }
         }
     }
 }

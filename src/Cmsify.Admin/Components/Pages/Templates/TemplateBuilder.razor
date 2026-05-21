@@ -4,6 +4,7 @@
 @using System.Text.Json.Nodes
 @inject TemplateApiClient Templates
 @inject PickListApiClient PickLists
+@inject ToastState Toasts
 
 <div class="cms-builder">
     <div class="cms-builder__top">
@@ -268,7 +269,7 @@
             selectedSectionId = created.Id;
             selectedFieldId = null;
             await LoadAsync();
-        });
+        }, "Section added");
     }
 
     private async Task AddFieldAsync()
@@ -291,7 +292,7 @@
             selectedFieldId = created.Id;
             selectedSectionId = created.SectionId;
             await LoadAsync();
-        });
+        }, "Field added");
     }
 
     private async Task SaveFieldAsync()
@@ -306,7 +307,7 @@
             var request = new TemplateFieldRequest(fieldEdit.SectionId, fieldEdit.Key, fieldEdit.Label, fieldEdit.HelpText, fieldEdit.Order, fieldEdit.IsRequired, fieldEdit.MinOccurrences, fieldEdit.MaxOccurrences, fieldEdit.IsOpen, fieldEdit.CompositionMode, fieldEdit.PrimitiveType, fieldEdit.TemplateId, fieldEdit.AllowedTypes, BuildFieldConfig(fieldEdit));
             await Templates.UpdateFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, SelectedField.Id, request);
             await LoadAsync();
-        });
+        }, "Field saved");
     }
 
     private static JsonElement? BuildFieldConfig(FieldEdit edit)
@@ -342,7 +343,7 @@
         {
             await Templates.UpdateSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, SelectedSection.Id, new TemplateSectionRequest(sectionEdit.Name, sectionEdit.Description, sectionEdit.Order, sectionEdit.IsCollapsible));
             await LoadAsync();
-        });
+        }, "Section saved");
     }
 
     private void BeginDeleteSection()
@@ -381,7 +382,7 @@
 
             CancelDeleteSection();
             await LoadAsync();
-        });
+        }, "Section deleted");
     }
 
     private void BeginDeleteField()
@@ -419,7 +420,7 @@
 
             CancelDeleteField();
             await LoadAsync();
-        });
+        }, "Field deleted");
     }
 
     private async Task PublishAsync()
@@ -431,7 +432,7 @@
                 await Templates.PublishAsync(WorkspaceId, TemplateId, version.VersionNumber);
                 confirmPublish = false;
                 await LoadAsync();
-            });
+            }, "Template version published");
         }
     }
 
@@ -480,12 +481,13 @@
         return $"New Field {suffix}";
     }
 
-    private async Task RunMutationAsync(Func<Task> operation)
+    private async Task RunMutationAsync(Func<Task> operation, string successMessage)
     {
         error = null;
         try
         {
             await operation();
+            Toasts.Success(successMessage);
         }
         catch (ProblemDetailsException ex)
         {
