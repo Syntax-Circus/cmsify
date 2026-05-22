@@ -67,4 +67,36 @@
       setTimeout(() => URL.revokeObjectURL(url), 0);
     }
   };
+
+  window.cmsifyAuth = {
+    getCsrfToken: () => {
+      const meta = document.querySelector('meta[name="cmsify-csrf-token"]');
+      return meta ? meta.getAttribute("content") || "" : "";
+    },
+    refreshClaimsAndNavigate: async (returnUrl) => {
+      try {
+        await fetch("/admin-auth/refresh-claims", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "RequestVerificationToken": window.cmsifyAuth.getCsrfToken() }
+        });
+      } catch (e) {
+        // Ignore — we still want to navigate; the cookie will simply not be refreshed,
+        // and GuardedRouteView will redirect back to change-password if needed.
+      }
+      window.location.assign(returnUrl || "/workspaces");
+    },
+    submitLogout: () => {
+      const form = document.createElement("form");
+      form.method = "post";
+      form.action = "/admin-auth/logout";
+      const csrf = document.createElement("input");
+      csrf.type = "hidden";
+      csrf.name = "__RequestVerificationToken";
+      csrf.value = window.cmsifyAuth.getCsrfToken();
+      form.appendChild(csrf);
+      document.body.appendChild(form);
+      form.submit();
+    }
+  };
 })();

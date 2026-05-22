@@ -1,8 +1,13 @@
+@using Microsoft.AspNetCore.Antiforgery
+@inject IAntiforgery Antiforgery
+@inject IHttpContextAccessor HttpContextAccessor
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="cmsify-csrf-token" content="@CsrfToken" />
     <base href="/" />
     <script>
         (() => {
@@ -29,3 +34,9 @@
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>
+
+@code {
+    private string CsrfToken => HttpContextAccessor.HttpContext is { } httpContext
+        ? Antiforgery.GetAndStoreTokens(httpContext).RequestToken ?? string.Empty
+        : string.Empty;
+}

@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Components.Forms;
+using Cmsify.Admin.Auth;
 using Cmsify.Admin.State;
 using Cmsify.Core.Domain.Enums;
 
@@ -53,7 +54,7 @@ public sealed class AuthService
 
 public sealed class WorkspaceApiClient : ApiClientBase
 {
-    public WorkspaceApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public WorkspaceApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<PagedResult<WorkspaceDto>> ListAsync(CancellationToken ct = default) => GetAsync<PagedResult<WorkspaceDto>>("/api/v1/workspaces", ct);
 
@@ -68,7 +69,7 @@ public sealed class WorkspaceApiClient : ApiClientBase
 
 public sealed class TemplateApiClient : ApiClientBase
 {
-    public TemplateApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public TemplateApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<PagedResult<TemplateSummaryResponse>> ListAsync(Guid workspaceId, string? search = null, CancellationToken ct = default) =>
         GetAsync<PagedResult<TemplateSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/templates?search={Uri.EscapeDataString(search ?? string.Empty)}", ct);
@@ -118,7 +119,7 @@ public sealed class TemplateApiClient : ApiClientBase
 
 public sealed class PickListApiClient : ApiClientBase
 {
-    public PickListApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public PickListApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<IReadOnlyList<PickListSummaryResponse>> ListAsync(Guid workspaceId, string? search = null, CancellationToken ct = default) =>
         GetAsync<IReadOnlyList<PickListSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/picklists?search={Uri.EscapeDataString(search ?? string.Empty)}", ct);
@@ -138,7 +139,7 @@ public sealed class PickListApiClient : ApiClientBase
 
 public sealed class ContentApiClient : ApiClientBase
 {
-    public ContentApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public ContentApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<PagedResponse<ContentItemSummaryResponse>> ListAsync(Guid workspaceId, ContentStatus? status, Guid? templateId, string? locale, string? tags, string? q, CancellationToken ct = default)
     {
@@ -174,12 +175,12 @@ public sealed class ContentApiClient : ApiClientBase
 public sealed class MediaApiClient : ApiClientBase
 {
     private readonly IHttpClientFactory httpClientFactory;
-    private readonly AuthState authState;
+    private readonly IApiTokenAccessor apiTokenAccessor;
 
-    public MediaApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState)
+    public MediaApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor)
     {
         this.httpClientFactory = httpClientFactory;
-        this.authState = authState;
+        this.apiTokenAccessor = apiTokenAccessor;
     }
 
     public Task<PagedResponse<MediaAssetResponse>> ListAsync(Guid workspaceId, string? mimeType, string? search, CancellationToken ct = default) =>
@@ -206,9 +207,10 @@ public sealed class MediaApiClient : ApiClientBase
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/workspaces/{workspaceId}/media") { Content = content };
         request.Headers.Add("X-Correlation-Id", Guid.CreateVersion7().ToString());
-        if (!string.IsNullOrWhiteSpace(authState.Token))
+        var token = await apiTokenAccessor.GetTokenAsync(ct);
+        if (!string.IsNullOrWhiteSpace(token))
         {
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authState.Token);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         }
 
         using var response = await http.SendAsync(request, ct);
@@ -250,7 +252,7 @@ public sealed class MediaApiClient : ApiClientBase
 
 public sealed class WebhookApiClient : ApiClientBase
 {
-    public WebhookApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public WebhookApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<PagedResponse<WebhookEndpointResponse>> ListAsync(Guid workspaceId, CancellationToken ct = default) =>
         GetAsync<PagedResponse<WebhookEndpointResponse>>($"/api/v1/workspaces/{workspaceId}/webhooks", ct);
@@ -270,7 +272,7 @@ public sealed class WebhookApiClient : ApiClientBase
 
 public sealed class AuditApiClient : ApiClientBase
 {
-    public AuditApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public AuditApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<PagedResponse<AuditLogResponse>> QueryAsync(Guid? workspaceId, string? entityType, string? action, CancellationToken ct = default)
     {
@@ -281,7 +283,7 @@ public sealed class AuditApiClient : ApiClientBase
 
 public sealed class UserApiClient : ApiClientBase
 {
-    public UserApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public UserApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<PagedResponse<UserDto>> ListAsync(CancellationToken ct = default) => GetAsync<PagedResponse<UserDto>>("/api/v1/users", ct);
 
@@ -295,7 +297,7 @@ public sealed class UserApiClient : ApiClientBase
 
 public sealed class ApiClientsApiClient : ApiClientBase
 {
-    public ApiClientsApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public ApiClientsApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<PagedResponse<ApiClientDto>> ListAsync(CancellationToken ct = default) => GetAsync<PagedResponse<ApiClientDto>>("/api/v1/clients", ct);
 
@@ -308,7 +310,7 @@ public sealed class ApiClientsApiClient : ApiClientBase
 
 public sealed class SettingsApiClient : ApiClientBase
 {
-    public SettingsApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public SettingsApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<AccountPreferencesResponse> GetPreferencesAsync(CancellationToken ct = default) => GetAsync<AccountPreferencesResponse>("/api/v1/account/preferences", ct);
 
@@ -321,7 +323,7 @@ public sealed class SettingsApiClient : ApiClientBase
 
 public sealed class PackagesApiClient : ApiClientBase
 {
-    public PackagesApiClient(IHttpClientFactory httpClientFactory, AuthState authState) : base(httpClientFactory, authState) { }
+    public PackagesApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
 
     public Task<IReadOnlyList<OfficialPackageResponse>> ListOfficialAsync(CancellationToken ct = default) =>
         GetAsync<IReadOnlyList<OfficialPackageResponse>>("/api/v1/packages/official", ct);

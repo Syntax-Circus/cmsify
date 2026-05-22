@@ -1,33 +1,38 @@
+using System.Security.Claims;
+using Cmsify.Admin.Auth;
 using Cmsify.Admin.Services;
-using Microsoft.JSInterop;
+using Microsoft.AspNetCore.Components.Authorization;
 
 namespace Cmsify.Admin.State;
 
-public sealed class AuthState
+public sealed class AuthState : IDisposable
 {
-    private const string StorageKey = "cmsify.auth";
-    private readonly BrowserStorage storage;
+    private readonly AuthenticationStateProvider authenticationStateProvider;
+    private readonly IApiTokenAccessor apiTokenAccessor;
     private readonly AuthService authService;
+    private UserSummary? user;
+    private bool isAuthenticated;
+    private bool mustChangePassword;
     private bool initialized;
-    private bool persisted;
 
-    public AuthState(BrowserStorage storage, AuthService authService)
+    public AuthState(
+        AuthenticationStateProvider authenticationStateProvider,
+        IApiTokenAccessor apiTokenAccessor,
+        AuthService authService)
     {
-        this.storage = storage;
+        this.authenticationStateProvider = authenticationStateProvider;
+        this.apiTokenAccessor = apiTokenAccessor;
         this.authService = authService;
+        this.authenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
     }
 
     public event Action? Changed;
 
-    public string? Token { get; private set; }
+    public UserSummary? User => user;
 
-    public DateTimeOffset? ExpiresAt { get; private set; }
+    public bool IsAuthenticated => isAuthenticated;
 
-    public UserSummary? User { get; private set; }
-
-    public bool MustChangePassword { get; private set; }
-
-    public bool IsAuthenticated => !string.IsNullOrWhiteSpace(Token) && ExpiresAt > DateTimeOffset.UtcNow;
+    public bool MustChangePassword => mustChangePassword;
 
     public async Task InitializeAsync()
     {
@@ -36,89 +41,51 @@ public sealed class AuthState
             return;
         }
 
-        var saved = await storage.GetAsync<SavedAuth>("local", StorageKey);
-        persisted = saved is not null;
-        saved ??= await storage.GetAsync<SavedAuth>("session", StorageKey);
-        if (saved is not null)
-        {
-            Token = saved.Token;
-            ExpiresAt = saved.ExpiresAt;
-            User = saved.User;
-            MustChangePassword = saved.MustChangePassword;
-            if (!IsAuthenticated)
-            {
-                await ClearAsync();
-            }
-        }
-
+        await RefreshFromAuthStateAsync();
         initialized = true;
-    }
-
-    public async Task LoginAsync(string email, string password, bool rememberMe, CancellationToken ct = default)
-    {
-        var response = await authService.LoginAsync(email, password, ct);
-        Token = response.Token;
-        ExpiresAt = response.ExpiresAt;
-        User = response.User;
-        MustChangePassword = response.MustChangePassword;
-        persisted = rememberMe;
-        await StoreAsync();
-        Changed?.Invoke();
     }
 
     public async Task ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken ct = default)
     {
-        await authService.ChangePasswordAsync(Token, currentPassword, newPassword, ct);
-        MustChangePassword = false;
-        await StoreAsync();
+        var token = await apiTokenAccessor.GetTokenAsync(ct);
+        await authService.ChangePasswordAsync(token, currentPassword, newPassword, ct);
+        // Callers should follow up by POSTing to AdminAuthEndpoints.RefreshClaimsPath from the
+        // browser (JS) and then reloading, so the cookie's MustChangePassword claim is cleared.
+        mustChangePassword = false;
         Changed?.Invoke();
     }
 
-    public async Task LogoutAsync(CancellationToken ct = default)
+    public void Dispose()
     {
-        if (IsAuthenticated)
-        {
-            await authService.LogoutAsync(Token, ct);
-        }
-
-        await ClearAsync();
+        authenticationStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
     }
 
-    public async Task ClearAsync()
+    private void OnAuthenticationStateChanged(Task<AuthenticationState> task)
     {
-        Token = null;
-        ExpiresAt = null;
-        User = null;
-        MustChangePassword = false;
-        await storage.RemoveAsync("local", StorageKey);
-        await storage.RemoveAsync("session", StorageKey);
+        _ = RefreshFromAuthStateAsync();
+    }
+
+    private async Task RefreshFromAuthStateAsync()
+    {
+        var state = await authenticationStateProvider.GetAuthenticationStateAsync();
+        var principal = state.User;
+        isAuthenticated = principal.Identity?.IsAuthenticated ?? false;
+        if (isAuthenticated)
+        {
+            var id = Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var parsed) ? parsed : Guid.Empty;
+            var email = principal.FindFirstValue(ClaimTypes.Email) ?? string.Empty;
+            var displayName = principal.FindFirstValue(ClaimTypes.Name) ?? email;
+            var role = principal.FindFirstValue(ClaimTypes.Role) ?? "Reader";
+            var isSuperAdmin = string.Equals(principal.FindFirstValue(CmsifyAuthClaims.IsSuperAdmin), "true", StringComparison.OrdinalIgnoreCase);
+            user = new UserSummary(id, email, displayName, role, isSuperAdmin);
+            mustChangePassword = string.Equals(principal.FindFirstValue(CmsifyAuthClaims.MustChangePassword), "true", StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            user = null;
+            mustChangePassword = false;
+        }
+
         Changed?.Invoke();
     }
-
-    public async Task UpdateExpiresAtAsync(DateTimeOffset expiresAt)
-    {
-        if (string.IsNullOrWhiteSpace(Token) || !ExpiresAt.HasValue || expiresAt <= ExpiresAt.Value)
-        {
-            return;
-        }
-
-        ExpiresAt = expiresAt;
-        try
-        {
-            await StoreAsync();
-        }
-        catch (JSDisconnectedException)
-        {
-            // Session lifetime refresh is opportunistic; the next live circuit can refresh storage again.
-        }
-    }
-
-    private async Task StoreAsync()
-    {
-        var saved = new SavedAuth(Token!, ExpiresAt!.Value, User!, MustChangePassword);
-        await storage.RemoveAsync(persisted ? "session" : "local", StorageKey);
-        await storage.SetAsync(persisted ? "local" : "session", StorageKey, saved);
-    }
-
-    private sealed record SavedAuth(string Token, DateTimeOffset ExpiresAt, UserSummary User, bool MustChangePassword);
 }

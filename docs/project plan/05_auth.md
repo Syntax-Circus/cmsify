@@ -200,6 +200,132 @@ On startup, if `Users` table is empty:
 
 ---
 
+## Admin app session layer (cookie facade)
+
+The Cmsify.Admin host (Blazor Server) sits in front of the API and presents
+a **server-issued HTTP cookie** to the browser. The browser never sees the
+API session token; Admin stores the bearer inside the encrypted cookie
+ticket and attaches it to outgoing API calls server-side.
+
+### Why a separate cookie layer?
+
+- Cookies follow normal browser lifecycle (survive tab close / browser
+  restart by default), so admins are not logged out simply because a tab
+  was closed or the dev server was rebuilt.
+- The bearer token is held in an `HttpOnly`, Data-Protection-encrypted
+  cookie payload — not JS-accessible, not vulnerable to XSS exfiltration.
+- The API surface stays unchanged (still pure bearer auth), so Admin,
+  API clients, and any future first-party clients use the same backend
+  contract.
+- Admin and API can be deployed on different domains without needing
+  cross-site cookies — the cookie lives only on the Admin host, and
+  Admin → API calls are server-to-server.
+
+### Cookie ticket contents
+
+The ASP.NET Core cookie auth handler stores a `ClaimsPrincipal` with:
+
+- `NameIdentifier` — UserId
+- `Email`, `Name` (DisplayName), `Role`
+- `cmsify:super_admin` — `"true"`/`"false"`
+- `cmsify:must_change_password` — `"true"`/`"false"`
+- `cmsify:api_token` — the raw API bearer token
+- `cmsify:api_token_expires_at` — ISO-8601 expiry as last known to Admin
+
+The cookie body is encrypted using ASP.NET Core's Data Protection stack,
+so the API token is safe at rest in the user's browser.
+
+### Cookie lifetime
+
+- **Persistent by default.** Every login issues `IsPersistent = true`.
+  "Remember me" no longer exists.
+- `SlidingExpiration = true` with `ExpireTimeSpan` driven by
+  `Admin:Auth:Session:SlidingWindowMinutes` (default `60`).
+- Absolute cap enforced by a custom
+  `CookieAuthenticationEvents.ValidatePrincipal` handler using the
+  cookie's `IssuedUtc` + `Admin:Auth:Session:MaxLifetimeHours`
+  (default `24`). When a cookie exceeds the cap, the principal is
+  rejected and the user is bounced to `/login`.
+
+### Data Protection
+
+- `services.AddDataProtection().PersistKeysToFileSystem(<path>).SetApplicationName("Cmsify.Admin")`.
+- Path from `Admin:DataProtection:KeysPath` (default
+  `.local/keys/admin`). Relative paths resolve against the content root.
+- The directory is created on startup if missing.
+- For multi-instance / HA deployments, swap `PersistKeysToFileSystem`
+  for `PersistKeysToStackExchangeRedis` (or another distributed key
+  store) so all instances share keys. Not implemented in MVP.
+
+### Endpoints
+
+The Admin host exposes three POST endpoints (separate from Blazor pages
+so they can manipulate `HttpContext` directly):
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /admin-auth/login` | Validates form, calls API `/auth/login`, `SignInAsync`, redirects to `returnUrl` (or `/account/change-password` when required). |
+| `POST /admin-auth/logout` | Best-effort API `/auth/logout`, then `SignOutAsync`, redirects to `/login`. |
+| `POST /admin-auth/refresh-claims` | Re-issues the cookie after a successful password change so `cmsify:must_change_password` flips to `false`. |
+
+Login and logout are protected by ASP.NET Core antiforgery; the login
+form embeds `<AntiforgeryToken />` and the logout form is built in JS
+using a CSRF token rendered as a `<meta name="cmsify-csrf-token">` tag
+in `App.razor`. Refresh-claims requires an already-authenticated cookie
+and is exempted from antiforgery for simplicity.
+
+### Blazor wiring
+
+- `App.razor` injects `IAntiforgery` + `IHttpContextAccessor` at the
+  SSR root and emits the CSRF meta tag.
+- `Login.razor` is a plain HTML form (`method="post"` →
+  `/admin-auth/login`) — no `EditForm`, no interactive rendermode work
+  required for the post itself.
+- `ChangePassword.razor` calls the API, then JS-invokes
+  `cmsifyAuth.refreshClaimsAndNavigate(returnUrl)` which POSTs to
+  `/admin-auth/refresh-claims` and reloads to clear the must-change
+  state.
+- `MainLayout.razor` logout button calls `cmsifyAuth.submitLogout()`,
+  which dynamically POSTs to `/admin-auth/logout` with the CSRF token.
+- `GuardedRouteView.razor` and `AuthState` consume
+  `AuthenticationStateProvider` — no browser-storage round-trip.
+- `ApiClientBase` reads the bearer from a scoped `IApiTokenAccessor`,
+  which pulls `cmsify:api_token` from the current `ClaimsPrincipal`.
+
+### Configuration
+
+```jsonc
+"Admin": {
+  "Auth": {
+    "Session": {
+      "SlidingWindowMinutes": 60,
+      "MaxLifetimeHours": 24
+    }
+  },
+  "DataProtection": {
+    "KeysPath": ".local/keys/admin"
+  }
+}
+```
+
+Equivalent env vars are documented in `.env.example` and
+`src/Cmsify.Admin/.env.example`.
+
+### Interplay with the API session
+
+- The API session and the Admin cookie are independent. The API still
+  enforces its own absolute expiry on the bearer.
+- If the API invalidates a bearer (server restart that drops in-memory
+  sessions, manual revoke, absolute expiry), the next Admin → API call
+  returns `401`. The Admin UI currently surfaces this as a redirect
+  to `/login`; the cookie is cleared on the next sign-in.
+- The Admin cookie's sliding window should generally be ≤ the API's
+  session lifetime so the Admin cookie expires before — or with — the
+  underlying API session, avoiding a window where the cookie looks valid
+  but the API rejects every call.
+
+---
+
 ## Tasks
 
 - [x] Install `BCrypt.Net-Next`, `Microsoft.AspNetCore.Authentication.JwtBearer`

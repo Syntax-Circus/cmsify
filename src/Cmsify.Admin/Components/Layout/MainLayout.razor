@@ -4,6 +4,7 @@
 @inject UserPreferencesState Preferences
 @inject ToastState Toasts
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <div class="cms-shell">
     @if (ShowChrome)
@@ -42,7 +43,7 @@
                     <div class="cms-user-name">@Auth.User?.DisplayName</div>
                     <div class="cms-user-role">@Auth.User?.Role · @Auth.User?.Email</div>
                 </div>
-                <button class="cms-iconbtn" title="Sign out" @onclick="LogoutAsync"><i class="bi bi-box-arrow-right"></i></button>
+                <button class="cms-iconbtn" type="button" title="Sign out" @onclick="LogoutAsync"><i class="bi bi-box-arrow-right"></i></button>
             </div>
         </aside>
     }
@@ -158,11 +159,7 @@
 
     private async Task ToggleThemeAsync() => await Preferences.SetThemeAsync(EffectiveTheme == "dark" ? "light" : "dark");
 
-    private async Task LogoutAsync()
-    {
-        await Auth.LogoutAsync();
-        Navigation.NavigateTo("/login", replace: true);
-    }
+    private async Task LogoutAsync() => await JS.InvokeVoidAsync("cmsifyAuth.submitLogout");
 
     private IReadOnlyList<BreadcrumbItem> BuildBreadcrumbItems()
     {
