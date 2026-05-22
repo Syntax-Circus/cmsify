@@ -1,7 +1,6 @@
 @page "/login"
 @layout Cmsify.Admin.Components.Layout.MainLayout
-@rendermode InteractiveServer
-@inject AuthState Auth
+@using Microsoft.AspNetCore.Components.Forms
 @inject IConfiguration Configuration
 @inject NavigationManager Navigation
 
@@ -13,69 +12,59 @@
         <h1 class="h4 mb-1">Sign in to Cmsify</h1>
         <p class="text-muted small mb-0">Use your admin account to continue.</p>
     </div>
-    <EditForm Model="form" OnValidSubmit="SubmitAsync">
-        <DataAnnotationsValidator />
+    <form method="post" action="/admin-auth/login">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnUrl" value="@ReturnUrl" />
         <div class="mb-3">
             <label class="form-label" for="email">Email</label>
-            <InputText id="email" type="email" class="form-control" @bind-Value="form.Email" autofocus />
+            <input id="email" name="email" type="email" class="form-control" autofocus required />
         </div>
         <div class="mb-3">
             <label class="form-label" for="password">Password</label>
-            <InputText id="password" type="password" class="form-control" @bind-Value="form.Password" />
+            <input id="password" name="password" type="password" class="form-control" required />
         </div>
-        <div class="form-check mb-3">
-            <InputCheckbox id="remember" class="form-check-input" @bind-Value="form.RememberMe" />
-            <label class="form-check-label" for="remember">Remember me</label>
-        </div>
-        @if (!string.IsNullOrWhiteSpace(error))
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
         {
-            <div class="alert alert-danger">@error</div>
+            <div class="alert alert-danger">@ErrorMessage</div>
         }
-        <button class="btn btn-primary w-100" disabled="@busy">
-            @if (busy) { <LoadingSpinner /> }
-            Sign In
-        </button>
+        <button class="btn btn-primary w-100" type="submit">Sign In</button>
         @if (OidcEnabled)
         {
             <div class="text-center text-muted small my-3">or</div>
             <a class="btn btn-outline-secondary w-100" href="/signin-oidc">Sign in with @OidcProviderName</a>
         }
-    </EditForm>
+    </form>
     <div class="text-center text-muted small mt-3">Cmsify Admin</div>
 </div>
 
 @code {
-    private readonly LoginForm form = new();
-    private bool busy;
-    private string? error;
-
     private bool OidcEnabled => Configuration.GetValue("Auth:Oidc:Enabled", false);
     private string OidcProviderName => Configuration["Admin:OidcProviderName"] ?? "OIDC";
 
-    private async Task SubmitAsync()
-    {
-        busy = true;
-        error = null;
-        try
-        {
-            await Auth.LoginAsync(form.Email, form.Password, form.RememberMe);
-            var returnUrl = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Navigation.Uri).Query).TryGetValue("returnUrl", out var value) ? value.ToString() : "/workspaces";
-            Navigation.NavigateTo(Auth.MustChangePassword ? $"/account/change-password?returnUrl={Uri.EscapeDataString(returnUrl)}" : returnUrl, replace: true);
-        }
-        catch (ProblemDetailsException ex)
-        {
-            error = ex.StatusCode == 401 ? "Invalid email or password" : ex.Message;
-        }
-        finally
-        {
-            busy = false;
-        }
-    }
+    private string ReturnUrl { get; set; } = "/workspaces";
+    private string? ErrorMessage { get; set; }
 
-    private sealed class LoginForm
+    protected override void OnInitialized()
     {
-        public string Email { get; set; } = "";
-        public string Password { get; set; } = "";
-        public bool RememberMe { get; set; }
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Navigation.Uri).Query);
+        if (query.TryGetValue("returnUrl", out var returnUrl) && !string.IsNullOrWhiteSpace(returnUrl))
+        {
+            var candidate = returnUrl.ToString();
+            if (candidate.StartsWith('/') && !candidate.StartsWith("//", StringComparison.Ordinal))
+            {
+                ReturnUrl = candidate;
+            }
+        }
+
+        if (query.TryGetValue("error", out var error))
+        {
+            ErrorMessage = error.ToString() switch
+            {
+                "invalid-credentials" => "Invalid email or password.",
+                "missing-credentials" => "Email and password are required.",
+                "api-unavailable" => "Cmsify API is unavailable. Please try again shortly.",
+                _ => "Sign in failed. Please try again."
+            };
+        }
     }
 }

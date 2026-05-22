@@ -11,6 +11,7 @@
   <Project Path="src\Cmsify.Api\Cmsify.Api.csproj" />
   <Project Path="src\Cmsify.Core\Cmsify.Core.csproj" />
   <Project Path="src\Cmsify.Infrastructure\Cmsify.Infrastructure.csproj" />
+  <Project Path="tests\Cmsify.Admin.Integration.Tests\Cmsify.Admin.Integration.Tests.csproj" />
   <Project Path="tests\Cmsify.Api.Integration.Tests\Cmsify.Api.Integration.Tests.csproj" />
   <Project Path="tests\Cmsify.Core.Tests\Cmsify.Core.Tests.csproj" />
   <Project Path="tests\Cmsify.Infrastructure.Tests\Cmsify.Infrastructure.Tests.csproj" />

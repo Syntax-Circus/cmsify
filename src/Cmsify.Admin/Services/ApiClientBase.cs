@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Cmsify.Admin.State;
+using Cmsify.Admin.Auth;
 
 namespace Cmsify.Admin.Services;
 
@@ -12,12 +12,12 @@ public abstract class ApiClientBase
     private const string SessionExpiresAtHeaderName = "X-Session-Expires-At";
     private readonly Dictionary<string, string> etags = new(StringComparer.OrdinalIgnoreCase);
     private readonly IHttpClientFactory httpClientFactory;
-    private readonly AuthState authState;
+    private readonly IApiTokenAccessor apiTokenAccessor;
 
-    protected ApiClientBase(IHttpClientFactory httpClientFactory, AuthState authState)
+    protected ApiClientBase(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor)
     {
         this.httpClientFactory = httpClientFactory;
-        this.authState = authState;
+        this.apiTokenAccessor = apiTokenAccessor;
     }
 
     protected async Task<(T Body, string? ETag)> GetWithETagAsync<T>(string url, CancellationToken ct = default)
@@ -93,16 +93,17 @@ public abstract class ApiClientBase
     {
         var http = httpClientFactory.CreateClient("CmsifyApi");
         request.Headers.Add("X-Correlation-Id", Guid.CreateVersion7().ToString());
-        if (!string.IsNullOrWhiteSpace(authState.Token))
+        var token = await apiTokenAccessor.GetTokenAsync(ct);
+        if (!string.IsNullOrWhiteSpace(token))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authState.Token);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
 
         var response = await http.SendAsync(request, ct);
         if (response.Headers.TryGetValues(SessionExpiresAtHeaderName, out var expiresAtValues)
             && DateTimeOffset.TryParse(expiresAtValues.FirstOrDefault(), out var expiresAt))
         {
-            await authState.UpdateExpiresAtAsync(expiresAt);
+            await apiTokenAccessor.NoteSessionExpiryAsync(expiresAt, ct);
         }
 
         return response;
