@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IContentValidator, ContentValidator>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
+        services.AddScoped<IContentPublishingService, ContentPublishingService>();
         services.AddScoped<IContentSearchVectorBuilder, ContentSearchVectorBuilder>();
         services.AddScoped<IWorkspaceAuthorizationService, WorkspaceAuthorizationService>();
         services.AddSingleton<ISecretProtector, AesSecretProtector>();

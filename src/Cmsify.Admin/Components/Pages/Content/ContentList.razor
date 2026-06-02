@@ -36,7 +36,7 @@
                         <a class="btn btn-primary btn-sm" href="/workspaces/@WorkspaceId/content/@item.Id">Edit</a>
                         <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, SubmitAction)">Submit</button>
                         <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ApproveAction)">Approve</button>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, PublishAction)">Publish</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => OpenPublishDialog(item.Id)">Publish</button>
                         <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ArchiveAction)">Archive</button>
                     </div>
                 </td>
@@ -45,6 +45,59 @@
         </tbody>
     </table>
 </div>
+
+@if (publishContentId.HasValue)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Publish content</h5>
+                    <button type="button" class="btn-close" @onclick="ClosePublishDialog" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrWhiteSpace(publishError))
+                    {
+                        <div class="alert alert-danger">@publishError</div>
+                    }
+                    @if (publishWarnings.Count > 0)
+                    {
+                        <div class="alert alert-warning">
+                            @foreach (var warning in publishWarnings)
+                            {
+                                <div>@warning</div>
+                            }
+                        </div>
+                    }
+                    <div class="mb-3">
+                        <label class="form-label">Schedule publish at (UTC, optional)</label>
+                        <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="publishAtInput" />
+                    </div>
+                    <div class="form-check mb-3">
+                        <input id="boundedOverride" class="form-check-input" type="checkbox" @bind="boundedOverride" />
+                        <label class="form-check-label" for="boundedOverride">Publish as bounded override instead of default</label>
+                    </div>
+                    @if (boundedOverride)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Effective start (UTC)</label>
+                            <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="effectiveStartInput" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Effective end (UTC, exclusive)</label>
+                            <input class="form-control" placeholder="2026-12-26T00:00:00Z" @bind="effectiveEndInput" />
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" type="button" @onclick="ClosePublishDialog">Cancel</button>
+                    <button class="btn btn-primary" type="button" @onclick="PublishAsync">Publish</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
 
 @code {
     [Parameter] public Guid WorkspaceId { get; set; }
@@ -56,8 +109,14 @@
     private string? q;
     private const string SubmitAction = "submit";
     private const string ApproveAction = "approve";
-    private const string PublishAction = "publish";
     private const string ArchiveAction = "archive";
+    private Guid? publishContentId;
+    private bool boundedOverride;
+    private string? publishAtInput;
+    private string? effectiveStartInput;
+    private string? effectiveEndInput;
+    private string? publishError;
+    private IReadOnlyList<string> publishWarnings = [];
 
     protected override async Task OnParametersSetAsync()
     {
@@ -71,7 +130,57 @@
 
     private async Task TransitionAsync(Guid id, string action)
     {
-        await Content.TransitionAsync(WorkspaceId, id, action, action == "publish" ? new PublishContentRequest(null) : null);
+        await Content.TransitionAsync(WorkspaceId, id, action);
         await LoadAsync();
+    }
+
+    private void OpenPublishDialog(Guid id)
+    {
+        publishContentId = id;
+        boundedOverride = false;
+        publishAtInput = null;
+        effectiveStartInput = null;
+        effectiveEndInput = null;
+        publishError = null;
+        publishWarnings = [];
+    }
+
+    private void ClosePublishDialog() => publishContentId = null;
+
+    private async Task PublishAsync()
+    {
+        if (!publishContentId.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            var request = new PublishContentRequest(
+                ParseUtcDateTimeOffset(publishAtInput),
+                boundedOverride ? ParseUtcDateTimeOffset(effectiveStartInput) : null,
+                boundedOverride ? ParseUtcDateTimeOffset(effectiveEndInput) : null);
+            var response = await Content.PublishAsync(WorkspaceId, publishContentId.Value, request);
+            publishWarnings = response.Warnings;
+            await LoadAsync();
+            if (publishWarnings.Count == 0)
+            {
+                ClosePublishDialog();
+            }
+        }
+        catch (Exception ex)
+        {
+            publishError = ex.Message;
+        }
+    }
+
+    private static DateTimeOffset? ParseUtcDateTimeOffset(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTime.SpecifyKind(DateTime.Parse(value), DateTimeKind.Utc);
     }
 }

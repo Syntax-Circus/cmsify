@@ -32,6 +32,23 @@ public interface IContentSearchVectorBuilder
     string Build(ContentItem item, TemplateVersion version);
 }
 
+public sealed record ContentEffectiveRange(DateTimeOffset? StartAt, DateTimeOffset? EndAt)
+{
+    public bool IsDefault => !StartAt.HasValue && !EndAt.HasValue;
+}
+
+public sealed record ContentPublishResult(ContentVersion Version, IReadOnlyList<string> Warnings);
+
+public interface IContentPublishingService
+{
+    Task<ContentPublishResult> PublishSnapshotAsync(
+        ContentItem content,
+        ContentEffectiveRange effectiveRange,
+        int? rolledBackFromVersionNumber = null,
+        Guid? actorUserId = null,
+        CancellationToken ct = default);
+}
+
 public interface ICurrentActor
 {
     Guid? UserId { get; }

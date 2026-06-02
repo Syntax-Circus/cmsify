@@ -25,6 +25,8 @@ export interface ContentListOptions {
   sortBy?: string;
   page?: number;
   pageSize?: number;
+  asOf?: string | Date;
+  resolve?: boolean;
 }
 
 export class CmsifyClient {
@@ -50,10 +52,10 @@ export class CmsifyClient {
   };
 
   readonly content = {
-    list: (options: ContentListOptions = {}) => this.request<PageResult<ContentItem>>(this.workspacePath("/content", options)),
+    list: (options: ContentListOptions = {}) => this.request<PageResult<ContentItem>>(this.workspacePath("/content", { ...options, resolve: true })),
     listAll: (options: ContentListOptions = {}) => listAll((page) => this.content.list({ ...options, page })),
-    get: (id: string) => this.request<ContentItem>(this.workspacePath(`/content/${id}`)),
-    bySlug: (slug: string) => this.request<ContentItem>(this.workspacePath(`/content/by-slug/${encodeURIComponent(slug)}`)),
+    get: (id: string, options: Pick<ContentListOptions, "asOf" | "resolve"> = {}) => this.request<ContentItem>(this.workspacePath(`/content/${id}`, options.resolve || options.asOf ? { ...options, resolve: true } : undefined)),
+    bySlug: (slug: string, options: Pick<ContentListOptions, "asOf"> = {}) => this.request<ContentItem>(this.workspacePath(`/content/by-slug/${encodeURIComponent(slug)}`, options)),
     translations: (id: string) => this.request<ContentItem[]>(this.workspacePath(`/content/${id}/translations`)),
   };
 
@@ -118,7 +120,7 @@ export class CmsifyClient {
     return await response.json() as T;
   }
 
-  private workspacePath(path: string, query?: ContentListOptions): string {
+  private workspacePath(path: string, query?: ContentListOptions & { resolve?: boolean }): string {
     if (!this.workspace) {
       throw new Error("A workspace slug or ID is required for this operation.");
     }
@@ -129,7 +131,7 @@ export class CmsifyClient {
         continue;
       }
 
-      search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+      search.set(key, value instanceof Date ? value.toISOString() : Array.isArray(value) ? value.join(",") : String(value));
     }
 
     const suffix = search.size > 0 ? `?${search}` : "";

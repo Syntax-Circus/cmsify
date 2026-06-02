@@ -28,6 +28,7 @@ else
                 <tr>
                     <th>Version</th>
                     <th>Status</th>
+                    <th>Effective range</th>
                     <th>Published</th>
                     <th>Retired</th>
                     <th>Notes</th>
@@ -42,6 +43,7 @@ else
                             <button class="btn btn-link p-0" type="button" @onclick="() => InspectAsync(version.VersionNumber)">v@(version.VersionNumber)</button>
                         </td>
                         <td><StatusBadge Status="@version.Status" /></td>
+                        <td>@RangeDisplay(version.EffectiveStartAt, version.EffectiveEndAt)</td>
                         <td><LocalTimeDisplay Value="@version.PublishedAt" /></td>
                         <td>
                             @if (version.RetiredAt.HasValue)
@@ -95,6 +97,8 @@ else
                         <dd class="col-sm-9">@(inspected.LocaleCode ?? "—")</dd>
                         <dt class="col-sm-3">Tags</dt>
                         <dd class="col-sm-9">@(inspected.Tags.Count == 0 ? "—" : string.Join(", ", inspected.Tags))</dd>
+                        <dt class="col-sm-3">Effective range</dt>
+                        <dd class="col-sm-9">@RangeDisplay(inspected.EffectiveStartAt, inspected.EffectiveEndAt)</dd>
                         <dt class="col-sm-3">Published</dt>
                         <dd class="col-sm-9"><LocalTimeDisplay Value="@inspected.PublishedAt" /></dd>
                         @if (inspected.RetiredAt.HasValue)
@@ -207,4 +211,9 @@ else
         ValueKind.ChildContent => field.ChildContentItemId?.ToString() ?? "—",
         _ => string.IsNullOrEmpty(field.TextValue) ? (field.JsonValue?.ToString() ?? "—") : field.TextValue!
     };
+
+    private static string RangeDisplay(DateTimeOffset? start, DateTimeOffset? end) =>
+        start.HasValue && end.HasValue
+            ? $"{start.Value:u} to {end.Value:u}"
+            : "Default";
 }

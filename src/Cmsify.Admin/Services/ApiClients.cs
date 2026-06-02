@@ -159,6 +159,9 @@ public sealed class ContentApiClient : ApiClientBase
     public Task<ContentItemDetailResponse> TransitionAsync(Guid workspaceId, Guid contentId, string action, object? request = null, CancellationToken ct = default) =>
         PostAsync<ContentItemDetailResponse>($"/api/v1/workspaces/{workspaceId}/content/{contentId}/{action}", request, ct);
 
+    public Task<PublishContentResponse> PublishAsync(Guid workspaceId, Guid contentId, PublishContentRequest request, CancellationToken ct = default) =>
+        PostAsync<PublishContentResponse>($"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish", request, ct);
+
     public Task<IReadOnlyList<ContentItemSummaryResponse>> LinkTranslationAsync(Guid workspaceId, Guid contentId, Guid targetId, CancellationToken ct = default) =>
         PostAsync<IReadOnlyList<ContentItemSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/content/{contentId}/link-translation", new LinkTranslationRequest(targetId), ct);
 

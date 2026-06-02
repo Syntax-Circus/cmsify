@@ -18,6 +18,7 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
             .HasFilter("slug IS NOT NULL AND is_deleted = false");
         builder.HasIndex(content => content.TranslationGroupId);
         builder.HasIndex(content => new { content.Status, content.PublishAt });
+        builder.HasIndex(content => new { content.Status, content.PublishAt, content.PendingEffectiveStartAt, content.PendingEffectiveEndAt });
         builder.HasIndex(content => content.WorkspaceId);
         builder.HasIndex(content => content.SearchVector).HasMethod("GIN");
 

@@ -134,6 +134,33 @@ public sealed class QueryApiTests : IAsyncLifetime
         template.CurrentVersionId = version.Id;
         dbContext.Tags.Add(tag);
         dbContext.ContentItems.AddRange(published, draft, translated);
+        dbContext.ContentVersions.AddRange(
+            new ContentVersion
+            {
+                ContentItemId = published.Id,
+                WorkspaceId = workspaceId,
+                VersionNumber = 1,
+                Status = ContentVersionStatus.Published,
+                TemplateVersionId = version.Id,
+                Slug = published.Slug,
+                LocaleCode = published.LocaleCode,
+                TranslationGroupId = published.TranslationGroupId,
+                Tags = ["featured"],
+                PublishedAt = published.PublishedAt!.Value
+            },
+            new ContentVersion
+            {
+                ContentItemId = translated.Id,
+                WorkspaceId = workspaceId,
+                VersionNumber = 1,
+                Status = ContentVersionStatus.Published,
+                TemplateVersionId = version.Id,
+                Slug = translated.Slug,
+                LocaleCode = translated.LocaleCode,
+                TranslationGroupId = translated.TranslationGroupId,
+                Tags = [],
+                PublishedAt = translated.PublishedAt!.Value
+            });
         await dbContext.SaveChangesAsync();
         return new QuerySeed(workspaceId, template.Id, published.Id);
     }
