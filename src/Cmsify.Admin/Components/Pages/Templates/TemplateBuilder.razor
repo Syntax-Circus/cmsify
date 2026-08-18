@@ -221,7 +221,7 @@
     private async Task LoadAsync()
     {
         var result = await Templates.GetAsync(WorkspaceId, TemplateId);
-        template = result.Body;
+        template = result;
         version = template.CurrentVersion ?? await EnsureDraftAsync();
         try
         {
@@ -491,7 +491,7 @@
         }
         catch (ProblemDetailsException ex)
         {
-            error = ex.Detail ?? ex.Title;
+            error = ex.Message;
         }
     }
 

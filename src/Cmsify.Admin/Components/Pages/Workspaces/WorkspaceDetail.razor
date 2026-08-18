@@ -39,7 +39,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        var (loaded, _) = await Workspaces.GetAsync(WorkspaceId);
+        var loaded = await Workspaces.GetAsync(WorkspaceId);
         workspace = loaded;
         WorkspaceState.Set(loaded);
         templateCount = (await Templates.ListAsync(WorkspaceId)).TotalCount;

@@ -82,14 +82,14 @@
             try
             {
                 var loaded = await PickLists.GetAsync(WorkspaceId, PickListId.Value);
-                name = loaded.Body.Name;
-                slug = loaded.Body.Slug;
-                description = loaded.Body.Description;
-                options = loaded.Body.Options.Select(option => new OptionEdit { Label = option.Label, Value = option.Value, Order = option.Order }).ToList();
+                name = loaded.Name;
+                slug = loaded.Slug;
+                description = loaded.Description;
+                options = loaded.Options.Select(option => new OptionEdit { Label = option.Label, Value = option.Value, Order = option.Order }).ToList();
             }
             catch (ProblemDetailsException ex)
             {
-                error = ex.Detail ?? ex.Title;
+                error = ex.Message;
             }
         }
         else
@@ -130,7 +130,7 @@
         }
         catch (ProblemDetailsException ex)
         {
-            error = ex.Detail ?? ex.Title;
+            error = ex.Message;
         }
     }
 

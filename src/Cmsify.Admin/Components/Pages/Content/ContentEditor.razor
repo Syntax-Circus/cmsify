@@ -122,7 +122,7 @@
         multiPickValues.Clear();
 
         var loaded = await Content.GetAsync(WorkspaceId, ContentId.Value);
-        item = loaded.Body;
+        item = loaded;
         slug = item.Slug;
         locale = item.LocaleCode;
         tags = string.Join(",", item.Tags);
@@ -164,7 +164,7 @@
     private async Task LoadTemplateVersionAsync(Guid templateId)
     {
         var template = await Templates.GetAsync(WorkspaceId, templateId);
-        templateVersion = template.Body.CurrentVersion ?? await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version");
+        templateVersion = template.CurrentVersion ?? await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version");
         await LoadPicklistsForFieldsAsync();
         await LoadReferenceOptionsForFieldsAsync();
     }
@@ -194,7 +194,7 @@
             try
             {
                 var loaded = await PickLists.GetAsync(WorkspaceId, id);
-                picklistCache[id] = loaded.Body;
+                picklistCache[id] = loaded;
             }
             catch (ProblemDetailsException) { }
         }
@@ -529,7 +529,7 @@
         }
         catch (ProblemDetailsException ex)
         {
-            error = string.IsNullOrWhiteSpace(ex.Detail) ? ex.Message : ex.Detail;
+            error = ex.Message;
             if (ex.StatusCode == StatusCodes.Status412PreconditionFailed && ContentId.HasValue)
             {
                 await LoadContentAsync();
@@ -549,7 +549,7 @@
             }
             catch (ProblemDetailsException ex)
             {
-                error = string.IsNullOrWhiteSpace(ex.Detail) ? ex.Message : ex.Detail;
+                error = ex.Message;
             }
         }
     }

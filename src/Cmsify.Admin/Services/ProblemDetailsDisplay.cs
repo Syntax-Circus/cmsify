@@ -1,3 +1,5 @@
+using SyntaxCircus.Http.Resilience;
+
 namespace Cmsify.Admin.Services;
 
 public static class ProblemDetailsDisplay
@@ -6,7 +8,7 @@ public static class ProblemDetailsDisplay
     {
         if (ex.Errors is null || ex.Errors.Count == 0)
         {
-            return ex.Detail ?? ex.Title;
+            return ex.Message;
         }
 
         var details = ex.Errors
@@ -15,7 +17,7 @@ public static class ProblemDetailsDisplay
             .ToArray();
 
         return details.Length == 0
-            ? ex.Detail ?? ex.Title
-            : $"{ex.Detail ?? ex.Title} {string.Join(" ", details)}";
+            ? ex.Message
+            : $"{ex.Message} {string.Join(" ", details)}";
     }
 }

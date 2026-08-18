@@ -7,23 +7,6 @@ public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int TotalCount, in
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount, int Offset, int Limit);
 
-public sealed class ProblemDetailsException : Exception
-{
-    public ProblemDetailsException(int statusCode, string title, string? detail, IReadOnlyDictionary<string, string[]>? errors)
-        : base(detail ?? title)
-    {
-        StatusCode = statusCode;
-        Title = title;
-        Detail = detail;
-        Errors = errors;
-    }
-
-    public int StatusCode { get; }
-    public string Title { get; }
-    public string? Detail { get; }
-    public IReadOnlyDictionary<string, string[]>? Errors { get; }
-}
-
 public sealed record FileDownloadResponse(string FileName, string ContentType, byte[] Content);
 
 public sealed record UserSummary(Guid Id, string Email, string DisplayName, string Role, bool IsSuperAdmin);

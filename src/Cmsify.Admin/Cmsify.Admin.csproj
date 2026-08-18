@@ -14,5 +14,6 @@
     <PackageReference Include="AspNetCore.SassCompiler" Version="1.77.8" />
     <PackageReference Include="Microsoft.Web.LibraryManager.Build" Version="2.1.175" />
     <PackageReference Include="SyntaxCircus.DotEnv" Version="0.1.2" />
+    <PackageReference Include="SyntaxCircus.Http.Resilience" Version="0.1.6" />
   </ItemGroup>
 </Project>

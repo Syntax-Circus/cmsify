@@ -72,7 +72,7 @@ else
         }
         catch (ProblemDetailsException ex)
         {
-            error = ex.Detail ?? ex.Title;
+            error = ex.Message;
         }
     }
 
@@ -90,7 +90,7 @@ else
         }
         catch (ProblemDetailsException ex)
         {
-            error = ex.Detail ?? ex.Title;
+            error = ex.Message;
         }
     }
 }

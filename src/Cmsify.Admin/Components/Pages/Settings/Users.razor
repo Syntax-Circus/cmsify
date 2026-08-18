@@ -135,7 +135,7 @@
         }
         catch (ProblemDetailsException ex)
         {
-            toast = ex.Detail ?? ex.Title;
+            toast = ex.Message;
             return;
         }
 
