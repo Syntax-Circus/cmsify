@@ -11,6 +11,7 @@ using Cmsify.Infrastructure.Persistence.Repositories;
 using Cmsify.Infrastructure.Security;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Extensions;
 
@@ -28,8 +29,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<AuditInterceptor>();
         services.AddDbContext<CmsifyDbContext>((serviceProvider, options) =>
         {
-            options.UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-                .UseSnakeCaseNamingConvention();
+            options.UseNpgsql(connectionString)
+                .UseSyntaxCircusSnakeCaseNamingConvention();
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditInterceptor>());
         });
         services.AddScoped<IDbSeeder, DbSeeder>();

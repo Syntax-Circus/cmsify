@@ -2,15 +2,15 @@ using Cmsify.Admin.Auth;
 using Cmsify.Admin.Components;
 using Cmsify.Admin.Services;
 using Cmsify.Admin.State;
-using DotNetEnv;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using SyntaxCircus.DotEnv;
 
 var builder = WebApplication.CreateBuilder(args);
 
-if (builder.Environment.IsDevelopment())
+if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
 {
-    LoadDotEnvFromParents(builder.Environment.ContentRootPath);
+    builder.Configuration.AddSyntaxCircusDotEnvFiles(builder.Environment.ContentRootPath);
     builder.Configuration.AddEnvironmentVariables();
 }
 
@@ -98,33 +98,6 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
-
-static void LoadDotEnvFromParents(string startPath)
-{
-    var directories = new Stack<DirectoryInfo>();
-    for (var directory = new DirectoryInfo(startPath); directory is not null; directory = directory.Parent)
-    {
-        directories.Push(directory);
-        if (Directory.Exists(Path.Combine(directory.FullName, ".git")))
-        {
-            break;
-        }
-    }
-
-    foreach (var directory in directories)
-    {
-        LoadIfExists(Path.Combine(directory.FullName, ".env"));
-        LoadIfExists(Path.Combine(directory.FullName, ".env.local"));
-    }
-}
-
-static void LoadIfExists(string path)
-{
-    if (File.Exists(path))
-    {
-        Env.Load(path);
-    }
-}
 
 public partial class Program;
 

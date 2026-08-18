@@ -2,6 +2,7 @@ using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Testcontainers.PostgreSql;
 
 namespace Cmsify.Api.Integration.Tests;
@@ -32,8 +33,8 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
             })
             .Build();
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
-            .UseNpgsql(postgres.GetConnectionString(), npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-            .UseSnakeCaseNamingConvention()
+            .UseNpgsql(postgres.GetConnectionString())
+            .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options;
 
         await using var context = new CmsifyDbContext(options);
@@ -44,7 +45,7 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
         await using var connection = new NpgsqlConnection(postgres.GetConnectionString());
         await connection.OpenAsync();
 
-        var migrations = await QueryStringsAsync(connection, "SELECT migration_id FROM __ef_migrations_history ORDER BY migration_id;");
+        var migrations = await QueryStringsAsync(connection, "SELECT \"MigrationId\" FROM \"__EFMigrationsHistory\" ORDER BY \"MigrationId\";");
         Assert.Contains(migrations, migration => migration.EndsWith("_InitialSchema", StringComparison.Ordinal));
         Assert.Contains(migrations, migration => migration.EndsWith("_AddUserSessions", StringComparison.Ordinal));
         Assert.Contains("ix_workspaces_slug", await QueryStringsAsync(connection, "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'workspaces';"));

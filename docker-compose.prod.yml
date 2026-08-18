@@ -27,6 +27,7 @@ services:
       Storage__Provider: ${Storage__Provider:-local}
       Storage__Local__BasePath: /var/cmsify/media
       Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
+      TrustedProxy__RequireTrustedProxiesInProduction: ${TrustedProxy__RequireTrustedProxiesInProduction:-false}
     depends_on:
       postgres:
         condition: service_healthy

@@ -382,9 +382,9 @@ RateLimit__PerActorPerMinute=600
 RateLimit__PerIpPerMinute=60
 
 # Logging (Serilog)
-Logging__MinLevel=Information
-Logging__FilePath=/var/cmsify/logs/cmsify-.log
-Logging__RetainedFileCountLimit=14
+Serilog__MinimumLevel__Default=Information
+Serilog__File__Enabled=true
+Serilog__File__Path=/var/cmsify/logs/cmsify-.log
 
 # Storage
 Storage__Provider=local

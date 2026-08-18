@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Persistence;
 
@@ -17,18 +18,7 @@ public sealed class CmsifyDatabaseMigrator : ICmsifyDatabaseMigrator
 
     public async Task MigrateAsync(CancellationToken ct = default)
     {
-        await dbContext.Database.OpenConnectionAsync(ct);
-
-        try
-        {
-            await dbContext.Database.ExecuteSqlRawAsync($"SELECT pg_advisory_lock({MigrationLockKey});", ct);
-            await dbContext.Database.MigrateAsync(ct);
-            await dbSeeder.SeedAsync(ct);
-        }
-        finally
-        {
-            await dbContext.Database.ExecuteSqlRawAsync($"SELECT pg_advisory_unlock({MigrationLockKey});", ct);
-            await dbContext.Database.CloseConnectionAsync();
-        }
+        await dbContext.MigrateWithAdvisoryLockAsync(MigrationLockKey, ct);
+        await dbSeeder.SeedAsync(ct);
     }
 }

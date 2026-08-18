@@ -4,6 +4,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Testcontainers.PostgreSql;
 
 namespace Cmsify.Infrastructure.Tests;
@@ -97,8 +98,8 @@ public sealed class WorkspaceAuthorizationServiceTests : IAsyncLifetime
     private async Task<CmsifyDbContext> CreateMigratedContextAsync()
     {
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
-            .UseNpgsql(postgres.GetConnectionString(), npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-            .UseSnakeCaseNamingConvention()
+            .UseNpgsql(postgres.GetConnectionString())
+            .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options;
         var dbContext = new CmsifyDbContext(options);
         await dbContext.Database.MigrateAsync();
