@@ -137,6 +137,18 @@ public sealed class PickListApiClient : CmsifyApiClientBase
         DeleteAsync($"/api/v1/workspaces/{workspaceId}/picklists/{id}", ct);
 }
 
+public sealed class ComponentApiClient : CmsifyApiClientBase
+{
+    public ComponentApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }
+    public Task<IReadOnlyList<ComponentSummaryResponse>> ListAsync(Guid workspaceId, CancellationToken ct = default) => RequireAsync(GetAsync<IReadOnlyList<ComponentSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/components", ct));
+    public Task<ComponentResponse> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => RequireAsync(GetWithETagAsync<ComponentResponse>($"/api/v1/workspaces/{workspaceId}/components/{id}", ct, useConditionalRequest: false));
+    public Task<ComponentResponse> CreateAsync(Guid workspaceId, ComponentRequest request, CancellationToken ct = default) => RequireAsync(PostAsync<ComponentRequest, ComponentResponse>($"/api/v1/workspaces/{workspaceId}/components", request, ct));
+    public Task<ComponentResponse> UpdateAsync(Guid workspaceId, Guid id, ComponentRequest request, CancellationToken ct = default) => RequireAsync(PutAsync<ComponentRequest, ComponentResponse>($"/api/v1/workspaces/{workspaceId}/components/{id}", request, ct));
+    public Task<ComponentVersionResponse> CreateDraftAsync(Guid workspaceId, Guid id, ComponentVersionRequest request, CancellationToken ct = default) => RequireAsync(PostAsync<ComponentVersionRequest, ComponentVersionResponse>($"/api/v1/workspaces/{workspaceId}/components/{id}/versions", request, ct));
+    public Task<ComponentVersionResponse> SaveFieldsAsync(Guid workspaceId, Guid id, int version, IReadOnlyList<ComponentFieldRequest> fields, CancellationToken ct = default) => RequireAsync(PutAsync<IReadOnlyList<ComponentFieldRequest>, ComponentVersionResponse>($"/api/v1/workspaces/{workspaceId}/components/{id}/versions/{version}/fields", fields, ct));
+    public Task<ComponentResponse> PublishAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => RequireAsync(PostAsync<object, ComponentResponse>($"/api/v1/workspaces/{workspaceId}/components/{id}/versions/{version}/publish", new { }, ct));
+}
+
 public sealed class ContentApiClient : CmsifyApiClientBase
 {
     public ContentApiClient(IHttpClientFactory httpClientFactory, IApiTokenAccessor apiTokenAccessor) : base(httpClientFactory, apiTokenAccessor) { }

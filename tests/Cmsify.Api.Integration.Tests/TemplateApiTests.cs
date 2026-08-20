@@ -231,7 +231,73 @@ public sealed class TemplateApiTests : IAsyncLifetime
         Assert.NotNull(field.FieldConfig);
         Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistId", out var idElement));
         Assert.Equal(picklist.Id.ToString(), idElement.GetString());
+        Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistRevisionId", out var revisionElement));
+        Assert.Equal(picklist.CurrentRevisionId!.Value.ToString(), revisionElement.GetString());
         Assert.False(field.FieldConfig!.Value.TryGetProperty("picklistRef", out _));
+    }
+
+    [Fact]
+    public async Task Components_RejectCircularNestedDefinitions()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var first = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Hero", $"hero-{Guid.NewGuid():N}", null));
+        Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
+        var hero = await first.Content.ReadFromJsonAsync<ComponentResponse>();
+        var second = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Call to action", $"cta-{Guid.NewGuid():N}", null));
+        Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
+        var cta = await second.Content.ReadFromJsonAsync<ComponentResponse>();
+        Assert.NotNull(hero?.CurrentVersion);
+        Assert.NotNull(cta?.CurrentVersion);
+
+        using var heroFields = await client.PutAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/components/{hero.Id}/versions/{hero.CurrentVersion.VersionNumber}/fields",
+            new[] { new ComponentFieldRequest("cta", "CTA", null, 0, false, 0, 1, null, cta.Id, null) });
+        Assert.True(heroFields.IsSuccessStatusCode, await heroFields.Content.ReadAsStringAsync());
+
+        using var circularFields = await client.PutAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/components/{cta.Id}/versions/{cta.CurrentVersion.VersionNumber}/fields",
+            new[] { new ComponentFieldRequest("hero", "Hero", null, 0, false, 0, 1, null, hero.Id, null) });
+        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, circularFields.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdatingPickList_CreatesImmutableRevision()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/picklists", new PickListRequest("Status", $"status-{Guid.NewGuid():N}", null, [new PickListOptionRequest("Draft", "draft", 0)]));
+        create.EnsureSuccessStatusCode();
+        var created = await create.Content.ReadFromJsonAsync<PickListResponse>();
+        Assert.NotNull(created?.CurrentRevisionId);
+        var etag = create.Headers.ETag?.Tag;
+        Assert.False(string.IsNullOrWhiteSpace(etag));
+
+        using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{workspaceId}/picklists/{created.Id}")
+        {
+            Content = JsonContent.Create(new PickListRequest("Status", created.Slug, null, [new PickListOptionRequest("Published", "published", 0)]))
+        };
+        updateRequest.Headers.TryAddWithoutValidation("If-Match", etag);
+        using var update = await client.SendAsync(updateRequest);
+        update.EnsureSuccessStatusCode();
+        var updated = await update.Content.ReadFromJsonAsync<PickListResponse>();
+        Assert.NotNull(updated?.CurrentRevisionId);
+        Assert.NotEqual(created.CurrentRevisionId, updated.CurrentRevisionId);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var revisions = await dbContext.PickListRevisions.Include(revision => revision.Options).Where(revision => revision.PickListId == created.Id).OrderBy(revision => revision.VersionNumber).ToListAsync();
+        Assert.Collection(revisions,
+            revision => Assert.Equal("Draft", Assert.Single(revision.Options).Label),
+            revision => Assert.Equal("Published", Assert.Single(revision.Options).Label));
     }
 
     [Fact]

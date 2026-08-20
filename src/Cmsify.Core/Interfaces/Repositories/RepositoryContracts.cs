@@ -73,7 +73,8 @@ public sealed record TemplateFieldInput(
     PrimitiveType? PrimitiveType,
     Guid? TemplateId,
     JsonElement? FieldConfig,
-    IReadOnlyList<TemplateFieldAllowedTypeInput> AllowedTypes);
+    IReadOnlyList<TemplateFieldAllowedTypeInput> AllowedTypes,
+    Guid? ComponentId = null);
 
 public sealed record TemplateFieldAllowedTypeInput(PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
 

@@ -2,6 +2,7 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Cmsify.Infrastructure.Persistence;
 
@@ -77,6 +78,17 @@ public sealed class ContentPublishingService : IContentPublishingService
             RolledBackFromVersionNumber = rolledBackFromVersionNumber
         };
 
+        var fields = await dbContext.TemplateFields.AsNoTracking()
+            .Where(field => field.TemplateVersionId == content.TemplateVersionId && field.PrimitiveType == PrimitiveType.PickList)
+            .ToListAsync(ct);
+        var pickListIds = fields.Select(GetPickListId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        var currentLabels = await dbContext.PickLists.AsNoTracking().Include(list => list.Options)
+            .Where(list => pickListIds.Contains(list.Id)).ToDictionaryAsync(list => list.Id, list => list.Options.ToDictionary(option => option.Value, option => option.Label, StringComparer.OrdinalIgnoreCase), ct);
+        var revisionIds = fields.Select(GetPickListRevisionId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        var revisionLabels = await dbContext.PickListRevisions.AsNoTracking().Include(revision => revision.Options)
+            .Where(revision => revisionIds.Contains(revision.Id)).ToDictionaryAsync(revision => revision.Id, revision => revision.Options.ToDictionary(option => option.Value, option => option.Label, StringComparer.OrdinalIgnoreCase), ct);
+        var fieldPickLists = fields.Select(field => (field.Id, PickListId: GetPickListId(field), RevisionId: GetPickListRevisionId(field))).Where(x => x.PickListId.HasValue).ToDictionary(x => x.Id);
+
         foreach (var value in content.FieldValues)
         {
             snapshot.FieldValues.Add(new ContentVersionFieldValue
@@ -86,6 +98,9 @@ public sealed class ContentPublishingService : IContentPublishingService
                 Order = value.Order,
                 ValueKind = value.ValueKind,
                 TextValue = value.TextValue,
+                DisplayLabel = value.ValueKind == ValueKind.PickList && value.TextValue is not null && fieldPickLists.TryGetValue(value.FieldId, out var binding)
+                    ? (binding.RevisionId.HasValue && revisionLabels.TryGetValue(binding.RevisionId.Value, out var versionedOptions) ? versionedOptions : currentLabels.GetValueOrDefault(binding.PickListId!.Value))?.GetValueOrDefault(value.TextValue)
+                    : null,
                 BoolValue = value.BoolValue,
                 MediaAssetId = value.MediaAssetId,
                 FileAssetId = value.FileAssetId,
@@ -96,6 +111,24 @@ public sealed class ContentPublishingService : IContentPublishingService
 
         dbContext.ContentVersions.Add(snapshot);
         return new ContentPublishResult(snapshot, warnings);
+    }
+
+    private static Guid? GetPickListId(TemplateField field)
+    {
+        if (field.FieldConfig is not { ValueKind: JsonValueKind.Object } config || !config.TryGetProperty("picklistId", out var id) || id.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        return Guid.TryParse(id.GetString(), out var parsed) ? parsed : null;
+    }
+
+    private static Guid? GetPickListRevisionId(TemplateField field)
+    {
+        if (field.FieldConfig is not { ValueKind: JsonValueKind.Object } config || !config.TryGetProperty("picklistRevisionId", out var id) || id.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        return Guid.TryParse(id.GetString(), out var parsed) ? parsed : null;
     }
 
     private static void ValidateRange(ContentEffectiveRange range)

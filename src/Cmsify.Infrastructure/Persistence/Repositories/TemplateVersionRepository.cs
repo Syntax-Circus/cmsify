@@ -97,6 +97,7 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
                 CompositionMode = input.CompositionMode,
                 PrimitiveType = input.PrimitiveType,
                 TemplateId = input.TemplateId,
+                ComponentId = input.ComponentId,
                 FieldConfig = input.FieldConfig
             };
 

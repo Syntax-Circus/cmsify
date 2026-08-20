@@ -41,7 +41,16 @@ public sealed class PickListsController : ControllerBase
 
         var items = await query
             .OrderBy(picklist => picklist.Name)
-            .Select(picklist => new PickListSummaryResponse(picklist.Id, picklist.Name, picklist.Slug, picklist.Description, picklist.Options.Count))
+            .Select(picklist => new PickListSummaryResponse(
+                picklist.Id,
+                picklist.Name,
+                picklist.Slug,
+                picklist.Description,
+                picklist.Options.Count,
+                picklist.CurrentRevisionId,
+                picklist.CurrentRevisionId.HasValue
+                    ? dbContext.PickListRevisions.Where(revision => revision.Id == picklist.CurrentRevisionId.Value).Select(revision => revision.VersionNumber).SingleOrDefault()
+                    : 0))
             .ToListAsync(ct);
         return Ok(items);
     }
@@ -63,7 +72,10 @@ public sealed class PickListsController : ControllerBase
         }
 
         Response.Headers.ETag = ControllerHelpers.ETag(picklist.UpdatedAt);
-        return Ok(ToResponse(picklist));
+        var revisionNumber = picklist.CurrentRevisionId.HasValue
+            ? await dbContext.PickListRevisions.Where(revision => revision.Id == picklist.CurrentRevisionId.Value).Select(revision => revision.VersionNumber).SingleOrDefaultAsync(ct)
+            : 0;
+        return Ok(ToResponse(picklist, revisionNumber));
     }
 
     [HttpPost]
@@ -105,11 +117,16 @@ public sealed class PickListsController : ControllerBase
             });
         }
 
+        var revision = AddRevision(picklist, request.Options, 1);
+
         dbContext.PickLists.Add(picklist);
         await dbContext.SaveChangesAsync(ct);
+        picklist.CurrentRevisionId = revision.Id;
+        await dbContext.SaveChangesAsync(ct);
+        await dbContext.Entry(picklist).ReloadAsync(ct);
 
         Response.Headers.ETag = ControllerHelpers.ETag(picklist.UpdatedAt);
-        return CreatedAtAction(nameof(Get), new { workspaceId, id = picklist.Id }, ToResponse(picklist));
+        return CreatedAtAction(nameof(Get), new { workspaceId, id = picklist.Id }, ToResponse(picklist, 1));
     }
 
     [HttpPut("{id:guid}")]
@@ -166,9 +183,15 @@ public sealed class PickListsController : ControllerBase
             dbContext.PickListOptions.Add(entity);
         }
 
+        var nextRevision = await dbContext.PickListRevisions.Where(revision => revision.PickListId == id).Select(revision => (int?)revision.VersionNumber).MaxAsync(ct) ?? 0;
+        var revision = AddRevision(picklist, request.Options, nextRevision + 1);
+
         await dbContext.SaveChangesAsync(ct);
+        picklist.CurrentRevisionId = revision.Id;
+        await dbContext.SaveChangesAsync(ct);
+        await dbContext.Entry(picklist).ReloadAsync(ct);
         Response.Headers.ETag = ControllerHelpers.ETag(picklist.UpdatedAt);
-        return Ok(ToResponse(picklist));
+        return Ok(ToResponse(picklist, nextRevision + 1));
     }
 
     [HttpDelete("{id:guid}")]
@@ -240,14 +263,25 @@ public sealed class PickListsController : ControllerBase
         return null;
     }
 
-    private static PickListResponse ToResponse(PickList picklist) =>
+    private PickListRevision AddRevision(PickList picklist, IReadOnlyList<PickListOptionRequest> options, int versionNumber)
+    {
+        var revision = new PickListRevision { PickListId = picklist.Id, VersionNumber = versionNumber };
+        foreach (var (option, index) in options.Select((option, index) => (option, index)))
+        {
+            revision.Options.Add(new PickListRevisionOption { PickListRevisionId = revision.Id, Label = option.Label, Value = option.Value, Order = option.Order ?? index });
+        }
+        dbContext.PickListRevisions.Add(revision);
+        return revision;
+    }
+
+    private static PickListResponse ToResponse(PickList picklist, int revisionNumber = 0) =>
         new(picklist.Id, picklist.Name, picklist.Slug, picklist.Description,
-            picklist.Options.OrderBy(option => option.Order).Select(option => new PickListOptionResponse(option.Id, option.Label, option.Value, option.Order)).ToArray());
+            picklist.Options.OrderBy(option => option.Order).Select(option => new PickListOptionResponse(option.Id, option.Label, option.Value, option.Order)).ToArray(), picklist.CurrentRevisionId, revisionNumber);
 }
 
-public sealed record PickListSummaryResponse(Guid Id, string Name, string Slug, string? Description, int OptionCount);
+public sealed record PickListSummaryResponse(Guid Id, string Name, string Slug, string? Description, int OptionCount, Guid? CurrentRevisionId = null, int CurrentVersionNumber = 0);
 
-public sealed record PickListResponse(Guid Id, string Name, string Slug, string? Description, IReadOnlyList<PickListOptionResponse> Options);
+public sealed record PickListResponse(Guid Id, string Name, string Slug, string? Description, IReadOnlyList<PickListOptionResponse> Options, Guid? CurrentRevisionId = null, int CurrentVersionNumber = 0);
 
 public sealed record PickListOptionResponse(Guid Id, string Label, string Value, int Order);
 

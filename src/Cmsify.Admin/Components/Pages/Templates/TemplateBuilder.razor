@@ -4,6 +4,7 @@
 @using System.Text.Json.Nodes
 @inject TemplateApiClient Templates
 @inject PickListApiClient PickLists
+@inject ComponentApiClient Components
 @inject ToastState Toasts
 
 <div class="cms-builder">
@@ -135,6 +136,17 @@
                             </div>
                         </div>
                     }
+                    <div class="cms-card cms-card--inset mb-3">
+                        <h3 class="h6 mb-2">Inline component binding</h3>
+                        <select class="form-select" @bind="fieldEdit.ComponentId" disabled="@(!CanEdit)">
+                            <option value="">— Use primitive/template field instead —</option>
+                            @foreach (var component in components)
+                            {
+                                <option value="@component.Id">@component.Name</option>
+                            }
+                        </select>
+                        <div class="form-text">Selecting a component makes this field an inline, repeatable component block.</div>
+                    </div>
                     @if (CycleWarning)
                     {
                         <div class="alert alert-warning">This selection may create a template cycle. The server validates cycles again when you save.</div>
@@ -195,6 +207,7 @@
     private SectionEdit sectionEdit = new();
     private FieldEdit fieldEdit = new();
     private List<PickListSummaryResponse> picklists = [];
+    private List<ComponentSummaryResponse> components = [];
     private bool confirmPublish;
     private bool confirmDeleteSection;
     private bool confirmDeleteField;
@@ -226,6 +239,7 @@
         try
         {
             picklists = (await PickLists.ListAsync(WorkspaceId)).ToList();
+            components = (await Components.ListAsync(WorkspaceId)).ToList();
         }
         catch (ProblemDetailsException) { }
         RestoreSelection();
@@ -304,7 +318,7 @@
 
         await RunMutationAsync(async () =>
         {
-            var request = new TemplateFieldRequest(fieldEdit.SectionId, fieldEdit.Key, fieldEdit.Label, fieldEdit.HelpText, fieldEdit.Order, fieldEdit.IsRequired, fieldEdit.MinOccurrences, fieldEdit.MaxOccurrences, fieldEdit.IsOpen, fieldEdit.CompositionMode, fieldEdit.PrimitiveType, fieldEdit.TemplateId, fieldEdit.AllowedTypes, BuildFieldConfig(fieldEdit));
+            var request = new TemplateFieldRequest(fieldEdit.SectionId, fieldEdit.Key, fieldEdit.Label, fieldEdit.HelpText, fieldEdit.Order, fieldEdit.IsRequired, fieldEdit.MinOccurrences, fieldEdit.MaxOccurrences, fieldEdit.ComponentId.HasValue ? false : fieldEdit.IsOpen, fieldEdit.CompositionMode, fieldEdit.ComponentId.HasValue ? null : fieldEdit.PrimitiveType, fieldEdit.ComponentId.HasValue ? null : fieldEdit.TemplateId, fieldEdit.AllowedTypes, BuildFieldConfig(fieldEdit), fieldEdit.ComponentId);
             await Templates.UpdateFieldAsync(WorkspaceId, TemplateId, version.VersionNumber, SelectedField.Id, request);
             await LoadAsync();
         }, "Field saved");
@@ -319,6 +333,10 @@
             {
                 node["picklistId"] = edit.PicklistId.Value.ToString();
             }
+            if (edit.PicklistRevisionId.HasValue)
+            {
+                node["picklistRevisionId"] = edit.PicklistRevisionId.Value.ToString();
+            }
             node["multiple"] = edit.Multiple;
             return JsonSerializer.SerializeToElement(node);
         }
@@ -330,6 +348,9 @@
     {
         var value = args.Value?.ToString();
         fieldEdit.PicklistId = Guid.TryParse(value, out var id) ? id : null;
+        fieldEdit.PicklistRevisionId = fieldEdit.PicklistId.HasValue
+            ? picklists.FirstOrDefault(picklist => picklist.Id == fieldEdit.PicklistId.Value)?.CurrentRevisionId
+            : null;
     }
 
     private async Task SaveSectionAsync()
@@ -531,6 +552,7 @@
             CompositionMode = field.CompositionMode;
             PrimitiveType = field.PrimitiveType;
             TemplateId = field.TemplateId;
+            ComponentId = field.ComponentId;
             AllowedTypes = field.AllowedTypes.Select(t => new TemplateFieldAllowedTypeRequest(t.PrimitiveType, t.AllowedTemplateId)).ToArray();
             if (field.FieldConfig is JsonElement config && config.ValueKind == JsonValueKind.Object)
             {
@@ -541,6 +563,10 @@
                 if (config.TryGetProperty("multiple", out var multipleProp) && (multipleProp.ValueKind == JsonValueKind.True || multipleProp.ValueKind == JsonValueKind.False))
                 {
                     Multiple = multipleProp.GetBoolean();
+                }
+                if (config.TryGetProperty("picklistRevisionId", out var revisionProp) && revisionProp.ValueKind == JsonValueKind.String && Guid.TryParse(revisionProp.GetString(), out var revisionId))
+                {
+                    PicklistRevisionId = revisionId;
                 }
             }
         }
@@ -557,8 +583,10 @@
         public CompositionMode CompositionMode { get; set; }
         public PrimitiveType? PrimitiveType { get; set; } = SyntaxCircus.Cmsify.Contracts.PrimitiveType.Text;
         public Guid? TemplateId { get; set; }
+        public Guid? ComponentId { get; set; }
         public IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes { get; set; } = [];
         public Guid? PicklistId { get; set; }
+        public Guid? PicklistRevisionId { get; set; }
         public bool Multiple { get; set; }
     }
 

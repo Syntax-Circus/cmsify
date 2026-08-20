@@ -53,7 +53,8 @@ public enum ValueKind
     Link,
     Quote,
     Separator,
-    ChildContent
+    ChildContent,
+    Component
 }
 
 public enum TextFormatHint

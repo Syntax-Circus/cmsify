@@ -94,6 +94,17 @@ public sealed class PickListClient(CmsifyClient client)
     public Task<PickListResponse?> UpdateAsync(Guid workspaceId, Guid id, PickListRequest request, CancellationToken ct = default) => client.PutAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}"), request, ct);
 }
 
+public sealed class ComponentClient(CmsifyClient client)
+{
+    public Task<IReadOnlyList<ComponentSummaryResponse>?> ListAsync(Guid workspaceId, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<ComponentSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, "/components"), ct);
+    public Task<ComponentResponse?> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}"), ct);
+    public Task<ComponentResponse?> CreateAsync(Guid workspaceId, ComponentRequest request, CancellationToken ct = default) => client.PostAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, "/components"), request, ct);
+    public Task<ComponentResponse?> UpdateAsync(Guid workspaceId, Guid id, ComponentRequest request, CancellationToken ct = default) => client.PutAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}"), request, ct);
+    public Task<ComponentVersionResponse?> CreateDraftAsync(Guid workspaceId, Guid id, ComponentVersionRequest request, CancellationToken ct = default) => client.PostAsync<ComponentVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}/versions"), request, ct);
+    public Task<ComponentVersionResponse?> SaveFieldsAsync(Guid workspaceId, Guid id, int version, IReadOnlyList<ComponentFieldRequest> fields, CancellationToken ct = default) => client.PutAsync<ComponentVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}/versions/{version}/fields"), fields, ct);
+    public Task<ComponentResponse?> PublishAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => client.PostAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}/versions/{version}/publish"), null, ct);
+}
+
 public sealed class TagClient(CmsifyClient client)
 {
     public Task<IReadOnlyList<TagResponse>?> ListAsync(Guid workspaceId, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<TagResponse>>(CmsifyClient.WorkspacePath(workspaceId, "/tags"), ct);

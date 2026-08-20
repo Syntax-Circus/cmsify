@@ -115,6 +115,9 @@ public sealed class ContentVersionFieldValue : Entity
 
     public string? TextValue { get; set; }
 
+    /// <summary>Label selected at publication time for a pick-list value.</summary>
+    public string? DisplayLabel { get; set; }
+
     public bool? BoolValue { get; set; }
 
     public Guid? MediaAssetId { get; set; }

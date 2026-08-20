@@ -69,10 +69,10 @@ public sealed class TemplateFieldInputValidator : AbstractValidator<TemplateFiel
             .Must(field => !field.MaxOccurrences.HasValue || field.MaxOccurrences.Value >= field.MinOccurrences)
             .WithMessage("MaxOccurrences must be greater than or equal to MinOccurrences.");
         RuleFor(field => field)
-            .Must(field => field.IsOpen || (field.PrimitiveType.HasValue ^ field.TemplateId.HasValue))
-            .WithMessage("Constrained fields must define exactly one of PrimitiveType or TemplateId.");
+            .Must(field => field.IsOpen || (field.PrimitiveType.HasValue ? 1 : 0) + (field.TemplateId.HasValue ? 1 : 0) + (field.ComponentId.HasValue ? 1 : 0) == 1)
+            .WithMessage("Constrained fields must define exactly one of PrimitiveType, TemplateId, or ComponentId.");
         RuleFor(field => field)
-            .Must(field => !field.IsOpen || (!field.PrimitiveType.HasValue && !field.TemplateId.HasValue))
+            .Must(field => !field.IsOpen || (!field.PrimitiveType.HasValue && !field.TemplateId.HasValue && !field.ComponentId.HasValue))
             .WithMessage("Open fields cannot define PrimitiveType or TemplateId.");
     }
 }

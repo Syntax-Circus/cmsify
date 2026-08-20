@@ -53,6 +53,15 @@ public sealed class ContentValidator : IContentValidator
 
     private static void ValidateValueKind(TemplateField field, ContentFieldValue value, ICollection<ValidationFailure> failures)
     {
+        if (field.ComponentId.HasValue)
+        {
+            if (value.ValueKind != ValueKind.Component || value.JsonValue is not { ValueKind: System.Text.Json.JsonValueKind.Object })
+            {
+                failures.Add(new ValidationFailure(field.Key, $"Field '{field.Key}' expects a component object value."));
+            }
+            return;
+        }
+
         if (field.TemplateId.HasValue || field.IsOpen)
         {
             if (value.ValueKind != ValueKind.ChildContent)

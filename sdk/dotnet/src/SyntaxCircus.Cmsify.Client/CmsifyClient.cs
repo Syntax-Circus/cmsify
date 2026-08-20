@@ -40,6 +40,7 @@ public sealed class CmsifyClient
         Content = new ContentClient(this);
         Media = new MediaClient(this);
         PickLists = new PickListClient(this);
+        Components = new ComponentClient(this);
         Tags = new TagClient(this);
         Webhooks = new WebhookClient(this);
         Audit = new AuditClient(this);
@@ -56,6 +57,7 @@ public sealed class CmsifyClient
     public ContentClient Content { get; }
     public MediaClient Media { get; }
     public PickListClient PickLists { get; }
+    public ComponentClient Components { get; }
     public TagClient Tags { get; }
     public WebhookClient Webhooks { get; }
     public AuditClient Audit { get; }

@@ -159,6 +159,8 @@ public sealed class PackagesController : ControllerBase
 
         var picklistResolutions = resolutions?.PickLists ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var picklistIdBySlug = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var picklistRevisionIdBySlug = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var revisionsToMakeCurrent = new List<(PickList PickList, PickListRevision Revision)>();
         var importedPickLists = new List<PackagePickListImportResult>();
         var unresolvedConflicts = new List<string>();
 
@@ -167,9 +169,12 @@ public sealed class PackagesController : ControllerBase
             if (!existingBySlug.TryGetValue(packagePickList.Slug, out var existing))
             {
                 var picklist = CreatePickListFromPackage(workspaceId, packagePickList.Slug, packagePickList.Name, packagePickList.Description, packagePickList.Options);
+                var revision = AddRevision(picklist, packagePickList.Options, 1);
                 dbContext.PickLists.Add(picklist);
+                revisionsToMakeCurrent.Add((picklist, revision));
                 existingSlugs.Add(picklist.Slug);
                 picklistIdBySlug[packagePickList.Slug] = picklist.Id;
+                picklistRevisionIdBySlug[packagePickList.Slug] = revision.Id;
                 importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, picklist.Slug, picklist.Id, "imported"));
                 continue;
             }
@@ -192,6 +197,10 @@ public sealed class PackagesController : ControllerBase
             {
                 case PackagePickListResolution.UseExisting:
                     picklistIdBySlug[packagePickList.Slug] = existing.Id;
+                    if (existing.CurrentRevisionId.HasValue)
+                    {
+                        picklistRevisionIdBySlug[packagePickList.Slug] = existing.CurrentRevisionId.Value;
+                    }
                     importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, existing.Slug, existing.Id, "useExisting"));
                     break;
                 case PackagePickListResolution.Replace:
@@ -213,15 +222,24 @@ public sealed class PackagesController : ControllerBase
                         dbContext.PickListOptions.Add(entity);
                     }
 
+                    var nextRevision = await dbContext.PickListRevisions.Where(revision => revision.PickListId == existing.Id)
+                        .Select(revision => (int?)revision.VersionNumber).MaxAsync(ct) ?? 0;
+                    var replacementRevision = AddRevision(existing, packagePickList.Options, nextRevision + 1);
+                    revisionsToMakeCurrent.Add((existing, replacementRevision));
+
                     picklistIdBySlug[packagePickList.Slug] = existing.Id;
+                    picklistRevisionIdBySlug[packagePickList.Slug] = replacementRevision.Id;
                     importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, existing.Slug, existing.Id, "replaced"));
                     break;
                 case PackagePickListResolution.ImportAsNew:
                     var newSlug = NextAvailableSlug(packagePickList.Slug, existingSlugs);
                     var picklist = CreatePickListFromPackage(workspaceId, newSlug, packagePickList.Name, packagePickList.Description, packagePickList.Options);
+                    var revision = AddRevision(picklist, packagePickList.Options, 1);
                     dbContext.PickLists.Add(picklist);
+                    revisionsToMakeCurrent.Add((picklist, revision));
                     existingSlugs.Add(newSlug);
                     picklistIdBySlug[packagePickList.Slug] = picklist.Id;
+                    picklistRevisionIdBySlug[packagePickList.Slug] = revision.Id;
                     importedPickLists.Add(new PackagePickListImportResult(packagePickList.Slug, newSlug, picklist.Id, "importedAsNew"));
                     break;
                 default:
@@ -243,6 +261,14 @@ public sealed class PackagesController : ControllerBase
                     ["unresolvedPicklists"] = unresolvedConflicts,
                     ["preview"] = preview
                 });
+        }
+
+        // The current-revision foreign key points back to rows created above, so it
+        // must be applied after the lists and immutable revisions have been saved.
+        await dbContext.SaveChangesAsync(ct);
+        foreach (var (picklist, revision) in revisionsToMakeCurrent)
+        {
+            picklist.CurrentRevisionId = revision.Id;
         }
 
         var sortedTemplates = TopologicalSort(manifest);
@@ -292,7 +318,7 @@ public sealed class PackagesController : ControllerBase
                 Notes = $"Imported from {manifest.PackageNamespace}/{manifest.Id}@{manifest.Version}"
             };
 
-            AddStructure(version, packageTemplate, templatesBySlug, picklistIdBySlug);
+            AddStructure(version, packageTemplate, templatesBySlug, picklistIdBySlug, picklistRevisionIdBySlug);
             await dbContext.TemplateVersions
                 .Where(candidate => candidate.TemplateId == template.Id && candidate.Status == TemplateVersionStatus.Published)
                 .ExecuteUpdateAsync(updates => updates.SetProperty(candidate => candidate.Status, TemplateVersionStatus.Archived), ct);
@@ -341,6 +367,13 @@ public sealed class PackagesController : ControllerBase
             .Select(value => value!.Value)
             .Distinct()
             .ToArray();
+        var revisionIdByPickListId = templates
+            .SelectMany(version => version.Fields)
+            .Where(field => field.PrimitiveType == PrimitiveType.PickList)
+            .Select(field => (PickListId: ExtractPickListId(field.PrimitiveType, field.FieldConfig), RevisionId: ExtractPickListRevisionId(field.FieldConfig)))
+            .Where(binding => binding.PickListId.HasValue && binding.RevisionId.HasValue)
+            .GroupBy(binding => binding.PickListId!.Value)
+            .ToDictionary(group => group.Key, group => group.First().RevisionId!.Value);
         var pickLists = pickListIds.Length == 0
             ? []
             : await dbContext.PickLists.AsNoTracking()
@@ -348,6 +381,20 @@ public sealed class PackagesController : ControllerBase
                 .Where(picklist => picklist.WorkspaceId == workspaceId && !picklist.IsDeleted && pickListIds.Contains(picklist.Id))
                 .ToListAsync(ct);
         var picklistSlugById = pickLists.ToDictionary(picklist => picklist.Id, picklist => picklist.Slug);
+        var revisions = revisionIdByPickListId.Count == 0
+            ? []
+            : await dbContext.PickListRevisions.AsNoTracking().Include(revision => revision.Options)
+                .Where(revision => revisionIdByPickListId.Values.Contains(revision.Id))
+                .ToListAsync(ct);
+        var revisionOptionsById = revisions.ToDictionary(revision => revision.Id, revision => revision.Options);
+        var packagePickLists = pickLists.OrderBy(picklist => picklist.Slug).Select(picklist =>
+        {
+            var options = revisionIdByPickListId.TryGetValue(picklist.Id, out var revisionId)
+                && revisionOptionsById.TryGetValue(revisionId, out var revisionOptions)
+                    ? revisionOptions.OrderBy(option => option.Order).Select(option => new CtpPickListOption(option.Label, option.Value, option.Order)).ToArray()
+                    : picklist.Options.OrderBy(option => option.Order).Select(option => new CtpPickListOption(option.Label, option.Value, option.Order)).ToArray();
+            return new CtpPickList(picklist.Slug, picklist.Name, picklist.Description, options);
+        }).ToArray();
 
         var manifest = new CtpPackageManifest(
             "1.0",
@@ -360,11 +407,7 @@ public sealed class PackagesController : ControllerBase
             null,
             null,
             templates.Select(templateVersion => ToPackageTemplate(templateVersion, picklistSlugById)).OrderBy(template => template.Name).ToArray(),
-            pickLists.OrderBy(picklist => picklist.Slug).Select(picklist => new CtpPickList(
-                picklist.Slug,
-                picklist.Name,
-                picklist.Description,
-                picklist.Options.OrderBy(option => option.Order).Select(option => new CtpPickListOption(option.Label, option.Value, option.Order)).ToArray())).ToArray());
+            packagePickLists);
 
         var json = JsonSerializer.Serialize(manifest, JsonOptions);
         return File(Encoding.UTF8.GetBytes(json), "application/json", $"{packageNamespace}.{id}@{version}.ctp");
@@ -541,7 +584,7 @@ public sealed class PackagesController : ControllerBase
         }
     }
 
-    private static void AddStructure(TemplateVersion version, CtpTemplate packageTemplate, IReadOnlyDictionary<string, Template> templatesBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug)
+    private static void AddStructure(TemplateVersion version, CtpTemplate packageTemplate, IReadOnlyDictionary<string, Template> templatesBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug, IReadOnlyDictionary<string, Guid> picklistRevisionIdBySlug)
     {
         foreach (var packageSection in packageTemplate.Sections.OrderBy(section => section.Order))
         {
@@ -557,17 +600,17 @@ public sealed class PackagesController : ControllerBase
 
             foreach (var packageField in packageSection.Fields.OrderBy(field => field.Order))
             {
-                version.Fields.Add(ToField(version.Id, section.Id, packageField, templatesBySlug, picklistIdBySlug));
+                version.Fields.Add(ToField(version.Id, section.Id, packageField, templatesBySlug, picklistIdBySlug, picklistRevisionIdBySlug));
             }
         }
 
         foreach (var packageField in packageTemplate.Fields.OrderBy(field => field.Order))
         {
-            version.Fields.Add(ToField(version.Id, null, packageField, templatesBySlug, picklistIdBySlug));
+            version.Fields.Add(ToField(version.Id, null, packageField, templatesBySlug, picklistIdBySlug, picklistRevisionIdBySlug));
         }
     }
 
-    private static TemplateField ToField(Guid versionId, Guid? sectionId, CtpField packageField, IReadOnlyDictionary<string, Template> templatesBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug) =>
+    private static TemplateField ToField(Guid versionId, Guid? sectionId, CtpField packageField, IReadOnlyDictionary<string, Template> templatesBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug, IReadOnlyDictionary<string, Guid> picklistRevisionIdBySlug) =>
         new()
         {
             TemplateVersionId = versionId,
@@ -583,7 +626,7 @@ public sealed class PackagesController : ControllerBase
             CompositionMode = packageField.CompositionMode,
             PrimitiveType = packageField.PrimitiveType,
             TemplateId = string.IsNullOrWhiteSpace(packageField.TemplateRef) ? null : templatesBySlug[packageField.TemplateRef].Id,
-            FieldConfig = RewriteFieldConfigForImport(packageField.FieldConfig, picklistIdBySlug)
+            FieldConfig = RewriteFieldConfigForImport(packageField.FieldConfig, picklistIdBySlug, picklistRevisionIdBySlug)
         };
 
     private async Task<IReadOnlyList<TemplateVersion>> ResolveTemplatesAsync(Guid workspaceId, IReadOnlyList<Guid> selectedIds, CancellationToken ct)
@@ -770,6 +813,18 @@ public sealed class PackagesController : ControllerBase
         return true;
     }
 
+    private PickListRevision AddRevision(PickList picklist, IReadOnlyList<CtpPickListOption> options, int versionNumber)
+    {
+        var revision = new PickListRevision { PickListId = picklist.Id, VersionNumber = versionNumber };
+        foreach (var option in OrderedOptionsForImport(options))
+        {
+            revision.Options.Add(new PickListRevisionOption { PickListRevisionId = revision.Id, Label = option.Label, Value = option.Value, Order = option.Order });
+        }
+
+        dbContext.PickListRevisions.Add(revision);
+        return revision;
+    }
+
     private static PickList CreatePickListFromPackage(Guid workspaceId, string slug, string name, string? description, IReadOnlyList<CtpPickListOption> options)
     {
         var picklist = new PickList
@@ -829,6 +884,19 @@ public sealed class PackagesController : ControllerBase
         return id;
     }
 
+    private static Guid? ExtractPickListRevisionId(JsonElement? fieldConfig)
+    {
+        if (fieldConfig is not { ValueKind: JsonValueKind.Object } config
+            || !config.TryGetProperty("picklistRevisionId", out var idElement)
+            || idElement.ValueKind != JsonValueKind.String
+            || !Guid.TryParse(idElement.GetString(), out var id))
+        {
+            return null;
+        }
+
+        return id;
+    }
+
     private static string? ExtractPickListRef(JsonElement? fieldConfig)
     {
         if (!fieldConfig.HasValue || fieldConfig.Value.ValueKind != JsonValueKind.Object)
@@ -844,7 +912,7 @@ public sealed class PackagesController : ControllerBase
         return refElement.GetString();
     }
 
-    private static JsonElement? RewriteFieldConfigForImport(JsonElement? fieldConfig, IReadOnlyDictionary<string, Guid> picklistIdBySlug)
+    private static JsonElement? RewriteFieldConfigForImport(JsonElement? fieldConfig, IReadOnlyDictionary<string, Guid> picklistIdBySlug, IReadOnlyDictionary<string, Guid> picklistRevisionIdBySlug)
     {
         if (!fieldConfig.HasValue || fieldConfig.Value.ValueKind != JsonValueKind.Object)
         {
@@ -863,7 +931,7 @@ public sealed class PackagesController : ControllerBase
             writer.WriteStartObject();
             foreach (var property in fieldConfig.Value.EnumerateObject())
             {
-                if (property.NameEquals("picklistRef") || property.NameEquals("picklistId"))
+                if (property.NameEquals("picklistRef") || property.NameEquals("picklistId") || property.NameEquals("picklistRevisionId"))
                 {
                     continue;
                 }
@@ -872,6 +940,10 @@ public sealed class PackagesController : ControllerBase
             }
 
             writer.WriteString("picklistId", id.ToString());
+            if (picklistRevisionIdBySlug.TryGetValue(picklistRef, out var revisionId))
+            {
+                writer.WriteString("picklistRevisionId", revisionId.ToString());
+            }
             writer.WriteEndObject();
         }
 
@@ -898,7 +970,7 @@ public sealed class PackagesController : ControllerBase
             writer.WriteStartObject();
             foreach (var property in fieldConfig.Value.EnumerateObject())
             {
-                if (property.NameEquals("picklistId") || property.NameEquals("picklistRef"))
+                if (property.NameEquals("picklistId") || property.NameEquals("picklistRef") || property.NameEquals("picklistRevisionId"))
                 {
                     continue;
                 }

@@ -65,6 +65,7 @@ public sealed class ContentVersionFieldValueConfiguration : IEntityTypeConfigura
         builder.HasIndex(value => new { value.ContentVersionId, value.FieldId, value.Order });
         builder.Property(value => value.ValueKind).HasConversion<string>().HasMaxLength(50);
         builder.Property(value => value.TextValue);
+        builder.Property(value => value.DisplayLabel).HasMaxLength(200);
         builder.Property(value => value.JsonValue).HasColumnType("jsonb");
     }
 }

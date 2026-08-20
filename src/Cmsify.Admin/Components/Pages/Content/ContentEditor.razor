@@ -94,6 +94,7 @@
     private readonly Dictionary<Guid, Guid?> assetValues = [];
     private readonly Dictionary<Guid, Guid?> referenceValues = [];
     private readonly Dictionary<Guid, List<string>> multiPickValues = [];
+    private readonly Dictionary<Guid, List<string>> componentValues = [];
     private Dictionary<Guid, PickListResponse> picklistCache = new();
     private Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = new();
 
@@ -120,6 +121,7 @@
         assetValues.Clear();
         referenceValues.Clear();
         multiPickValues.Clear();
+        componentValues.Clear();
 
         var loaded = await Content.GetAsync(WorkspaceId, ContentId.Value);
         item = loaded;
@@ -147,6 +149,15 @@
                     multiPickValues[value.FieldId] = existing;
                 }
                 existing.Add(value.TextValue);
+            }
+            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue)
+            {
+                if (!componentValues.TryGetValue(value.FieldId, out var values))
+                {
+                    values = [];
+                    componentValues[value.FieldId] = values;
+                }
+                values.Add(value.JsonValue.Value.GetRawText());
             }
         }
     }
@@ -263,6 +274,35 @@
     private RenderFragment RenderField(TemplateFieldResponse field) => builder =>
     {
         var sequence = 0;
+        if (field.ComponentId.HasValue)
+        {
+            if (!componentValues.TryGetValue(field.Id, out var values))
+            {
+                values = ["{}"];
+                componentValues[field.Id] = values;
+            }
+            for (var index = 0; index < values.Count; index++)
+            {
+                var valueIndex = index;
+                builder.OpenElement(sequence++, "textarea");
+                builder.AddAttribute(sequence++, "class", "form-control font-monospace mb-2");
+                builder.AddAttribute(sequence++, "rows", "8");
+                builder.AddAttribute(sequence++, "placeholder", "{ \"fieldKey\": \"value\" }");
+                builder.AddAttribute(sequence++, "value", values[valueIndex]);
+                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => values[valueIndex] = e.Value?.ToString() ?? "{}"));
+                builder.CloseElement();
+            }
+            if (!field.MaxOccurrences.HasValue || values.Count < field.MaxOccurrences.Value)
+            {
+                builder.OpenElement(sequence++, "button");
+                builder.AddAttribute(sequence++, "type", "button");
+                builder.AddAttribute(sequence++, "class", "btn btn-sm btn-outline-secondary");
+                builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, () => values.Add("{}")));
+                builder.AddContent(sequence++, "Add component");
+                builder.CloseElement();
+            }
+            return;
+        }
         if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
         {
             if (field.CompositionMode == CompositionMode.Reference)
@@ -455,6 +495,29 @@
         var values = new List<ContentFieldValueRequest>();
         foreach (var field in fields)
         {
+            if (field.ComponentId.HasValue)
+            {
+                var rawValues = componentValues.GetValueOrDefault(field.Id) ?? [];
+                foreach (var raw in rawValues)
+                {
+                    try
+                    {
+                        using var document = JsonDocument.Parse(raw);
+                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        {
+                            error = $"Component field '{field.Label}' must contain JSON objects.";
+                            return;
+                        }
+                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
+                    }
+                    catch (JsonException)
+                    {
+                        error = $"Component field '{field.Label}' contains invalid JSON.";
+                        return;
+                    }
+                }
+                continue;
+            }
             if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
             {
                 if (referenceValues.GetValueOrDefault(field.Id) is Guid referencedId)

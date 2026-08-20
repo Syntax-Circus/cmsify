@@ -67,6 +67,12 @@ The TypeScript client is layered over OpenAPI-generated files in `sdk/typescript
 
 Keep API version compatibility explicit. Breaking changes require an API/SDK major-version decision; do not silently change request or response shapes.
 
+## Components and choice-set invariants
+
+- Components are inline-only schemas. Nested component graphs must remain acyclic and component values are snapshot JSON, never independently published child items.
+- Pick-list edits create immutable revisions. Published content retains the selected option label in its version snapshot; never resolve historical labels from the current choice set.
+- `PublishAt` and the single effective range are the only content timing concepts. Do not introduce separate display and publish period fields.
+
 ## Change hygiene
 
 - Use `apply_patch` for source and documentation edits.

@@ -21,8 +21,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap",
     "test": "vitest run",
-    "generate": "tsx scripts/generate.ts",
-    "generate:check": "tsx scripts/generate.ts --check",
+    "generate": "node scripts/generate.mjs",
+    "generate:check": "node scripts/generate.mjs --check",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

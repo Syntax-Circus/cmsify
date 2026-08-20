@@ -86,6 +86,8 @@ public sealed class TemplateField : Entity
 
     public Guid? TemplateId { get; set; }
 
+    public Guid? ComponentId { get; set; }
+
     public JsonElement? FieldConfig { get; set; }
 
     public TemplateVersion? ReferencedTemplateVersion { get; set; }

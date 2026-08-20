@@ -29,6 +29,12 @@ public sealed class TemplateFieldConfiguration : IEntityTypeConfiguration<Templa
             .OnDelete(DeleteBehavior.Restrict)
             .IsRequired(false);
 
+        builder.HasOne<ComponentDefinition>()
+            .WithMany()
+            .HasForeignKey(field => field.ComponentId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
+
         builder.Ignore(field => field.ReferencedTemplateVersion);
 
         builder.Property(field => field.Key).HasMaxLength(100).IsRequired();
@@ -40,6 +46,6 @@ public sealed class TemplateFieldConfiguration : IEntityTypeConfiguration<Templa
 
         builder.ToTable(table => table.HasCheckConstraint(
             "ck_template_fields_type_shape",
-            "(is_open = true AND primitive_type IS NULL AND template_id IS NULL) OR (is_open = false AND ((primitive_type IS NOT NULL AND template_id IS NULL) OR (primitive_type IS NULL AND template_id IS NOT NULL)))"));
+            "(is_open = true AND primitive_type IS NULL AND template_id IS NULL AND component_id IS NULL) OR (is_open = false AND ((primitive_type IS NOT NULL AND template_id IS NULL AND component_id IS NULL) OR (primitive_type IS NULL AND template_id IS NOT NULL AND component_id IS NULL) OR (primitive_type IS NULL AND template_id IS NULL AND component_id IS NOT NULL)))"));
     }
 }

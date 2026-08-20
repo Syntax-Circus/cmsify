@@ -30,11 +30,11 @@ public sealed record TemplateSectionResponse(Guid Id, string Name, string? Descr
 
 public sealed record TemplateFieldAllowedTypeResponse(Guid Id, PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
 
-public sealed record TemplateFieldResponse(Guid Id, Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeResponse> AllowedTypes, JsonElement? FieldConfig);
+public sealed record TemplateFieldResponse(Guid Id, Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeResponse> AllowedTypes, JsonElement? FieldConfig, Guid? ComponentId = null);
 
-public sealed record PickListSummaryResponse(Guid Id, string Name, string Slug, string? Description, int OptionCount);
+public sealed record PickListSummaryResponse(Guid Id, string Name, string Slug, string? Description, int OptionCount, Guid? CurrentRevisionId = null, int CurrentVersionNumber = 0);
 
-public sealed record PickListResponse(Guid Id, string Name, string Slug, string? Description, IReadOnlyList<PickListOptionResponse> Options);
+public sealed record PickListResponse(Guid Id, string Name, string Slug, string? Description, IReadOnlyList<PickListOptionResponse> Options, Guid? CurrentRevisionId = null, int CurrentVersionNumber = 0);
 
 public sealed record PickListOptionResponse(Guid Id, string Label, string Value, int Order);
 
@@ -48,7 +48,15 @@ public sealed record TemplateSectionRequest(string Name, string? Description, in
 
 public sealed record TemplateFieldAllowedTypeRequest(PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
 
-public sealed record TemplateFieldRequest(Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes, JsonElement? FieldConfig);
+public sealed record TemplateFieldRequest(Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes, JsonElement? FieldConfig, Guid? ComponentId = null);
+
+public sealed record ComponentSummaryResponse(Guid Id, string Name, string Slug, string? Description, Guid? CurrentVersionId);
+public sealed record ComponentResponse(Guid Id, Guid WorkspaceId, string Name, string Slug, string? Description, ComponentVersionResponse? CurrentVersion);
+public sealed record ComponentVersionResponse(Guid Id, Guid ComponentId, int VersionNumber, TemplateVersionStatus Status, DateTimeOffset? PublishedAt, string? Notes, IReadOnlyList<ComponentFieldResponse> Fields);
+public sealed record ComponentFieldResponse(Guid Id, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, PrimitiveType? PrimitiveType, Guid? NestedComponentId, JsonElement? FieldConfig);
+public sealed record ComponentRequest(string Name, string Slug, string? Description);
+public sealed record ComponentVersionRequest(string? Notes);
+public sealed record ComponentFieldRequest(string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, PrimitiveType? PrimitiveType, Guid? NestedComponentId, JsonElement? FieldConfig);
 
 public sealed record ReorderFieldRequest(Guid FieldId, int Order);
 
@@ -58,7 +66,7 @@ public sealed record ContentItemDetailResponse(Guid Id, Guid TemplateVersionId, 
 
 public sealed record ContentFieldValueRequest(Guid FieldId, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
 
-public sealed record ContentFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentItemDetailResponse? Child, JsonElement? JsonValue);
+public sealed record ContentFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentItemDetailResponse? Child, JsonElement? JsonValue, string? DisplayLabel = null);
 
 public sealed record CreateContentItemRequest(Guid TemplateVersionId, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
 
@@ -71,7 +79,7 @@ public sealed record LinkTranslationRequest(Guid TargetContentItemId);
 
 public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string? Slug, string? LocaleCode, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags);
 
-public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
+public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue, string? DisplayLabel = null);
 
 public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, IReadOnlyList<ContentVersionFieldValueResponse> Fields);
 

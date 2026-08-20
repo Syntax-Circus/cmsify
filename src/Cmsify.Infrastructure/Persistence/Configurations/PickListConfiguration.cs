@@ -21,9 +21,37 @@ public sealed class PickListConfiguration : IEntityTypeConfiguration<PickList>
             .HasForeignKey(picklist => picklist.WorkspaceId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasOne<PickListRevision>()
+            .WithMany()
+            .HasForeignKey(picklist => picklist.CurrentRevisionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Property(picklist => picklist.Name).HasMaxLength(200).IsRequired();
         builder.Property(picklist => picklist.Slug).HasMaxLength(100).IsRequired();
         builder.Property(picklist => picklist.Description).HasMaxLength(1_000);
+    }
+}
+
+public sealed class PickListRevisionConfiguration : IEntityTypeConfiguration<PickListRevision>
+{
+    public void Configure(EntityTypeBuilder<PickListRevision> builder)
+    {
+        builder.ConfigureEntityId();
+        builder.HasIndex(revision => new { revision.PickListId, revision.VersionNumber }).IsUnique();
+        builder.HasOne<PickList>().WithMany().HasForeignKey(revision => revision.PickListId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class PickListRevisionOptionConfiguration : IEntityTypeConfiguration<PickListRevisionOption>
+{
+    public void Configure(EntityTypeBuilder<PickListRevisionOption> builder)
+    {
+        builder.ConfigureEntityId();
+        builder.HasIndex(option => new { option.PickListRevisionId, option.Value }).IsUnique();
+        builder.HasIndex(option => new { option.PickListRevisionId, option.Order });
+        builder.Property(option => option.Label).HasMaxLength(200).IsRequired();
+        builder.Property(option => option.Value).HasMaxLength(200).IsRequired();
+        builder.HasOne<PickListRevision>().WithMany(revision => revision.Options).HasForeignKey(option => option.PickListRevisionId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 

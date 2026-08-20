@@ -539,7 +539,7 @@ public sealed class TemplatesController : ControllerBase
         new(section.Id, section.Name, section.Description, section.Order, section.IsCollapsible);
 
     private static TemplateFieldResponse ToFieldResponse(TemplateField field) =>
-        new(field.Id, field.SectionId, field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, field.TemplateId, field.AllowedTypes.Select(type => new TemplateFieldAllowedTypeResponse(type.Id, type.PrimitiveType, type.AllowedTemplateId)).ToArray(), field.FieldConfig.Clone());
+        new(field.Id, field.SectionId, field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, field.TemplateId, field.AllowedTypes.Select(type => new TemplateFieldAllowedTypeResponse(type.Id, type.PrimitiveType, type.AllowedTemplateId)).ToArray(), field.FieldConfig.Clone(), field.ComponentId);
 
     private ObjectResult? ValidateFieldRequest(TemplateVersion version, TemplateFieldRequest request, Guid? currentFieldId = null)
     {
@@ -553,14 +553,23 @@ public sealed class TemplatesController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Field key already exists", $"A field with key '{request.Key}' already exists in this template version.");
         }
 
-        if (!request.IsOpen && (request.PrimitiveType.HasValue == request.TemplateId.HasValue))
+        var typeCount = (request.PrimitiveType.HasValue ? 1 : 0) + (request.TemplateId.HasValue ? 1 : 0) + (request.ComponentId.HasValue ? 1 : 0);
+        if (!request.IsOpen && typeCount != 1)
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid field type", "Constrained fields must define exactly one primitiveType or templateId.");
         }
 
-        if (request.IsOpen && (request.PrimitiveType.HasValue || request.TemplateId.HasValue))
+        if (request.IsOpen && (request.PrimitiveType.HasValue || request.TemplateId.HasValue || request.ComponentId.HasValue))
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid field type", "Open fields cannot define primitiveType or templateId.");
+        }
+
+        if (request.ComponentId.HasValue && !dbContext.Components.Any(component =>
+                component.Id == request.ComponentId.Value
+                && !component.IsDeleted
+                && dbContext.Templates.Any(template => template.Id == version.TemplateId && template.WorkspaceId == component.WorkspaceId && !template.IsDeleted)))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Unknown component", "The selected component must belong to this workspace.");
         }
 
         if (request.PrimitiveType.HasValue)
@@ -601,6 +610,7 @@ public sealed class TemplatesController : ControllerBase
         field.CompositionMode = request.CompositionMode;
         field.PrimitiveType = request.PrimitiveType;
         field.TemplateId = request.TemplateId;
+        field.ComponentId = request.ComponentId;
         field.FieldConfig = request.FieldConfig.Clone();
     }
 
@@ -621,6 +631,7 @@ public sealed class TemplatesController : ControllerBase
             CompositionMode = source.CompositionMode,
             PrimitiveType = source.PrimitiveType,
             TemplateId = source.TemplateId,
+            ComponentId = source.ComponentId,
             FieldConfig = source.FieldConfig.Clone()
         };
         foreach (var allowedType in source.AllowedTypes)
@@ -687,7 +698,7 @@ public sealed record UpdateTemplateRequest(string Name, string? Description);
 public sealed record CreateTemplateVersionRequest(string? Notes);
 public sealed record TemplateSectionRequest(string Name, string? Description, int Order, bool IsCollapsible);
 public sealed record TemplateFieldAllowedTypeRequest(PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
-public sealed record TemplateFieldRequest(Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes, JsonElement? FieldConfig);
+public sealed record TemplateFieldRequest(Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes, JsonElement? FieldConfig, Guid? ComponentId = null);
 public sealed record ReorderFieldRequest(Guid FieldId, int Order);
 public sealed record TemplateSummaryResponse(Guid Id, Guid WorkspaceId, string Name, string Slug, string? Description, Guid? CurrentVersionId);
 public sealed record TemplateResponse(Guid Id, Guid WorkspaceId, string Name, string Slug, string? Description, bool IsSystem, TemplateVersionResponse? CurrentVersion);
@@ -695,4 +706,4 @@ public sealed record TemplateVersionSummaryResponse(Guid Id, int VersionNumber, 
 public sealed record TemplateVersionResponse(Guid Id, Guid TemplateId, int VersionNumber, TemplateVersionStatus Status, DateTimeOffset? PublishedAt, string? Notes, IReadOnlyList<TemplateSectionResponse> Sections, IReadOnlyList<TemplateFieldResponse> Fields);
 public sealed record TemplateSectionResponse(Guid Id, string Name, string? Description, int Order, bool IsCollapsible);
 public sealed record TemplateFieldAllowedTypeResponse(Guid Id, PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
-public sealed record TemplateFieldResponse(Guid Id, Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeResponse> AllowedTypes, JsonElement? FieldConfig);
+public sealed record TemplateFieldResponse(Guid Id, Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeResponse> AllowedTypes, JsonElement? FieldConfig, Guid? ComponentId = null);
