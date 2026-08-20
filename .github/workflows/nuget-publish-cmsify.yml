@@ -24,6 +24,7 @@ jobs:
         run: |
           dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --no-build --configuration Release --output artifacts
           dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --no-build --configuration Release --output artifacts
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --no-build --configuration Release --output artifacts
       - name: Upload package artifact
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-artifact@v4

@@ -18,7 +18,8 @@ dotnet build $solution --no-restore --configuration Release
 if ($LASTEXITCODE -ne 0) { throw "dotnet build failed" }
 $packageProjects = @(
     (Join-Path $PSScriptRoot "src\Cmsify.Contracts\Cmsify.Contracts.csproj"),
-    (Join-Path $PSScriptRoot "sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj")
+    (Join-Path $PSScriptRoot "sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj"),
+    (Join-Path $PSScriptRoot "sdk\dotnet\src\SyntaxCircus.Cmsify.Client.DistributedCaching\SyntaxCircus.Cmsify.Client.DistributedCaching.csproj")
 )
 foreach ($project in $packageProjects) {
     dotnet pack $project --no-build --configuration Release --output $OutputDirectory

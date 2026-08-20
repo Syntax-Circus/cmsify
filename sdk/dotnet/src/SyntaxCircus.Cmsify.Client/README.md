@@ -24,6 +24,20 @@ var posts = await cms.Content.ListAsync(
 
 The client also exposes templates, media, picklists, tags, webhooks, audit, users, API clients, settings, packages, authentication, and health services. Requests attach bearer authentication and correlation IDs, map RFC 7807 failures to `CmsifyApiException`, retry transient `429`/`5xx` responses, and preserve ETags for mutation concurrency.
 
+## Cached content reads
+
+Caching is opt-in and leaves `CmsifyClient.Content` unchanged. Register the in-memory cached facade and use a stable, non-secret partition to keep authorization audiences isolated:
+
+```csharp
+services.AddCmsifyContentMemoryCache(options =>
+{
+    options.CachePartitionProvider = _ => ValueTask.FromResult("public-site");
+    options.DefaultAbsoluteExpiration = TimeSpan.FromMinutes(5);
+});
+```
+
+Resolve `ICachedCmsifyContentClient` for cached `GetAsync`, `BySlugAsync`, `ListAsync`, and `ListAllAsync` calls. Per-call `CmsifyContentCacheEntryOptions` can override the absolute expiry. Resolve `ICmsifyContentCacheInvalidator` to remove a key from `CmsifyContentCacheKeys` or bust all cached content for a workspace. For Redis or another distributed provider, install `SyntaxCircus.Cmsify.Client.DistributedCaching`, configure the host's `IDistributedCache`, and register `AddCmsifyContentDistributedCache` instead of the in-memory backend.
+
 Use `CmsifyClientOptions.TokenProvider` for rotating or request-time credentials. Keep tokens in server-side secret storage and never send them to browser code.
 
 The shared `SyntaxCircus.Cmsify.Contracts` package contains the public request, response, enum, pagination, and dynamic JSON models without the HTTP client implementation.

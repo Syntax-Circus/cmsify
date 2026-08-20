@@ -4,13 +4,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PackageId>SyntaxCircus.Cmsify.Client</PackageId>
-    <Title>Syntax Circus LLC Cmsify Client</Title>
-    <Description>Typed .NET client for connecting to and managing the Cmsify headless CMS API.</Description>
+    <PackageId>SyntaxCircus.Cmsify.Client.DistributedCaching</PackageId>
+    <Title>Syntax Circus LLC Cmsify Distributed Content Caching</Title>
+    <Description>Provider-neutral IDistributedCache add-on for the SyntaxCircus Cmsify .NET client.</Description>
     <Authors>Syntax Circus LLC</Authors>
     <Company>Syntax Circus LLC</Company>
     <Copyright>Copyright © Syntax Circus LLC</Copyright>
-    <PackageTags>cms;headless-cms;cmsify;content-management;api-client</PackageTags>
+    <PackageTags>cms;headless-cms;cmsify;content-management;cache;redis;distributed-cache</PackageTags>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -23,12 +23,10 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\src\Cmsify.Contracts\Cmsify.Contracts.csproj" />
+    <ProjectReference Include="..\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
     <PackageReference Include="GitVersion.MsBuild" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
-    <PackageReference Include="Microsoft.Extensions.Http" />
-    <PackageReference Include="Microsoft.Extensions.Options" />
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

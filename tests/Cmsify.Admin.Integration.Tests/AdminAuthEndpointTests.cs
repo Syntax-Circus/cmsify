@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using Cmsify.Admin.Services;
-using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Cmsify.Admin.Integration.Tests;
@@ -50,9 +49,9 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["returnUrl"] = "/workspaces"
         }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Found);
-        response.Headers.Location!.OriginalString.Should().Contain("error=missing-credentials");
-        factory.ObservedRequests.Should().BeEmpty();
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldContain("error=missing-credentials");
+        factory.ObservedRequests.ShouldBeEmpty();
     }
 
     [Fact]
@@ -71,8 +70,8 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["returnUrl"] = "/workspaces"
         }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Found);
-        response.Headers.Location!.OriginalString.Should().Contain("error=invalid-credentials");
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldContain("error=invalid-credentials");
     }
 
     [Fact]
@@ -91,12 +90,12 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["returnUrl"] = "/workspaces/abc"
         }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Found);
-        response.Headers.Location!.OriginalString.Should().Be("/workspaces/abc");
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldBe("/workspaces/abc");
 
         var setCookies = response.Headers.GetValues("Set-Cookie").ToArray();
-        setCookies.Should().Contain(c => c.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal));
-        setCookies.Should().Contain(c => c.Contains("HttpOnly", StringComparison.OrdinalIgnoreCase));
+        setCookies.ShouldContain(c => c.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal));
+        setCookies.ShouldContain(c => c.Contains("HttpOnly", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -115,8 +114,8 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["returnUrl"] = "/workspaces"
         }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Found);
-        response.Headers.Location!.OriginalString.Should().StartWith("/account/change-password?returnUrl=");
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldStartWith("/account/change-password?returnUrl=");
     }
 
     [Fact]
@@ -135,8 +134,8 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["returnUrl"] = "//evil.example.com/path"
         }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Found);
-        response.Headers.Location!.OriginalString.Should().Be("/workspaces");
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldBe("/workspaces");
     }
 
     [Fact]
@@ -172,14 +171,14 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["__RequestVerificationToken"] = logoutToken
         }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Found);
-        response.Headers.Location!.OriginalString.Should().Be("/login");
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldBe("/login");
 
         var setCookies = response.Headers.GetValues("Set-Cookie").ToArray();
-        setCookies.Should().Contain(c => c.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal)
+        setCookies.ShouldContain(c => c.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal)
             && c.Contains("expires=Thu, 01 Jan 1970", StringComparison.OrdinalIgnoreCase));
 
-        factory.ObservedRequests.Should().Contain(r =>
+        factory.ObservedRequests.ShouldContain(r =>
             r.RequestUri!.AbsolutePath.EndsWith("/auth/logout", StringComparison.Ordinal)
             && r.Headers.Authorization != null
             && r.Headers.Authorization.Scheme == "Bearer"
@@ -193,7 +192,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
 
         using var response = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -214,8 +213,8 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
 
         using var refresh = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
 
-        refresh.StatusCode.Should().Be(HttpStatusCode.OK);
-        refresh.Headers.Should().Contain(h => h.Key == "Set-Cookie"
+        refresh.StatusCode.ShouldBe(HttpStatusCode.OK);
+        refresh.Headers.ShouldContain(h => h.Key == "Set-Cookie"
             && h.Value.Any(v => v.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal)));
     }
 }

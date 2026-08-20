@@ -12,6 +12,7 @@
   <Project Path="src\Cmsify.Core\Cmsify.Core.csproj" />
   <Project Path="src\Cmsify.Contracts\Cmsify.Contracts.csproj" />
   <Project Path="sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
+  <Project Path="sdk\dotnet\src\SyntaxCircus.Cmsify.Client.DistributedCaching\SyntaxCircus.Cmsify.Client.DistributedCaching.csproj" />
   <Project Path="sdk\dotnet\tests\SyntaxCircus.Cmsify.Client.Tests\SyntaxCircus.Cmsify.Client.Tests.csproj" />
   <Project Path="src\Cmsify.Infrastructure\Cmsify.Infrastructure.csproj" />
   <Project Path="tests\Cmsify.Admin.Integration.Tests\Cmsify.Admin.Integration.Tests.csproj" />

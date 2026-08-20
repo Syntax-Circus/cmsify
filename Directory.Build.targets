@@ -1,0 +1,10 @@
+<Project>
+  <Target Name="RejectFluentAssertions" BeforeTargets="CollectPackageReferences">
+    <ItemGroup>
+      <_ForbiddenFluentAssertionsReference Include="@(PackageReference)" Condition="'%(PackageReference.Identity)' == 'FluentAssertions'" />
+      <_ForbiddenFluentAssertionsVersion Include="@(PackageVersion)" Condition="'%(PackageVersion.Identity)' == 'FluentAssertions'" />
+    </ItemGroup>
+    <Error Condition="'@(_ForbiddenFluentAssertionsReference)' != '' Or '@(_ForbiddenFluentAssertionsVersion)' != ''"
+           Text="FluentAssertions is prohibited in Cmsify. Use Shouldly for test assertions instead." />
+  </Target>
+</Project>

@@ -80,6 +80,22 @@ builder.Services.AddCmsifyClient(options =>
 
 For delegated credentials, set `TokenProvider` instead of `ApiToken`. The client forwards correlation IDs, retries transient failures and `429 Retry-After`, serializes enum values as strings, and throws `CmsifyApiException` containing ProblemDetails for non-success responses. See the [.NET SDK README](../sdk/dotnet/README.md) and [focused sample](../examples/dotnet/CmsifyClientSample.cs).
 
+### Cached content reads
+
+Content caching is opt-in and applies only through `ICachedCmsifyContentClient`; the existing `CmsifyClient.Content` methods always remain live API calls. For a single application instance, register the in-memory backend after registering the client:
+
+```csharp
+builder.Services.AddCmsifyContentMemoryCache(options =>
+{
+    options.CachePartitionProvider = _ => ValueTask.FromResult("website-reader");
+    options.DefaultAbsoluteExpiration = TimeSpan.FromMinutes(5);
+});
+```
+
+The partition must be stable and non-secret, and must distinguish authorization audiences when using per-user or rotating credentials. Cached reads use absolute expiration only; individual calls can supply `CmsifyContentCacheEntryOptions`. Use `ICmsifyContentCacheInvalidator.RemoveAsync(CmsifyContentCacheKeys.Get(...))` for an exact entry or `RemoveWorkspaceAsync` to bust a workspace.
+
+For Redis or another shared cache, install `SyntaxCircus.Cmsify.Client.DistributedCaching`, configure an `IDistributedCache` provider in the host, and call `AddCmsifyContentDistributedCache` instead. The add-on stores JSON values, is provider-neutral, and fails open to a live Cmsify request when the cache is unavailable.
+
 ## Direct HTTP smoke test
 
 When diagnosing an integration, make one authenticated request outside the application:
