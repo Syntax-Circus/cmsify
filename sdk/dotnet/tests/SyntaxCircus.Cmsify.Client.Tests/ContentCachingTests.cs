@@ -99,6 +99,34 @@ public sealed class ContentCachingTests
         calls.ShouldBe(2);
     }
 
+    [Fact]
+    public async Task MemoryCache_WorkspaceInvalidationWinsOverAnInflightRead()
+    {
+        var calls = 0;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var provider = CreateMemoryProvider(_ =>
+        {
+            calls++;
+            started.TrySetResult();
+            release.Task.GetAwaiter().GetResult();
+            return Json(Content(calls));
+        });
+        var cached = provider.GetRequiredService<ICachedCmsifyContentClient>();
+        var invalidator = provider.GetRequiredService<ICmsifyContentCacheInvalidator>();
+        var workspaceId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+
+        var first = Task.Run(() => cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken), TestContext.Current.CancellationToken);
+        await started.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await invalidator.RemoveWorkspaceAsync(workspaceId, TestContext.Current.CancellationToken);
+        release.TrySetResult();
+        await first;
+        await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken);
+
+        calls.ShouldBe(2);
+    }
+
     private static ServiceProvider CreateMemoryProvider(Func<HttpRequestMessage, HttpResponseMessage> handler)
     {
         var services = CreateServices(handler);

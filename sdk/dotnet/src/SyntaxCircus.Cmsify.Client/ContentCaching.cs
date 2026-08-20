@@ -160,6 +160,7 @@ public sealed class CachedCmsifyContentClient(CmsifyClient client, ICmsifyConten
 internal sealed class MemoryCmsifyContentCacheStore(IMemoryCache cache) : ICmsifyContentCacheStore
 {
     private readonly ConcurrentDictionary<string, CancellationTokenSource> workspaceTokens = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Lazy<Task<object?>>> inFlight = new(StringComparer.Ordinal);
 
     public async Task<T?> GetOrCreateAsync<T>(CmsifyContentCacheKey key, string keyPrefix, string partition, TimeSpan absoluteExpiration, Func<CancellationToken, Task<T?>> factory, CancellationToken cancellationToken)
     {
@@ -169,16 +170,36 @@ internal sealed class MemoryCmsifyContentCacheStore(IMemoryCache cache) : ICmsif
             return existing;
         }
 
-        var value = await factory(cancellationToken).ConfigureAwait(false);
-        if (value is not null)
-        {
-            var token = workspaceTokens.GetOrAdd(WorkspaceTokenKey(key, keyPrefix, partition), _ => new CancellationTokenSource());
-            cache.Set(cacheKey, value, new MemoryCacheEntryOptions()
-                .SetAbsoluteExpiration(absoluteExpiration)
-                .AddExpirationToken(new CancellationChangeToken(token.Token)));
-        }
+        var workspaceTokenKey = WorkspaceTokenKey(key, keyPrefix, partition);
+        var workspaceToken = workspaceTokens.GetOrAdd(workspaceTokenKey, _ => new CancellationTokenSource());
+        var pending = inFlight.GetOrAdd(cacheKey, _ => new Lazy<Task<object?>>(
+            async () =>
+            {
+                if (cache.TryGetValue(cacheKey, out T? cached))
+                {
+                    return cached;
+                }
 
-        return value;
+                var value = await factory(CancellationToken.None).ConfigureAwait(false);
+                if (value is not null && !workspaceToken.IsCancellationRequested)
+                {
+                    cache.Set(cacheKey, value, new MemoryCacheEntryOptions()
+                        .SetAbsoluteExpiration(absoluteExpiration)
+                        .AddExpirationToken(new CancellationChangeToken(workspaceToken.Token)));
+                }
+
+                return value;
+            }, LazyThreadSafetyMode.ExecutionAndPublication));
+
+        try
+        {
+            var value = await pending.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return value is null ? default : (T)value;
+        }
+        finally
+        {
+            inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<object?>>>(cacheKey, pending));
+        }
     }
 
     public Task RemoveAsync(CmsifyContentCacheKey key, string keyPrefix, string partition, CancellationToken cancellationToken)

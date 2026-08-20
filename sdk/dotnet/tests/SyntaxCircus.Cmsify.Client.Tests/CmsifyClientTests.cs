@@ -87,6 +87,95 @@ public sealed class CmsifyClientTests
         values.Count.ShouldBe(2);
     }
 
+    [Fact]
+    public async Task ContentReadThenUpdate_UsesTheTrackedEtag()
+    {
+        string? ifMatch = null;
+        var client = CreateClient(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                var response = Json(HttpStatusCode.OK, new { });
+                response.Headers.ETag = new EntityTagHeaderValue("\"v1\"");
+                return response;
+            }
+
+            ifMatch = request.Headers.IfMatch.ToString();
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        var workspaceId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+
+        await client.Content.GetAsync(workspaceId, contentId, ct: TestContext.Current.CancellationToken);
+        await client.Content.UpdateAsync(workspaceId, contentId, new UpdateContentItemRequest(null, null, null, null, [], []), TestContext.Current.CancellationToken);
+
+        ifMatch.ShouldBe("\"v1\"");
+    }
+
+    [Fact]
+    public async Task DownloadFailure_PreservesApiExceptionAndCorrelationId()
+    {
+        HttpRequestMessage? captured = null;
+        var client = CreateClient(request =>
+        {
+            captured = request;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var exception = await Should.ThrowAsync<CmsifyApiException>(() => client.DownloadAsync("/missing", TestContext.Current.CancellationToken));
+
+        exception.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        exception.CorrelationId.ShouldBe(captured!.Headers.GetValues("X-Correlation-Id").Single());
+    }
+
+    [Fact]
+    public async Task PostRequests_AreNotRetriedWithoutAnIdempotencyKey()
+    {
+        var calls = 0;
+        var client = CreateClient(_ =>
+        {
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        });
+
+        await Should.ThrowAsync<CmsifyApiException>(() => client.PostAsync<object>("/create", cancellationToken: TestContext.Current.CancellationToken));
+
+        calls.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task AddedFacadeOperations_UseTheirDocumentedRoutes()
+    {
+        var routes = new List<string>();
+        var client = CreateClient(request =>
+        {
+            routes.Add($"{request.Method} {request.RequestUri!.PathAndQuery}");
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        var workspaceId = Guid.NewGuid();
+        var resourceId = Guid.NewGuid();
+        var version = 2;
+
+        await client.Content.UpgradeVersionAsync(workspaceId, resourceId, TestContext.Current.CancellationToken);
+        await client.Content.LinkTranslationAsync(workspaceId, resourceId, new LinkTranslationRequest(Guid.NewGuid()), TestContext.Current.CancellationToken);
+        await client.Content.GetVersionAsync(workspaceId, resourceId, version, TestContext.Current.CancellationToken);
+        await client.Content.RollbackVersionAsync(workspaceId, resourceId, version, TestContext.Current.CancellationToken);
+        await client.Templates.DeleteSectionAsync(workspaceId, resourceId, version, Guid.NewGuid(), TestContext.Current.CancellationToken);
+        await client.Templates.DeleteFieldAsync(workspaceId, resourceId, version, Guid.NewGuid(), TestContext.Current.CancellationToken);
+        await client.Templates.ReorderFieldsAsync(workspaceId, resourceId, version, [], TestContext.Current.CancellationToken);
+        await client.Components.GetVersionAsync(workspaceId, resourceId, version, TestContext.Current.CancellationToken);
+        await client.Webhooks.DeliveriesAsync(workspaceId, resourceId, isDelivered: true, isFailed: false, ct: TestContext.Current.CancellationToken);
+        await client.Webhooks.RetryDeliveryAsync(workspaceId, resourceId, Guid.NewGuid(), TestContext.Current.CancellationToken);
+        await client.Packages.ImportAsync(workspaceId, new { cmsifyPackage = "1.0" }, TestContext.Current.CancellationToken);
+        await client.Packages.PreviewAsync(workspaceId, new { cmsifyPackage = "1.0" }, TestContext.Current.CancellationToken);
+        await client.Packages.ExportAsync(workspaceId, [Guid.NewGuid()], ct: TestContext.Current.CancellationToken);
+
+        routes.ShouldContain(route => route.Contains($"POST /api/v1/workspaces/{workspaceId}/content/{resourceId}/upgrade-version"));
+        routes.ShouldContain(route => route.Contains($"GET /api/v1/workspaces/{workspaceId}/components/{resourceId}/versions/{version}"));
+        routes.ShouldContain(route => route.Contains($"POST /api/v1/workspaces/{workspaceId}/webhooks/{resourceId}/deliveries/"));
+        routes.ShouldContain(route => route.StartsWith($"GET /api/v1/workspaces/{workspaceId}/packages/export?templateIds="));
+    }
+
     private static CmsifyClient CreateClient(Func<HttpRequestMessage, HttpResponseMessage> handler, string? token = null, Action<CmsifyClientOptions>? configure = null)
     {
         var options = new CmsifyClientOptions { BaseUrl = new Uri("https://cms.test"), ApiToken = token, EnableRetries = true };

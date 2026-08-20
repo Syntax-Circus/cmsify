@@ -22,7 +22,9 @@ var posts = await cms.Content.ListAsync(
     cancellationToken);
 ```
 
-The client also exposes templates, media, picklists, tags, webhooks, audit, users, API clients, settings, packages, authentication, and health services. Requests attach bearer authentication and correlation IDs, map RFC 7807 failures to `CmsifyApiException`, retry transient `429`/`5xx` responses, and preserve ETags for mutation concurrency.
+The client also exposes templates, media, picklists, tags, webhooks, audit, users, API clients, settings, packages, authentication, and health services. Requests attach bearer authentication and correlation IDs, map RFC 7807 failures to `CmsifyApiException`, and preserve ETags for mutation concurrency. Retries apply only to safe read requests; writes are never replayed automatically. Mutating methods also accept an optional trailing `ifMatch` parameter when callers need to provide an ETag explicitly.
+
+Use `Media.DownloadToAsync` or `Packages.ExportToAsync` to stream large files directly to a destination stream. The existing `DownloadAsync` and `ExportAsync` methods retain their byte-array convenience behavior.
 
 ## Cached content reads
 
