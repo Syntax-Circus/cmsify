@@ -29,6 +29,7 @@ The first API start applies database migrations and seeds the configured admin u
 - [Operating Cmsify](docs/operations.md) — configuration, production essentials, persistence, health checks, and security.
 - [Integrating with the API](docs/integrating.md) — authentication, workspace-scoped requests, REST conventions, and server-side consumers.
 - [TypeScript client](sdk/typescript/README.md) — `@cmsify/client` usage, framework examples, pagination, errors, and regeneration.
+- [.NET client](sdk/dotnet/README.md) — NuGet packages, dependency injection, authentication, and service examples.
 - [Agent and contributor instructions](AGENTS.md) — repository conventions and validation workflow for coding agents.
 - [Project roadmap](docs/roadmap.md) — planned client and platform work.
 
@@ -41,6 +42,7 @@ The first API start applies database migrations and seeds the configured admin u
 | `src/Cmsify.Api` | Versioned HTTP API, OpenAPI, middleware, and health endpoints |
 | `src/Cmsify.Admin` | Blazor administration UI; all data access goes through the API |
 | `sdk/typescript` | Generated OpenAPI types and the ergonomic TypeScript client |
+| `sdk/dotnet` | Shared wire contracts and the `SyntaxCircus.Cmsify.Client` NuGet client |
 | `examples` | Next.js, Astro, and SvelteKit server-side integration examples |
 | `tests` | Unit and HTTP/integration test projects |
 

@@ -555,7 +555,7 @@
         public int? MaxOccurrences { get; set; }
         public bool IsOpen { get; set; } = true;
         public CompositionMode CompositionMode { get; set; }
-        public PrimitiveType? PrimitiveType { get; set; } = Cmsify.Core.Domain.Enums.PrimitiveType.Text;
+        public PrimitiveType? PrimitiveType { get; set; } = SyntaxCircus.Cmsify.Contracts.PrimitiveType.Text;
         public Guid? TemplateId { get; set; }
         public IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes { get; set; } = [];
         public Guid? PicklistId { get; set; }

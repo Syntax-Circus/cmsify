@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Components.Forms;
 using Cmsify.Admin.Auth;
 using Cmsify.Admin.State;
-using Cmsify.Core.Domain.Enums;
+using SyntaxCircus.Cmsify.Contracts;
 
 namespace Cmsify.Admin.Services;
 

@@ -3,6 +3,7 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using SyntaxCircus.Cmsify.Contracts;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Api.Controllers;
@@ -138,13 +139,3 @@ public sealed class AuthController : ControllerBase
             : null;
     }
 }
-
-public sealed record LoginRequest(string Email, string Password);
-
-public sealed record LoginResponse(string Token, DateTimeOffset ExpiresAt, bool MustChangePassword, UserSummary User);
-
-public sealed record UserSummary(Guid Id, string Email, string DisplayName, string Role, bool IsSuperAdmin);
-
-public sealed record ActorResponse(Guid? UserId, Guid? ApiClientId, string Role, Guid? WorkspaceId, bool IsSuperAdmin);
-
-public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);

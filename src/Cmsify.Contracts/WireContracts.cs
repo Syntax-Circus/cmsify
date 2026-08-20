@@ -1,9 +1,10 @@
 using System.Text.Json;
-using Cmsify.Core.Domain.Enums;
+namespace SyntaxCircus.Cmsify.Contracts;
 
-namespace Cmsify.Admin.Services;
-
-public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int TotalCount, int Page, int PageSize);
+public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int TotalCount, int Page, int PageSize)
+{
+    public int TotalPages => (int)Math.Ceiling(TotalCount / (double)Math.Max(1, PageSize));
+}
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount, int Offset, int Limit);
 
@@ -159,3 +160,16 @@ public sealed record PackagePickListOptionPreview(string Label, string Value, in
 public sealed record PackageTemplatePreview(string Slug, string Name, string Status);
 
 public sealed record PackageImportResolutionsRequest(IReadOnlyDictionary<string, string>? PickLists);
+
+
+public sealed record LoginRequest(string Email, string Password);
+public sealed record ActorResponse(Guid? UserId, Guid? ApiClientId, string Role, Guid? WorkspaceId, bool IsSuperAdmin);
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20);
+public sealed record RejectContentRequest(string Reason);
+public sealed record UpdateTemplateRequest(string Name, string? Description);
+public sealed record CreateTemplateVersionRequest(string? Notes);
+public sealed record RotateWebhookSecretResponse(Guid Id, string Secret, string Warning);
+public sealed record TagResponse(Guid Id, string Name, int UsageCount);
+public sealed record AuditQueryRequest(string? EntityType, Guid? EntityId, AuditAction? Action, Guid? ActorUserId, Guid? ActorApiClientId, DateTimeOffset? After, DateTimeOffset? Before, int Page = 1, int PageSize = 50);
+public sealed record UserWorkspaceAccessRequest(Guid WorkspaceId, WorkspaceAccessLevel AccessLevel);

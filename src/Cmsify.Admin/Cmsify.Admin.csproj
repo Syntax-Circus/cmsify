@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Cmsify.Contracts\Cmsify.Contracts.csproj" />
     <ProjectReference Include="..\Cmsify.Core\Cmsify.Core.csproj" />
   </ItemGroup>
 

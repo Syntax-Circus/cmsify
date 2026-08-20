@@ -55,6 +55,31 @@ const posts = await cms.content.list({
 
 Keep `CMSIFY_API_TOKEN` in a server-only secret namespace. The existing examples show the correct pattern for Next.js App Router, Astro, and SvelteKit.
 
+## .NET client and NuGet packages
+
+The first-party .NET SDK is split into two packages so API hosts and consumers share the same wire contracts:
+
+- `SyntaxCircus.Cmsify.Contracts` — request/response records, enums, pagination, and JSON options.
+- `SyntaxCircus.Cmsify.Client` — an `HttpClient`-based management client built on those contracts.
+
+Install the client (it targets .NET 10):
+
+```powershell
+dotnet add package SyntaxCircus.Cmsify.Client
+```
+
+Register it with dependency injection:
+
+```csharp
+builder.Services.AddCmsifyClient(options =>
+{
+    options.BaseUrl = new Uri(builder.Configuration["Cmsify:BaseUrl"]!);
+    options.ApiToken = builder.Configuration["Cmsify:ApiToken"];
+});
+```
+
+For delegated credentials, set `TokenProvider` instead of `ApiToken`. The client forwards correlation IDs, retries transient failures and `429 Retry-After`, serializes enum values as strings, and throws `CmsifyApiException` containing ProblemDetails for non-success responses. See the [.NET SDK README](../sdk/dotnet/README.md) and [focused sample](../examples/dotnet/CmsifyClientSample.cs).
+
 ## Direct HTTP smoke test
 
 When diagnosing an integration, make one authenticated request outside the application:

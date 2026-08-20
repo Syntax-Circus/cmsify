@@ -1,0 +1,96 @@
+namespace SyntaxCircus.Cmsify.Contracts;
+public enum PrimitiveType
+{
+    Text,
+    RichText,
+    Markdown,
+    Boolean,
+    PickList,
+    Media,
+    File,
+    Link,
+    Quote,
+    Separator
+}
+
+public enum TemplateVersionStatus
+{
+    Draft,
+    Published,
+    Archived
+}
+
+public enum CompositionMode
+{
+    Inline,
+    Reference
+}
+
+public enum ContentStatus
+{
+    Draft,
+    Review,
+    Approved,
+    Published,
+    Archived
+}
+
+public enum ContentVersionStatus
+{
+    Published,
+    Retired
+}
+
+public enum ValueKind
+{
+    Text,
+    RichText,
+    Markdown,
+    Boolean,
+    PickList,
+    Media,
+    File,
+    Link,
+    Quote,
+    Separator,
+    ChildContent
+}
+
+public enum TextFormatHint
+{
+    PlainText,
+    Html,
+    Markdown,
+    Json,
+    Xml,
+    Yaml,
+    Csv,
+    Toml,
+    Sql,
+    Code,
+    Url,
+    Email,
+    Regex
+}
+
+public enum UserRole
+{
+    Reader,
+    Editor,
+    TemplateAdmin,
+    Admin
+}
+
+public enum WorkspaceAccessLevel
+{
+    Read,
+    Write
+}
+
+public enum AuditAction
+{
+    Created,
+    Updated,
+    Deleted,
+    StatusChanged
+}
