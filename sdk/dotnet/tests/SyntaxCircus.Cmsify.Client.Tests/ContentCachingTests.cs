@@ -33,16 +33,16 @@ public sealed class ContentCachingTests
         var workspaceId = Guid.NewGuid();
         var contentId = Guid.NewGuid();
 
-        (await cached.GetAsync(workspaceId, contentId))!.Slug.ShouldBe("post-1");
-        (await cached.GetAsync(workspaceId, contentId))!.Slug.ShouldBe("post-1");
+        (await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken))!.Slug.ShouldBe("post-1");
+        (await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken))!.Slug.ShouldBe("post-1");
         calls.ShouldBe(1);
 
-        await invalidator.RemoveAsync(CmsifyContentCacheKeys.Get(workspaceId, contentId));
-        (await cached.GetAsync(workspaceId, contentId))!.Slug.ShouldBe("post-2");
+        await invalidator.RemoveAsync(CmsifyContentCacheKeys.Get(workspaceId, contentId), TestContext.Current.CancellationToken);
+        (await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken))!.Slug.ShouldBe("post-2");
         calls.ShouldBe(2);
 
-        await invalidator.RemoveWorkspaceAsync(workspaceId);
-        (await cached.GetAsync(workspaceId, contentId))!.Slug.ShouldBe("post-3");
+        await invalidator.RemoveWorkspaceAsync(workspaceId, TestContext.Current.CancellationToken);
+        (await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken))!.Slug.ShouldBe("post-3");
         calls.ShouldBe(3);
     }
 
@@ -56,9 +56,9 @@ public sealed class ContentCachingTests
         var contentId = Guid.NewGuid();
         var entryOptions = new CmsifyContentCacheEntryOptions { AbsoluteExpiration = TimeSpan.FromMilliseconds(10) };
 
-        await cached.GetAsync(workspaceId, contentId, cacheOptions: entryOptions);
-        await Task.Delay(50);
-        await cached.GetAsync(workspaceId, contentId, cacheOptions: entryOptions);
+        await cached.GetAsync(workspaceId, contentId, cacheOptions: entryOptions, cancellationToken: TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await cached.GetAsync(workspaceId, contentId, cacheOptions: entryOptions, cancellationToken: TestContext.Current.CancellationToken);
 
         calls.ShouldBe(2);
     }
@@ -74,12 +74,12 @@ public sealed class ContentCachingTests
         var workspaceId = Guid.NewGuid();
         var contentId = Guid.NewGuid();
 
-        await cached.GetAsync(workspaceId, contentId);
-        await cached.GetAsync(workspaceId, contentId);
+        await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken);
+        await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken);
         calls.ShouldBe(1);
 
-        await invalidator.RemoveWorkspaceAsync(workspaceId);
-        await cached.GetAsync(workspaceId, contentId);
+        await invalidator.RemoveWorkspaceAsync(workspaceId, TestContext.Current.CancellationToken);
+        await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken);
         calls.ShouldBe(2);
     }
 
@@ -93,8 +93,8 @@ public sealed class ContentCachingTests
         var workspaceId = Guid.NewGuid();
         var contentId = Guid.NewGuid();
 
-        await cached.GetAsync(workspaceId, contentId);
-        await cached.GetAsync(workspaceId, contentId);
+        await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken);
+        await cached.GetAsync(workspaceId, contentId, cancellationToken: TestContext.Current.CancellationToken);
 
         calls.ShouldBe(2);
     }

@@ -16,7 +16,7 @@ public sealed class CmsifyClientTests
             return Json(HttpStatusCode.OK, new { value = "ok" });
         }, "cmsify_test");
 
-        var result = await client.GetAsync<JsonValue>("/api/v1/test");
+        var result = await client.GetAsync<JsonValue>("/api/v1/test", TestContext.Current.CancellationToken);
 
         result!.Value.ShouldBe("ok");
         captured!.Headers.Authorization!.Scheme.ShouldBe("Bearer");
@@ -83,7 +83,7 @@ public sealed class CmsifyClientTests
     {
         var client = CreateClient(_ => Json(HttpStatusCode.NotFound, new { type = "https://cmsify.dev/errors/not-found", title = "Not found", status = 404, traceId = "trace-1", detail = "Missing" }));
 
-        var exception = await Should.ThrowAsync<CmsifyApiException>(() => client.GetAsync<object>("/missing"));
+        var exception = await Should.ThrowAsync<CmsifyApiException>(() => client.GetAsync<object>("/missing", TestContext.Current.CancellationToken));
 
         exception.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         exception.Problem.Detail.ShouldBe("Missing");
@@ -107,7 +107,7 @@ public sealed class CmsifyClientTests
             return Json(HttpStatusCode.OK, new { value = "ok" });
         });
 
-        (await client.GetAsync<JsonValue>("/retry"))!.Value.ShouldBe("ok");
+        (await client.GetAsync<JsonValue>("/retry", TestContext.Current.CancellationToken))!.Value.ShouldBe("ok");
         attempts.ShouldBe(2);
     }
 
@@ -120,8 +120,8 @@ public sealed class CmsifyClientTests
             options.TokenProvider = _ => ValueTask.FromResult<string?>("dynamic-" + ++tokenCalls);
         });
 
-        await client.GetAsync<JsonValue>("/one");
-        await client.GetAsync<JsonValue>("/two");
+        await client.GetAsync<JsonValue>("/one", TestContext.Current.CancellationToken);
+        await client.GetAsync<JsonValue>("/two", TestContext.Current.CancellationToken);
         tokenCalls.ShouldBe(2);
     }
 
@@ -133,7 +133,7 @@ public sealed class CmsifyClientTests
         var client = CreateClient(_ => Json(HttpStatusCode.OK, new PagedResponse<object>([item], 2, ++page, 1)));
 
         var values = new List<ContentItemSummaryResponse>();
-        await foreach (var value in client.Content.ListAllAsync(Guid.NewGuid(), new ContentListQuery(null, null, null, null, null, null, null, null, null, null, null, null, false, null, "createdAt", true, 1, 1)))
+        await foreach (var value in client.Content.ListAllAsync(Guid.NewGuid(), new ContentListQuery(null, null, null, null, null, null, null, null, null, null, null, null, false, null, "createdAt", true, 1, 1), ct: TestContext.Current.CancellationToken).WithCancellation(TestContext.Current.CancellationToken))
         {
             values.Add(value);
         }

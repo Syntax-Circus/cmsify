@@ -15,8 +15,7 @@ namespace Cmsify.Api.Integration.Tests;
 
 public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:17-alpine")
+    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("cmsify")
         .WithUsername("cmsify")
         .WithPassword("cmsify")
