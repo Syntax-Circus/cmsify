@@ -21,11 +21,18 @@ dotnet restore $solution
 if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed" }
 dotnet build $solution --no-restore --configuration Release
 if ($LASTEXITCODE -ne 0) { throw "dotnet build failed" }
-dotnet pack $solution --no-build --configuration Release --output $OutputDirectory
-if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
+$packageProjects = @(
+    (Join-Path $PSScriptRoot "src\Cmsify.Contracts\Cmsify.Contracts.csproj"),
+    (Join-Path $PSScriptRoot "sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj")
+)
+foreach ($project in $packageProjects) {
+    dotnet pack $project --no-build --configuration Release --output $OutputDirectory
+    if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed for $project" }
+}
 
 $packages = @(Get-ChildItem -Path $OutputDirectory -Filter "*.nupkg" | Where-Object Name -notlike "*.symbols.nupkg")
 if ($packages.Count -eq 0) { throw "No NuGet packages were produced." }
+Write-Host "GitVersion-derived packages: $($packages.Name -join ', ')"
 if ($DryRun) { Write-Host "Dry run complete: $($packages.Name -join ', ')"; exit 0 }
 
 foreach ($package in $packages) {

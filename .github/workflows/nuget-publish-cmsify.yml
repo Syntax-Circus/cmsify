@@ -19,8 +19,6 @@ jobs:
         run: dotnet restore Cmsify.slnx
       - name: Test
         run: dotnet test Cmsify.slnx --no-restore --configuration Release
-      - name: Pack
-        run: dotnet pack Cmsify.slnx --no-restore --configuration Release --output artifacts
       - name: Publish packages
         shell: pwsh
         env:
