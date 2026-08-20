@@ -90,6 +90,11 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("token_hash");
 
+                    b.Property<string>("TokenIdentifier")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("token_identifier");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -109,6 +114,11 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CreatedByUserId")
                         .HasDatabaseName("ix_api_clients_created_by_user_id");
+
+                    b.HasIndex("TokenIdentifier")
+                        .IsUnique()
+                        .HasDatabaseName("ix_api_clients_token_identifier")
+                        .HasFilter("token_identifier IS NOT NULL");
 
                     b.HasIndex("WorkspaceId")
                         .HasDatabaseName("ix_api_clients_workspace_id");
@@ -1679,6 +1689,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_attempt_at");
 
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
                     b.Property<DateTimeOffset?>("NextRetryAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("next_retry_at");
@@ -1701,8 +1715,8 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.HasIndex("WebhookEndpointId")
                         .HasDatabaseName("ix_webhook_delivery_logs_webhook_endpoint_id");
 
-                    b.HasIndex("IsDelivered", "IsFailed", "NextRetryAt")
-                        .HasDatabaseName("ix_webhook_delivery_logs_is_delivered_is_failed_next_retry_at");
+                    b.HasIndex("IsDelivered", "IsFailed", "NextRetryAt", "LeaseExpiresAt")
+                        .HasDatabaseName("ix_webhook_delivery_logs_is_delivered_is_failed_next_retry_at_");
 
                     b.ToTable("webhook_delivery_logs", (string)null);
                 });

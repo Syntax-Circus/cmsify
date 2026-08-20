@@ -10,6 +10,8 @@ public sealed class ApiClient : SoftDeletableEntity
 
     public required string TokenHash { get; set; }
 
+    public string? TokenIdentifier { get; set; }
+
     public UserRole Role { get; set; }
 
     public Guid? WorkspaceId { get; set; }

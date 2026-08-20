@@ -13,6 +13,7 @@ public sealed class ApiClientConfiguration : IEntityTypeConfiguration<ApiClient>
         builder.ConfigureXminConcurrency();
 
         builder.HasIndex(client => client.WorkspaceId);
+        builder.HasIndex(client => client.TokenIdentifier).IsUnique().HasFilter("token_identifier IS NOT NULL");
 
         builder.HasOne<Workspace>()
             .WithMany()
@@ -28,6 +29,7 @@ public sealed class ApiClientConfiguration : IEntityTypeConfiguration<ApiClient>
         builder.Property(client => client.Name).HasMaxLength(200).IsRequired();
         builder.Property(client => client.Description).HasMaxLength(1_000);
         builder.Property(client => client.TokenHash).HasMaxLength(500).IsRequired();
+        builder.Property(client => client.TokenIdentifier).HasMaxLength(64);
         builder.Property(client => client.Role).HasConversion<string>().HasMaxLength(50);
     }
 }

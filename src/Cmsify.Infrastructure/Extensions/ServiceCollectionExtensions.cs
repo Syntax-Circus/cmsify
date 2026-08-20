@@ -54,7 +54,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWebhookRepository, WebhookRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddStorageProvider(configuration);
-        services.AddHttpClient(nameof(WebhookDeliveryProcessor));
+        services.AddSingleton<IWebhookDestinationValidator, WebhookDestinationValidator>();
+        services.AddHttpClient(nameof(WebhookDeliveryProcessor), client =>
+            client.Timeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Webhook:RequestTimeoutSeconds", 15), 1, 120)))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<WebhookDeliveryProcessor>();
         services.AddSingleton<IWebhookQueue, InProcessWebhookQueue>();
         services.AddScoped<IScheduledPublishingDispatcher, InProcessScheduledPublishingDispatcher>();

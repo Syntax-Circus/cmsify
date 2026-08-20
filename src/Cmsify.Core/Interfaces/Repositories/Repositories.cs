@@ -101,7 +101,7 @@ public interface IApiClientRepository
 
     Task<PagedResult<ApiClientDto>> ListAsync(PageRequest page, CancellationToken ct = default);
 
-    Task<ApiClientDto> CreateAsync(CreateApiClientCommand command, string tokenHash, CancellationToken ct = default);
+    Task<ApiClientDto> CreateAsync(CreateApiClientCommand command, string tokenHash, string tokenIdentifier, CancellationToken ct = default);
 
     Task<ApiClientDto> UpdateAsync(UpdateApiClientCommand command, CancellationToken ct = default);
 
@@ -124,7 +124,7 @@ public interface IWebhookRepository
 
     Task<IReadOnlyList<WebhookDispatchTargetDto>> GetActiveEndpointsForEventAsync(string eventType, Guid? workspaceId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<PendingWebhookDeliveryDto>> GetPendingDeliveryLogsAsync(DateTimeOffset now, int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<PendingWebhookDeliveryDto>> ClaimPendingDeliveryLogsAsync(DateTimeOffset now, int limit, CancellationToken ct = default);
 
     Task MarkDeliverySucceededAsync(Guid deliveryLogId, int statusCode, CancellationToken ct = default);
 

@@ -46,6 +46,8 @@ public sealed class WebhookDeliveryLog : Entity
 
     public bool IsFailed { get; set; }
 
+    public DateTimeOffset? LeaseExpiresAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

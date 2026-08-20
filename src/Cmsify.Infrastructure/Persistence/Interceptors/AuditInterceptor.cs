@@ -35,7 +35,7 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
     {
         var actor = ResolveActor();
         var entries = context.ChangeTracker.Entries()
-            .Where(entry => entry.Entity is not AuditLog and not WebhookDeliveryLog)
+            .Where(entry => entry.Entity is not AuditLog and not WebhookDeliveryLog and not UserSession and not ApiClient)
             .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .Where(entry => entry.Properties.Any(property => property.Metadata.Name == "Id"))
             .ToArray();

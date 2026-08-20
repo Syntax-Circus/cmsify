@@ -50,7 +50,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         var createResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks", new
         {
             name = "Revalidator",
-            url = "https://example.test/revalidate",
+            url = "https://8.8.8.8/revalidate",
             secret = "plain-secret",
             events = new[] { "content.published" }
         });
@@ -90,6 +90,24 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         var retryResponse = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries/{deliveryId}/retry", null);
 
         Assert.Equal(System.Net.HttpStatusCode.Accepted, retryResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task WebhookManagement_RejectsPrivateDestinations()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedApiClientAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks", new
+        {
+            name = "Unsafe",
+            url = "https://127.0.0.1/hooks",
+            events = new[] { "content.published" }
+        });
+
+        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
     }
 
     [Fact]

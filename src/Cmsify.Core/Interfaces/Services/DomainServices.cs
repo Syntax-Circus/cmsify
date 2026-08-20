@@ -88,6 +88,18 @@ public interface IWebhookQueue
     IAsyncEnumerable<WebhookEvent> DequeueAllAsync(CancellationToken ct = default);
 }
 
+public interface IWebhookDestinationValidator
+{
+    Task<WebhookDestinationValidationResult> ValidateAsync(string url, CancellationToken ct = default);
+}
+
+public sealed record WebhookDestinationValidationResult(bool IsValid, string? NormalizedUrl, string? Error)
+{
+    public static WebhookDestinationValidationResult Valid(string normalizedUrl) => new(true, normalizedUrl, null);
+
+    public static WebhookDestinationValidationResult Invalid(string error) => new(false, null, error);
+}
+
 public interface IScheduledPublishingDispatcher
 {
     Task RunOnceAsync(CancellationToken ct = default);

@@ -1,8 +1,10 @@
+using System.Security.Cryptography;
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 
 namespace Cmsify.Api.Controllers;
 
@@ -39,10 +41,11 @@ public sealed class ApiClientsController : ControllerBase
             return Forbid();
         }
 
-        var rawToken = TokenUtility.GenerateApiToken();
+        var tokenIdentifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(12));
+        var rawToken = TokenUtility.GenerateApiToken(tokenIdentifier);
         var tokenHash = BCrypt.Net.BCrypt.HashPassword(rawToken, configuration.GetValue("Auth:BcryptCost", 12));
         var command = new CreateApiClientCommand(request.Name, request.Description, request.Role, request.WorkspaceId, request.ExpiresAt, currentActor.UserId!.Value);
-        var client = await apiClientRepository.CreateAsync(command, tokenHash, ct);
+        var client = await apiClientRepository.CreateAsync(command, tokenHash, tokenIdentifier, ct);
         return CreatedAtAction(nameof(Get), new { id = client.Id }, new CreateApiClientResponse(client, rawToken, "Store this token securely - it cannot be retrieved again."));
     }
 
@@ -74,10 +77,11 @@ public sealed class ApiClientsController : ControllerBase
             return NotFound();
         }
 
-        var rawToken = TokenUtility.GenerateApiToken();
+        var tokenIdentifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(12));
+        var rawToken = TokenUtility.GenerateApiToken(tokenIdentifier);
         var tokenHash = BCrypt.Net.BCrypt.HashPassword(rawToken, configuration.GetValue("Auth:BcryptCost", 12));
         await apiClientRepository.SoftDeleteAsync(id, currentActor.UserId!.Value, ct);
-        var created = await apiClientRepository.CreateAsync(new CreateApiClientCommand(client.Name, client.Description, client.Role, client.WorkspaceId, client.ExpiresAt, currentActor.UserId!.Value), tokenHash, ct);
+        var created = await apiClientRepository.CreateAsync(new CreateApiClientCommand(client.Name, client.Description, client.Role, client.WorkspaceId, client.ExpiresAt, currentActor.UserId!.Value), tokenHash, tokenIdentifier, ct);
         return Ok(new CreateApiClientResponse(created, rawToken, "Store this token securely - it cannot be retrieved again."));
     }
 
