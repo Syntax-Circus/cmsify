@@ -42,4 +42,8 @@ Resolve `ICachedCmsifyContentClient` for cached `GetAsync`, `BySlugAsync`, `List
 
 Use `CmsifyClientOptions.TokenProvider` for rotating or request-time credentials. Keep tokens in server-side secret storage and never send them to browser code.
 
+Treat API tokens as opaque bearer credentials. Newly issued tokens use a `cmsify_<identifier>_<secret>` shape, but applications must not parse or reconstruct them.
+
+Webhook create and update calls validate destinations before sending: URLs must use HTTPS, omit embedded credentials, and cannot use unsafe literal IP addresses. Hostname DNS checks remain enforced by the server.
+
 The shared `SyntaxCircus.Cmsify.Contracts` package contains the public request, response, enum, pagination, and dynamic JSON models without the HTTP client implementation.

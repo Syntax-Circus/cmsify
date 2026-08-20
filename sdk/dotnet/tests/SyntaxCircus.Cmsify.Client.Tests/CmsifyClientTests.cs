@@ -25,6 +25,60 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task GetAsync_PreservesOpaqueApiTokenFormat()
+    {
+        HttpRequestMessage? captured = null;
+        var token = "cmsify_identifier_secret";
+        var client = CreateClient(request =>
+        {
+            captured = request;
+            return Json(HttpStatusCode.OK, new { value = "ok" });
+        }, token);
+
+        await client.GetAsync<JsonValue>("/api/v1/test", TestContext.Current.CancellationToken);
+
+        captured!.Headers.Authorization!.Parameter.ShouldBe(token);
+    }
+
+    [Theory]
+    [InlineData("http://8.8.8.8/hooks")]
+    [InlineData("https://localhost/hooks")]
+    [InlineData("https://127.0.0.1/hooks")]
+    [InlineData("https://10.0.0.1/hooks")]
+    [InlineData("https://[::1]/hooks")]
+    [InlineData("https://user:password@8.8.8.8/hooks")]
+    public async Task WebhookMutations_RejectUnsafeUrlsBeforeSending(string url)
+    {
+        var requests = 0;
+        var client = CreateClient(_ =>
+        {
+            requests++;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        var workspaceId = Guid.NewGuid();
+
+        await Should.ThrowAsync<ArgumentException>(() => client.Webhooks.CreateAsync(workspaceId, new CreateWebhookEndpointRequest("Unsafe", url, null, ["content.published"]), TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<ArgumentException>(() => client.Webhooks.UpdateAsync(workspaceId, Guid.NewGuid(), new UpdateWebhookEndpointRequest("Unsafe", url, true, ["content.published"]), TestContext.Current.CancellationToken));
+
+        requests.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task WebhookMutations_AllowPublicHttpsDestinations()
+    {
+        var requests = 0;
+        var client = CreateClient(_ =>
+        {
+            requests++;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+
+        await client.Webhooks.CreateAsync(Guid.NewGuid(), new CreateWebhookEndpointRequest("Public", "https://8.8.8.8/hooks", null, ["content.published"]), TestContext.Current.CancellationToken);
+
+        requests.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task ErrorResponse_MapsProblemDetails()
     {
         var client = CreateClient(_ => Json(HttpStatusCode.NotFound, new { type = "https://cmsify.dev/errors/not-found", title = "Not found", status = 404, traceId = "trace-1", detail = "Missing" }));

@@ -126,8 +126,21 @@ public sealed class WebhookClient(CmsifyClient client)
 {
     public Task<PagedResponse<WebhookEndpointResponse>?> ListAsync(Guid workspaceId, int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<WebhookEndpointResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks?page={page}&pageSize={pageSize}"), ct);
     public Task<WebhookEndpointResponse?> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<WebhookEndpointResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), ct);
-    public Task<CreateWebhookEndpointResponse?> CreateAsync(Guid workspaceId, CreateWebhookEndpointRequest request, CancellationToken ct = default) => client.PostAsync<CreateWebhookEndpointResponse>(CmsifyClient.WorkspacePath(workspaceId, "/webhooks"), request, ct);
-    public Task<WebhookEndpointResponse?> UpdateAsync(Guid workspaceId, Guid id, UpdateWebhookEndpointRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<WebhookEndpointResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), request, ct) : client.PutAsync<WebhookEndpointResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), request, ifMatch, ct);
+    public Task<CreateWebhookEndpointResponse?> CreateAsync(Guid workspaceId, CreateWebhookEndpointRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        WebhookUrlValidator.Validate(request.Url, nameof(request.Url));
+        return client.PostAsync<CreateWebhookEndpointResponse>(CmsifyClient.WorkspacePath(workspaceId, "/webhooks"), request, ct);
+    }
+
+    public Task<WebhookEndpointResponse?> UpdateAsync(Guid workspaceId, Guid id, UpdateWebhookEndpointRequest request, CancellationToken ct = default, string? ifMatch = null)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        WebhookUrlValidator.Validate(request.Url, nameof(request.Url));
+        return ifMatch is null
+            ? client.PutAsync<WebhookEndpointResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), request, ct)
+            : client.PutAsync<WebhookEndpointResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), request, ifMatch, ct);
+    }
     public Task<RotateWebhookSecretResponse?> RotateSecretAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.PostAsync<RotateWebhookSecretResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}/rotate-secret"), null, ct);
     public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), ct) : client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), ifMatch, ct);
     public Task<PagedResponse<WebhookDeliveryResponse>?> DeliveriesAsync(Guid workspaceId, Guid id, bool? isDelivered = null, bool? isFailed = null, int page = 1, int pageSize = 50, CancellationToken ct = default) => client.GetAsync<PagedResponse<WebhookDeliveryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}/deliveries?page={page}&pageSize={pageSize}{Query.Optional("isDelivered", isDelivered)}{Query.Optional("isFailed", isFailed)}"), ct);

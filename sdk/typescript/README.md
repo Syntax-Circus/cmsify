@@ -44,6 +44,8 @@ const post = await cms.content.bySlug("my-first-post");
 
 Keep `CMSIFY_API_TOKEN` in a server-only secret store. Do not pass it to browser code, expose it in a public environment variable, or include it in a client-side bundle. The supported integration examples use the private/server environment mechanisms for Next.js App Router, Astro, and SvelteKit.
 
+Treat API tokens as opaque bearer credentials. Newly issued tokens use a `cmsify_<identifier>_<secret>` shape, but applications must not parse or reconstruct them.
+
 ## Common operations
 
 All methods return promises. List methods return `{ items, totalCount, page, pageSize, totalPages }`; use `listAll` when the application should consume every page:
