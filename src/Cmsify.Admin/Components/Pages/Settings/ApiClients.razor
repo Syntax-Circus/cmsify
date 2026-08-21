@@ -1,7 +1,6 @@
 @page "/settings/api-clients"
 @rendermode InteractiveServer
-@inject ApiClientsApiClient Clients
-@inject WorkspaceApiClient WorkspacesClient
+@inject CmsifyClient Cmsify
 @inject ToastState Toasts
 
 <div class="cms-page-head"><div><h1>API Clients</h1><div class="lead">Issue and rotate machine tokens.</div></div><button class="btn btn-primary" @onclick="() => creating = true">Create Client</button></div>
@@ -24,6 +23,8 @@
 }
 
 @code {
+    private ApiClientManagementClient Clients => Cmsify.ApiClients;
+    private WorkspaceClient WorkspacesClient => Cmsify.Workspaces;
     private List<ApiClientDto> clients = [];
     private List<WorkspaceDto> workspaces = [];
     private bool creating;

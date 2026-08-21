@@ -1,7 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/content"
 @rendermode InteractiveServer
-@inject ContentApiClient Content
-@inject TemplateApiClient Templates
+@inject CmsifyClient Cmsify
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -100,6 +99,8 @@
 }
 
 @code {
+    private ContentClient Content => Cmsify.Content;
+    private TemplateClient Templates => Cmsify.Templates;
     [Parameter] public Guid WorkspaceId { get; set; }
     private List<ContentItemSummaryResponse> items = [];
     private IReadOnlyList<TemplateSummaryResponse> templates = [];

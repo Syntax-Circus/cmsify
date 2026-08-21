@@ -1,7 +1,5 @@
 # Roadmap
 
-This file records follow-up work that is intentionally separate from the current documentation and runtime implementation.
+Cmsify has no committed roadmap items at this time. We prefer to share plans once their scope and timing are clear rather than treating ideas as promises.
 
-## Planned
-
-- [x] Implement the first-party .NET client and shared contracts packages. The remaining follow-up is the first production NuGet release and registry credentials; see [`sdk/dotnet/README.md`](../sdk/dotnet/README.md).
+Have an idea or a use case to share? [Open an issue](https://github.com/Syntax-Circus/cmsify/issues) on GitHub.

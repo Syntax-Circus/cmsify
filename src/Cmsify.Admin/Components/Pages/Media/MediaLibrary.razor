@@ -1,6 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/media"
 @rendermode InteractiveServer
-@inject MediaApiClient Media
+@inject CmsifyClient Cmsify
 @inject ToastState Toasts
 
 <div class="cms-page-head">
@@ -76,6 +76,7 @@ else
 <ConfirmDialog Visible="@confirmDelete" Title="Confirm Delete" Message="This media asset will be deleted if it is not referenced by published content." ConfirmText="Delete" OnCancel="() => confirmDelete = false" OnConfirm="DeleteAsync" />
 
 @code {
+    private MediaClient Media => Cmsify.Media;
     [Parameter] public Guid WorkspaceId { get; set; }
     private List<MediaAssetResponse> assets = [];
     private string? mimeType;
@@ -101,7 +102,8 @@ else
     private async Task UploadAsync(InputFileChangeEventArgs args)
     {
         uploadProgress = 1;
-        await Media.UploadAsync(WorkspaceId, args.File, null, new Progress<long>(bytes => uploadProgress = (int)Math.Min(100, bytes * 100 / Math.Max(1, args.File.Size))));
+        await using var stream = args.File.OpenReadStream(1_073_741_824);
+        await Media.UploadAsync(WorkspaceId, stream, args.File.Name, args.File.ContentType, progress: new Progress<long>(bytes => uploadProgress = (int)Math.Min(100, bytes * 100 / Math.Max(1, args.File.Size))));
         uploadProgress = 0;
         await LoadAsync();
     }
@@ -110,7 +112,7 @@ else
     {
         if (selected is not null)
         {
-            selected = await Media.UpdateAsync(WorkspaceId, selected.Id, altText);
+            selected = await Media.UpdateAsync(WorkspaceId, selected.Id, new UpdateMediaAssetRequest(altText));
             await LoadAsync();
             Toasts.Success("Alt text saved");
         }

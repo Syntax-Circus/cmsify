@@ -1,9 +1,6 @@
 @page "/settings/packages"
 @rendermode InteractiveServer
-@inject PackagesApiClient PackageClient
-@inject TemplateApiClient Templates
-@inject ComponentApiClient Components
-@inject PickListApiClient PickLists
+@inject CmsifyClient Cmsify
 @inject BrowserDownloads Downloads
 @inject WorkspaceState Workspace
 @inject ToastState Toasts
@@ -99,6 +96,10 @@ else
 }
 
 @code {
+    private PackageClient PackageClient => Cmsify.Packages;
+    private TemplateClient Templates => Cmsify.Templates;
+    private ComponentClient Components => Cmsify.Components;
+    private PickListClient PickLists => Cmsify.PickLists;
     private IReadOnlyList<OfficialPackageResponse>? packages;
     private readonly HashSet<string> importing = new(StringComparer.OrdinalIgnoreCase);
     private IBrowserFile? customPackageFile;
@@ -142,11 +143,11 @@ else
         exporting = true; error = null; message = null;
         try
         {
-            var file = await PackageClient.ExportAsync(Workspace.Current.Id, selectedTemplates.ToArray(), selectedComponents.ToArray(), selectedPicklists.ToArray(), exportNamespace, exportId, exportVersion);
+            var file = await PackageClient.ExportWithMetadataAsync(Workspace.Current.Id, selectedTemplates.ToArray(), selectedComponents.ToArray(), selectedPicklists.ToArray(), exportNamespace, exportId, exportVersion);
             await Downloads.SaveAsync(file);
             message = $"Exported {selectedTemplates.Count} templates, {selectedComponents.Count} components, and {selectedPicklists.Count} picklists.";
         }
-        catch (ProblemDetailsException ex) { error = ProblemDetailsDisplay.Format(ex); }
+        catch (CmsifyApiException ex) { error = ProblemDetailsDisplay.Format(ex); }
         catch (Exception ex) { error = ex.Message; }
         finally { exporting = false; }
     }
@@ -167,7 +168,8 @@ else
 
         try
         {
-            var preview = await PackageClient.PreviewCustomAsync(Workspace.Current.Id, customPackageFile);
+            await using var stream = customPackageFile.OpenReadStream(1_073_741_824);
+            var preview = await PackageClient.PreviewAsync(Workspace.Current.Id, stream, customPackageFile.Name);
             if (HasConflicts(preview))
             {
                 pendingCustomFile = customPackageFile;
@@ -179,7 +181,7 @@ else
                 await DoCustomImportAsync(customPackageFile, null);
             }
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ProblemDetailsDisplay.Format(ex);
         }
@@ -218,7 +220,7 @@ else
                 await DoOfficialImportAsync(packageId, null);
             }
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ProblemDetailsDisplay.Format(ex);
         }
@@ -250,7 +252,7 @@ else
                 await DoCustomImportAsync(pendingCustomFile, resolutions);
             }
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ProblemDetailsDisplay.Format(ex);
         }
@@ -275,7 +277,8 @@ else
 
     private async Task DoCustomImportAsync(IBrowserFile file, PackageImportResolutionsRequest? resolutions)
     {
-        var result = await PackageClient.ImportAsync(Workspace.Current!.Id, file, resolutions);
+        await using var stream = file.OpenReadStream(1_073_741_824);
+        var result = await PackageClient.ImportAsync(Workspace.Current!.Id, stream, file.Name, resolutions);
         message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists?.Count ?? 0} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         customPackageFile = null;
         Toasts.Success("Package imported");

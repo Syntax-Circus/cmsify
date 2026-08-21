@@ -4,7 +4,9 @@ using Cmsify.Admin.Services;
 using Cmsify.Admin.State;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using SyntaxCircus.AspNetCore.Common;
 using SyntaxCircus.DotEnv;
+using SyntaxCircus.Cmsify;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -53,10 +55,34 @@ builder.Services.AddDataProtection()
 
 builder.Services.AddHttpClient("CmsifyApi", client =>
 {
-    var baseUrl = builder.Configuration["Admin:ApiBaseUrl"]
-        ?? builder.Configuration["Api:BaseUrl"]
-        ?? "https://localhost:61241";
+    var baseUrl = builder.Configuration["Admin:ApiBaseUrl"] ?? "https://localhost:61241";
     client.BaseAddress = new Uri(baseUrl);
+});
+builder.Services.AddScoped<CmsifyClient>(services =>
+{
+    var tokenAccessor = services.GetRequiredService<IApiTokenAccessor>();
+    var httpContextAccessor = services.GetRequiredService<IHttpContextAccessor>();
+    return new CmsifyClient(services.GetRequiredService<IHttpClientFactory>().CreateClient("CmsifyApi"), new CmsifyClientOptions
+    {
+        TokenProvider = ct =>
+        {
+            var context = httpContextAccessor.HttpContext;
+            if (context is not null)
+            {
+                return ValueTask.FromResult(context.User.FindFirst(CmsifyAuthClaims.ApiToken)?.Value);
+            }
+
+            return new ValueTask<string?>(tokenAccessor.GetTokenAsync(ct));
+        },
+        ResponseObserver = async (response, ct) =>
+        {
+            if (response.Headers.TryGetValues("X-Session-Expires-At", out var values)
+                && DateTimeOffset.TryParse(values.FirstOrDefault(), out var expiresAt))
+            {
+                await tokenAccessor.NoteSessionExpiryAsync(expiresAt, ct);
+            }
+        }
+    });
 });
 builder.Services.AddScoped<BrowserStorage>();
 builder.Services.AddScoped<BrowserDownloads>();
@@ -65,19 +91,6 @@ builder.Services.AddScoped<AuthState>();
 builder.Services.AddScoped<WorkspaceState>();
 builder.Services.AddScoped<UserPreferencesState>();
 builder.Services.AddScoped<ToastState>();
-builder.Services.AddScoped<AuthService>();
-builder.Services.AddScoped<WorkspaceApiClient>();
-builder.Services.AddScoped<TemplateApiClient>();
-builder.Services.AddScoped<PickListApiClient>();
-builder.Services.AddScoped<ComponentApiClient>();
-builder.Services.AddScoped<ContentApiClient>();
-builder.Services.AddScoped<MediaApiClient>();
-builder.Services.AddScoped<WebhookApiClient>();
-builder.Services.AddScoped<AuditApiClient>();
-builder.Services.AddScoped<UserApiClient>();
-builder.Services.AddScoped<ApiClientsApiClient>();
-builder.Services.AddScoped<SettingsApiClient>();
-builder.Services.AddScoped<PackagesApiClient>();
 
 var app = builder.Build();
 
@@ -88,14 +101,13 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapAdminAuthEndpoints();
-app.MapRazorComponents<App>()
+app.MapRazorComponentsWithStaticAssets<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();

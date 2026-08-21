@@ -1,3 +1,4 @@
+using SyntaxCircus.Cmsify;
 using Cmsify.Admin.Services;
 
 namespace Cmsify.Admin.State;
@@ -7,13 +8,13 @@ public sealed class WorkspaceState
     private const string StorageArea = "local";
     private const string StorageKeyPrefix = "cmsify.workspace.current.";
     private readonly BrowserStorage storage;
-    private readonly WorkspaceApiClient workspaces;
+    private readonly CmsifyClient cmsify;
     private Guid initializedForUserId;
 
-    public WorkspaceState(BrowserStorage storage, WorkspaceApiClient workspaces)
+    public WorkspaceState(BrowserStorage storage, CmsifyClient cmsify)
     {
         this.storage = storage;
-        this.workspaces = workspaces;
+        this.cmsify = cmsify;
     }
 
     public event Action? Changed;
@@ -32,7 +33,7 @@ public sealed class WorkspaceState
         initializedForUserId = userId;
         Current = null;
 
-        var page = await workspaces.ListAsync(ct);
+        var page = await RequireAsync(cmsify.Workspaces.ListAsync(ct: ct));
         Available = page.Items;
 
         var savedWorkspaceId = await storage.GetAsync<Guid?>(StorageArea, StorageKey(userId));
@@ -90,4 +91,7 @@ public sealed class WorkspaceState
     }
 
     private static string StorageKey(Guid userId) => $"{StorageKeyPrefix}{userId:N}";
+
+    private static async Task<T> RequireAsync<T>(Task<T?> task) where T : class =>
+        await task.ConfigureAwait(false) ?? throw new InvalidOperationException("API returned an empty response body.");
 }

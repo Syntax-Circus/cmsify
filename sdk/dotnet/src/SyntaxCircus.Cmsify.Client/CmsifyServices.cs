@@ -31,6 +31,7 @@ public sealed class WorkspaceClient(CmsifyClient client)
 
 public sealed class TemplateClient(CmsifyClient client)
 {
+    public Task<PagedResult<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, string? search, CancellationToken ct = default) => ListAsync(workspaceId, null, search, ct: ct);
     public Task<PagedResult<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, bool? isSystem = null, string? search = null, int page = 1, int pageSize = 20, CancellationToken ct = default) =>
         client.GetAsync<PagedResult<TemplateSummaryResponse>>($"{CmsifyClient.WorkspacePath(workspaceId, "/templates")}?page={page}&pageSize={pageSize}{Query.Optional("isSystem", isSystem)}{Query.Optional("search", search)}", ct);
     public Task<TemplateResponse?> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), ct);
@@ -38,9 +39,12 @@ public sealed class TemplateClient(CmsifyClient client)
     public Task<TemplateResponse?> UpdateAsync(Guid workspaceId, Guid id, UpdateTemplateRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), request, ct) : client.PutAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), request, ifMatch, ct);
     public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), ct) : client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), ifMatch, ct);
     public Task<IReadOnlyList<TemplateVersionSummaryResponse>?> VersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<TemplateVersionSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions"), ct);
+    public Task<IReadOnlyList<TemplateVersionSummaryResponse>?> ListVersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => VersionsAsync(workspaceId, id, ct);
     public Task<TemplateVersionResponse?> CreateVersionAsync(Guid workspaceId, Guid id, CreateTemplateVersionRequest request, CancellationToken ct = default) => client.PostAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions"), request, ct);
+    public Task<TemplateVersionResponse?> CreateDraftAsync(Guid workspaceId, Guid id, string? notes, CancellationToken ct = default) => CreateVersionAsync(workspaceId, id, new CreateTemplateVersionRequest(notes), ct);
     public Task<TemplateVersionResponse?> GetVersionAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => client.GetAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}"), ct);
     public Task<TemplateVersionResponse?> PublishVersionAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => client.PutAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}/publish"), null, ct);
+    public Task<TemplateVersionResponse?> PublishAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => PublishVersionAsync(workspaceId, id, version, ct);
     public Task<TemplateSectionResponse?> AddSectionAsync(Guid workspaceId, Guid id, int version, TemplateSectionRequest request, CancellationToken ct = default) => client.PostAsync<TemplateSectionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}/sections"), request, ct);
     public Task<TemplateFieldResponse?> AddFieldAsync(Guid workspaceId, Guid id, int version, TemplateFieldRequest request, CancellationToken ct = default) => client.PostAsync<TemplateFieldResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}/fields"), request, ct);
     public Task<TemplateSectionResponse?> UpdateSectionAsync(Guid workspaceId, Guid id, int version, Guid sectionId, TemplateSectionRequest request, CancellationToken ct = default) => client.PutAsync<TemplateSectionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}/sections/{sectionId}"), request, ct);
@@ -52,6 +56,8 @@ public sealed class TemplateClient(CmsifyClient client)
 
 public sealed class ContentClient(CmsifyClient client)
 {
+    public Task<PagedResponse<ContentItemSummaryResponse>?> ListAsync(Guid workspaceId, ContentStatus? status, Guid? templateId, string? locale, string? tags, string? q, CancellationToken ct = default) =>
+        ListAsync(workspaceId, new ContentListQuery(q, null, templateId, status, locale, null, null, tags, null, null, null, null, false, null, "updatedAt", true, 1, 20), ct);
     public Task<PagedResponse<ContentItemSummaryResponse>?> ListAsync(Guid workspaceId, ContentListQuery? query = null, CancellationToken ct = default) => client.GetAsync<PagedResponse<ContentItemSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/content{Query.Content(query)}"), ct);
     public IAsyncEnumerable<ContentItemSummaryResponse> ListAllAsync(Guid workspaceId, ContentListQuery? query = null, CancellationToken ct = default) => CmsifyClient.ListAll((page, cancellationToken) => ListAsync(workspaceId, query is null ? new ContentListQuery(null, null, null, null, null, null, null, null, null, null, null, null, false, null, "createdAt", true, page, 20) : query with { Page = page }, cancellationToken), ct);
     public Task<ContentItemDetailResponse?> GetAsync(Guid workspaceId, Guid id, bool resolve = false, DateTimeOffset? asOf = null, CancellationToken ct = default) => client.GetAsync<ContentItemDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}{Query.ContentDetail(resolve, asOf)}"), ct);
@@ -71,14 +77,17 @@ public sealed class ContentClient(CmsifyClient client)
     public Task<IReadOnlyList<ContentVersionSummaryResponse>?> VersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<ContentVersionSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions"), ct);
     public Task<ContentVersionDetailResponse?> GetVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => client.GetAsync<ContentVersionDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}"), ct);
     public Task<ContentItemDetailResponse?> RollbackVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => client.PostAsync<ContentItemDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}/rollback"), null, ct);
+    public Task<IReadOnlyList<ContentVersionSummaryResponse>?> ListVersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => VersionsAsync(workspaceId, id, ct);
+    public Task<ContentItemDetailResponse?> RollbackAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => RollbackVersionAsync(workspaceId, id, versionNumber, ct);
+    public Task<ContentItemDetailResponse?> TransitionAsync(Guid workspaceId, Guid id, string action, object? request = null, CancellationToken ct = default) => client.PostAsync<ContentItemDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/{action}"), request, ct);
 }
 
 public sealed class MediaClient(CmsifyClient client)
 {
-    public Task<MediaAssetResponse?> UploadAsync(Guid workspaceId, Stream content, string fileName, string contentType, string? altText = null, CancellationToken ct = default)
+    public Task<MediaAssetResponse?> UploadAsync(Guid workspaceId, Stream content, string fileName, string contentType, string? altText = null, IProgress<long>? progress = null, CancellationToken ct = default)
     {
         var form = new MultipartFormDataContent();
-        var file = new StreamContent(content);
+        var file = new StreamContent(progress is null ? content : new ProgressStream(content, progress));
         file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         form.Add(file, "file", fileName);
         if (altText is not null)
@@ -94,6 +103,28 @@ public sealed class MediaClient(CmsifyClient client)
     public Task DownloadToAsync(Guid workspaceId, Guid id, Stream destination, CancellationToken ct = default) => client.DownloadToAsync(CmsifyClient.WorkspacePath(workspaceId, $"/media/{id}/file"), destination, ct);
     public Task<MediaAssetResponse?> UpdateAsync(Guid workspaceId, Guid id, UpdateMediaAssetRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<MediaAssetResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/media/{id}"), request, ct) : client.PutAsync<MediaAssetResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/media/{id}"), request, ifMatch, ct);
     public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/media/{id}"), ct) : client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/media/{id}"), ifMatch, ct);
+
+    private sealed class ProgressStream(Stream inner, IProgress<long> progress) : Stream
+    {
+        private long total;
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position { get => total; set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var read = await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            total += read;
+            progress.Report(total);
+            return read;
+        }
+    }
 }
 
 public sealed class PickListClient(CmsifyClient client)
@@ -103,6 +134,7 @@ public sealed class PickListClient(CmsifyClient client)
     public Task<PickListResponse?> GetRevisionAsync(Guid workspaceId, Guid id, Guid revisionId, CancellationToken ct = default) => client.GetAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}/revisions/{revisionId}"), ct);
     public Task<PickListResponse?> CreateAsync(Guid workspaceId, PickListRequest request, CancellationToken ct = default) => client.PostAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, "/picklists"), request, ct);
     public Task<PickListResponse?> UpdateAsync(Guid workspaceId, Guid id, PickListRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}"), request, ct) : client.PutAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}"), request, ifMatch, ct);
+    public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}"), ct) : client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}"), ifMatch, ct);
 }
 
 public sealed class ComponentClient(CmsifyClient client)
@@ -146,12 +178,20 @@ public sealed class WebhookClient(CmsifyClient client)
     public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), ct) : client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}"), ifMatch, ct);
     public Task<PagedResponse<WebhookDeliveryResponse>?> DeliveriesAsync(Guid workspaceId, Guid id, bool? isDelivered = null, bool? isFailed = null, int page = 1, int pageSize = 50, CancellationToken ct = default) => client.GetAsync<PagedResponse<WebhookDeliveryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}/deliveries?page={page}&pageSize={pageSize}{Query.Optional("isDelivered", isDelivered)}{Query.Optional("isFailed", isFailed)}"), ct);
     public Task RetryDeliveryAsync(Guid workspaceId, Guid id, Guid deliveryId, CancellationToken ct = default) => client.PostAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/webhooks/{id}/deliveries/{deliveryId}/retry"), null, ct);
+    public Task<PagedResponse<WebhookDeliveryResponse>?> ListDeliveriesAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => DeliveriesAsync(workspaceId, id, ct: ct);
+    public Task RetryAsync(Guid workspaceId, Guid id, Guid deliveryId, CancellationToken ct = default) => RetryDeliveryAsync(workspaceId, id, deliveryId, ct);
 }
 
 public sealed class AuditClient(CmsifyClient client)
 {
     public Task<PagedResponse<AuditLogResponse>?> QueryAsync(AuditQueryRequest? query = null, CancellationToken ct = default) => client.GetAsync<PagedResponse<AuditLogResponse>>($"/api/v1/audit{Query.Audit(query)}", ct);
     public Task<PagedResponse<AuditLogResponse>?> QueryWorkspaceAsync(Guid workspaceId, AuditQueryRequest? query = null, CancellationToken ct = default) => client.GetAsync<PagedResponse<AuditLogResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/audit{Query.Audit(query)}"), ct);
+    public Task<PagedResponse<AuditLogResponse>?> QueryAsync(Guid? workspaceId, string? entityType, string? action, CancellationToken ct = default) => workspaceId.HasValue
+        ? QueryWorkspaceAsync(workspaceId.Value, CreateAuditQuery(entityType, action), ct)
+        : QueryAsync(CreateAuditQuery(entityType, action), ct);
+
+    private static AuditQueryRequest CreateAuditQuery(string? entityType, string? action) =>
+        new(entityType, null, Enum.TryParse<AuditAction>(action, true, out var parsed) ? parsed : null, null, null, null, null);
 }
 
 public sealed class UserClient(CmsifyClient client)
@@ -161,6 +201,7 @@ public sealed class UserClient(CmsifyClient client)
     public Task<TempPasswordResponse?> CreateAsync(CreateUserRequest request, CancellationToken ct = default) => client.PostAsync<TempPasswordResponse>("/api/v1/users", request, ct);
     public Task<UserDto?> UpdateAsync(Guid id, UpdateUserRequest request, CancellationToken ct = default) => client.PutAsync<UserDto>($"/api/v1/users/{id}", request, ct);
     public Task<TempPasswordResponse?> ResetPasswordAsync(Guid id, ResetPasswordRequest request, CancellationToken ct = default) => client.PostAsync<TempPasswordResponse>($"/api/v1/users/{id}/reset-password", request, ct);
+    public Task<TempPasswordResponse?> ResetPasswordAsync(Guid id, string temporaryPassword, CancellationToken ct = default) => ResetPasswordAsync(id, new ResetPasswordRequest(temporaryPassword), ct);
 }
 
 public sealed class ApiClientManagementClient(CmsifyClient client)
@@ -178,11 +219,14 @@ public sealed class SettingsClient(CmsifyClient client)
     public Task<AccountPreferencesResponse?> UpdatePreferencesAsync(UpdateAccountPreferencesRequest request, CancellationToken ct = default) => client.PutAsync<AccountPreferencesResponse>("/api/v1/account/preferences", request, ct);
     public Task<StorageConfigResponse?> StorageAsync(CancellationToken ct = default) => client.GetAsync<StorageConfigResponse>("/api/v1/settings/storage", ct);
     public Task<StorageTestResponse?> TestStorageAsync(CancellationToken ct = default) => client.PostAsync<StorageTestResponse>("/api/v1/settings/storage/test", null, ct);
+    public Task<AccountPreferencesResponse?> GetPreferencesAsync(CancellationToken ct = default) => PreferencesAsync(ct);
+    public Task<StorageConfigResponse?> GetStorageAsync(CancellationToken ct = default) => StorageAsync(ct);
 }
 
 public sealed class PackageClient(CmsifyClient client)
 {
     public Task<IReadOnlyList<OfficialPackageResponse>?> OfficialAsync(CancellationToken ct = default) => client.GetAsync<IReadOnlyList<OfficialPackageResponse>>("/api/v1/packages/official", ct);
+    public Task<IReadOnlyList<OfficialPackageResponse>?> ListOfficialAsync(CancellationToken ct = default) => OfficialAsync(ct);
     public Task<PackageImportPreviewResponse?> PreviewOfficialAsync(Guid workspaceId, string packageId, CancellationToken ct = default) => client.PostAsync<PackageImportPreviewResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/packages/import/official/{Uri.EscapeDataString(packageId)}/preview"), null, ct);
     public Task<PackageImportResponse?> ImportOfficialAsync(Guid workspaceId, string packageId, PackageImportResolutionsRequest? request = null, CancellationToken ct = default) => client.PostAsync<PackageImportResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/packages/import/official/{Uri.EscapeDataString(packageId)}"), request, ct);
     public Task<PackageImportResponse?> ImportAsync(Guid workspaceId, object manifestOrRequest, CancellationToken ct = default) => client.PostAsync<PackageImportResponse>(CmsifyClient.WorkspacePath(workspaceId, "/packages/import"), manifestOrRequest, ct);
@@ -190,8 +234,11 @@ public sealed class PackageClient(CmsifyClient client)
     public Task<PackageImportResponse?> ImportAsync(Guid workspaceId, Stream package, string fileName, PackageImportResolutionsRequest? resolutions = null, CancellationToken ct = default) => SendPackageAsync<PackageImportResponse>("/packages/import", workspaceId, package, fileName, resolutions, ct);
     public Task<PackageImportPreviewResponse?> PreviewAsync(Guid workspaceId, Stream package, string fileName, CancellationToken ct = default) => SendPackageAsync<PackageImportPreviewResponse>("/packages/import/preview", workspaceId, package, fileName, null, ct);
     public Task<byte[]> ExportAsync(Guid workspaceId, IReadOnlyCollection<Guid> templateIds, string packageNamespace = "custom", string id = "export", string version = "1.0.0", CancellationToken ct = default) => client.DownloadAsync(CmsifyClient.WorkspacePath(workspaceId, $"/packages/export?templateIds={Uri.EscapeDataString(string.Join(',', templateIds))}&packageNamespace={Uri.EscapeDataString(packageNamespace)}&id={Uri.EscapeDataString(id)}&version={Uri.EscapeDataString(version)}"), ct);
+    public Task<byte[]> ExportAsync(Guid workspaceId, Guid templateId, string packageNamespace, string id, string version, CancellationToken ct = default) => ExportAsync(workspaceId, [templateId], packageNamespace, id, version, ct);
+    public Task<CmsifyDownload> ExportWithMetadataAsync(Guid workspaceId, IReadOnlyCollection<Guid> templateIds, string packageNamespace = "custom", string id = "export", string version = "1.0.0", CancellationToken ct = default) => client.DownloadWithMetadataAsync(CmsifyClient.WorkspacePath(workspaceId, $"/packages/export?templateIds={Uri.EscapeDataString(string.Join(',', templateIds))}&packageNamespace={Uri.EscapeDataString(packageNamespace)}&id={Uri.EscapeDataString(id)}&version={Uri.EscapeDataString(version)}"), ct);
     public Task ExportToAsync(Guid workspaceId, IReadOnlyCollection<Guid> templateIds, Stream destination, string packageNamespace = "custom", string id = "export", string version = "1.0.0", CancellationToken ct = default) => client.DownloadToAsync(CmsifyClient.WorkspacePath(workspaceId, $"/packages/export?templateIds={Uri.EscapeDataString(string.Join(',', templateIds))}&packageNamespace={Uri.EscapeDataString(packageNamespace)}&id={Uri.EscapeDataString(id)}&version={Uri.EscapeDataString(version)}"), destination, ct);
     public Task<byte[]> ExportAsync(Guid workspaceId, IReadOnlyCollection<Guid> templateIds, IReadOnlyCollection<Guid> componentIds, IReadOnlyCollection<Guid> picklistIds, string packageNamespace = "custom", string id = "export", string version = "1.0.0", CancellationToken ct = default) => client.DownloadAsync(CmsifyClient.WorkspacePath(workspaceId, ExportPath(templateIds, componentIds, picklistIds, packageNamespace, id, version)), ct);
+    public Task<CmsifyDownload> ExportWithMetadataAsync(Guid workspaceId, IReadOnlyCollection<Guid> templateIds, IReadOnlyCollection<Guid> componentIds, IReadOnlyCollection<Guid> picklistIds, string packageNamespace = "custom", string id = "export", string version = "1.0.0", CancellationToken ct = default) => client.DownloadWithMetadataAsync(CmsifyClient.WorkspacePath(workspaceId, ExportPath(templateIds, componentIds, picklistIds, packageNamespace, id, version)), ct);
     public Task ExportToAsync(Guid workspaceId, IReadOnlyCollection<Guid> templateIds, IReadOnlyCollection<Guid> componentIds, IReadOnlyCollection<Guid> picklistIds, Stream destination, string packageNamespace = "custom", string id = "export", string version = "1.0.0", CancellationToken ct = default) => client.DownloadToAsync(CmsifyClient.WorkspacePath(workspaceId, ExportPath(templateIds, componentIds, picklistIds, packageNamespace, id, version)), destination, ct);
 
     private static string ExportPath(IReadOnlyCollection<Guid> templateIds, IReadOnlyCollection<Guid> componentIds, IReadOnlyCollection<Guid> picklistIds, string packageNamespace, string id, string version) => $"/packages/export?templateIds={Uri.EscapeDataString(string.Join(',', templateIds))}&componentIds={Uri.EscapeDataString(string.Join(',', componentIds))}&picklistIds={Uri.EscapeDataString(string.Join(',', picklistIds))}&packageNamespace={Uri.EscapeDataString(packageNamespace)}&id={Uri.EscapeDataString(id)}&version={Uri.EscapeDataString(version)}";

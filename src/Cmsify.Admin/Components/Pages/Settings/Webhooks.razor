@@ -1,6 +1,6 @@
 @page "/settings/webhooks"
 @rendermode InteractiveServer
-@inject WebhookApiClient WebhooksClient
+@inject CmsifyClient Cmsify
 @inject WorkspaceState Workspace
 @inject ToastState Toasts
 
@@ -26,6 +26,7 @@ else
 }
 
 @code {
+    private WebhookClient WebhooksClient => Cmsify.Webhooks;
     private List<WebhookEndpointResponse> hooks = [];
     private List<WebhookDeliveryResponse> deliveries = [];
     private WebhookEndpointResponse? selected;

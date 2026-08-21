@@ -1,6 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/picklists"
 @rendermode InteractiveServer
-@inject PickListApiClient PickLists
+@inject CmsifyClient Cmsify
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -56,6 +56,7 @@ else
 }
 
 @code {
+    private PickListClient PickLists => Cmsify.PickLists;
     [Parameter] public Guid WorkspaceId { get; set; }
     private List<PickListSummaryResponse> picklists = [];
     private string? search;
@@ -70,7 +71,7 @@ else
         {
             picklists = (await PickLists.ListAsync(WorkspaceId, search)).ToList();
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
         }
@@ -88,7 +89,7 @@ else
             await PickLists.DeleteAsync(WorkspaceId, picklist.Id);
             await LoadAsync();
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
         }

@@ -7,15 +7,18 @@ WORKDIR /src
 ARG BUILD_VERSION=0.0.0-local
 ARG BUILD_INFORMATIONAL_VERSION=0.0.0-local
 ARG DISABLE_GITVERSION_TASK=true
+COPY ["Directory.Packages.props", "./"]
 COPY ["src/Cmsify.Admin/Cmsify.Admin.csproj", "src/Cmsify.Admin/"]
+COPY ["src/Cmsify.Contracts/Cmsify.Contracts.csproj", "src/Cmsify.Contracts/"]
 COPY ["src/Cmsify.Core/Cmsify.Core.csproj", "src/Cmsify.Core/"]
+COPY ["sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj", "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/"]
 RUN dotnet restore "src/Cmsify.Admin/Cmsify.Admin.csproj"
 COPY . .
 RUN dotnet publish "src/Cmsify.Admin/Cmsify.Admin.csproj" -c Release -o /app/publish --no-restore \
     -p:Version="${BUILD_VERSION}" \
     -p:InformationalVersion="${BUILD_INFORMATIONAL_VERSION}" \
     -p:DisableGitVersionTask="${DISABLE_GITVERSION_TASK}"
-
+RUN test -f /app/publish/wwwroot/_framework/blazor.web.js
 FROM base AS final
 WORKDIR /app
 COPY --from=build /app/publish .

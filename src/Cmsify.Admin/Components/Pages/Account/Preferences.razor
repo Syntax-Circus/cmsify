@@ -1,7 +1,7 @@
 @page "/account/preferences"
 @rendermode InteractiveServer
 @inject UserPreferencesState PrefState
-@inject SettingsApiClient Settings
+@inject CmsifyClient Cmsify
 @inject ToastState Toasts
 
 <div class="cms-page-head">
@@ -34,6 +34,7 @@
 </div>
 
 @code {
+    private SettingsClient Settings => Cmsify.Settings;
     private AccountPreferencesResponse? account;
     private string timeZoneId = TimeZoneInfo.Local.Id;
     private string theme = "auto";

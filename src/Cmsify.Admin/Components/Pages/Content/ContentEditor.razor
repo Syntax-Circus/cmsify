@@ -2,9 +2,7 @@
 @page "/workspaces/{WorkspaceId:guid}/content/{ContentId:guid}"
 @rendermode InteractiveServer
 @using System.Text.Json
-@inject ContentApiClient Content
-@inject TemplateApiClient Templates
-@inject PickListApiClient PickLists
+@inject CmsifyClient Cmsify
 @inject ToastState Toasts
 @inject NavigationManager Navigation
 
@@ -75,6 +73,9 @@
 <MediaPickerModal Visible="@showMedia" WorkspaceId="@WorkspaceId" MimePrefix="@mediaMime" Selected="MediaSelectedAsync" Closed="() => showMedia = false" />
 
 @code {
+    private ContentClient Content => Cmsify.Content;
+    private TemplateClient Templates => Cmsify.Templates;
+    private PickListClient PickLists => Cmsify.PickLists;
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid? ContentId { get; set; }
 
@@ -209,7 +210,7 @@
                 var loaded = await PickLists.GetRevisionAsync(WorkspaceId, binding.PicklistId!.Value, id);
                 picklistCache[id] = loaded;
             }
-            catch (ProblemDetailsException) { }
+            catch (CmsifyApiException) { }
         }
     }
 
@@ -604,10 +605,10 @@
                 Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
             }
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
-            if (ex.StatusCode == StatusCodes.Status412PreconditionFailed && ContentId.HasValue)
+            if (ex.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && ContentId.HasValue)
             {
                 await LoadContentAsync();
                 error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
@@ -622,9 +623,9 @@
             try
             {
                 error = null;
-                await Content.LinkTranslationAsync(WorkspaceId, ContentId.Value, targetId);
+                await Content.LinkTranslationAsync(WorkspaceId, ContentId.Value, new LinkTranslationRequest(targetId));
             }
-            catch (ProblemDetailsException ex)
+            catch (CmsifyApiException ex)
             {
                 error = ex.Message;
             }

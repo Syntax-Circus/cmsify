@@ -1,6 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/content/{ContentId:guid}/versions"
 @rendermode InteractiveServer
-@inject ContentApiClient Content
+@inject CmsifyClient Cmsify
 @inject NavigationManager Navigation
 
 <div class="cms-page-head">
@@ -143,6 +143,7 @@ else
                OnConfirm="ConfirmRollbackAsync" />
 
 @code {
+    private ContentClient Content => Cmsify.Content;
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid ContentId { get; set; }
 
@@ -159,7 +160,7 @@ else
         {
             versions = await Content.ListVersionsAsync(WorkspaceId, ContentId);
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
         }
@@ -171,7 +172,7 @@ else
         {
             inspected = await Content.GetVersionAsync(WorkspaceId, ContentId, versionNumber);
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
         }
@@ -197,7 +198,7 @@ else
             await Content.RollbackAsync(WorkspaceId, ContentId, target);
             await ReloadAsync();
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
         }

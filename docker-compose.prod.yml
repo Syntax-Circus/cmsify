@@ -15,7 +15,7 @@ services:
       retries: 10
 
   api:
-    image: syntaxcircus/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
+    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
     ports:
       - "127.0.0.1:${CMSIFY_API_PORT:-5000}:8080"
     environment:
@@ -50,7 +50,7 @@ services:
       retries: 12
 
   admin:
-    image: syntaxcircus/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
+    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
     ports:
       - "127.0.0.1:${CMSIFY_ADMIN_PORT:-5001}:8080"
     environment:

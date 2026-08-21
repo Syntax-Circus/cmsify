@@ -11,6 +11,8 @@ using SyntaxCircus.Cmsify.Contracts;
 
 namespace SyntaxCircus.Cmsify;
 
+public sealed record CmsifyDownload(byte[] Content, string FileName, string ContentType);
+
 public sealed class CmsifyClient
 {
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
@@ -81,13 +83,24 @@ public sealed class CmsifyClient
 
     public async Task<byte[]> DownloadAsync(string path, CancellationToken cancellationToken = default)
     {
+        return (await DownloadWithMetadataAsync(path, cancellationToken).ConfigureAwait(false)).Content;
+    }
+
+    /// <summary>Downloads a response and preserves its filename and content type metadata.</summary>
+    public async Task<CmsifyDownload> DownloadWithMetadataAsync(string path, CancellationToken cancellationToken = default)
+    {
         await using var buffer = new MemoryStream();
-        await DownloadToAsync(path, buffer, cancellationToken).ConfigureAwait(false);
-        return buffer.ToArray();
+        var metadata = await DownloadToAsyncCore(path, buffer, cancellationToken).ConfigureAwait(false);
+        return new CmsifyDownload(buffer.ToArray(), metadata.FileName, metadata.ContentType);
     }
 
     /// <summary>Downloads a response directly to <paramref name="destination"/> without buffering it in memory.</summary>
     public async Task DownloadToAsync(string path, Stream destination, CancellationToken cancellationToken = default)
+    {
+        await DownloadToAsyncCore(path, destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<(string FileName, string ContentType)> DownloadToAsyncCore(string path, Stream destination, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(destination);
         var uri = CreateUri(path);
@@ -97,6 +110,7 @@ public sealed class CmsifyClient
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
             var correlationId = await AddAuthenticationAndCorrelationAsync(request, cancellationToken).ConfigureAwait(false);
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            await ObserveResponseAsync(response, cancellationToken).ConfigureAwait(false);
             if (ShouldRetry(HttpMethod.Get, response.StatusCode, attempt))
             {
                 await Task.Delay(GetRetryDelay(response, attempt), cancellationToken).ConfigureAwait(false);
@@ -109,7 +123,10 @@ public sealed class CmsifyClient
             }
 
             await response.Content.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
-            return;
+            var disposition = response.Content.Headers.ContentDisposition;
+            var fileName = disposition?.FileNameStar ?? disposition?.FileName?.Trim('"') ?? "download";
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            return (fileName, contentType);
         }
     }
 
@@ -120,6 +137,7 @@ public sealed class CmsifyClient
         var correlationId = await AddAuthenticationAndCorrelationAsync(request, cancellationToken).ConfigureAwait(false);
 
         using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await ObserveResponseAsync(response, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new CmsifyApiException(response.StatusCode, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false), GetCorrelationId(response, correlationId));
@@ -152,6 +170,7 @@ public sealed class CmsifyClient
             }
 
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            await ObserveResponseAsync(response, cancellationToken).ConfigureAwait(false);
             if (ShouldRetry(method, response.StatusCode, attempt))
             {
                 var delay = GetRetryDelay(response, attempt);
@@ -271,6 +290,9 @@ public sealed class CmsifyClient
 
         return correlationId;
     }
+
+    private Task ObserveResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
+        options.ResponseObserver?.Invoke(response, cancellationToken) ?? Task.CompletedTask;
 
     private static string GetCorrelationId(HttpResponseMessage response, string fallback) =>
         response.Headers.TryGetValues("X-Correlation-Id", out var values) ? values.FirstOrDefault() ?? fallback : fallback;

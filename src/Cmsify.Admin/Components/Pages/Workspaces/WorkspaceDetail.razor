@@ -1,9 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}"
 @rendermode InteractiveServer
-@inject WorkspaceApiClient Workspaces
-@inject TemplateApiClient Templates
-@inject ContentApiClient Content
-@inject MediaApiClient Media
+@inject CmsifyClient Cmsify
 @inject WorkspaceState WorkspaceState
 
 <div class="cms-page-head">
@@ -30,6 +27,10 @@
 </div>
 
 @code {
+    private WorkspaceClient Workspaces => Cmsify.Workspaces;
+    private TemplateClient Templates => Cmsify.Templates;
+    private ContentClient Content => Cmsify.Content;
+    private MediaClient Media => Cmsify.Media;
     [Parameter] public Guid WorkspaceId { get; set; }
     private WorkspaceDto? workspace;
     private int templateCount;

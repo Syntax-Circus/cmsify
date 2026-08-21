@@ -2,6 +2,8 @@
 
 Cmsify is an authenticated, workspace-scoped API. There is no anonymous public content-delivery surface in the MVP, so a public website should fetch content in its server/runtime layer and render or proxy the result.
 
+For credential selection, bearer-token lifecycle, and workspace authorization, see [Authentication and authorization](authentication-and-authorization.md).
+
 ## Authentication choices
 
 For machine-to-machine integrations, create an API client in the admin UI and send its token on every request:

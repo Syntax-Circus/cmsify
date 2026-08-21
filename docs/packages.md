@@ -53,3 +53,12 @@ Cmsify bundles official packages with the API. They appear alongside uploaded pa
 ### Foundation Pack
 
 The official **Foundation Pack** supplies small, composable building blocks rather than whole content types: Call to Action, Notice, and Media with Caption components, plus the choice sets they need. Its `yes-no` choice set uses the stable values `yes` and `no` for integrations and string-backed fields. For ordinary true/false data, use Cmsify's native Boolean primitive instead.
+
+Foundation Pack uses CTP `1.1`, so it can include components and `componentRef` fields. The following starter packs use CTP `1.0` and contain templates and picklists:
+
+| Pack | Package ID | Included templates |
+| --- | --- | --- |
+| Blog Starter Pack | `blog` | Author Bio, Blog Category, Blog Post |
+| Docs Starter Pack | `docs` | Doc Section, Doc Page, Changelog |
+| Portfolio Starter Pack | `portfolio` | Testimonial, Project, Case Study |
+| Product Starter Pack | `product` | Review, Product Variant, Product |

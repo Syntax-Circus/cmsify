@@ -1,18 +1,18 @@
+using SyntaxCircus.Cmsify;
 using Cmsify.Admin.Services;
-using SyntaxCircus.Http.Resilience;
 
 namespace Cmsify.Admin.State;
 
 public sealed class UserPreferencesState
 {
     private readonly BrowserStorage storage;
-    private readonly SettingsApiClient settingsApiClient;
+    private readonly CmsifyClient cmsify;
     private bool initialized;
 
-    public UserPreferencesState(BrowserStorage storage, SettingsApiClient settingsApiClient)
+    public UserPreferencesState(BrowserStorage storage, CmsifyClient cmsify)
     {
         this.storage = storage;
-        this.settingsApiClient = settingsApiClient;
+        this.cmsify = cmsify;
     }
 
     public event Action? Changed;
@@ -36,11 +36,11 @@ public sealed class UserPreferencesState
 
         try
         {
-            var preferences = await settingsApiClient.GetPreferencesAsync(ct);
+            var preferences = await RequireAsync(cmsify.Settings.PreferencesAsync(ct));
             TimeZoneId = string.IsNullOrWhiteSpace(preferences.TimeZoneId) ? TimeZoneInfo.Local.Id : preferences.TimeZoneId;
             Theme = string.IsNullOrWhiteSpace(preferences.Theme) ? Theme : NormalizeTheme(preferences.Theme);
         }
-        catch (ProblemDetailsException)
+        catch (CmsifyApiException)
         {
             // Preferences require authentication; the theme still comes from local storage before login.
         }
@@ -52,7 +52,7 @@ public sealed class UserPreferencesState
 
     public async Task SaveAsync(string timeZoneId, string theme, CancellationToken ct = default)
     {
-        var preferences = await settingsApiClient.UpdatePreferencesAsync(new UpdateAccountPreferencesRequest(timeZoneId, theme), ct);
+        var preferences = await RequireAsync(cmsify.Settings.UpdatePreferencesAsync(new UpdateAccountPreferencesRequest(timeZoneId, theme), ct));
         TimeZoneId = preferences.TimeZoneId ?? timeZoneId;
         Theme = NormalizeTheme(preferences.Theme);
         EffectiveTheme = NormalizeEffectiveTheme(await storage.SetThemeAsync(Theme));
@@ -71,4 +71,7 @@ public sealed class UserPreferencesState
 
     private static string NormalizeEffectiveTheme(string? theme) =>
         theme == "dark" ? "dark" : "light";
+
+    private static async Task<T> RequireAsync<T>(Task<T?> task) where T : class =>
+        await task.ConfigureAwait(false) ?? throw new InvalidOperationException("API returned an empty response body.");
 }

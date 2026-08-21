@@ -4,18 +4,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RazorLangVersion>Latest</RazorLangVersion>
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Cmsify.Contracts\Cmsify.Contracts.csproj" />
     <ProjectReference Include="..\Cmsify.Core\Cmsify.Core.csproj" />
+    <ProjectReference Include="..\..\sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="AspNetCore.SassCompiler" />
     <PackageReference Include="Microsoft.Web.LibraryManager.Build" />
+    <PackageReference Include="SyntaxCircus.AspNetCore.Common" />
     <PackageReference Include="SyntaxCircus.Blazor.Components" />
     <PackageReference Include="SyntaxCircus.DotEnv" />
-    <PackageReference Include="SyntaxCircus.Http.Resilience" />
   </ItemGroup>
 </Project>

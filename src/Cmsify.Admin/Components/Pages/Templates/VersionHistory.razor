@@ -1,6 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/templates/{TemplateId:guid}/versions"
 @rendermode InteractiveServer
-@inject TemplateApiClient Templates
+@inject CmsifyClient Cmsify
 
 <div class="cms-page-head">
     <div><h1>Version History</h1><div class="lead">Review draft, published, and archived template versions.</div></div>
@@ -26,6 +26,7 @@
 </div>
 
 @code {
+    private TemplateClient Templates => Cmsify.Templates;
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid TemplateId { get; set; }
     private IReadOnlyList<TemplateVersionSummaryResponse> versions = [];

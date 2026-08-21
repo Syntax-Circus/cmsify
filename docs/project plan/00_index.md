@@ -3,6 +3,8 @@
 > A headless CMS with infinitely composable templates, built on .NET 10, PostgreSQL, and EF Core.
 > Delivered as a standalone API + Blazor admin UI. Designed for OSS distribution.
 
+> **Status:** This directory is a design archive. It records original intent and may describe completed, superseded, or future work. For current behavior, use the implementation, tests, checked-in OpenAPI contract, and the task-oriented guides in [`docs/`](..). Do not treat unchecked items or MVP labels here as a release-status dashboard.
+
 ---
 
 ## Document Index
