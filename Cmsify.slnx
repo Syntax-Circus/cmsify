@@ -2,11 +2,6 @@
   <Folder Name="/Solution Items/">
     <File Path=".env.example" />
     <File Path=".github/copilot-instructions.md" />
-    <File Path=".github/workflows/admin-accessibility.yml" />
-    <File Path=".github/workflows/dotnet-test.yml" />
-    <File Path=".github/workflows/npm-publish-cmsify-client.yml" />
-    <File Path=".github/workflows/nuget-publish-cmsify.yml" />
-    <File Path=".github/workflows/typescript-sdk.yml" />
     <File Path=".gitignore" />
     <File Path="AGENTS.md" />
     <File Path="Directory.Build.targets" />
@@ -25,17 +20,12 @@
   <Project Path="sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
   <Folder Name="/Solution Items/.github/">
     <File Path=".github/copilot-instructions.md" />
-    <File Path=".github/workflows/admin-accessibility.yml" />
-    <File Path=".github/workflows/dotnet-test.yml" />
-    <File Path=".github/workflows/npm-publish-cmsify-client.yml" />
-    <File Path=".github/workflows/nuget-publish-cmsify.yml" />
-    <File Path=".github/workflows/typescript-sdk.yml" />
   </Folder>
   <Folder Name="/Solution Items/.github/workflows/">
     <File Path=".github/workflows/admin-accessibility.yml" />
     <File Path=".github/workflows/dotnet-test.yml" />
     <File Path=".github/workflows/npm-publish-cmsify-client.yml" />
-    <File Path=".github/workflows/nuget-publish-cmsify.yml" />
+    <File Path=".github/workflows/publish-cmsify.yml" />
     <File Path=".github/workflows/typescript-sdk.yml" />
   </Folder>
   <Project Path="sdk\dotnet\src\SyntaxCircus.Cmsify.Client.DistributedCaching\SyntaxCircus.Cmsify.Client.DistributedCaching.csproj" />
