@@ -1,4 +1,4 @@
-name: Build and publish Cmsify .NET packages
+name: Build and publish Cmsify packages and Docker images
 
 on:
   push:
@@ -82,8 +82,8 @@ jobs:
           git push origin "$tag"
 
 # Docker Hub publishing is intentionally inactive until the registry and secrets are ready.
-# When enabled, this job publishes the API image with the GitVersion SemVer embedded in
-# both the Docker tag and the compiled API assembly metadata.
+# When enabled, this job publishes the API and Admin images with the GitVersion SemVer
+# embedded in both the Docker tags and the compiled assembly metadata.
 #
 #  docker:
 #    needs: publish
@@ -116,6 +116,19 @@ jobs:
 #          tags: |
 #            syntaxcircus/cmsify-api:${{ steps.gitversion.outputs.semVer }}
 #            syntaxcircus/cmsify-api:latest
+#          build-args: |
+#            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
+#            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
+#            DISABLE_GITVERSION_TASK=true
+#      - name: Build and push Admin image
+#        uses: docker/build-push-action@v6
+#        with:
+#          context: .
+#          file: src/Cmsify.Admin/Dockerfile
+#          push: true
+#          tags: |
+#            syntaxcircus/cmsify-admin:${{ steps.gitversion.outputs.semVer }}
+#            syntaxcircus/cmsify-admin:latest
 #          build-args: |
 #            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
 #            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}

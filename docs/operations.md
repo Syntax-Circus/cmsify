@@ -17,11 +17,17 @@ Important production settings include:
 
 Use environment-specific secret management in production. Do not commit credentials, connection strings containing passwords, encryption keys, or bearer tokens.
 
+## Docker Hub deployment
+
+The public `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images can be deployed with the repository's [`docker-compose.prod.yml`](../docker-compose.prod.yml) sample. Copy [`docker-compose.prod.env.example`](../docker-compose.prod.env.example) to a private environment file, set an exact `CMSIFY_VERSION`, replace all placeholder secrets, then run Compose with `--env-file`. The sample is a single-host stack with PostgreSQL and named volumes for database data, local media, and Admin Data Protection keys.
+
+Bind the API and Admin ports to loopback and terminate TLS at a host reverse proxy. If ports are published publicly instead, secure them with TLS and configure the proxy/trusted-forwarded-header settings for that deployment.
+
 ## Persistence and upgrades
 
 The API runs EF Core migrations at startup. Back up PostgreSQL and the configured media storage before upgrades. Treat migrations and media as a matched deployment: restoring only the database or only the media volume can leave content references unusable.
 
-The development Compose file persists PostgreSQL under `local/postgres` and local media under `local/media`. The production Compose file uses named volumes (`postgres_data` and `media_data`). Choose an external PostgreSQL and object-storage backup policy for production rather than relying on container lifecycle.
+The development Compose file persists PostgreSQL under `local/postgres` and local media under `local/media`. The production Compose file uses named volumes (`postgres_data`, `media_data`, and `admin_data_protection_keys`). Choose an external PostgreSQL and object-storage backup policy for production rather than relying on container lifecycle.
 
 ## Network and TLS
 
