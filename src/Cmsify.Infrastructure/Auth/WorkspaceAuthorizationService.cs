@@ -33,7 +33,7 @@ public sealed class WorkspaceAuthorizationService : IWorkspaceAuthorizationServi
             return Task.FromResult(currentActor.WorkspaceId == workspaceId);
         }
 
-        return currentActor.UserId.HasValue && currentActor.Role >= UserRole.Editor
+        return currentActor.UserId.HasValue
             ? dbContext.UserWorkspaceAccesses.AsNoTracking().AnyAsync(access =>
                 access.UserId == currentActor.UserId.Value
                 && access.WorkspaceId == workspaceId

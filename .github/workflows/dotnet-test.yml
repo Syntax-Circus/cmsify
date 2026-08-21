@@ -16,4 +16,4 @@ jobs:
       - name: Restore
         run: dotnet restore Cmsify.slnx
       - name: Test
-        run: dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
+        run: dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -p:DisableGitVersionTask=true

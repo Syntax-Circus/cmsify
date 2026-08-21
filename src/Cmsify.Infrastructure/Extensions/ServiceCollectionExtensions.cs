@@ -11,6 +11,7 @@ using Cmsify.Infrastructure.Persistence.Repositories;
 using Cmsify.Infrastructure.Security;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Extensions;
 
@@ -28,8 +29,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<AuditInterceptor>();
         services.AddDbContext<CmsifyDbContext>((serviceProvider, options) =>
         {
-            options.UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-                .UseSnakeCaseNamingConvention();
+            options.UseNpgsql(connectionString)
+                .UseSyntaxCircusSnakeCaseNamingConvention();
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditInterceptor>());
         });
         services.AddScoped<IDbSeeder, DbSeeder>();
@@ -38,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IContentValidator, ContentValidator>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
+        services.AddScoped<IContentPublishingService, ContentPublishingService>();
         services.AddScoped<IContentSearchVectorBuilder, ContentSearchVectorBuilder>();
         services.AddScoped<IWorkspaceAuthorizationService, WorkspaceAuthorizationService>();
         services.AddSingleton<ISecretProtector, AesSecretProtector>();
@@ -52,7 +54,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWebhookRepository, WebhookRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddStorageProvider(configuration);
-        services.AddHttpClient(nameof(WebhookDeliveryProcessor));
+        services.AddSingleton<IWebhookDestinationValidator, WebhookDestinationValidator>();
+        services.AddHttpClient(nameof(WebhookDeliveryProcessor), client =>
+            client.Timeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Webhook:RequestTimeoutSeconds", 15), 1, 120)))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<WebhookDeliveryProcessor>();
         services.AddSingleton<IWebhookQueue, InProcessWebhookQueue>();
         services.AddScoped<IScheduledPublishingDispatcher, InProcessScheduledPublishingDispatcher>();

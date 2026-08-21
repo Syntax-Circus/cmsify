@@ -12,7 +12,7 @@
                 <div class="modal-body">
                     <p class="text-muted">
                         Package <strong>@Preview.PackageNamespace/@Preview.Id @Preview.Version</strong> contains items that already exist in this workspace.
-                        Choose how to resolve each picklist conflict before importing.
+                        Choose how to resolve each picklist and component conflict before importing.
                     </p>
 
                     @if (Preview.PickLists.Count == 0)
@@ -97,6 +97,31 @@
                         }
                     }
 
+                    @if (Preview.Components?.Count > 0)
+                    {
+                        <div class="cms-card mb-3">
+                            <h6 class="mb-2">Components</h6>
+                            @foreach (var component in Preview.Components)
+                            {
+                                <div class="border-top pt-2 mt-2">
+                                    <strong>@component.Name</strong> <span class="text-muted">(@component.Slug)</span>
+                                    <span class="badge @(component.Status == "new" ? "bg-success" : component.Status == "identical" ? "bg-secondary" : "bg-warning text-dark") ms-2">@component.Status</span>
+                                    <div class="small text-muted">Incoming: @component.FieldCount fields@(component.ExistingFieldCount.HasValue ? $" · Existing: {component.ExistingFieldCount} fields" : string.Empty)</div>
+                                    @if (component.Status != "new")
+                                    {
+                                        var slug = component.Slug;
+                                        var selected = componentResolutions.TryGetValue(slug, out var value) ? value : component.SuggestedAction;
+                                        <div class="mt-2 small">
+                                            <div class="form-check"><input class="form-check-input" type="radio" id="@($"cmp-{slug}-use")" checked="@(selected == "useExisting")" @onchange="@(() => SetComponentResolution(slug, "useExisting"))" /><label class="form-check-label" for="@($"cmp-{slug}-use")">Use existing component</label></div>
+                                            <div class="form-check"><input class="form-check-input" type="radio" id="@($"cmp-{slug}-replace")" checked="@(selected == "replace")" @onchange="@(() => SetComponentResolution(slug, "replace"))" /><label class="form-check-label" for="@($"cmp-{slug}-replace")">Publish the incoming schema as the next version</label></div>
+                                            <div class="form-check"><input class="form-check-input" type="radio" id="@($"cmp-{slug}-new")" checked="@(selected == "importAsNew")" @onchange="@(() => SetComponentResolution(slug, "importAsNew"))" /><label class="form-check-label" for="@($"cmp-{slug}-new")">Import a suffixed copy</label></div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+
                     @if (Preview.Templates.Count > 0)
                     {
                         <div class="cms-card">
@@ -135,6 +160,7 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private Dictionary<string, string> resolutions = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string> componentResolutions = new(StringComparer.OrdinalIgnoreCase);
 
     protected override void OnParametersSet()
     {
@@ -143,6 +169,9 @@
             resolutions = Preview.PickLists
                 .Where(picklist => picklist.Status != "new")
                 .ToDictionary(picklist => picklist.Slug, picklist => picklist.SuggestedAction, StringComparer.OrdinalIgnoreCase);
+            componentResolutions = (Preview.Components ?? [])
+                .Where(component => component.Status != "new")
+                .ToDictionary(component => component.Slug, component => component.SuggestedAction, StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -151,7 +180,9 @@
         resolutions[slug] = action;
     }
 
-    private Task Confirm() => OnConfirm.InvokeAsync(new PackageImportResolutionsRequest(resolutions));
+    private void SetComponentResolution(string slug, string action) => componentResolutions[slug] = action;
+
+    private Task Confirm() => OnConfirm.InvokeAsync(new PackageImportResolutionsRequest(resolutions, componentResolutions));
 
     private Task Cancel() => OnCancel.InvokeAsync();
 }

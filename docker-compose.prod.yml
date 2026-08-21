@@ -15,18 +15,28 @@ services:
       retries: 10
 
   api:
-    build:
-      context: .
-      dockerfile: src/Cmsify.Api/Dockerfile
+    image: syntaxcircus/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
+    ports:
+      - "127.0.0.1:${CMSIFY_API_PORT:-5000}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Cmsify: ${ConnectionStrings__Cmsify:?ConnectionStrings__Cmsify is required}
+      ConnectionStrings__Cmsify: Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
+      Seed__Admin__Email: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      Seed__Admin__DisplayName: ${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
       Seed__Admin__Password: ${Seed__Admin__Password:?Seed__Admin__Password is required}
       Secrets__EncryptionKey: ${Secrets__EncryptionKey:?Secrets__EncryptionKey is required}
       Storage__Provider: ${Storage__Provider:-local}
       Storage__Local__BasePath: /var/cmsify/media
+      Storage__Local__RootPath: /var/cmsify/media
+      Storage__S3__BucketName: ${Storage__S3__BucketName:-}
+      Storage__S3__Region: ${Storage__S3__Region:-us-east-1}
+      Storage__S3__AccessKey: ${Storage__S3__AccessKey:-}
+      Storage__S3__SecretKey: ${Storage__S3__SecretKey:-}
+      Storage__S3__ServiceUrl: ${Storage__S3__ServiceUrl:-}
       Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
+      TrustedProxy__RequireTrustedProxiesInProduction: ${TrustedProxy__RequireTrustedProxiesInProduction:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,18 +50,22 @@ services:
       retries: 12
 
   admin:
-    build:
-      context: .
-      dockerfile: src/Cmsify.Admin/Dockerfile
+    image: syntaxcircus/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
+    ports:
+      - "127.0.0.1:${CMSIFY_ADMIN_PORT:-5001}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      Admin__ApiBaseUrl: ${Admin__ApiBaseUrl:?Admin__ApiBaseUrl is required}
+      Admin__ApiBaseUrl: http://api:8080
+      Admin__DataProtection__KeysPath: /var/cmsify/admin-keys
     depends_on:
       api:
         condition: service_healthy
+    volumes:
+      - admin_data_protection_keys:/var/cmsify/admin-keys
     restart: unless-stopped
 
 volumes:
   postgres_data:
   media_data:
+  admin_data_protection_keys:

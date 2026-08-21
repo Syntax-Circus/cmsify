@@ -19,7 +19,7 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.4")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "pgcrypto");
@@ -90,6 +90,11 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("token_hash");
 
+                    b.Property<string>("TokenIdentifier")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("token_identifier");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -109,6 +114,11 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CreatedByUserId")
                         .HasDatabaseName("ix_api_clients_created_by_user_id");
+
+                    b.HasIndex("TokenIdentifier")
+                        .IsUnique()
+                        .HasDatabaseName("ix_api_clients_token_identifier")
+                        .HasFilter("token_identifier IS NOT NULL");
 
                     b.HasIndex("WorkspaceId")
                         .HasDatabaseName("ix_api_clients_workspace_id");
@@ -173,6 +183,241 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_audit_logs_entity_type_entity_id");
 
                     b.ToTable("audit_logs", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CurrentVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("current_version_id");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deleted_by_user_id");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("PackageId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("package_id");
+
+                    b.Property<string>("PackageNamespace")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("package_namespace");
+
+                    b.Property<string>("PackageVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("package_version");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("slug");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_components");
+
+                    b.HasIndex("CurrentVersionId")
+                        .HasDatabaseName("ix_components_current_version_id");
+
+                    b.HasIndex("WorkspaceId", "Slug")
+                        .IsUnique()
+                        .HasDatabaseName("ix_components_workspace_id_slug")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("components", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentField", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("ComponentVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("component_version_id");
+
+                    b.Property<JsonElement?>("FieldConfig")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("field_config");
+
+                    b.Property<string>("HelpText")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("help_text");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_required");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("key");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("label");
+
+                    b.Property<int?>("MaxOccurrences")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_occurrences");
+
+                    b.Property<int>("MinOccurrences")
+                        .HasColumnType("integer")
+                        .HasColumnName("min_occurrences");
+
+                    b.Property<Guid?>("NestedComponentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("nested_component_id");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer")
+                        .HasColumnName("order");
+
+                    b.Property<string>("PrimitiveType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("primitive_type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_component_fields");
+
+                    b.HasIndex("NestedComponentId")
+                        .HasDatabaseName("ix_component_fields_nested_component_id");
+
+                    b.HasIndex("ComponentVersionId", "Key")
+                        .IsUnique()
+                        .HasDatabaseName("ix_component_fields_component_version_id_key");
+
+                    b.ToTable("component_fields", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("ComponentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("component_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deleted_by_user_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("version_number");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_component_versions");
+
+                    b.HasIndex("ComponentId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_component_versions_component_id")
+                        .HasFilter("status = 'Draft' AND is_deleted = false");
+
+                    b.HasIndex("ComponentId", "VersionNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_component_versions_component_id_version_number");
+
+                    b.ToTable("component_versions", (string)null);
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.ContentFieldValue", b =>
@@ -285,6 +530,14 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("locale_code");
 
+                    b.Property<DateTimeOffset?>("PendingEffectiveEndAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("pending_effective_end_at");
+
+                    b.Property<DateTimeOffset?>("PendingEffectiveStartAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("pending_effective_start_at");
+
                     b.Property<DateTimeOffset?>("PublishAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("publish_at");
@@ -359,6 +612,9 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_content_items_workspace_id_template_version_id_slug")
                         .HasFilter("slug IS NOT NULL AND is_deleted = false");
 
+                    b.HasIndex("Status", "PublishAt", "PendingEffectiveStartAt", "PendingEffectiveEndAt")
+                        .HasDatabaseName("ix_content_items_status_publish_at_pending_effective_start_at_");
+
                     b.ToTable("content_items", (string)null);
                 });
 
@@ -392,6 +648,14 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ContentItemId")
                         .HasColumnType("uuid")
                         .HasColumnName("content_item_id");
+
+                    b.Property<DateTimeOffset?>("EffectiveEndAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_end_at");
+
+                    b.Property<DateTimeOffset?>("EffectiveStartAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_start_at");
 
                     b.Property<string>("LocaleCode")
                         .HasMaxLength(20)
@@ -449,22 +713,28 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_content_versions");
 
+                    b.HasIndex("ContentItemId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_content_versions_content_item_id")
+                        .HasFilter("status = 'Published' AND effective_start_at IS NULL AND effective_end_at IS NULL");
+
                     b.HasIndex("TemplateVersionId")
                         .HasDatabaseName("ix_content_versions_template_version_id");
 
                     b.HasIndex("WorkspaceId")
                         .HasDatabaseName("ix_content_versions_workspace_id");
 
-                    b.HasIndex("ContentItemId", "Status")
-                        .IsUnique()
-                        .HasDatabaseName("ix_content_versions_content_item_id_status")
-                        .HasFilter("status = 'Published'");
-
                     b.HasIndex("ContentItemId", "VersionNumber")
                         .IsUnique()
                         .HasDatabaseName("ix_content_versions_content_item_id_version_number");
 
-                    b.ToTable("content_versions", (string)null);
+                    b.HasIndex("ContentItemId", "Status", "EffectiveStartAt", "EffectiveEndAt")
+                        .HasDatabaseName("ix_content_versions_content_item_id_status_effective_start_at_");
+
+                    b.ToTable("content_versions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_content_versions_effective_range", "(effective_start_at IS NULL AND effective_end_at IS NULL) OR (effective_start_at IS NOT NULL AND effective_end_at IS NOT NULL AND effective_start_at < effective_end_at)");
+                        });
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.ContentVersionFieldValue", b =>
@@ -486,6 +756,11 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ContentVersionId")
                         .HasColumnType("uuid")
                         .HasColumnName("content_version_id");
+
+                    b.Property<string>("DisplayLabel")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("display_label");
 
                     b.Property<Guid>("FieldId")
                         .HasColumnType("uuid")
@@ -624,6 +899,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<Guid?>("CurrentRevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("current_revision_id");
+
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deleted_at");
@@ -649,6 +928,21 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
+                    b.Property<string>("PackageId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("package_id");
+
+                    b.Property<string>("PackageNamespace")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("package_namespace");
+
+                    b.Property<string>("PackageVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("package_version");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -671,6 +965,9 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_pick_lists");
+
+                    b.HasIndex("CurrentRevisionId")
+                        .HasDatabaseName("ix_pick_lists_current_revision_id");
 
                     b.HasIndex("WorkspaceId", "Slug")
                         .IsUnique()
@@ -719,6 +1016,77 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_pick_list_options_pick_list_id_value");
 
                     b.ToTable("pick_list_options", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickListRevision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("PickListId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("pick_list_id");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("version_number");
+
+                    b.HasKey("Id")
+                        .HasName("pk_pick_list_revisions");
+
+                    b.HasIndex("PickListId", "VersionNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_pick_list_revisions_pick_list_id_version_number");
+
+                    b.ToTable("pick_list_revisions", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickListRevisionOption", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("label");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer")
+                        .HasColumnName("order");
+
+                    b.Property<Guid>("PickListRevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("pick_list_revision_id");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("value");
+
+                    b.HasKey("Id")
+                        .HasName("pk_pick_list_revision_options");
+
+                    b.HasIndex("PickListRevisionId", "Order")
+                        .HasDatabaseName("ix_pick_list_revision_options_pick_list_revision_id_order");
+
+                    b.HasIndex("PickListRevisionId", "Value")
+                        .IsUnique()
+                        .HasDatabaseName("ix_pick_list_revision_options_pick_list_revision_id_value");
+
+                    b.ToTable("pick_list_revision_options", (string)null);
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.Tag", b =>
@@ -881,6 +1249,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<Guid?>("ComponentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("component_id");
+
                     b.Property<string>("CompositionMode")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -948,6 +1320,9 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_template_fields");
 
+                    b.HasIndex("ComponentId")
+                        .HasDatabaseName("ix_template_fields_component_id");
+
                     b.HasIndex("SectionId")
                         .HasDatabaseName("ix_template_fields_section_id");
 
@@ -960,7 +1335,7 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
                     b.ToTable("template_fields", null, t =>
                         {
-                            t.HasCheckConstraint("ck_template_fields_type_shape", "(is_open = true AND primitive_type IS NULL AND template_id IS NULL) OR (is_open = false AND ((primitive_type IS NOT NULL AND template_id IS NULL) OR (primitive_type IS NULL AND template_id IS NOT NULL)))");
+                            t.HasCheckConstraint("ck_template_fields_type_shape", "(is_open = true AND primitive_type IS NULL AND template_id IS NULL AND component_id IS NULL) OR (is_open = false AND ((primitive_type IS NOT NULL AND template_id IS NULL AND component_id IS NULL) OR (primitive_type IS NULL AND template_id IS NOT NULL AND component_id IS NULL) OR (primitive_type IS NULL AND template_id IS NULL AND component_id IS NOT NULL)))");
                         });
                 });
 
@@ -1344,6 +1719,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_attempt_at");
 
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
                     b.Property<DateTimeOffset?>("NextRetryAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("next_retry_at");
@@ -1366,8 +1745,8 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.HasIndex("WebhookEndpointId")
                         .HasDatabaseName("ix_webhook_delivery_logs_webhook_endpoint_id");
 
-                    b.HasIndex("IsDelivered", "IsFailed", "NextRetryAt")
-                        .HasDatabaseName("ix_webhook_delivery_logs_is_delivered_is_failed_next_retry_at");
+                    b.HasIndex("IsDelivered", "IsFailed", "NextRetryAt", "LeaseExpiresAt")
+                        .HasDatabaseName("ix_webhook_delivery_logs_is_delivered_is_failed_next_retry_at_");
 
                     b.ToTable("webhook_delivery_logs", (string)null);
                 });
@@ -1548,6 +1927,48 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_api_clients_workspaces_workspace_id");
                 });
 
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentDefinition", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.ComponentVersion", null)
+                        .WithMany()
+                        .HasForeignKey("CurrentVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_components_component_versions_current_version_id");
+
+                    b.HasOne("Cmsify.Core.Domain.Entities.Workspace", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_components_workspaces_workspace_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentField", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.ComponentVersion", null)
+                        .WithMany("Fields")
+                        .HasForeignKey("ComponentVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_component_fields_component_versions_component_version_id");
+
+                    b.HasOne("Cmsify.Core.Domain.Entities.ComponentDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("NestedComponentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_component_fields_components_nested_component_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentVersion", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.ComponentDefinition", null)
+                        .WithMany("Versions")
+                        .HasForeignKey("ComponentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_component_versions_components_component_id");
+                });
+
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.ContentFieldValue", b =>
                 {
                     b.HasOne("Cmsify.Core.Domain.Entities.ContentItem", null)
@@ -1663,6 +2084,12 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickList", b =>
                 {
+                    b.HasOne("Cmsify.Core.Domain.Entities.PickListRevision", null)
+                        .WithMany()
+                        .HasForeignKey("CurrentRevisionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_pick_lists_pick_list_revisions_current_revision_id");
+
                     b.HasOne("Cmsify.Core.Domain.Entities.Workspace", null)
                         .WithMany()
                         .HasForeignKey("WorkspaceId")
@@ -1679,6 +2106,26 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_pick_list_options_pick_lists_pick_list_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickListRevision", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.PickList", null)
+                        .WithMany()
+                        .HasForeignKey("PickListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_pick_list_revisions_pick_lists_pick_list_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickListRevisionOption", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.PickListRevision", null)
+                        .WithMany("Options")
+                        .HasForeignKey("PickListRevisionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_pick_list_revision_options_pick_list_revisions_pick_list_re");
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.Tag", b =>
@@ -1709,6 +2156,12 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.TemplateField", b =>
                 {
+                    b.HasOne("Cmsify.Core.Domain.Entities.ComponentDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("ComponentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_template_fields_components_component_id");
+
                     b.HasOne("Cmsify.Core.Domain.Entities.TemplateSection", null)
                         .WithMany()
                         .HasForeignKey("SectionId")
@@ -1833,6 +2286,16 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_webhook_subscriptions_webhook_endpoints_webhook_endpoint_id");
                 });
 
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentDefinition", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.ComponentVersion", b =>
+                {
+                    b.Navigation("Fields");
+                });
+
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.ContentItem", b =>
                 {
                     b.Navigation("FieldValues");
@@ -1846,6 +2309,11 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickList", b =>
+                {
+                    b.Navigation("Options");
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickListRevision", b =>
                 {
                     b.Navigation("Options");
                 });

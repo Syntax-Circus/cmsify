@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using Cmsify.Admin.Auth;
-using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
@@ -20,7 +19,7 @@ public sealed class AbsoluteLifetimeCookieEventsTests
 
         await events.ValidatePrincipal(context);
 
-        context.Principal.Should().BeNull("RejectPrincipal nulls the principal");
+        context.Principal.ShouldBeNull();
     }
 
     [Fact]
@@ -31,7 +30,7 @@ public sealed class AbsoluteLifetimeCookieEventsTests
 
         await events.ValidatePrincipal(context);
 
-        context.Principal.Should().NotBeNull();
+        context.Principal.ShouldNotBeNull();
     }
 
     [Fact]
@@ -42,7 +41,7 @@ public sealed class AbsoluteLifetimeCookieEventsTests
 
         await events.ValidatePrincipal(context);
 
-        context.Principal.Should().NotBeNull();
+        context.Principal.ShouldNotBeNull();
     }
 
     [Fact]
@@ -55,8 +54,8 @@ public sealed class AbsoluteLifetimeCookieEventsTests
         await events.ValidatePrincipal(withinDefault);
         await events.ValidatePrincipal(beyondDefault);
 
-        withinDefault.Principal.Should().NotBeNull();
-        beyondDefault.Principal.Should().BeNull();
+        withinDefault.Principal.ShouldNotBeNull();
+        beyondDefault.Principal.ShouldBeNull();
     }
 
     private static AbsoluteLifetimeCookieEvents BuildEvents(int? maxLifetimeHours)

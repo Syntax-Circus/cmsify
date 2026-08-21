@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Domain.ValueObjects;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
@@ -19,16 +20,18 @@ public sealed class ContentController : ControllerBase
     private readonly IContentValidator contentValidator;
     private readonly IContentSearchVectorBuilder searchVectorBuilder;
     private readonly IContentLifecycleService lifecycleService;
+    private readonly IContentPublishingService publishingService;
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IWebhookQueue webhookQueue;
 
-    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookQueue webhookQueue)
+    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookQueue webhookQueue)
     {
         this.dbContext = dbContext;
         this.contentValidator = contentValidator;
         this.searchVectorBuilder = searchVectorBuilder;
         this.lifecycleService = lifecycleService;
+        this.publishingService = publishingService;
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
         this.webhookQueue = webhookQueue;
@@ -40,6 +43,11 @@ public sealed class ContentController : ControllerBase
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return NotFound();
+        }
+
+        if (query.Resolve)
+        {
+            return await ListResolvedAsync(workspaceId, query, ct);
         }
 
         var items = BaseContentQuery(workspaceId).AsNoTracking();
@@ -135,6 +143,11 @@ public sealed class ContentController : ControllerBase
             return NotFound();
         }
 
+        if (request.Slug is not null && !SlugRules.IsValid(request.Slug))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", SlugRules.ValidationMessage);
+        }
+
         var version = await LoadTemplateVersionAsync(request.TemplateVersionId, ct);
         if (version is null || !await TemplateVersionBelongsToWorkspaceAsync(version.Id, workspaceId, ct))
         {
@@ -157,6 +170,10 @@ public sealed class ContentController : ControllerBase
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
         }
+        if (await ValidatePickListValuesAsync(content, version, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
+        }
 
         content.SearchVector = searchVectorBuilder.Build(content, version);
         await ApplyTagsAsync(content, workspaceId, request.Tags, ct);
@@ -168,11 +185,23 @@ public sealed class ContentController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<ContentItemDetailResponse>> Get(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<ActionResult<ContentItemDetailResponse>> Get(Guid workspaceId, Guid id, [FromQuery] bool resolve = false, [FromQuery] DateTimeOffset? asOf = null, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return NotFound();
+        }
+
+        if (resolve)
+        {
+            var resolved = await ResolvePublishedVersionAsync(workspaceId, contentItemId: id, slug: null, asOf ?? DateTimeOffset.UtcNow, ct);
+            if (resolved is null)
+            {
+                return NotFound();
+            }
+
+            Response.Headers.ETag = ControllerHelpers.ETag(resolved.PublishedAt);
+            return Ok(await ToResolvedDetailResponseAsync(resolved, asOf ?? DateTimeOffset.UtcNow, ct: ct));
         }
 
         var content = await BaseContentQuery(workspaceId).AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
@@ -186,27 +215,33 @@ public sealed class ContentController : ControllerBase
     }
 
     [HttpGet("by-slug/{slug}")]
-    public async Task<ActionResult<ContentItemDetailResponse>> GetBySlug(Guid workspaceId, string slug, CancellationToken ct)
+    public async Task<ActionResult<ContentItemDetailResponse>> GetBySlug(Guid workspaceId, string slug, [FromQuery] DateTimeOffset? asOf = null, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return NotFound();
         }
 
-        var content = await BaseContentQuery(workspaceId).AsNoTracking().FirstOrDefaultAsync(item => item.Slug == slug, ct);
+        var resolvedAsOf = asOf ?? DateTimeOffset.UtcNow;
+        var content = await ResolvePublishedVersionAsync(workspaceId, contentItemId: null, slug, resolvedAsOf, ct);
         if (content is null)
         {
             return NotFound();
         }
 
-        Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
-        return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
+        Response.Headers.ETag = ControllerHelpers.ETag(content.PublishedAt);
+        return Ok(await ToResolvedDetailResponseAsync(content, resolvedAsOf, ct: ct));
     }
 
     [HttpPut("{id:guid}")]
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<ContentItemDetailResponse>> Update(Guid workspaceId, Guid id, UpdateContentItemRequest request, CancellationToken ct)
     {
+        if (request.Slug is not null && !SlugRules.IsValid(request.Slug))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", SlugRules.ValidationMessage);
+        }
+
         var content = await LoadContentForEditAsync(workspaceId, id, ct);
         if (content is null)
         {
@@ -249,6 +284,10 @@ public sealed class ContentController : ControllerBase
         if (!validation.IsValid)
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
+        }
+        if (await ValidatePickListValuesAsync(content, version!, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
         }
 
         content.SearchVector = searchVectorBuilder.Build(content, version!);
@@ -327,6 +366,10 @@ public sealed class ContentController : ControllerBase
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
         }
+        if (await ValidatePickListValuesAsync(content, target, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", pickListError);
+        }
 
         content.SearchVector = searchVectorBuilder.Build(content, target);
         content.UpdatedAt = DateTimeOffset.UtcNow;
@@ -348,13 +391,30 @@ public sealed class ContentController : ControllerBase
 
     [HttpPost("{id:guid}/publish")]
     [RequireRole(UserRole.Editor)]
-    public async Task<ActionResult<ContentItemDetailResponse>> Publish(Guid workspaceId, Guid id, PublishContentRequest? request, CancellationToken ct)
+    public async Task<ActionResult<PublishContentResponse>> Publish(Guid workspaceId, Guid id, PublishContentRequest? request, CancellationToken ct)
     {
         var content = await LoadContentForEditAsync(workspaceId, id, ct);
         if (content is null)
         {
             return NotFound();
         }
+
+        var templateVersion = await LoadTemplateVersionAsync(content.TemplateVersionId, ct);
+        if (templateVersion is null)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", "Template version is unavailable.");
+        }
+        if (await ValidatePickListValuesAsync(content, templateVersion, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
+        }
+
+        var effectiveRangeResult = BuildEffectiveRange(request?.EffectiveStartAt, request?.EffectiveEndAt);
+        if (effectiveRangeResult.Result is not null)
+        {
+            return effectiveRangeResult.Result;
+        }
+        var effectiveRange = effectiveRangeResult.Value!;
 
         if (request?.PublishAt is not null)
         {
@@ -364,12 +424,28 @@ public sealed class ContentController : ControllerBase
             }
 
             content.PublishAt = request.PublishAt;
+            content.PendingEffectiveStartAt = effectiveRange.StartAt;
+            content.PendingEffectiveEndAt = effectiveRange.EndAt;
             content.UpdatedAt = DateTimeOffset.UtcNow;
             await dbContext.SaveChangesAsync(ct);
-            return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
+            return Ok(new PublishContentResponse(await ToDetailResponseAsync(content.Id, ct: ct), []));
         }
 
-        return await Transition(workspaceId, id, ContentStatus.Published, null, ct);
+        if (!lifecycleService.CanTransition(content.Status, ContentStatus.Published))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "invalid-state-transition", "Invalid content state transition", $"Content cannot transition from {content.Status} to {ContentStatus.Published}.");
+        }
+
+        await lifecycleService.TransitionAsync(content, ContentStatus.Published, currentActor.UserId ?? Guid.Empty);
+        content.PublishAt = null;
+        content.PendingEffectiveStartAt = null;
+        content.PendingEffectiveEndAt = null;
+        var publishResult = await publishingService.PublishSnapshotAsync(content, effectiveRange, actorUserId: currentActor.UserId, ct: ct);
+        await dbContext.SaveChangesAsync(ct);
+        await EnqueueContentEventAsync("content.status_changed", content, ct);
+        await EnqueueContentEventAsync("content.published", content, ct);
+
+        return Ok(new PublishContentResponse(await ToDetailResponseAsync(content.Id, ct: ct), publishResult.Warnings));
     }
 
     [HttpPost("{id:guid}/archive")]
@@ -445,11 +521,26 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "invalid-state-transition", "Invalid content state transition", $"Content cannot transition from {content.Status} to {targetStatus}.");
         }
 
+        if (targetStatus == ContentStatus.Published)
+        {
+            var templateVersion = await LoadTemplateVersionAsync(content.TemplateVersionId, ct);
+            if (templateVersion is null)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", "Template version is unavailable.");
+            }
+            if (await ValidatePickListValuesAsync(content, templateVersion, ct) is { } pickListError)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
+            }
+        }
+
         await lifecycleService.TransitionAsync(content, targetStatus, currentActor.UserId ?? Guid.Empty);
         if (targetStatus == ContentStatus.Published)
         {
             content.PublishAt = null;
-            await SnapshotPublishedAsync(content, rolledBackFromVersionNumber: null, ct);
+            content.PendingEffectiveStartAt = null;
+            content.PendingEffectiveEndAt = null;
+            await publishingService.PublishSnapshotAsync(content, new ContentEffectiveRange(null, null), actorUserId: currentActor.UserId, ct: ct);
         }
 
         await dbContext.SaveChangesAsync(ct);
@@ -461,66 +552,6 @@ public sealed class ContentController : ControllerBase
 
         _ = reason;
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
-    }
-
-    private async Task<ContentVersion> SnapshotPublishedAsync(ContentItem content, int? rolledBackFromVersionNumber, CancellationToken ct)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var priorPublished = await dbContext.ContentVersions
-            .Where(version => version.ContentItemId == content.Id && version.Status == ContentVersionStatus.Published)
-            .ToListAsync(ct);
-        foreach (var prior in priorPublished)
-        {
-            prior.Status = ContentVersionStatus.Retired;
-            prior.RetiredAt = now;
-        }
-
-        var nextNumber = await dbContext.ContentVersions
-            .Where(version => version.ContentItemId == content.Id)
-            .Select(version => (int?)version.VersionNumber)
-            .MaxAsync(ct) ?? 0;
-        nextNumber += 1;
-
-        var tagNames = await dbContext.ContentItemTags.AsNoTracking()
-            .Where(join => join.ContentItemId == content.Id)
-            .Join(dbContext.Tags.AsNoTracking(), join => join.TagId, tag => tag.Id, (_, tag) => tag.Name)
-            .OrderBy(name => name)
-            .ToListAsync(ct);
-
-        var snapshot = new ContentVersion
-        {
-            ContentItemId = content.Id,
-            WorkspaceId = content.WorkspaceId,
-            VersionNumber = nextNumber,
-            Status = ContentVersionStatus.Published,
-            TemplateVersionId = content.TemplateVersionId,
-            Slug = content.Slug,
-            LocaleCode = content.LocaleCode,
-            TranslationGroupId = content.TranslationGroupId,
-            Tags = tagNames.ToList(),
-            PublishedAt = now,
-            PublishedByUserId = currentActor.UserId,
-            RolledBackFromVersionNumber = rolledBackFromVersionNumber
-        };
-        foreach (var value in content.FieldValues)
-        {
-            snapshot.FieldValues.Add(new ContentVersionFieldValue
-            {
-                ContentVersionId = snapshot.Id,
-                FieldId = value.FieldId,
-                Order = value.Order,
-                ValueKind = value.ValueKind,
-                TextValue = value.TextValue,
-                BoolValue = value.BoolValue,
-                MediaAssetId = value.MediaAssetId,
-                FileAssetId = value.FileAssetId,
-                ChildContentItemId = value.ChildContentItemId,
-                JsonValue = value.JsonValue?.Clone()
-            });
-        }
-
-        dbContext.ContentVersions.Add(snapshot);
-        return snapshot;
     }
 
     [HttpGet("{id:guid}/versions")]
@@ -630,6 +661,10 @@ public sealed class ContentController : ControllerBase
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Snapshot does not satisfy its template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
         }
+        if (await ValidatePickListValuesAsync(content, templateVersion, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Snapshot does not satisfy its template version", pickListError);
+        }
 
         var previousActiveNumber = await dbContext.ContentVersions.AsNoTracking()
             .Where(version => version.ContentItemId == id && version.Status == ContentVersionStatus.Published)
@@ -642,9 +677,16 @@ public sealed class ContentController : ControllerBase
         content.Status = ContentStatus.Published;
         content.PublishedAt = DateTimeOffset.UtcNow;
         content.PublishAt = null;
+        content.PendingEffectiveStartAt = null;
+        content.PendingEffectiveEndAt = null;
         content.ArchivedAt = null;
 
-        var snapshot = await SnapshotPublishedAsync(content, target.VersionNumber, ct);
+        var snapshot = await publishingService.PublishSnapshotAsync(
+            content,
+            new ContentEffectiveRange(target.EffectiveStartAt, target.EffectiveEndAt),
+            target.VersionNumber,
+            currentActor.UserId,
+            ct);
         await dbContext.SaveChangesAsync(ct);
 
         var payload = JsonSerializer.SerializeToElement(new
@@ -653,7 +695,7 @@ public sealed class ContentController : ControllerBase
             workspaceId = content.WorkspaceId,
             fromVersionNumber = previousActiveNumber,
             toVersionNumber = target.VersionNumber,
-            newVersionNumber = snapshot.VersionNumber
+            newVersionNumber = snapshot.Version.VersionNumber
         });
         await webhookQueue.EnqueueAsync(new WebhookEvent("content.rolled_back", content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow), ct);
         await EnqueueContentEventAsync("content.published", content, ct);
@@ -662,7 +704,7 @@ public sealed class ContentController : ControllerBase
 
     private static ContentVersionSummaryResponse ToVersionSummary(ContentVersion version) =>
         new(version.Id, version.ContentItemId, version.VersionNumber, version.Status, version.TemplateVersionId,
-            version.Slug, version.LocaleCode, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
+            version.Slug, version.LocaleCode, version.EffectiveStartAt, version.EffectiveEndAt, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
             version.RolledBackFromVersionNumber, version.Tags.ToList());
 
     private async Task<ContentVersionDetailResponse> ToVersionDetailAsync(ContentVersion version, CancellationToken ct)
@@ -682,13 +724,28 @@ public sealed class ContentController : ControllerBase
                 templateFields.TryGetValue(value.FieldId, out var field);
                 return new ContentVersionFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order,
                     value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId,
-                    value.ChildContentItemId, value.JsonValue?.Clone());
+                    value.ChildContentItemId, value.JsonValue?.Clone(), value.DisplayLabel);
             })
             .ToList();
         return new ContentVersionDetailResponse(version.Id, version.ContentItemId, version.VersionNumber,
             version.Status, version.TemplateVersionId, templateName, version.Slug, version.LocaleCode,
-            version.TranslationGroupId, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
+            version.TranslationGroupId, version.EffectiveStartAt, version.EffectiveEndAt, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
             version.RolledBackFromVersionNumber, version.Tags.ToList(), fields);
+    }
+
+    private (ContentEffectiveRange? Value, ObjectResult? Result) BuildEffectiveRange(DateTimeOffset? effectiveStartAt, DateTimeOffset? effectiveEndAt)
+    {
+        if (effectiveStartAt.HasValue != effectiveEndAt.HasValue)
+        {
+            return (null, this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid effective range", "Provide both effectiveStartAt and effectiveEndAt, or neither."));
+        }
+
+        if (effectiveStartAt.HasValue && effectiveStartAt.Value >= effectiveEndAt!.Value)
+        {
+            return (null, this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid effective range", "effectiveStartAt must be before effectiveEndAt."));
+        }
+
+        return (new ContentEffectiveRange(effectiveStartAt, effectiveEndAt), null);
     }
 
     private IQueryable<ContentItem> BaseContentQuery(Guid workspaceId) =>
@@ -795,6 +852,160 @@ public sealed class ContentController : ControllerBase
         left.HasValue == right.HasValue
         && (!left.HasValue || left.Value.GetRawText() == right!.Value.GetRawText());
 
+    private async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
+    {
+        if (query.Status.HasValue && query.Status.Value != ContentStatus.Published)
+        {
+            return Ok(new PagedResponse<ContentItemSummaryResponse>([], 0, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
+        }
+
+        var asOf = query.AsOf ?? DateTimeOffset.UtcNow;
+        var versions = await dbContext.ContentVersions.AsNoTracking()
+            .Where(version => version.WorkspaceId == workspaceId && version.Status == ContentVersionStatus.Published)
+            .Where(version =>
+                (version.EffectiveStartAt == null && version.EffectiveEndAt == null)
+                || (version.EffectiveStartAt <= asOf && asOf < version.EffectiveEndAt))
+            .Where(version => !dbContext.ContentItems.Any(content => content.Id == version.ContentItemId && content.IsDeleted))
+            .ToListAsync(ct);
+
+        if (query.TemplateVersionId.HasValue)
+        {
+            versions = versions.Where(version => version.TemplateVersionId == query.TemplateVersionId.Value).ToList();
+        }
+
+        if (query.TemplateId.HasValue)
+        {
+            var templateVersionIds = await dbContext.TemplateVersions.AsNoTracking()
+                .Where(version => version.TemplateId == query.TemplateId.Value)
+                .Select(version => version.Id)
+                .ToListAsync(ct);
+            versions = versions.Where(version => templateVersionIds.Contains(version.TemplateVersionId)).ToList();
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.LocaleCode))
+        {
+            versions = versions.Where(version => version.LocaleCode == query.LocaleCode).ToList();
+        }
+
+        if (query.TranslationGroupId.HasValue)
+        {
+            versions = versions.Where(version => version.TranslationGroupId == query.TranslationGroupId.Value).ToList();
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Slug))
+        {
+            versions = versions.Where(version => version.Slug == query.Slug).ToList();
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Tags))
+        {
+            var tags = query.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(NormalizeTag).ToArray();
+            versions = versions.Where(version => tags.All(tag => version.Tags.Contains(tag))).ToList();
+        }
+
+        if (query.PublishedAfter.HasValue)
+        {
+            versions = versions.Where(version => version.PublishedAt >= query.PublishedAfter.Value).ToList();
+        }
+
+        if (query.PublishedBefore.HasValue)
+        {
+            versions = versions.Where(version => version.PublishedAt <= query.PublishedBefore.Value).ToList();
+        }
+
+        var resolved = versions
+            .GroupBy(version => version.ContentItemId)
+            .Select(group => SelectMostSpecific(group, asOf))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(query.Q))
+        {
+            resolved = resolved.Where(version => (version.Slug ?? string.Empty).Contains(query.Q, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        resolved = query.SortBy switch
+        {
+            "publishedAt" => query.SortDesc ? resolved.OrderByDescending(version => version.PublishedAt).ToList() : resolved.OrderBy(version => version.PublishedAt).ToList(),
+            "slug" => query.SortDesc ? resolved.OrderByDescending(version => version.Slug).ToList() : resolved.OrderBy(version => version.Slug).ToList(),
+            _ => query.SortDesc ? resolved.OrderByDescending(version => version.PublishedAt).ToList() : resolved.OrderBy(version => version.PublishedAt).ToList()
+        };
+
+        var total = resolved.Count;
+        var pageItems = resolved.Skip(ControllerHelpers.Offset(query.Page, query.PageSize)).Take(ControllerHelpers.Limit(query.PageSize)).ToList();
+        var responses = new List<ContentItemSummaryResponse>();
+        foreach (var version in pageItems)
+        {
+            responses.Add(await ToResolvedSummaryResponseAsync(version, ct));
+        }
+
+        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
+    }
+
+    private async Task<ContentVersion?> ResolvePublishedVersionAsync(Guid workspaceId, Guid? contentItemId, string? slug, DateTimeOffset asOf, CancellationToken ct)
+    {
+        var query = dbContext.ContentVersions.AsNoTracking()
+            .Include(version => version.FieldValues)
+            .Where(version => version.WorkspaceId == workspaceId && version.Status == ContentVersionStatus.Published)
+            .Where(version =>
+                (version.EffectiveStartAt == null && version.EffectiveEndAt == null)
+                || (version.EffectiveStartAt <= asOf && asOf < version.EffectiveEndAt))
+            .Where(version => !dbContext.ContentItems.Any(content => content.Id == version.ContentItemId && content.IsDeleted));
+
+        if (contentItemId.HasValue)
+        {
+            query = query.Where(version => version.ContentItemId == contentItemId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(slug))
+        {
+            query = query.Where(version => version.Slug == slug);
+        }
+
+        var candidates = await query.ToListAsync(ct);
+        return candidates.Count == 0 ? null : SelectMostSpecific(candidates, asOf);
+    }
+
+    private static ContentVersion SelectMostSpecific(IEnumerable<ContentVersion> versions, DateTimeOffset asOf) =>
+        versions
+            .OrderBy(version => version.EffectiveStartAt.HasValue && version.EffectiveEndAt.HasValue ? 0 : 1)
+            .ThenBy(version => version.EffectiveStartAt.HasValue && version.EffectiveEndAt.HasValue ? version.EffectiveEndAt.Value - version.EffectiveStartAt.Value : TimeSpan.MaxValue)
+            .ThenByDescending(version => version.PublishedAt)
+            .ThenByDescending(version => version.VersionNumber)
+            .First();
+
+    private async Task<ContentItemSummaryResponse> ToResolvedSummaryResponseAsync(ContentVersion version, CancellationToken ct)
+    {
+        var template = await dbContext.TemplateVersions.AsNoTracking()
+            .Where(templateVersion => templateVersion.Id == version.TemplateVersionId)
+            .Select(templateVersion => dbContext.Templates.Where(template => template.Id == templateVersion.TemplateId).Select(template => template.Name).First())
+            .FirstAsync(ct);
+        return new ContentItemSummaryResponse(version.ContentItemId, version.TemplateVersionId, template, ContentStatus.Published, version.Slug, version.LocaleCode, version.TranslationGroupId, version.Tags.ToList(), version.PublishedAt, version.PublishedAt, version.PublishedAt);
+    }
+
+    private async Task<ContentItemDetailResponse> ToResolvedDetailResponseAsync(ContentVersion version, DateTimeOffset asOf, int depth = 0, CancellationToken ct = default)
+    {
+        var summary = await ToResolvedSummaryResponseAsync(version, ct);
+        var templateFields = await dbContext.TemplateFields.AsNoTracking().Where(field => field.TemplateVersionId == version.TemplateVersionId).ToDictionaryAsync(field => field.Id, ct);
+        var fields = new List<ContentFieldValueResponse>();
+        foreach (var value in version.FieldValues.OrderBy(value => templateFields.GetValueOrDefault(value.FieldId)?.Order ?? 0).ThenBy(value => value.Order))
+        {
+            templateFields.TryGetValue(value.FieldId, out var field);
+            ContentItemDetailResponse? child = null;
+            if (depth < 8 && value.ChildContentItemId.HasValue)
+            {
+                var childVersion = await ResolvePublishedVersionAsync(version.WorkspaceId, value.ChildContentItemId.Value, slug: null, asOf, ct);
+                if (childVersion is not null)
+                {
+                    child = await ToResolvedDetailResponseAsync(childVersion, asOf, depth + 1, ct);
+                }
+            }
+
+            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone(), value.DisplayLabel));
+        }
+
+        return new ContentItemDetailResponse(summary.Id, summary.TemplateVersionId, summary.TemplateName, summary.Status, summary.Slug, summary.LocaleCode, summary.TranslationGroupId, summary.Tags, summary.CreatedAt, summary.UpdatedAt, summary.PublishedAt, fields);
+    }
+
     private async Task<ContentItemSummaryResponse> ToSummaryResponseAsync(ContentItem content, CancellationToken ct)
     {
         var template = await dbContext.TemplateVersions.AsNoTracking()
@@ -833,6 +1044,161 @@ public sealed class ContentController : ControllerBase
             .OrderBy(tag => tag)
             .ToListAsync(ct);
 
+    private async Task<string?> ValidatePickListValuesAsync(ContentItem content, TemplateVersion version, CancellationToken ct)
+    {
+        var bindings = new Dictionary<Guid, (string Key, Guid RevisionId, bool Multiple)>();
+        foreach (var field in version.Fields.Where(field => field.PrimitiveType == PrimitiveType.PickList))
+        {
+            if (!TryGetPickListBinding(field.FieldConfig, out var revisionId, out var multiple))
+            {
+                return $"Field '{field.Key}' must bind a PickList revision.";
+            }
+
+            bindings[field.Id] = (field.Key, revisionId, multiple);
+        }
+
+        var valuesByRevision = new Dictionary<Guid, HashSet<string>>();
+        if (bindings.Count > 0)
+        {
+            var optionValues = await dbContext.PickListRevisionOptions.AsNoTracking()
+                .Where(option => bindings.Values.Select(binding => binding.RevisionId).Contains(option.PickListRevisionId))
+                .Select(option => new { option.PickListRevisionId, option.Value })
+                .ToListAsync(ct);
+            valuesByRevision = optionValues
+                .GroupBy(option => option.PickListRevisionId)
+                .ToDictionary(group => group.Key, group => group.Select(option => option.Value).ToHashSet(StringComparer.OrdinalIgnoreCase));
+        }
+
+        foreach (var group in content.FieldValues.Where(value => bindings.ContainsKey(value.FieldId)).GroupBy(value => value.FieldId))
+        {
+            var binding = bindings[group.Key];
+            if (!binding.Multiple && group.Count() > 1)
+            {
+                return $"Field '{binding.Key}' allows only one PickList selection.";
+            }
+
+            if (!valuesByRevision.TryGetValue(binding.RevisionId, out var allowedValues))
+            {
+                return $"Field '{binding.Key}' references an unavailable PickList revision.";
+            }
+
+            foreach (var value in group)
+            {
+                if (string.IsNullOrWhiteSpace(value.TextValue) || !allowedValues.Contains(value.TextValue))
+                {
+                    return $"Field '{binding.Key}' contains a value that is not in its PickList revision.";
+                }
+            }
+        }
+
+        var revisionValueCache = valuesByRevision;
+        foreach (var field in version.Fields.Where(field => field.ComponentId.HasValue))
+        {
+            foreach (var value in content.FieldValues.Where(value => value.FieldId == field.Id && value.JsonValue is not null))
+            {
+                if (await ValidateComponentPickListValuesAsync(field.ComponentId!.Value, value.JsonValue!.Value, revisionValueCache, ct) is { } componentError)
+                {
+                    return $"Field '{field.Key}': {componentError}";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<string?> ValidateComponentPickListValuesAsync(Guid componentId, JsonElement value, Dictionary<Guid, HashSet<string>> revisionValueCache, CancellationToken ct)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            return "component values must be JSON objects.";
+        }
+
+        var component = await dbContext.Components.AsNoTracking()
+            .Include(candidate => candidate.Versions).ThenInclude(candidate => candidate.Fields)
+            .FirstOrDefaultAsync(candidate => candidate.Id == componentId && !candidate.IsDeleted, ct);
+        if (component is null)
+        {
+            return "references an unavailable component schema.";
+        }
+
+        var version = component.Versions.FirstOrDefault(candidate => candidate.Id == component.CurrentVersionId && candidate.Status == TemplateVersionStatus.Published && !candidate.IsDeleted);
+        if (version is null)
+        {
+            return "references an unavailable component schema.";
+        }
+
+        foreach (var field in version.Fields)
+        {
+            if (!value.TryGetProperty(field.Key, out var property))
+            {
+                if (field.IsRequired)
+                {
+                    return $"component field '{field.Key}' is required.";
+                }
+                continue;
+            }
+
+            if (field.PrimitiveType == PrimitiveType.PickList)
+            {
+                if (!TryGetPickListBinding(field.FieldConfig, out var revisionId, out var multiple))
+                {
+                    return $"component field '{field.Key}' must bind a PickList revision.";
+                }
+
+                if (!revisionValueCache.TryGetValue(revisionId, out var allowedValues))
+                {
+                    allowedValues = (await dbContext.PickListRevisionOptions.AsNoTracking()
+                        .Where(option => option.PickListRevisionId == revisionId)
+                        .Select(option => option.Value)
+                        .ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    revisionValueCache[revisionId] = allowedValues;
+                }
+
+                var submittedValues = property.ValueKind == JsonValueKind.Array
+                    ? property.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()).ToArray()
+                    : property.ValueKind == JsonValueKind.String ? [property.GetString()] : [];
+                if (submittedValues.Length == 0 || (!multiple && submittedValues.Length != 1) || submittedValues.Any(item => string.IsNullOrWhiteSpace(item) || !allowedValues.Contains(item)))
+                {
+                    return $"component field '{field.Key}' contains a value that is not in its PickList revision.";
+                }
+            }
+
+            if (field.NestedComponentId.HasValue)
+            {
+                var nestedValues = property.ValueKind == JsonValueKind.Array ? property.EnumerateArray().ToArray() : [property];
+                foreach (var nestedValue in nestedValues)
+                {
+                    if (await ValidateComponentPickListValuesAsync(field.NestedComponentId.Value, nestedValue, revisionValueCache, ct) is { } nestedError)
+                    {
+                        return nestedError;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetPickListBinding(JsonElement? fieldConfig, out Guid revisionId, out bool multiple)
+    {
+        revisionId = Guid.Empty;
+        multiple = false;
+        if (fieldConfig is not { ValueKind: JsonValueKind.Object } config
+            || !config.TryGetProperty("picklistRevisionId", out var revision)
+            || revision.ValueKind != JsonValueKind.String
+            || !Guid.TryParse(revision.GetString(), out revisionId))
+        {
+            return false;
+        }
+
+        if (config.TryGetProperty("multiple", out var multipleValue) && multipleValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            multiple = multipleValue.GetBoolean();
+        }
+
+        return true;
+    }
+
     private async Task<IReadOnlyList<Guid>> ReferencingContentIdsAsync(Guid id, bool onlyReferenceFields, CancellationToken ct)
     {
         var query = dbContext.ContentFieldValues.AsNoTracking().Where(value => value.ChildContentItemId == id);
@@ -861,19 +1227,20 @@ public sealed class ContentController : ControllerBase
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
 }
 
-public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20);
+public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20);
 public sealed record CreateContentItemRequest(Guid TemplateVersionId, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
 public sealed record UpdateContentItemRequest(string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? PublishAt, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
 public sealed record ContentFieldValueRequest(Guid FieldId, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
 public sealed record RejectContentRequest(string Reason);
-public sealed record PublishContentRequest(DateTimeOffset? PublishAt);
+public sealed record PublishContentRequest(DateTimeOffset? PublishAt, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt);
+public sealed record PublishContentResponse(ContentItemDetailResponse Content, IReadOnlyList<string> Warnings);
 public sealed record LinkTranslationRequest(Guid TargetContentItemId);
 public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt);
 public sealed record ContentItemDetailResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt, IReadOnlyList<ContentFieldValueResponse> Fields);
-public sealed record ContentFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentItemDetailResponse? Child, JsonElement? JsonValue);
+public sealed record ContentFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentItemDetailResponse? Child, JsonElement? JsonValue, string? DisplayLabel = null);
 
-public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string? Slug, string? LocaleCode, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags);
+public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string? Slug, string? LocaleCode, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags);
 
-public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
+public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue, string? DisplayLabel = null);
 
-public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, IReadOnlyList<ContentVersionFieldValueResponse> Fields);
+public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, IReadOnlyList<ContentVersionFieldValueResponse> Fields);

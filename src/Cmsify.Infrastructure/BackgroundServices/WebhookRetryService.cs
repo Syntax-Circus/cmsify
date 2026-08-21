@@ -29,7 +29,7 @@ public sealed class WebhookRetryService : BackgroundService
             await using var scope = scopeFactory.CreateAsyncScope();
             var repository = scope.ServiceProvider.GetRequiredService<IWebhookRepository>();
             var processor = scope.ServiceProvider.GetRequiredService<WebhookDeliveryProcessor>();
-            var pending = await repository.GetPendingDeliveryLogsAsync(DateTimeOffset.UtcNow, 100, stoppingToken);
+            var pending = await repository.ClaimPendingDeliveryLogsAsync(DateTimeOffset.UtcNow, 100, stoppingToken);
 
             foreach (var delivery in pending)
             {

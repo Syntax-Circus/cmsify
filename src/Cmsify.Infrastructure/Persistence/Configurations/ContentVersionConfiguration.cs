@@ -12,10 +12,11 @@ public sealed class ContentVersionConfiguration : IEntityTypeConfiguration<Conte
         builder.ConfigureEntityId();
 
         builder.HasIndex(version => new { version.ContentItemId, version.VersionNumber }).IsUnique();
-        builder.HasIndex(version => new { version.ContentItemId, version.Status })
+        builder.HasIndex(version => version.ContentItemId)
             .IsUnique()
-            .HasFilter("status = 'Published'");
+            .HasFilter("status = 'Published' AND effective_start_at IS NULL AND effective_end_at IS NULL");
         builder.HasIndex(version => version.WorkspaceId);
+        builder.HasIndex(version => new { version.ContentItemId, version.Status, version.EffectiveStartAt, version.EffectiveEndAt });
 
         builder.HasOne<ContentItem>()
             .WithMany()
@@ -35,6 +36,9 @@ public sealed class ContentVersionConfiguration : IEntityTypeConfiguration<Conte
         builder.Property(version => version.Status).HasConversion<string>().HasMaxLength(50);
         builder.Property(version => version.Slug).HasMaxLength(200);
         builder.Property(version => version.LocaleCode).HasMaxLength(20);
+        builder.ToTable(table => table.HasCheckConstraint(
+            "ck_content_versions_effective_range",
+            "(effective_start_at IS NULL AND effective_end_at IS NULL) OR (effective_start_at IS NOT NULL AND effective_end_at IS NOT NULL AND effective_start_at < effective_end_at)"));
         builder.Property(version => version.Tags)
             .HasColumnType("text[]")
             .HasConversion(
@@ -61,6 +65,7 @@ public sealed class ContentVersionFieldValueConfiguration : IEntityTypeConfigura
         builder.HasIndex(value => new { value.ContentVersionId, value.FieldId, value.Order });
         builder.Property(value => value.ValueKind).HasConversion<string>().HasMaxLength(50);
         builder.Property(value => value.TextValue);
+        builder.Property(value => value.DisplayLabel).HasMaxLength(200);
         builder.Property(value => value.JsonValue).HasColumnType("jsonb");
     }
 }

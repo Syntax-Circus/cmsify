@@ -31,13 +31,15 @@ public sealed class WebhooksController : ControllerBase
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly ISecretProtector secretProtector;
+    private readonly IWebhookDestinationValidator destinationValidator;
 
-    public WebhooksController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, ISecretProtector secretProtector)
+    public WebhooksController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, ISecretProtector secretProtector, IWebhookDestinationValidator destinationValidator)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
         this.secretProtector = secretProtector;
+        this.destinationValidator = destinationValidator;
     }
 
     [HttpGet]
@@ -71,6 +73,12 @@ public sealed class WebhooksController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Unsupported webhook event", eventError);
         }
 
+        var destination = await destinationValidator.ValidateAsync(request.Url, ct);
+        if (!destination.IsValid)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid webhook URL", destination.Error);
+        }
+
         var secret = string.IsNullOrWhiteSpace(request.Secret) ? GenerateSecret() : request.Secret;
         var createdByUserId = currentActor.UserId
             ?? await dbContext.Users.OrderBy(user => user.CreatedAt).Select(user => user.Id).FirstAsync(ct);
@@ -78,7 +86,7 @@ public sealed class WebhooksController : ControllerBase
         {
             WorkspaceId = workspaceId,
             Name = request.Name,
-            Url = request.Url,
+            Url = destination.NormalizedUrl!,
             Secret = secretProtector.Protect(secret),
             IsActive = true,
             CreatedByUserId = createdByUserId
@@ -128,8 +136,14 @@ public sealed class WebhooksController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Unsupported webhook event", eventError);
         }
 
+        var destination = await destinationValidator.ValidateAsync(request.Url, ct);
+        if (!destination.IsValid)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid webhook URL", destination.Error);
+        }
+
         endpoint.Name = request.Name;
-        endpoint.Url = request.Url;
+        endpoint.Url = destination.NormalizedUrl!;
         endpoint.IsActive = request.IsActive;
         endpoint.UpdatedAt = DateTimeOffset.UtcNow;
         dbContext.WebhookSubscriptions.RemoveRange(endpoint.Subscriptions);
@@ -179,6 +193,7 @@ public sealed class WebhooksController : ControllerBase
 
         dbContext.WebhookDeliveryLogs.RemoveRange(dbContext.WebhookDeliveryLogs.Where(log => log.WebhookEndpointId == id));
         endpoint.IsDeleted = true;
+        endpoint.IsActive = false;
         endpoint.DeletedAt = DateTimeOffset.UtcNow;
         endpoint.DeletedByUserId = currentActor.UserId;
         endpoint.UpdatedAt = DateTimeOffset.UtcNow;

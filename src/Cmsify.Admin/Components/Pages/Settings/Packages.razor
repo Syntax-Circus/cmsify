@@ -1,13 +1,17 @@
 @page "/settings/packages"
 @rendermode InteractiveServer
 @inject PackagesApiClient PackageClient
+@inject TemplateApiClient Templates
+@inject ComponentApiClient Components
+@inject PickListApiClient PickLists
+@inject BrowserDownloads Downloads
 @inject WorkspaceState Workspace
 @inject ToastState Toasts
 
 <div class="cms-page-head">
     <div>
         <h1>Packages</h1>
-        <div class="lead">Import custom template packages and install bundled official packages.</div>
+        <div class="lead">Import and share reusable template, component, and picklist packages.</div>
     </div>
 </div>
 
@@ -39,6 +43,17 @@ else
         </div>
     </div>
 
+    <div class="cms-card mb-3">
+        <h2 class="h6">Export reusable models</h2>
+        <p class="small text-muted">Select any mix of templates, components, and picklists. Required references are included automatically.</p>
+        <div class="row g-3 small">
+            <div class="col-md-4"><strong>Templates</strong>@foreach (var template in templates) { <div class="form-check"><input class="form-check-input" type="checkbox" checked="@selectedTemplates.Contains(template.Id)" @onchange="args => Toggle(selectedTemplates, template.Id, (bool?)args.Value == true)" /><label class="form-check-label">@template.Name</label></div> }</div>
+            <div class="col-md-4"><strong>Components</strong>@foreach (var component in components) { <div class="form-check"><input class="form-check-input" type="checkbox" checked="@selectedComponents.Contains(component.Id)" @onchange="args => Toggle(selectedComponents, component.Id, (bool?)args.Value == true)" /><label class="form-check-label">@component.Name</label></div> }</div>
+            <div class="col-md-4"><strong>Picklists</strong>@foreach (var picklist in picklists) { <div class="form-check"><input class="form-check-input" type="checkbox" checked="@selectedPicklists.Contains(picklist.Id)" @onchange="args => Toggle(selectedPicklists, picklist.Id, (bool?)args.Value == true)" /><label class="form-check-label">@picklist.Name</label></div> }</div>
+        </div>
+        <div class="d-flex gap-2 mt-3"><InputText class="form-control" style="max-width:180px" placeholder="namespace" @bind-Value="exportNamespace" /><InputText class="form-control" style="max-width:180px" placeholder="package ID" @bind-Value="exportId" /><InputText class="form-control" style="max-width:120px" placeholder="version" @bind-Value="exportVersion" /><button class="btn btn-outline-primary" disabled="@(exporting || (selectedTemplates.Count + selectedComponents.Count + selectedPicklists.Count == 0))" @onclick="ExportSelectedAsync">Export .ctp</button></div>
+    </div>
+
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="h5 mb-0">Bundled packages</h2>
     </div>
@@ -55,7 +70,11 @@ else
                         <button class="btn btn-primary" disabled="@importing.Contains(package.Id)" @onclick="() => StartOfficialImportAsync(package.Id)">Import</button>
                     </div>
                     <p class="text-muted mt-3">@package.Description</p>
-                    <div class="small">@package.TemplateCount templates: @string.Join(", ", package.Templates.Select(template => template.Name))</div>
+                    <div class="small">@package.TemplateCount templates · @package.ComponentCount components · @package.PickListCount picklists</div>
+                    @if (package.TemplateCount > 0)
+                    {
+                        <div class="small text-muted mt-1">@string.Join(", ", package.Templates.Select(template => template.Name))</div>
+                    }
                 </div>
             </div>
         }
@@ -86,6 +105,16 @@ else
     private bool importingCustom;
     private string? message;
     private string? error;
+    private IReadOnlyList<TemplateSummaryResponse> templates = [];
+    private IReadOnlyList<ComponentSummaryResponse> components = [];
+    private IReadOnlyList<PickListSummaryResponse> picklists = [];
+    private readonly HashSet<Guid> selectedTemplates = [];
+    private readonly HashSet<Guid> selectedComponents = [];
+    private readonly HashSet<Guid> selectedPicklists = [];
+    private string exportNamespace = "custom";
+    private string exportId = "export";
+    private string exportVersion = "1.0.0";
+    private bool exporting;
 
     private PackageImportPreviewResponse? pendingPreview;
     private string? pendingOfficialPackageId;
@@ -94,6 +123,32 @@ else
     protected override async Task OnInitializedAsync()
     {
         packages = await PackageClient.ListOfficialAsync();
+        if (Workspace.Current is { } workspace)
+        {
+            templates = (await Templates.ListAsync(workspace.Id)).Items;
+            components = await Components.ListAsync(workspace.Id);
+            picklists = await PickLists.ListAsync(workspace.Id);
+        }
+    }
+
+    private static void Toggle(ISet<Guid> selected, Guid id, bool isSelected)
+    {
+        if (isSelected) selected.Add(id); else selected.Remove(id);
+    }
+
+    private async Task ExportSelectedAsync()
+    {
+        if (Workspace.Current is null) return;
+        exporting = true; error = null; message = null;
+        try
+        {
+            var file = await PackageClient.ExportAsync(Workspace.Current.Id, selectedTemplates.ToArray(), selectedComponents.ToArray(), selectedPicklists.ToArray(), exportNamespace, exportId, exportVersion);
+            await Downloads.SaveAsync(file);
+            message = $"Exported {selectedTemplates.Count} templates, {selectedComponents.Count} components, and {selectedPicklists.Count} picklists.";
+        }
+        catch (ProblemDetailsException ex) { error = ProblemDetailsDisplay.Format(ex); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { exporting = false; }
     }
 
     private void SelectCustomPackage(InputFileChangeEventArgs args) =>
@@ -221,7 +276,7 @@ else
     private async Task DoCustomImportAsync(IBrowserFile file, PackageImportResolutionsRequest? resolutions)
     {
         var result = await PackageClient.ImportAsync(Workspace.Current!.Id, file, resolutions);
-        message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+        message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists?.Count ?? 0} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         customPackageFile = null;
         Toasts.Success("Package imported");
     }
@@ -229,10 +284,11 @@ else
     private async Task DoOfficialImportAsync(string packageId, PackageImportResolutionsRequest? resolutions)
     {
         var result = await PackageClient.ImportOfficialAsync(Workspace.Current!.Id, packageId, resolutions);
-        message = $"Imported {result.Imported.Count} templates from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+        message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists?.Count ?? 0} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         Toasts.Success("Package imported");
     }
 
     private static bool HasConflicts(PackageImportPreviewResponse preview) =>
-        preview.PickLists.Any(picklist => picklist.Status == "conflict");
+        preview.PickLists.Any(picklist => picklist.Status == "conflict")
+        || (preview.Components?.Any(component => component.Status == "conflict") ?? false);
 }

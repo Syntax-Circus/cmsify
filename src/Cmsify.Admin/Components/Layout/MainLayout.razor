@@ -22,19 +22,25 @@
                 <i class="bi bi-chevron-down"></i>
             </button>
             <nav class="cms-nav">
-                <NavLink class="cms-nav__item" href="@WorkspaceHref("")" Match="NavLinkMatch.All"><i class="bi bi-speedometer2"></i><span>Dashboard</span></NavLink>
-                <NavLink class="cms-nav__item" href="@WorkspaceHref("templates")"><i class="bi bi-puzzle"></i><span>Templates</span></NavLink>
-                <NavLink class="cms-nav__item" href="@WorkspaceHref("picklists")"><i class="bi bi-list-check"></i><span>Picklists</span></NavLink>
-                <NavLink class="cms-nav__item" href="@WorkspaceHref("content")"><i class="bi bi-file-earmark-text"></i><span>Content</span></NavLink>
-                <NavLink class="cms-nav__item" href="@WorkspaceHref("media")"><i class="bi bi-images"></i><span>Media</span></NavLink>
+                @if (Workspace.Current is not null)
+                {
+                    <NavLink class="cms-nav__item" href="@WorkspaceHref("")" Match="NavLinkMatch.All"><i class="bi bi-speedometer2"></i><span>Dashboard</span></NavLink>
+                    <NavLink class="cms-nav__item" href="@WorkspaceHref("templates")"><i class="bi bi-puzzle"></i><span>Templates</span></NavLink>
+                    <NavLink class="cms-nav__item" href="@WorkspaceHref("components")"><i class="bi bi-boxes"></i><span>Components</span></NavLink>
+                    <NavLink class="cms-nav__item" href="@WorkspaceHref("picklists")"><i class="bi bi-list-check"></i><span>Picklists</span></NavLink>
+                    <NavLink class="cms-nav__item" href="@WorkspaceHref("content")"><i class="bi bi-file-earmark-text"></i><span>Content</span></NavLink>
+                    <NavLink class="cms-nav__item" href="@WorkspaceHref("media")"><i class="bi bi-images"></i><span>Media</span></NavLink>
+                }
                 <NavLink class="cms-nav__item" href="/settings/users"><i class="bi bi-gear"></i><span>Settings</span></NavLink>
                 <div class="cms-nav__sub">
                     <NavLink class="cms-nav__item" href="/settings/users">Users</NavLink>
                     <NavLink class="cms-nav__item" href="/settings/api-clients">API Clients</NavLink>
-                    <NavLink class="cms-nav__item" href="/settings/webhooks">Webhooks</NavLink>
-                    <NavLink class="cms-nav__item" href="/settings/packages">Packages</NavLink>
-                    <NavLink class="cms-nav__item" href="/settings/storage">Storage</NavLink>
                     <NavLink class="cms-nav__item" href="/settings/audit">Audit Log</NavLink>
+                    @if (Workspace.Current is not null)
+                    {
+                        <NavLink class="cms-nav__item" href="/settings/webhooks">Webhooks</NavLink>
+                        <NavLink class="cms-nav__item" href="/settings/packages">Packages</NavLink>
+                    }
                 </div>
             </nav>
             <div class="cms-sidebar__foot">
@@ -82,13 +88,11 @@
     </div>
 </div>
 
-<Toast Message="@Toasts.Message" Variant="@Toasts.Variant" />
+<Toast Message="@Toasts.Message" Variant="@Toasts.Variant" Version="@Toasts.Version" OnDismiss="Toasts.Clear" />
 
 @implements IDisposable
 
 @code {
-    private CancellationTokenSource? toastCancellation;
-
     private bool ShowChrome => !Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("login", StringComparison.OrdinalIgnoreCase);
 
     private string EffectiveTheme => Preferences.EffectiveTheme;
@@ -111,39 +115,9 @@
         Workspace.Changed -= StateHasChanged;
         Preferences.Changed -= StateHasChanged;
         Toasts.Changed -= OnToastChanged;
-        toastCancellation?.Cancel();
-        toastCancellation?.Dispose();
     }
 
-    private void OnToastChanged()
-    {
-        _ = InvokeAsync(StateHasChanged);
-        if (string.IsNullOrWhiteSpace(Toasts.Message))
-        {
-            return;
-        }
-
-        toastCancellation?.Cancel();
-        toastCancellation?.Dispose();
-        toastCancellation = new CancellationTokenSource();
-        var version = Toasts.Version;
-        _ = DismissToastAsync(version, toastCancellation.Token);
-    }
-
-    private async Task DismissToastAsync(int version, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
-            if (!cancellationToken.IsCancellationRequested && Toasts.Version == version)
-            {
-                Toasts.Clear();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
+    private void OnToastChanged() => _ = InvokeAsync(StateHasChanged);
 
     private string WorkspaceHref(string section)
     {

@@ -12,6 +12,9 @@
     "/api/v1/workspaces/{workspaceId}/content/{id}": { "get": { "responses": { "200": { "description": "Content detail" } } } },
     "/api/v1/workspaces/{workspaceId}/content/by-slug/{slug}": { "get": { "responses": { "200": { "description": "Content detail" } } } },
     "/api/v1/workspaces/{workspaceId}/templates": { "get": { "responses": { "200": { "description": "Templates" } } } },
-    "/api/v1/workspaces/{workspaceId}/media": { "get": { "responses": { "200": { "description": "Media" } } } }
+    "/api/v1/workspaces/{workspaceId}/media": { "get": { "responses": { "200": { "description": "Media" } } } },
+    "/api/v1/workspaces/{workspaceId}/picklists/{id}/revisions/{revisionId}": { "get": { "responses": { "200": { "description": "PickList revision" }, "404": { "description": "Not found" } } } },
+    "/api/v1/packages/official": { "get": { "responses": { "200": { "description": "Official reusable-model packages" } } } },
+    "/api/v1/workspaces/{workspaceId}/packages/export": { "get": { "parameters": [ { "name": "templateIds", "in": "query", "schema": { "type": "string" } }, { "name": "componentIds", "in": "query", "schema": { "type": "string" } }, { "name": "picklistIds", "in": "query", "schema": { "type": "string" } } ], "responses": { "200": { "description": "CTP package download" } } } }
   }
 }

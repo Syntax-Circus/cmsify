@@ -1,7 +1,6 @@
-using DotNetEnv;
 using Cmsify.Api;
 using Cmsify.Api.Auth;
-using Cmsify.Api.Middleware;
+using Cmsify.Api.HealthChecks;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.Extensions;
@@ -12,43 +11,45 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Serilog;
 using Serilog.Events;
-using System.Threading.RateLimiting;
+using SyntaxCircus.AspNetCore.Common;
+using SyntaxCircus.AspNetCore.Serilog;
+using SyntaxCircus.DotEnv;
+
+const string CorrelationHeaderName = "X-Correlation-Id";
 
 var builder = WebApplication.CreateBuilder(args);
 
-if (builder.Environment.IsDevelopment())
+if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
 {
-    LoadDotEnvFromParents(builder.Environment.ContentRootPath);
+    builder.Configuration.AddSyntaxCircusDotEnvFiles(builder.Environment.ContentRootPath);
     builder.Configuration.AddEnvironmentVariables();
 }
 
-builder.Host.UseSerilog((context, loggerConfiguration) =>
+builder.AddStandardSerilog(fileLoggingOptions =>
 {
-    var configuredLevel = context.Configuration["Logging:MinLevel"];
-    var minimumLevel = Enum.TryParse<LogEventLevel>(configuredLevel, ignoreCase: true, out var parsedLevel)
-        ? parsedLevel
-        : LogEventLevel.Information;
-
-    loggerConfiguration
-        .MinimumLevel.Is(minimumLevel)
-        .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
-        .Enrich.FromLogContext()
-        .WriteTo.Console();
-
-    var filePath = context.Configuration["Logging:FilePath"];
-    if (!string.IsNullOrWhiteSpace(filePath))
-    {
-        loggerConfiguration.WriteTo.File(
-            filePath,
-            rollingInterval: RollingInterval.Day,
-            retainedFileCountLimit: context.Configuration.GetValue<int?>("Logging:RetainedFileCountLimit") ?? 14);
-    }
+    fileLoggingOptions.Enabled = builder.Configuration.GetValue("Serilog:File:Enabled", false);
+    fileLoggingOptions.Path = builder.Configuration["Serilog:File:Path"];
+    fileLoggingOptions.RollingInterval = RollingInterval.Day;
+    fileLoggingOptions.RetainedFileCountLimit = builder.Configuration.GetValue<int?>("Serilog:File:RetainedFileCountLimit", 14);
 });
 
 builder.Services.AddControllers();
+builder.Services.AddCorrelationId(options => options.HeaderName = CorrelationHeaderName);
+builder.Services.AddSecurityHeaders(builder.Configuration);
+builder.Services.AddTrustedProxyForwardedHeaders(builder.Configuration);
+builder.Services.AddProblemDetailsExceptionHandling(options =>
+{
+    options.BaseTypeUri = CmsifyError.BaseUri;
+    options.ExceptionMapper = exception => exception switch
+    {
+        InvalidOperationException => new ProblemMapping(StatusCodes.Status409Conflict, CmsifyError.Conflict, exception.Message),
+        ArgumentException => new ProblemMapping(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, exception.Message),
+        _ => new ProblemMapping(StatusCodes.Status500InternalServerError, CmsifyError.InternalServerError, "An unexpected error occurred."),
+    };
+});
 builder.Services.AddProblemDetails(options =>
 {
     options.CustomizeProblemDetails = context =>
@@ -80,57 +81,22 @@ builder.Services.AddCors(options =>
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
-        PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        {
-            if (IsRateLimitExempt(context.Request.Path))
+    options.UseChainedGlobalLimiter(
+        SyntaxCircus.AspNetCore.Common.RateLimiterOptionsExtensions.CreateFixedWindowTier(
+            context =>
             {
-                return RateLimitPartition.GetNoLimiter("exempt");
-            }
-
-            var actor = context.Items.TryGetValue(CurrentActorHttpContextKeys.ItemName, out var value) ? value as ICurrentActor : null;
-            var actorKey = actor?.UserId?.ToString() ?? actor?.ApiClientId?.ToString() ?? $"anonymous:{context.Connection.RemoteIpAddress}";
-            return RateLimitPartition.GetFixedWindowLimiter($"actor:{actorKey}", _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = builder.Configuration.GetValue("RateLimit:PerActor:PermitPerMinute", 600),
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            });
-        }),
-        PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        {
-            if (IsRateLimitExempt(context.Request.Path))
-            {
-                return RateLimitPartition.GetNoLimiter("exempt");
-            }
-
-            var ipKey = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            return RateLimitPartition.GetFixedWindowLimiter($"ip:{ipKey}", _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = builder.Configuration.GetValue("RateLimit:PerIp:PermitPerMinute", 60),
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            });
-        }));
-    options.OnRejected = async (context, ct) =>
-    {
-        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
-        {
-            context.HttpContext.Response.Headers.RetryAfter = Math.Ceiling(retryAfter.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        }
-
-        var problem = new ProblemDetails
-        {
-            Type = CmsifyError.TypeUri(CmsifyError.RateLimitExceeded),
-            Title = "Rate limit exceeded",
-            Status = StatusCodes.Status429TooManyRequests,
-            Detail = "Too many requests. Wait before retrying.",
-            Instance = context.HttpContext.Request.Path
-        };
-        problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
-        context.HttpContext.Response.ContentType = "application/problem+json";
-        await context.HttpContext.Response.WriteAsJsonAsync(problem, ct);
-    };
+                var actor = context.Items.TryGetValue(CurrentActorHttpContextKeys.ItemName, out var value) ? value as ICurrentActor : null;
+                return actor?.UserId?.ToString() ?? actor?.ApiClientId?.ToString() ?? $"anonymous:{context.Connection.RemoteIpAddress}";
+            },
+            permitLimit: builder.Configuration.GetValue("RateLimit:PerActor:PermitPerMinute", 600),
+            window: TimeSpan.FromMinutes(1),
+            isExempt: context => IsRateLimitExempt(context.Request.Path)),
+        SyntaxCircus.AspNetCore.Common.RateLimiterOptionsExtensions.CreateFixedWindowTier(
+            context => context.Connection.RemoteIpAddress?.ToString(),
+            permitLimit: builder.Configuration.GetValue("RateLimit:PerIp:PermitPerMinute", 60),
+            window: TimeSpan.FromMinutes(1),
+            isExempt: context => IsRateLimitExempt(context.Request.Path)));
+    options.UseProblemDetailsRejection(CmsifyError.RateLimitExceeded);
 });
 builder.Services.AddSwaggerGen(options =>
 {
@@ -149,17 +115,10 @@ builder.Services.AddSwaggerGen(options =>
         In = ParameterLocation.Header,
         Description = "Enter a Cmsify user session token, API client token, or JWT bearer token."
     });
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
     {
         {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
+            new OpenApiSecuritySchemeReference("Bearer", null, null),
             []
         }
     });
@@ -181,13 +140,17 @@ if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
         });
 }
 builder.Services.AddCmsifyInfrastructure(builder.Configuration);
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"])
+    .AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
 
 var app = builder.Build();
 
 await app.MigrateCmsifyDatabaseAsync();
 
-app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseCorrelationId();
+app.UseSecurityHeaders();
+app.UseProblemDetailsExceptionHandling();
 app.UseStatusCodePages(async context =>
 {
     var httpContext = context.HttpContext;
@@ -233,6 +196,7 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue("Api:Swagg
     });
 }
 
+app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 app.UseCors();
 if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
@@ -242,48 +206,9 @@ if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
 app.UseMiddleware<CmsifyAuthMiddleware>();
 app.UseRateLimiter();
 app.MapControllers();
-app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
-app.MapGet("/health/ready", async (CmsifyDbContext dbContext, IStorageProvider storageProvider, ILogger<Program> logger, CancellationToken ct) =>
-{
-    var canConnect = await dbContext.Database.CanConnectAsync(ct);
-    var pendingMigrations = canConnect
-        ? (await dbContext.Database.GetPendingMigrationsAsync(ct)).ToArray()
-        : [];
-    var storageReachable = await CheckStorageAsync(storageProvider, logger, ct);
-
-    return canConnect && pendingMigrations.Length == 0 && storageReachable
-        ? Results.Ok(new { status = "ready", database = "ready", storage = "ready", pendingMigrations = 0 })
-        : Results.Json(
-            new
-            {
-                status = "not_ready",
-                database = canConnect ? "pending_migrations" : "unreachable",
-                storage = storageReachable ? "ready" : "unreachable",
-                pendingMigrations = pendingMigrations.Length
-            },
-            statusCode: StatusCodes.Status503ServiceUnavailable);
-});
+app.MapStandardHealthChecks();
 
 app.Run();
-
-static void LoadDotEnvFromParents(string startPath)
-{
-    var directories = new Stack<DirectoryInfo>();
-    for (var directory = new DirectoryInfo(startPath); directory is not null; directory = directory.Parent)
-    {
-        directories.Push(directory);
-        if (Directory.Exists(Path.Combine(directory.FullName, ".git")))
-        {
-            break;
-        }
-    }
-
-    foreach (var directory in directories)
-    {
-        LoadIfExists(Path.Combine(directory.FullName, ".env"));
-        LoadIfExists(Path.Combine(directory.FullName, ".env.local"));
-    }
-}
 
 static string[] ReadConfiguredList(IConfiguration configuration, string key)
 {
@@ -319,27 +244,5 @@ static string StatusCodeToErrorCode(int statusCode) =>
         StatusCodes.Status429TooManyRequests => CmsifyError.RateLimitExceeded,
         _ => CmsifyError.InternalServerError
     };
-
-static async Task<bool> CheckStorageAsync(IStorageProvider storageProvider, Microsoft.Extensions.Logging.ILogger logger, CancellationToken ct)
-{
-    try
-    {
-        await storageProvider.ExistsAsync(".cmsify-healthcheck", ct);
-        return true;
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "Storage provider readiness check failed.");
-        return false;
-    }
-}
-
-static void LoadIfExists(string path)
-{
-    if (File.Exists(path))
-    {
-        Env.Load(path);
-    }
-}
 
 public partial class Program;

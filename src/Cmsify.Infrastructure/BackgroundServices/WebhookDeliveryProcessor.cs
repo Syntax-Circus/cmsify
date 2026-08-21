@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Interfaces.Services;
 
 namespace Cmsify.Infrastructure.BackgroundServices;
 
@@ -10,11 +11,13 @@ public sealed class WebhookDeliveryProcessor
 {
     private readonly IHttpClientFactory httpClientFactory;
     private readonly IWebhookRepository webhookRepository;
+    private readonly IWebhookDestinationValidator destinationValidator;
 
-    public WebhookDeliveryProcessor(IHttpClientFactory httpClientFactory, IWebhookRepository webhookRepository)
+    public WebhookDeliveryProcessor(IHttpClientFactory httpClientFactory, IWebhookRepository webhookRepository, IWebhookDestinationValidator destinationValidator)
     {
         this.httpClientFactory = httpClientFactory;
         this.webhookRepository = webhookRepository;
+        this.destinationValidator = destinationValidator;
     }
 
     public async Task DeliverInitialAsync(WebhookEvent evt, WebhookDispatchTargetDto target, CancellationToken ct)
@@ -55,11 +58,17 @@ public sealed class WebhookDeliveryProcessor
 
     private async Task<(bool IsSuccess, int? StatusCode)> PostAsync(string url, string secret, JsonElement payload, CancellationToken ct)
     {
+        var destination = await destinationValidator.ValidateAsync(url, ct);
+        if (!destination.IsValid)
+        {
+            return (false, null);
+        }
+
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
         using var content = new ByteArrayContent(payloadBytes);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        using var request = new HttpRequestMessage(HttpMethod.Post, destination.NormalizedUrl)
         {
             Content = content
         };
@@ -67,7 +76,7 @@ public sealed class WebhookDeliveryProcessor
 
         try
         {
-            var response = await httpClientFactory.CreateClient(nameof(WebhookDeliveryProcessor)).SendAsync(request, ct);
+            using var response = await httpClientFactory.CreateClient(nameof(WebhookDeliveryProcessor)).SendAsync(request, ct);
             return (response.IsSuccessStatusCode, (int)response.StatusCode);
         }
         catch (HttpRequestException)

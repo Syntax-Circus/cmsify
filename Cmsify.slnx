@@ -1,15 +1,45 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <File Path=".env.example" />
+    <File Path=".github/copilot-instructions.md" />
+    <File Path=".github/workflows/admin-accessibility.yml" />
+    <File Path=".github/workflows/dotnet-test.yml" />
+    <File Path=".github/workflows/npm-publish-cmsify-client.yml" />
+    <File Path=".github/workflows/nuget-publish-cmsify.yml" />
+    <File Path=".github/workflows/typescript-sdk.yml" />
     <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
+    <File Path="Directory.Build.targets" />
+    <File Path="Directory.Packages.props" />
     <File Path="docker-compose.prod.yml" />
     <File Path="docker-compose.yml" />
+    <File Path="GitVersion.yml" />
     <File Path="LICENSE" />
+    <File Path="publish.ps1" />
     <File Path="README.md" />
   </Folder>
   <Project Path="src\Cmsify.Admin\Cmsify.Admin.csproj" />
   <Project Path="src\Cmsify.Api\Cmsify.Api.csproj" />
   <Project Path="src\Cmsify.Core\Cmsify.Core.csproj" />
+  <Project Path="src\Cmsify.Contracts\Cmsify.Contracts.csproj" />
+  <Project Path="sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
+  <Folder Name="/Solution Items/.github/">
+    <File Path=".github/copilot-instructions.md" />
+    <File Path=".github/workflows/admin-accessibility.yml" />
+    <File Path=".github/workflows/dotnet-test.yml" />
+    <File Path=".github/workflows/npm-publish-cmsify-client.yml" />
+    <File Path=".github/workflows/nuget-publish-cmsify.yml" />
+    <File Path=".github/workflows/typescript-sdk.yml" />
+  </Folder>
+  <Folder Name="/Solution Items/.github/workflows/">
+    <File Path=".github/workflows/admin-accessibility.yml" />
+    <File Path=".github/workflows/dotnet-test.yml" />
+    <File Path=".github/workflows/npm-publish-cmsify-client.yml" />
+    <File Path=".github/workflows/nuget-publish-cmsify.yml" />
+    <File Path=".github/workflows/typescript-sdk.yml" />
+  </Folder>
+  <Project Path="sdk\dotnet\src\SyntaxCircus.Cmsify.Client.DistributedCaching\SyntaxCircus.Cmsify.Client.DistributedCaching.csproj" />
+  <Project Path="sdk\dotnet\tests\SyntaxCircus.Cmsify.Client.Tests\SyntaxCircus.Cmsify.Client.Tests.csproj" />
   <Project Path="src\Cmsify.Infrastructure\Cmsify.Infrastructure.csproj" />
   <Project Path="tests\Cmsify.Admin.Integration.Tests\Cmsify.Admin.Integration.Tests.csproj" />
   <Project Path="tests\Cmsify.Api.Integration.Tests\Cmsify.Api.Integration.Tests.csproj" />

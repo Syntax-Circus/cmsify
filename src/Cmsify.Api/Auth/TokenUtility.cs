@@ -8,7 +8,7 @@ public static class TokenUtility
 {
     public static string GenerateSessionToken() => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(48));
 
-    public static string GenerateApiToken() => $"cmsify_{WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(48))}";
+    public static string GenerateApiToken(string identifier) => $"cmsify_{identifier}_{WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(48))}";
 
     public static string Sha256Hash(string token)
     {

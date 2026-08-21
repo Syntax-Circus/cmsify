@@ -22,6 +22,10 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<TemplateFieldAllowedType> TemplateFieldAllowedTypes => Set<TemplateFieldAllowedType>();
 
+    public DbSet<ComponentDefinition> Components => Set<ComponentDefinition>();
+    public DbSet<ComponentVersion> ComponentVersions => Set<ComponentVersion>();
+    public DbSet<ComponentField> ComponentFields => Set<ComponentField>();
+
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
 
     public DbSet<ContentFieldValue> ContentFieldValues => Set<ContentFieldValue>();
@@ -55,6 +59,10 @@ public sealed class CmsifyDbContext : DbContext
     public DbSet<PickList> PickLists => Set<PickList>();
 
     public DbSet<PickListOption> PickListOptions => Set<PickListOption>();
+
+    public DbSet<PickListRevision> PickListRevisions => Set<PickListRevision>();
+
+    public DbSet<PickListRevisionOption> PickListRevisionOptions => Set<PickListRevisionOption>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

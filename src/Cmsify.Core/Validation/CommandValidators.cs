@@ -1,4 +1,5 @@
 using Cmsify.Core.Interfaces.Repositories;
+using Cmsify.Core.Domain.ValueObjects;
 using FluentValidation;
 
 namespace Cmsify.Core.Validation;
@@ -8,7 +9,7 @@ public sealed class CreateWorkspaceCommandValidator : AbstractValidator<CreateWo
     public CreateWorkspaceCommandValidator()
     {
         RuleFor(command => command.Name).NotEmpty().MaximumLength(200);
-        RuleFor(command => command.Slug).NotEmpty().Matches("^[a-z0-9]+(?:-[a-z0-9]+)*$").MaximumLength(200);
+        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage);
         RuleFor(command => command.Description).MaximumLength(1_000);
     }
 }
@@ -19,7 +20,7 @@ public sealed class UpdateWorkspaceCommandValidator : AbstractValidator<UpdateWo
     {
         RuleFor(command => command.Id).NotEmpty();
         RuleFor(command => command.Name).NotEmpty().MaximumLength(200);
-        RuleFor(command => command.Slug).NotEmpty().Matches("^[a-z0-9]+(?:-[a-z0-9]+)*$").MaximumLength(200);
+        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage);
         RuleFor(command => command.Description).MaximumLength(1_000);
     }
 }
@@ -30,7 +31,7 @@ public sealed class CreateTemplateCommandValidator : AbstractValidator<CreateTem
     {
         RuleFor(command => command.WorkspaceId).NotEmpty();
         RuleFor(command => command.Name).NotEmpty().MaximumLength(200);
-        RuleFor(command => command.Slug).NotEmpty().Matches("^[a-z0-9]+(?:-[a-z0-9]+)*$").MaximumLength(200);
+        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage);
         RuleFor(command => command.Description).MaximumLength(1_000);
         RuleFor(command => command.TitleFieldKey).Matches("^[a-zA-Z][a-zA-Z0-9_]*$").When(command => command.TitleFieldKey is not null);
     }
@@ -42,7 +43,7 @@ public sealed class UpdateTemplateCommandValidator : AbstractValidator<UpdateTem
     {
         RuleFor(command => command.Id).NotEmpty();
         RuleFor(command => command.Name).NotEmpty().MaximumLength(200);
-        RuleFor(command => command.Slug).NotEmpty().Matches("^[a-z0-9]+(?:-[a-z0-9]+)*$").MaximumLength(200);
+        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage);
         RuleFor(command => command.Description).MaximumLength(1_000);
         RuleFor(command => command.TitleFieldKey).Matches("^[a-zA-Z][a-zA-Z0-9_]*$").When(command => command.TitleFieldKey is not null);
     }
@@ -69,10 +70,10 @@ public sealed class TemplateFieldInputValidator : AbstractValidator<TemplateFiel
             .Must(field => !field.MaxOccurrences.HasValue || field.MaxOccurrences.Value >= field.MinOccurrences)
             .WithMessage("MaxOccurrences must be greater than or equal to MinOccurrences.");
         RuleFor(field => field)
-            .Must(field => field.IsOpen || (field.PrimitiveType.HasValue ^ field.TemplateId.HasValue))
-            .WithMessage("Constrained fields must define exactly one of PrimitiveType or TemplateId.");
+            .Must(field => field.IsOpen || (field.PrimitiveType.HasValue ? 1 : 0) + (field.TemplateId.HasValue ? 1 : 0) + (field.ComponentId.HasValue ? 1 : 0) == 1)
+            .WithMessage("Constrained fields must define exactly one of PrimitiveType, TemplateId, or ComponentId.");
         RuleFor(field => field)
-            .Must(field => !field.IsOpen || (!field.PrimitiveType.HasValue && !field.TemplateId.HasValue))
+            .Must(field => !field.IsOpen || (!field.PrimitiveType.HasValue && !field.TemplateId.HasValue && !field.ComponentId.HasValue))
             .WithMessage("Open fields cannot define PrimitiveType or TemplateId.");
     }
 }
@@ -95,7 +96,7 @@ public sealed class CreateContentItemCommandValidator : AbstractValidator<Create
     {
         RuleFor(command => command.WorkspaceId).NotEmpty();
         RuleFor(command => command.TemplateVersionId).NotEmpty();
-        RuleFor(command => command.Slug).Matches("^[a-z0-9]+(?:-[a-z0-9]+)*$").When(command => command.Slug is not null);
+        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage).When(command => command.Slug is not null);
         RuleForEach(command => command.FieldValues).ChildRules(value =>
         {
             value.RuleFor(fieldValue => fieldValue.FieldId).NotEmpty();
@@ -109,7 +110,7 @@ public sealed class UpdateContentItemCommandValidator : AbstractValidator<Update
     public UpdateContentItemCommandValidator()
     {
         RuleFor(command => command.Id).NotEmpty();
-        RuleFor(command => command.Slug).Matches("^[a-z0-9]+(?:-[a-z0-9]+)*$").When(command => command.Slug is not null);
+        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage).When(command => command.Slug is not null);
     }
 }
 

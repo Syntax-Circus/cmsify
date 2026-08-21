@@ -4,14 +4,14 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Testcontainers.PostgreSql;
 
 namespace Cmsify.Infrastructure.Tests;
 
 public sealed class WorkspaceAuthorizationServiceTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:17-alpine")
+    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("cmsify")
         .WithUsername("cmsify")
         .WithPassword("cmsify")
@@ -57,7 +57,7 @@ public sealed class WorkspaceAuthorizationServiceTests : IAsyncLifetime
             Email = "editor@example.test",
             DisplayName = "Editor",
             PasswordHash = "hash",
-            Role = UserRole.Admin,
+            Role = UserRole.Reader,
             IsActive = true
         };
         user.WorkspaceAccesses.Add(new UserWorkspaceAccess { WorkspaceId = readWorkspace.Id, AccessLevel = WorkspaceAccessLevel.Read });
@@ -66,7 +66,7 @@ public sealed class WorkspaceAuthorizationServiceTests : IAsyncLifetime
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
 
-        var service = new WorkspaceAuthorizationService(dbContext, new CurrentActorInfo(user.Id, null, UserRole.Admin, null, true));
+        var service = new WorkspaceAuthorizationService(dbContext, new CurrentActorInfo(user.Id, null, UserRole.Reader, null, true));
 
         Assert.True(await service.CanReadWorkspaceAsync(readWorkspace.Id));
         Assert.False(await service.CanWriteWorkspaceAsync(readWorkspace.Id));
@@ -97,8 +97,8 @@ public sealed class WorkspaceAuthorizationServiceTests : IAsyncLifetime
     private async Task<CmsifyDbContext> CreateMigratedContextAsync()
     {
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
-            .UseNpgsql(postgres.GetConnectionString(), npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-            .UseSnakeCaseNamingConvention()
+            .UseNpgsql(postgres.GetConnectionString())
+            .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options;
         var dbContext = new CmsifyDbContext(options);
         await dbContext.Database.MigrateAsync();

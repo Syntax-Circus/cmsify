@@ -22,13 +22,14 @@ public sealed class ApiClientRepository : IApiClientRepository
     public Task<PagedResult<ApiClientDto>> ListAsync(PageRequest page, CancellationToken ct = default) =>
         Scope(dbContext.ApiClients.AsNoTracking()).OrderBy(client => client.Name).ToPagedResultAsync(page, client => client.ToDto(), ct);
 
-    public async Task<ApiClientDto> CreateAsync(CreateApiClientCommand command, string tokenHash, CancellationToken ct = default)
+    public async Task<ApiClientDto> CreateAsync(CreateApiClientCommand command, string tokenHash, string tokenIdentifier, CancellationToken ct = default)
     {
         var entity = new ApiClient
         {
             Name = command.Name,
             Description = command.Description,
             TokenHash = tokenHash,
+            TokenIdentifier = tokenIdentifier,
             Role = command.Role,
             WorkspaceId = command.WorkspaceId,
             ExpiresAt = command.ExpiresAt,

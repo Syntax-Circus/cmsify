@@ -4,6 +4,7 @@ using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Tests;
 
@@ -98,10 +99,8 @@ public sealed partial class ModelConfigurationTests
     public void Model_DoesNotWarnForRequiredFilteredNavigationsOnUserWorkspaceAccess()
     {
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
-            .UseNpgsql(
-                "Host=localhost;Database=cmsify;Username=cmsify;Password=cmsify",
-                npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-            .UseSnakeCaseNamingConvention()
+            .UseNpgsql("Host=localhost;Database=cmsify;Username=cmsify;******")
+            .UseSyntaxCircusSnakeCaseNamingConvention()
             .ConfigureWarnings(warnings => warnings.Throw(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning))
             .Options;
 
@@ -163,10 +162,8 @@ public sealed partial class ModelConfigurationTests
     private static IModel BuildModel()
     {
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
-            .UseNpgsql(
-                "Host=localhost;Database=cmsify;Username=cmsify;Password=cmsify",
-                npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-            .UseSnakeCaseNamingConvention()
+            .UseNpgsql("Host=localhost;Database=cmsify;Username=cmsify;******")
+            .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options;
 
         using var context = new CmsifyDbContext(options);

@@ -30,6 +30,37 @@
 </head>
 <body>
     <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+    <ReconnectModal CssClass="cms-reconnect-modal">
+        <LoadingContent>
+            <div class="cms-reconnect-modal__spinner" aria-hidden="true">
+                <span></span>
+                <span></span>
+            </div>
+        </LoadingContent>
+        <FirstAttemptContent>
+            <p class="cms-reconnect-modal__message">Rejoining the server...</p>
+        </FirstAttemptContent>
+        <RetryingContent>
+            <p class="cms-reconnect-modal__message">
+                Rejoin failed. Trying again in <span id="components-seconds-to-next-attempt"></span> seconds.
+            </p>
+        </RetryingContent>
+        <FailedContent>
+            <p class="cms-reconnect-modal__message">We couldn't reconnect. Retry now, or reload the page.</p>
+        </FailedContent>
+        <RetryActionContent>
+            <button type="button" class="cms-reconnect-modal__action" data-reconnect-action="retry">Retry</button>
+        </RetryActionContent>
+        <PausedContent>
+            <p class="cms-reconnect-modal__message">The server has paused this session.</p>
+        </PausedContent>
+        <ResumeFailedContent>
+            <p class="cms-reconnect-modal__message">We couldn't resume the session. Please try again or reload the page.</p>
+        </ResumeFailedContent>
+        <ResumeActionContent>
+            <button type="button" class="cms-reconnect-modal__action" data-reconnect-action="resume">Resume</button>
+        </ResumeActionContent>
+    </ReconnectModal>
     <script src="js/cmsify.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>

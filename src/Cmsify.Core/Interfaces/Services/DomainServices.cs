@@ -32,6 +32,23 @@ public interface IContentSearchVectorBuilder
     string Build(ContentItem item, TemplateVersion version);
 }
 
+public sealed record ContentEffectiveRange(DateTimeOffset? StartAt, DateTimeOffset? EndAt)
+{
+    public bool IsDefault => !StartAt.HasValue && !EndAt.HasValue;
+}
+
+public sealed record ContentPublishResult(ContentVersion Version, IReadOnlyList<string> Warnings);
+
+public interface IContentPublishingService
+{
+    Task<ContentPublishResult> PublishSnapshotAsync(
+        ContentItem content,
+        ContentEffectiveRange effectiveRange,
+        int? rolledBackFromVersionNumber = null,
+        Guid? actorUserId = null,
+        CancellationToken ct = default);
+}
+
 public interface ICurrentActor
 {
     Guid? UserId { get; }
@@ -69,6 +86,18 @@ public interface IWebhookQueue
     ValueTask EnqueueAsync(WebhookEvent evt, CancellationToken ct = default);
 
     IAsyncEnumerable<WebhookEvent> DequeueAllAsync(CancellationToken ct = default);
+}
+
+public interface IWebhookDestinationValidator
+{
+    Task<WebhookDestinationValidationResult> ValidateAsync(string url, CancellationToken ct = default);
+}
+
+public sealed record WebhookDestinationValidationResult(bool IsValid, string? NormalizedUrl, string? Error)
+{
+    public static WebhookDestinationValidationResult Valid(string normalizedUrl) => new(true, normalizedUrl, null);
+
+    public static WebhookDestinationValidationResult Invalid(string error) => new(false, null, error);
 }
 
 public interface IScheduledPublishingDispatcher

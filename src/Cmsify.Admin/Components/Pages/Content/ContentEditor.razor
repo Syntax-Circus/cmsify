@@ -59,7 +59,8 @@
                 <StatusBadge Status="@item.Status" />
             }
             <label class="form-label mt-3">Slug</label>
-            <InputText class="form-control mb-3" @bind-Value="slug" />
+            <InputText class="form-control mb-1 font-monospace" @bind-Value="slug" aria-describedby="slug-rule" />
+            <div id="slug-rule" class="form-text mb-3">Optional. If supplied: @SlugRules.ValidationMessage</div>
             <label class="form-label">Locale</label>
             <InputText class="form-control mb-3" @bind-Value="locale" />
             <label class="form-label">Tags</label>
@@ -94,6 +95,7 @@
     private readonly Dictionary<Guid, Guid?> assetValues = [];
     private readonly Dictionary<Guid, Guid?> referenceValues = [];
     private readonly Dictionary<Guid, List<string>> multiPickValues = [];
+    private readonly Dictionary<Guid, List<string>> componentValues = [];
     private Dictionary<Guid, PickListResponse> picklistCache = new();
     private Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = new();
 
@@ -120,9 +122,10 @@
         assetValues.Clear();
         referenceValues.Clear();
         multiPickValues.Clear();
+        componentValues.Clear();
 
         var loaded = await Content.GetAsync(WorkspaceId, ContentId.Value);
-        item = loaded.Body;
+        item = loaded;
         slug = item.Slug;
         locale = item.LocaleCode;
         tags = string.Join(",", item.Tags);
@@ -148,6 +151,15 @@
                 }
                 existing.Add(value.TextValue);
             }
+            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue)
+            {
+                if (!componentValues.TryGetValue(value.FieldId, out var values))
+                {
+                    values = [];
+                    componentValues[value.FieldId] = values;
+                }
+                values.Add(value.JsonValue.Value.GetRawText());
+            }
         }
     }
 
@@ -164,7 +176,7 @@
     private async Task LoadTemplateVersionAsync(Guid templateId)
     {
         var template = await Templates.GetAsync(WorkspaceId, templateId);
-        templateVersion = template.Body.CurrentVersion ?? await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version");
+        templateVersion = template.CurrentVersion ?? await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version");
         await LoadPicklistsForFieldsAsync();
         await LoadReferenceOptionsForFieldsAsync();
     }
@@ -178,9 +190,9 @@
 
         var ids = templateVersion.Fields
             .Where(field => field.PrimitiveType == PrimitiveType.PickList)
-            .Select(field => GetPicklistBinding(field).PicklistId)
-            .Where(id => id.HasValue)
-            .Select(id => id!.Value)
+            .Select(GetPicklistBinding)
+            .Where(binding => binding.PicklistId.HasValue && binding.RevisionId.HasValue)
+            .Select(binding => binding.RevisionId!.Value)
             .Distinct()
             .ToList();
 
@@ -191,20 +203,22 @@
                 continue;
             }
 
+            var binding = templateVersion.Fields.Select(GetPicklistBinding).First(binding => binding.RevisionId == id);
             try
             {
-                var loaded = await PickLists.GetAsync(WorkspaceId, id);
-                picklistCache[id] = loaded.Body;
+                var loaded = await PickLists.GetRevisionAsync(WorkspaceId, binding.PicklistId!.Value, id);
+                picklistCache[id] = loaded;
             }
             catch (ProblemDetailsException) { }
         }
     }
 
-    private static (Guid? PicklistId, bool Multiple) GetPicklistBinding(TemplateFieldResponse field)
+    private static (Guid? PicklistId, Guid? RevisionId, bool Multiple) GetPicklistBinding(TemplateFieldResponse field)
     {
         if (field.FieldConfig is JsonElement config && config.ValueKind == JsonValueKind.Object)
         {
             Guid? picklistId = null;
+            Guid? revisionId = null;
             var multiple = false;
             if (config.TryGetProperty("picklistId", out var pickProp) && pickProp.ValueKind == JsonValueKind.String && Guid.TryParse(pickProp.GetString(), out var parsed))
             {
@@ -214,10 +228,14 @@
             {
                 multiple = multiProp.GetBoolean();
             }
-            return (picklistId, multiple);
+            if (config.TryGetProperty("picklistRevisionId", out var revisionProp) && revisionProp.ValueKind == JsonValueKind.String && Guid.TryParse(revisionProp.GetString(), out var parsedRevision))
+            {
+                revisionId = parsedRevision;
+            }
+            return (picklistId, revisionId, multiple);
         }
 
-        return (null, false);
+        return (null, null, false);
     }
 
     private async Task LoadReferenceOptionsForFieldsAsync()
@@ -263,6 +281,36 @@
     private RenderFragment RenderField(TemplateFieldResponse field) => builder =>
     {
         var sequence = 0;
+        if (field.ComponentId.HasValue)
+        {
+            if (!componentValues.TryGetValue(field.Id, out var values))
+            {
+                values = ["{}"];
+                componentValues[field.Id] = values;
+            }
+            for (var index = 0; index < values.Count; index++)
+            {
+                var valueIndex = index;
+                builder.OpenElement(sequence++, "textarea");
+                builder.AddAttribute(sequence++, "class", "form-control font-monospace mb-2");
+                builder.AddAttribute(sequence++, "rows", "8");
+                builder.AddAttribute(sequence++, "placeholder", "{ \"fieldKey\": \"value\" }");
+                builder.AddAttribute(sequence++, "value", values[valueIndex]);
+                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => values[valueIndex] = e.Value?.ToString() ?? "{}"));
+                builder.CloseElement();
+            }
+            if (!field.MaxOccurrences.HasValue || values.Count < field.MaxOccurrences.Value)
+            {
+                builder.OpenElement(sequence++, "button");
+                builder.AddAttribute(sequence++, "type", "button");
+                builder.AddAttribute(sequence++, "class", "btn btn-sm btn-outline-secondary");
+                builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, () => values.Add("{}")));
+                builder.AddContent(sequence++, "Add component");
+                builder.CloseElement();
+            }
+            return;
+        }
+
         if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
         {
             if (field.CompositionMode == CompositionMode.Reference)
@@ -340,7 +388,7 @@
         else if (field.PrimitiveType == PrimitiveType.PickList)
         {
             var binding = GetPicklistBinding(field);
-            if (!binding.PicklistId.HasValue || !picklistCache.TryGetValue(binding.PicklistId.Value, out var picklist))
+            if (!binding.PicklistId.HasValue || !binding.RevisionId.HasValue || !picklistCache.TryGetValue(binding.RevisionId.Value, out var picklist))
             {
                 builder.OpenElement(sequence++, "div");
                 builder.AddAttribute(sequence++, "class", "alert alert-warning py-2 px-3 small mb-0");
@@ -452,9 +500,38 @@
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(slug) && !SlugRules.IsValid(slug))
+        {
+            error = SlugRules.ValidationMessage;
+            return;
+        }
+
         var values = new List<ContentFieldValueRequest>();
         foreach (var field in fields)
         {
+            if (field.ComponentId.HasValue)
+            {
+                var rawValues = componentValues.GetValueOrDefault(field.Id) ?? [];
+                foreach (var raw in rawValues)
+                {
+                    try
+                    {
+                        using var document = JsonDocument.Parse(raw);
+                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        {
+                            error = $"Component field '{field.Label}' must contain JSON objects.";
+                            return;
+                        }
+                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
+                    }
+                    catch (JsonException)
+                    {
+                        error = $"Component field '{field.Label}' contains invalid JSON.";
+                        return;
+                    }
+                }
+                continue;
+            }
             if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
             {
                 if (referenceValues.GetValueOrDefault(field.Id) is Guid referencedId)
@@ -517,19 +594,19 @@
             error = null;
             if (ContentId.HasValue)
             {
-                item = await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(slug, locale, item?.TranslationGroupId, null, tagList, values));
+                item = await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values));
                 Toasts.Success("Draft saved");
             }
             else
             {
-                item = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, slug, locale, null, tagList, values));
+                item = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values));
                 Toasts.Success("Draft created");
                 Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
             }
         }
         catch (ProblemDetailsException ex)
         {
-            error = string.IsNullOrWhiteSpace(ex.Detail) ? ex.Message : ex.Detail;
+            error = ex.Message;
             if (ex.StatusCode == StatusCodes.Status412PreconditionFailed && ContentId.HasValue)
             {
                 await LoadContentAsync();
@@ -549,7 +626,7 @@
             }
             catch (ProblemDetailsException ex)
             {
-                error = string.IsNullOrWhiteSpace(ex.Detail) ? ex.Message : ex.Detail;
+                error = ex.Message;
             }
         }
     }

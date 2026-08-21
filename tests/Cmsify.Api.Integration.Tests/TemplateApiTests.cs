@@ -16,8 +16,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
 {
     private const string SessionExpiresAtHeaderName = "X-Session-Expires-At";
 
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:17-alpine")
+    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("cmsify")
         .WithUsername("cmsify")
         .WithPassword("cmsify")
@@ -231,7 +230,73 @@ public sealed class TemplateApiTests : IAsyncLifetime
         Assert.NotNull(field.FieldConfig);
         Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistId", out var idElement));
         Assert.Equal(picklist.Id.ToString(), idElement.GetString());
+        Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistRevisionId", out var revisionElement));
+        Assert.Equal(picklist.CurrentRevisionId!.Value.ToString(), revisionElement.GetString());
         Assert.False(field.FieldConfig!.Value.TryGetProperty("picklistRef", out _));
+    }
+
+    [Fact]
+    public async Task Components_RejectCircularNestedDefinitions()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var first = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Hero", $"hero-{Guid.NewGuid():N}", null));
+        Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
+        var hero = await first.Content.ReadFromJsonAsync<ComponentResponse>();
+        var second = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Call to action", $"cta-{Guid.NewGuid():N}", null));
+        Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
+        var cta = await second.Content.ReadFromJsonAsync<ComponentResponse>();
+        Assert.NotNull(hero?.CurrentVersion);
+        Assert.NotNull(cta?.CurrentVersion);
+
+        using var heroFields = await client.PutAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/components/{hero.Id}/versions/{hero.CurrentVersion.VersionNumber}/fields",
+            new[] { new ComponentFieldRequest("cta", "CTA", null, 0, false, 0, 1, null, cta.Id, null) });
+        Assert.True(heroFields.IsSuccessStatusCode, await heroFields.Content.ReadAsStringAsync());
+
+        using var circularFields = await client.PutAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/components/{cta.Id}/versions/{cta.CurrentVersion.VersionNumber}/fields",
+            new[] { new ComponentFieldRequest("hero", "Hero", null, 0, false, 0, 1, null, hero.Id, null) });
+        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, circularFields.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdatingPickList_CreatesImmutableRevision()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/picklists", new PickListRequest("Status", $"status-{Guid.NewGuid():N}", null, [new PickListOptionRequest("Draft", "draft", 0)]));
+        create.EnsureSuccessStatusCode();
+        var created = await create.Content.ReadFromJsonAsync<PickListResponse>();
+        Assert.NotNull(created?.CurrentRevisionId);
+        var etag = create.Headers.ETag?.Tag;
+        Assert.False(string.IsNullOrWhiteSpace(etag));
+
+        using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{workspaceId}/picklists/{created.Id}")
+        {
+            Content = JsonContent.Create(new PickListRequest("Status", created.Slug, null, [new PickListOptionRequest("Published", "published", 0)]))
+        };
+        updateRequest.Headers.TryAddWithoutValidation("If-Match", etag);
+        using var update = await client.SendAsync(updateRequest);
+        update.EnsureSuccessStatusCode();
+        var updated = await update.Content.ReadFromJsonAsync<PickListResponse>();
+        Assert.NotNull(updated?.CurrentRevisionId);
+        Assert.NotEqual(created.CurrentRevisionId, updated.CurrentRevisionId);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var revisions = await dbContext.PickListRevisions.Include(revision => revision.Options).Where(revision => revision.PickListId == created.Id).OrderBy(revision => revision.VersionNumber).ToListAsync();
+        Assert.Collection(revisions,
+            revision => Assert.Equal("Draft", Assert.Single(revision.Options).Label),
+            revision => Assert.Equal("Published", Assert.Single(revision.Options).Label));
     }
 
     [Fact]
@@ -438,6 +503,44 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var verifyDbContext = verifyScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
         var updatedSession = await verifyDbContext.UserSessions.AsNoTracking().FirstAsync(candidate => candidate.TokenHash == tokenHash);
         Assert.True((updatedSession.ExpiresAt - headerExpiry).Duration() < TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task OfficialFoundationPackage_ListsAndImportsReusableModels()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var listResponse = await client.GetAsync("/api/v1/packages/official");
+        listResponse.EnsureSuccessStatusCode();
+        var packages = await listResponse.Content.ReadFromJsonAsync<IReadOnlyList<OfficialPackageResponse>>();
+        var foundation = Assert.Single(packages!, package => package.Id == "foundation");
+        Assert.Equal(0, foundation.TemplateCount);
+        Assert.Equal(3, foundation.ComponentCount);
+        Assert.Equal(3, foundation.PickListCount);
+
+        using var importResponse = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/packages/import/official/foundation", null);
+        Assert.True(importResponse.IsSuccessStatusCode, await importResponse.Content.ReadAsStringAsync());
+        var imported = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        Assert.NotNull(imported);
+        Assert.Empty(imported!.Imported);
+        Assert.Equal(3, imported.PickLists.Count);
+        Assert.NotNull(imported.Components);
+        Assert.Equal(3, imported.Components!.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        Assert.Equal(3, await dbContext.PickLists.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation"));
+        Assert.Equal(3, await dbContext.Components.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation"));
+
+        var callToActionStyle = await dbContext.ComponentFields.AsNoTracking()
+            .SingleAsync(field => field.Key == "style" && field.PrimitiveType == PrimitiveType.PickList);
+        Assert.NotNull(callToActionStyle.FieldConfig);
+        Assert.True(callToActionStyle.FieldConfig!.Value.TryGetProperty("picklistId", out var picklistId));
+        Assert.NotEqual(Guid.Empty.ToString(), picklistId.GetString());
     }
 
     private static async Task<Guid> GetWorkspaceIdAsync(WebApplicationFactory<Program> factory)

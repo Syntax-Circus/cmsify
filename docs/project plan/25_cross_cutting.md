@@ -157,9 +157,10 @@ RateLimit__PerActor__PermitPerMinute=600
 RateLimit__PerIp__PermitPerMinute=60
 
 # Logging
-Logging__Serilog__MinimumLevel=Information
-Logging__Serilog__RollingFile__Path=/var/cmsify/logs/cmsify-.log
-Logging__Serilog__RollingFile__RetainedFileCountLimit=31
+Serilog__MinimumLevel__Default=Information
+Serilog__File__Enabled=true
+Serilog__File__Path=/var/cmsify/logs/cmsify-.log
+Serilog__File__RetainedFileCountLimit=14
 ```
 
 Add these keys to `src/Cmsify.Api/.env.example` (see `22_dotenv.md`).

@@ -19,6 +19,10 @@ public sealed class ContentItem : SoftDeletableEntity
 
     public DateTimeOffset? PublishAt { get; set; }
 
+    public DateTimeOffset? PendingEffectiveStartAt { get; set; }
+
+    public DateTimeOffset? PendingEffectiveEndAt { get; set; }
+
     public DateTimeOffset? PublishedAt { get; set; }
 
     public DateTimeOffset? ArchivedAt { get; set; }
@@ -84,6 +88,10 @@ public sealed class ContentVersion : Entity
 
     public IList<string> Tags { get; set; } = new List<string>();
 
+    public DateTimeOffset? EffectiveStartAt { get; set; }
+
+    public DateTimeOffset? EffectiveEndAt { get; set; }
+
     public DateTimeOffset PublishedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset? RetiredAt { get; set; }
@@ -106,6 +114,9 @@ public sealed class ContentVersionFieldValue : Entity
     public ValueKind ValueKind { get; set; }
 
     public string? TextValue { get; set; }
+
+    /// <summary>Label selected at publication time for a pick-list value.</summary>
+    public string? DisplayLabel { get; set; }
 
     public bool? BoolValue { get; set; }
 

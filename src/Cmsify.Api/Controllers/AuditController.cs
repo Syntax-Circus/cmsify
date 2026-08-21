@@ -104,27 +104,33 @@ public sealed class AuditController : ControllerBase
             .Take(pageSize)
             .ToListAsync(ct);
 
-        var responses = new List<AuditLogResponse>();
-        foreach (var log in logs)
-        {
-            responses.Add(new AuditLogResponse(log.Id, log.EntityType, log.EntityId, log.Action, await ResolveActorAsync(log.ActorUserId, log.ActorApiClientId, ct), log.Timestamp, log.WorkspaceId, log.ChangeDelta));
-        }
+        var userIds = logs.Where(log => log.ActorUserId.HasValue).Select(log => log.ActorUserId!.Value).Distinct().ToArray();
+        var apiClientIds = logs.Where(log => log.ActorApiClientId.HasValue).Select(log => log.ActorApiClientId!.Value).Distinct().ToArray();
+        var users = await dbContext.Users.AsNoTracking().Where(user => userIds.Contains(user.Id)).ToDictionaryAsync(user => user.Id, user => user.DisplayName, ct);
+        var apiClients = await dbContext.ApiClients.AsNoTracking().Where(client => apiClientIds.Contains(client.Id)).ToDictionaryAsync(client => client.Id, client => client.Name, ct);
+        var responses = logs.Select(log => new AuditLogResponse(
+            log.Id,
+            log.EntityType,
+            log.EntityId,
+            log.Action,
+            ResolveActor(log.ActorUserId, log.ActorApiClientId, users, apiClients),
+            log.Timestamp,
+            log.WorkspaceId,
+            log.ChangeDelta)).ToArray();
 
         return Ok(new PagedResponse<AuditLogResponse>(responses, total, Math.Max(1, request.Page), pageSize));
     }
 
-    private async Task<AuditActorResponse?> ResolveActorAsync(Guid? userId, Guid? apiClientId, CancellationToken ct)
+    private static AuditActorResponse? ResolveActor(Guid? userId, Guid? apiClientId, IReadOnlyDictionary<Guid, string> users, IReadOnlyDictionary<Guid, string> apiClients)
     {
         if (userId.HasValue)
         {
-            var displayName = await dbContext.Users.AsNoTracking().Where(user => user.Id == userId.Value).Select(user => user.DisplayName).FirstOrDefaultAsync(ct);
-            return new AuditActorResponse("User", userId.Value, displayName);
+            return new AuditActorResponse("User", userId.Value, users.GetValueOrDefault(userId.Value));
         }
 
         if (apiClientId.HasValue)
         {
-            var name = await dbContext.ApiClients.AsNoTracking().Where(client => client.Id == apiClientId.Value).Select(client => client.Name).FirstOrDefaultAsync(ct);
-            return new AuditActorResponse("ApiClient", apiClientId.Value, name);
+            return new AuditActorResponse("ApiClient", apiClientId.Value, apiClients.GetValueOrDefault(apiClientId.Value));
         }
 
         return null;

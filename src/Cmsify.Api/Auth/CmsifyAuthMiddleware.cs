@@ -77,21 +77,27 @@ public sealed class CmsifyAuthMiddleware
             return CurrentActorInfo.Anonymous;
         }
 
-        session.LastSeenAt = now;
-        session.ExpiresAt = LocalSessionLifetime.CalculateExpiresAt(configuration, now);
-        session.IpAddress = context.Connection.RemoteIpAddress?.ToString();
-        await dbContext.SaveChangesAsync();
+        var touchInterval = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Auth:SessionTouchIntervalSeconds", 300), 1, 3600));
+        if (!session.LastSeenAt.HasValue || session.LastSeenAt.Value <= now - touchInterval)
+        {
+            session.LastSeenAt = now;
+            session.ExpiresAt = LocalSessionLifetime.CalculateExpiresAt(configuration, now);
+            session.IpAddress = context.Connection.RemoteIpAddress?.ToString();
+            await dbContext.SaveChangesAsync(context.RequestAborted);
+        }
         context.Response.Headers[LocalSessionLifetime.ExpiresAtHeaderName] = session.ExpiresAt.ToString("O");
 
         return new CurrentActorInfo(user.Id, null, user.Role, null, true, user.IsSuperAdmin);
     }
 
-    private static async Task<ICurrentActor> ResolveApiClientAsync(string rawToken, CmsifyDbContext dbContext)
+    private async Task<ICurrentActor> ResolveApiClientAsync(string rawToken, CmsifyDbContext dbContext)
     {
         var now = DateTimeOffset.UtcNow;
-        var clients = await dbContext.ApiClients
-            .Where(client => client.IsActive && (!client.ExpiresAt.HasValue || client.ExpiresAt > now))
-            .ToListAsync();
+        var tokenIdentifier = TryGetApiTokenIdentifier(rawToken);
+        var query = dbContext.ApiClients.Where(client => client.IsActive && !client.IsDeleted && (!client.ExpiresAt.HasValue || client.ExpiresAt > now));
+        var clients = tokenIdentifier is not null
+            ? await query.Where(client => client.TokenIdentifier == tokenIdentifier).ToListAsync()
+            : await query.Where(client => client.TokenIdentifier == null).ToListAsync();
 
         foreach (var client in clients)
         {
@@ -100,12 +106,24 @@ public sealed class CmsifyAuthMiddleware
                 continue;
             }
 
-            client.LastUsedAt = now;
-            await dbContext.SaveChangesAsync();
+            var touchInterval = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Auth:ApiClientTouchIntervalSeconds", 300), 1, 3600));
+            if (!client.LastUsedAt.HasValue || client.LastUsedAt.Value <= now - touchInterval)
+            {
+                client.LastUsedAt = now;
+                await dbContext.SaveChangesAsync();
+            }
             return new CurrentActorInfo(null, client.Id, client.Role, client.WorkspaceId, true);
         }
 
         return CurrentActorInfo.Anonymous;
+    }
+
+    private static string? TryGetApiTokenIdentifier(string rawToken)
+    {
+        var parts = rawToken.Split('_', StringSplitOptions.None);
+        return parts.Length == 3 && parts[0] == "cmsify" && parts[1].Length is > 0 and <= 64 && parts[2].Length > 0
+            ? parts[1]
+            : null;
     }
 
     private async Task<ICurrentActor> ResolveJwtActorAsync(HttpContext context)

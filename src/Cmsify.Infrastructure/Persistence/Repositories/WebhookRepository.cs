@@ -104,26 +104,53 @@ public sealed class WebhookRepository : IWebhookRepository
     public async Task<IReadOnlyList<WebhookDispatchTargetDto>> GetActiveEndpointsForEventAsync(string eventType, Guid? workspaceId, CancellationToken ct = default)
     {
         var targets = await dbContext.WebhookEndpoints.AsNoTracking()
-            .Where(endpoint => endpoint.IsActive && (!workspaceId.HasValue || endpoint.WorkspaceId == workspaceId.Value))
+            .Where(endpoint => endpoint.IsActive && !endpoint.IsDeleted && (!workspaceId.HasValue || endpoint.WorkspaceId == workspaceId.Value))
             .Where(endpoint => endpoint.Subscriptions.Any(subscription => subscription.EventType == eventType))
             .Select(endpoint => new WebhookDispatchTargetDto(endpoint.Id, endpoint.WorkspaceId, endpoint.Url, endpoint.Secret))
             .ToListAsync(ct);
         return targets.Select(target => target with { Secret = secretProtector.Unprotect(target.Secret) }).ToArray();
     }
 
-    public async Task<IReadOnlyList<PendingWebhookDeliveryDto>> GetPendingDeliveryLogsAsync(DateTimeOffset now, int limit, CancellationToken ct = default) =>
-        (await dbContext.WebhookDeliveryLogs.AsNoTracking()
-            .Where(log => !log.IsDelivered && !log.IsFailed && log.NextRetryAt <= now)
-            .OrderBy(log => log.NextRetryAt)
-            .Take(Math.Clamp(limit, 1, 500))
-            .Join(
-                dbContext.WebhookEndpoints,
-                log => log.WebhookEndpointId,
-                endpoint => endpoint.Id,
-                (log, endpoint) => new PendingWebhookDeliveryDto(log.Id, log.WebhookEndpointId, endpoint.WorkspaceId, log.EventType, endpoint.Url, endpoint.Secret, log.Payload, log.AttemptCount, log.NextRetryAt))
-            .ToListAsync(ct))
-            .Select(delivery => delivery with { Secret = secretProtector.Unprotect(delivery.Secret) })
+    public async Task<IReadOnlyList<PendingWebhookDeliveryDto>> ClaimPendingDeliveryLogsAsync(DateTimeOffset now, int limit, CancellationToken ct = default)
+    {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
+        var logs = await dbContext.WebhookDeliveryLogs
+            .FromSqlInterpolated($"""
+                SELECT * FROM webhook_delivery_logs
+                WHERE NOT is_delivered AND NOT is_failed AND next_retry_at <= {now} AND (lease_expires_at IS NULL OR lease_expires_at <= {now})
+                  AND EXISTS (SELECT 1 FROM webhook_endpoints endpoint WHERE endpoint.id = webhook_delivery_logs.webhook_endpoint_id AND endpoint.is_active AND NOT endpoint.is_deleted)
+                ORDER BY next_retry_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT {Math.Clamp(limit, 1, 500)}
+                """)
+            .ToListAsync(ct);
+
+        if (logs.Count == 0)
+        {
+            await transaction.CommitAsync(ct);
+            return [];
+        }
+
+        var endpointIds = logs.Select(log => log.WebhookEndpointId).Distinct().ToArray();
+        var endpoints = await dbContext.WebhookEndpoints.AsNoTracking()
+            .Where(endpoint => endpointIds.Contains(endpoint.Id))
+            .ToDictionaryAsync(endpoint => endpoint.Id, ct);
+        var leaseUntil = now.AddMinutes(5);
+        foreach (var log in logs)
+        {
+            log.LeaseExpiresAt = leaseUntil;
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return logs
+            .Select(log =>
+            {
+                var endpoint = endpoints[log.WebhookEndpointId];
+                return new PendingWebhookDeliveryDto(log.Id, log.WebhookEndpointId, endpoint.WorkspaceId, log.EventType, endpoint.Url, secretProtector.Unprotect(endpoint.Secret), log.Payload, log.AttemptCount, log.NextRetryAt);
+            })
             .ToArray();
+    }
 
     public async Task MarkDeliverySucceededAsync(Guid deliveryLogId, int statusCode, CancellationToken ct = default)
     {
@@ -134,6 +161,7 @@ public sealed class WebhookRepository : IWebhookRepository
         entity.IsDelivered = true;
         entity.IsFailed = false;
         entity.NextRetryAt = null;
+        entity.LeaseExpiresAt = null;
         await dbContext.SaveChangesAsync(ct);
     }
 
@@ -146,6 +174,7 @@ public sealed class WebhookRepository : IWebhookRepository
         entity.IsDelivered = false;
         entity.IsFailed = isFailed;
         entity.NextRetryAt = isFailed ? null : nextRetryAt;
+        entity.LeaseExpiresAt = null;
         await dbContext.SaveChangesAsync(ct);
     }
 }

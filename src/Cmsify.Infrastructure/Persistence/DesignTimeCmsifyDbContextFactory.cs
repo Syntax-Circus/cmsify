@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Persistence;
 
@@ -8,10 +9,8 @@ public sealed class DesignTimeCmsifyDbContextFactory : IDesignTimeDbContextFacto
     public CmsifyDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
-            .UseNpgsql(
-                "Host=localhost;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify",
-                npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
-            .UseSnakeCaseNamingConvention()
+            .UseNpgsql("Host=localhost;Port=5432;Database=cmsify;Username=cmsify;******")
+            .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options;
 
         return new CmsifyDbContext(options);

@@ -10,7 +10,7 @@ public sealed class WebhookDeliveryLogConfiguration : IEntityTypeConfiguration<W
     {
         builder.ConfigureEntityId();
 
-        builder.HasIndex(log => new { log.IsDelivered, log.IsFailed, log.NextRetryAt });
+        builder.HasIndex(log => new { log.IsDelivered, log.IsFailed, log.NextRetryAt, log.LeaseExpiresAt });
         builder.HasIndex(log => log.WebhookEndpointId);
 
         builder.HasOne<WebhookEndpoint>()
