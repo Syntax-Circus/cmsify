@@ -168,4 +168,18 @@ html, body { min-height: 100%; background: var(--cms-bg); color: var(--cms-text)
 .cms-tree-field { width: 100%; border: 1px solid transparent; background: transparent; text-align: left; border-radius: 6px; padding: 7px 8px; color: var(--cms-text); }
 .cms-tree-field:hover, .cms-tree-field.is-active { background: var(--cms-surface-2); border-color: var(--cms-border); }
 .cms-side-panel { position: fixed; top: 56px; right: 0; bottom: 0; width: 380px; background: var(--cms-surface); border-left: 1px solid var(--cms-border); padding: 20px; z-index: 50; box-shadow: -12px 0 28px rgba(0,0,0,.12); }
+.cms-reconnect-modal { width: min(28rem, calc(100vw - 2rem)); margin: 20vh auto; padding: 0; color: var(--cms-text); background: var(--cms-surface); border: 1px solid var(--cms-border); border-radius: 14px; box-shadow: 0 24px 64px rgba(0,0,0,.35); }
+.cms-reconnect-modal::backdrop { background: rgba(6,3,26,.72); backdrop-filter: blur(2px); }
+.cms-reconnect-modal > div { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 0 2rem; text-align: center; }
+.cms-reconnect-modal > div:first-child { padding-top: 2rem; }
+.cms-reconnect-modal > div:last-child { padding-bottom: 2rem; }
+.cms-reconnect-modal__message { margin: 0; color: var(--cms-text-muted); }
+.cms-reconnect-modal__spinner { position: relative; width: 4rem; height: 4rem; }
+.cms-reconnect-modal__spinner span { position: absolute; inset: 0; border: 3px solid var(--cms-brand-cyan); border-radius: 50%; animation: cms-reconnect-pulse 1.5s cubic-bezier(0,.2,.8,1) infinite; }
+.cms-reconnect-modal__spinner span + span { animation-delay: -.5s; }
+.cms-reconnect-modal__action { display: inline-block; padding: .5rem 1.25rem; color: #fff; background: var(--cms-brand-blue); border: 1px solid var(--cms-brand-blue); border-radius: 8px; font-weight: 600; }
+.cms-reconnect-modal__action:hover { background: var(--cms-focus); border-color: var(--cms-focus); }
+.cms-reconnect-modal__action:focus-visible { outline: 3px solid color-mix(in srgb, var(--cms-focus) 40%, transparent); outline-offset: 3px; }
+@keyframes cms-reconnect-pulse { 0%, 4.9% { transform: scale(0); opacity: 0; } 5% { transform: scale(0); opacity: 1; } 100% { transform: scale(1); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cms-reconnect-modal__spinner span { animation: none; opacity: 1; transform: scale(.75); } }
 @media (max-width: 767.98px) { .cms-sidebar { display: none; } .cms-content { padding: 16px; } .cms-page-head { align-items: stretch; flex-direction: column; } }

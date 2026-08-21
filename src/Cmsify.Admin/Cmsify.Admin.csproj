@@ -14,6 +14,7 @@
   <ItemGroup>
     <PackageReference Include="AspNetCore.SassCompiler" />
     <PackageReference Include="Microsoft.Web.LibraryManager.Build" />
+    <PackageReference Include="SyntaxCircus.Blazor.Components" />
     <PackageReference Include="SyntaxCircus.DotEnv" />
     <PackageReference Include="SyntaxCircus.Http.Resilience" />
   </ItemGroup>
