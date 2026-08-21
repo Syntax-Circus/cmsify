@@ -4,6 +4,7 @@ using Cmsify.Admin.Services;
 using Cmsify.Admin.State;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using SyntaxCircus.AspNetCore.Common;
 using SyntaxCircus.DotEnv;
 using SyntaxCircus.Cmsify;
 
@@ -107,7 +108,7 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapAdminAuthEndpoints();
-app.MapRazorComponents<App>()
+app.MapRazorComponentsWithStaticAssets<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
