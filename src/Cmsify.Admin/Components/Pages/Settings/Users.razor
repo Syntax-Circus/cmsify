@@ -1,7 +1,6 @@
 @page "/settings/users"
 @rendermode InteractiveServer
-@inject UserApiClient UsersClient
-@inject WorkspaceApiClient WorkspacesClient
+@inject CmsifyClient Cmsify
 @inject ToastState Toasts
 
 <div class="cms-page-head">
@@ -82,6 +81,8 @@
 }
 
 @code {
+    private UserClient UsersClient => Cmsify.Users;
+    private WorkspaceClient WorkspacesClient => Cmsify.Workspaces;
     private List<UserDto> users = [];
     private List<WorkspaceDto> workspaces = [];
     private bool creating;
@@ -133,7 +134,7 @@
                 Toasts.Success("User saved");
             }
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             toast = ex.Message;
             return;

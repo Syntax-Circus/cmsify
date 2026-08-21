@@ -1,6 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/components"
 @rendermode InteractiveServer
-@inject ComponentApiClient Components
+@inject CmsifyClient Cmsify
 @inject NavigationManager Navigation
 
 <div class="cms-page-head"><div><h1>Components</h1><div class="lead">Reusable inline schemas for structured content blocks.</div></div><button class="btn btn-primary" @onclick="NewComponent">New Component</button></div>
@@ -29,10 +29,11 @@ else
 }
 
 @code {
+    private ComponentClient Components => Cmsify.Components;
     [Parameter] public Guid WorkspaceId { get; set; }
     private List<ComponentSummaryResponse> items = [];
     private string? error;
-    protected override async Task OnParametersSetAsync() { try { items = (await Components.ListAsync(WorkspaceId)).ToList(); } catch (ProblemDetailsException ex) { error = ex.Message; } }
+    protected override async Task OnParametersSetAsync() { try { items = (await Components.ListAsync(WorkspaceId)).ToList(); } catch (CmsifyApiException ex) { error = ex.Message; } }
     private void NewComponent() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/components/new");
     private void Edit(Guid id) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/components/{id}");
 }

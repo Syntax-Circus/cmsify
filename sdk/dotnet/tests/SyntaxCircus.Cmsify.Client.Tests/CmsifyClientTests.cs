@@ -126,6 +126,78 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task ResponseObserver_SeesEveryResponseBeforeDeserialization()
+    {
+        HttpStatusCode? observedStatus = null;
+        var client = CreateClient(_ => Json(HttpStatusCode.OK, new { value = "ok" }), configure: options =>
+        {
+            options.ResponseObserver = (response, _) =>
+            {
+                observedStatus = response.StatusCode;
+                return Task.CompletedTask;
+            };
+        });
+
+        await client.GetAsync<JsonValue>("/observed", TestContext.Current.CancellationToken);
+
+        observedStatus.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DownloadWithMetadataAsync_PreservesContentHeaders()
+    {
+        var client = CreateClient(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([1, 2, 3])
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-cmsify-package");
+            response.Content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment") { FileNameStar = "starter.ctp" };
+            return response;
+        });
+
+        var download = await client.DownloadWithMetadataAsync("/package", TestContext.Current.CancellationToken);
+
+        download.FileName.ShouldBe("starter.ctp");
+        download.ContentType.ShouldBe("application/x-cmsify-package");
+        download.Content.ShouldBe([1, 2, 3]);
+    }
+
+    [Fact]
+    public async Task PickListDelete_UsesDocumentedRoute()
+    {
+        string? route = null;
+        var client = CreateClient(request =>
+        {
+            route = $"{request.Method} {request.RequestUri!.PathAndQuery}";
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        var workspaceId = Guid.NewGuid();
+        var pickListId = Guid.NewGuid();
+
+        await client.PickLists.DeleteAsync(workspaceId, pickListId, TestContext.Current.CancellationToken);
+
+        route.ShouldBe($"DELETE /api/v1/workspaces/{workspaceId}/picklists/{pickListId}");
+    }
+
+    [Fact]
+    public async Task MediaUpload_ReportsSentBytes()
+    {
+        long reported = 0;
+        var client = CreateClient(request =>
+        {
+            request.Content!.LoadIntoBufferAsync().GetAwaiter().GetResult();
+            return Json(HttpStatusCode.OK, new { });
+        });
+        await using var stream = new MemoryStream([1, 2, 3, 4]);
+
+        await client.Media.UploadAsync(Guid.NewGuid(), stream, "image.png", "image/png", progress: new CallbackProgress(value => reported = value), ct: TestContext.Current.CancellationToken);
+
+        reported.ShouldBe(4);
+    }
+
+    [Fact]
     public async Task ListAllAsync_TraversesPages()
     {
         var page = 0;
@@ -251,5 +323,10 @@ public sealed class CmsifyClientTests
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(handler(request));
+    }
+
+    private sealed class CallbackProgress(Action<long> callback) : IProgress<long>
+    {
+        public void Report(long value) => callback(value);
     }
 }

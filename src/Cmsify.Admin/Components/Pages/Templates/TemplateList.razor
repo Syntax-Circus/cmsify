@@ -1,7 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/templates"
 @rendermode InteractiveServer
-@inject TemplateApiClient Templates
-@inject PackagesApiClient PackageClient
+@inject CmsifyClient Cmsify
 @inject BrowserDownloads Downloads
 @inject NavigationManager Navigation
 @inject ToastState Toasts
@@ -117,6 +116,8 @@ else
 }
 
 @code {
+    private TemplateClient Templates => Cmsify.Templates;
+    private PackageClient PackageClient => Cmsify.Packages;
     [Parameter] public Guid WorkspaceId { get; set; }
     private List<TemplateSummaryResponse> templates = [];
     private string? search;
@@ -190,12 +191,12 @@ else
         try
         {
             var template = exportTemplate;
-            var file = await PackageClient.ExportAsync(WorkspaceId, template.Id, exportPackageNamespace, exportPackageId, exportVersion);
+            var file = await PackageClient.ExportWithMetadataAsync(WorkspaceId, [template.Id], exportPackageNamespace, exportPackageId, exportVersion);
             await Downloads.SaveAsync(file);
             message = $"Exported {template.Name} to {file.FileName}.";
             exportTemplate = null;
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ProblemDetailsDisplay.Format(ex);
         }

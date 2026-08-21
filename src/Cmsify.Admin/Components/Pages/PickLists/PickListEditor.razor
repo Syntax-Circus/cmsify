@@ -1,7 +1,7 @@
 @page "/workspaces/{WorkspaceId:guid}/picklists/new"
 @page "/workspaces/{WorkspaceId:guid}/picklists/{PickListId:guid}"
 @rendermode InteractiveServer
-@inject PickListApiClient PickLists
+@inject CmsifyClient Cmsify
 @inject ToastState Toasts
 @inject NavigationManager Navigation
 
@@ -67,6 +67,7 @@
 </div>
 
 @code {
+    private PickListClient PickLists => Cmsify.PickLists;
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid? PickListId { get; set; }
 
@@ -88,7 +89,7 @@
                 description = loaded.Description;
                 options = loaded.Options.Select(option => new OptionEdit { Label = option.Label, Value = option.Value, Order = option.Order }).ToList();
             }
-            catch (ProblemDetailsException ex)
+            catch (CmsifyApiException ex)
             {
                 error = ex.Message;
             }
@@ -135,7 +136,7 @@
 
             Navigation.NavigateTo($"/workspaces/{WorkspaceId}/picklists");
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
         }

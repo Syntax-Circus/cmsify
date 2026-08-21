@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Cmsify.Admin.Services;
+using SyntaxCircus.Cmsify;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
@@ -27,7 +27,7 @@ public static class AdminAuthEndpoints
         [FromForm] string email,
         [FromForm] string password,
         [FromForm(Name = "returnUrl")] string? returnUrlInput,
-        [FromServices] AuthService authService,
+        [FromServices] CmsifyClient cmsify,
         CancellationToken ct)
     {
         var returnUrl = NormalizeReturnUrl(returnUrlInput);
@@ -40,13 +40,13 @@ public static class AdminAuthEndpoints
         LoginResponse response;
         try
         {
-            response = await authService.LoginAsync(email, password, ct);
+            response = await RequireAsync(cmsify.Auth.LoginAsync(new LoginRequest(email, password), ct));
         }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        catch (CmsifyApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             return Results.Redirect(BuildLoginRedirect(returnUrl, "invalid-credentials"));
         }
-        catch (HttpRequestException)
+        catch (CmsifyApiException)
         {
             return Results.Redirect(BuildLoginRedirect(returnUrl, "api-unavailable"));
         }
@@ -61,7 +61,7 @@ public static class AdminAuthEndpoints
 
     private static async Task<IResult> LogoutAsync(
         HttpContext context,
-        [FromServices] AuthService authService,
+        [FromServices] CmsifyClient cmsify,
         CancellationToken ct)
     {
         var token = context.User.FindFirstValue(CmsifyAuthClaims.ApiToken);
@@ -69,7 +69,7 @@ public static class AdminAuthEndpoints
         {
             try
             {
-                await authService.LogoutAsync(token, ct);
+                await cmsify.Auth.LogoutAsync(ct);
             }
             catch
             {
@@ -141,5 +141,8 @@ public static class AdminAuthEndpoints
 
     private static string BuildLoginRedirect(string returnUrl, string error) =>
         $"/login?returnUrl={Uri.EscapeDataString(returnUrl)}&error={error}";
+
+    private static async Task<T> RequireAsync<T>(Task<T?> task) where T : class =>
+        await task.ConfigureAwait(false) ?? throw new InvalidOperationException("API returned an empty response body.");
 }
 

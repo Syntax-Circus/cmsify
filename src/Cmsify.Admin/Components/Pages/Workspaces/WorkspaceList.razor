@@ -1,6 +1,6 @@
 @page "/workspaces"
 @rendermode InteractiveServer
-@inject WorkspaceApiClient Workspaces
+@inject CmsifyClient Cmsify
 @inject WorkspaceState WorkspaceState
 @inject ToastState Toasts
 @inject NavigationManager Navigation
@@ -82,6 +82,7 @@ else
 }
 
 @code {
+    private WorkspaceClient Workspaces => Cmsify.Workspaces;
     private List<WorkspaceDto> items = [];
     private string? search;
     private WorkspaceEdit? editing;
@@ -145,7 +146,7 @@ else
             var request = new WorkspaceRequest(editing.Name, editing.Slug, editing.Description);
             saved = editing.Id == Guid.Empty ? await Workspaces.CreateAsync(request) : await Workspaces.UpdateAsync(editing.Id, request);
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             editError = ex.Message;
             return;

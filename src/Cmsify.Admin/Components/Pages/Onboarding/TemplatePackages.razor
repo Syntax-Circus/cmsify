@@ -1,6 +1,6 @@
 @page "/onboarding/templates"
 @rendermode InteractiveServer
-@inject PackagesApiClient Packages
+@inject CmsifyClient Cmsify
 @inject WorkspaceState Workspace
 @inject NavigationManager Navigation
 @inject ToastState Toasts
@@ -62,6 +62,7 @@ else
 }
 
 @code {
+    private PackageClient Packages => Cmsify.Packages;
     private IReadOnlyList<OfficialPackageResponse>? packages;
     private readonly HashSet<string> selected = new(StringComparer.OrdinalIgnoreCase);
     private bool installing;
@@ -109,7 +110,7 @@ else
             Toasts.Success(message);
             Navigation.NavigateTo($"/workspaces/{Workspace.Current.Id}/templates");
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ProblemDetailsDisplay.Format(ex);
         }

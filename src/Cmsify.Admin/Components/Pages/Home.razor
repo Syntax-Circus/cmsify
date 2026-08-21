@@ -1,10 +1,11 @@
 @page "/"
 @inject NavigationManager Navigation
-@inject WorkspaceApiClient Workspaces
+@inject CmsifyClient Cmsify
 
 <h1>Loading Cmsify</h1>
 
 @code {
+    private WorkspaceClient Workspaces => Cmsify.Workspaces;
     protected override async Task OnInitializedAsync()
     {
         var workspaces = await Workspaces.ListAsync();

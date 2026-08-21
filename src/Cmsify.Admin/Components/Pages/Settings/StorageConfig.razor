@@ -1,6 +1,6 @@
 @page "/settings/storage"
 @rendermode InteractiveServer
-@inject SettingsApiClient Settings
+@inject CmsifyClient Cmsify
 
 <div class="cms-page-head"><div><h1>Storage</h1><div class="lead">Current media storage provider status.</div></div><button class="btn btn-primary" @onclick="TestAsync">Test connection</button></div>
 
@@ -16,6 +16,7 @@
 </div>
 
 @code {
+    private SettingsClient Settings => Cmsify.Settings;
     private StorageConfigResponse? config;
     private StorageTestResponse? test;
     protected override async Task OnInitializedAsync() => config = await Settings.GetStorageAsync();

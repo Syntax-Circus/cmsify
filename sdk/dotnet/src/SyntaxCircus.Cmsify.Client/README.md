@@ -26,6 +26,8 @@ The client also exposes templates, media, picklists, tags, webhooks, audit, user
 
 Use `Media.DownloadToAsync` or `Packages.ExportToAsync` to stream large files directly to a destination stream. The existing `DownloadAsync` and `ExportAsync` methods retain their byte-array convenience behavior.
 
+Use `DownloadWithMetadataAsync` or `Packages.ExportWithMetadataAsync` when the response filename and content type are needed alongside the bytes. Media uploads accept an optional `IProgress<long>` for sent-byte progress. Consumers that need to inspect response headers can set `CmsifyClientOptions.ResponseObserver`; it runs for each received response before retry, deserialization, or error mapping.
+
 ## Cached content reads
 
 Caching is opt-in and leaves `CmsifyClient.Content` unchanged. Register the in-memory cached facade and use a stable, non-secret partition to keep authorization audiences isolated:

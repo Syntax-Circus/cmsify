@@ -47,6 +47,7 @@ The template defaults to the named local-media volume. Set `Storage__Provider=s3
 **Start here:**
 
 - [Getting started](docs/getting-started.md) — local setup, first login, workspace, and API client token.
+- [Authentication and authorization](docs/authentication-and-authorization.md) — Admin user sessions, API-client tokens, SDK bearer handling, roles, scopes, and token lifecycle.
 - [Operating Cmsify](docs/operations.md) — configuration, production essentials, persistence, health checks, and security.
 
 **Build integrations and content models:**

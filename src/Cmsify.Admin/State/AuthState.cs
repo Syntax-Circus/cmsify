@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using Cmsify.Admin.Auth;
-using Cmsify.Admin.Services;
+using SyntaxCircus.Cmsify;
 using Microsoft.AspNetCore.Components.Authorization;
 
 namespace Cmsify.Admin.State;
@@ -8,8 +8,7 @@ namespace Cmsify.Admin.State;
 public sealed class AuthState : IDisposable
 {
     private readonly AuthenticationStateProvider authenticationStateProvider;
-    private readonly IApiTokenAccessor apiTokenAccessor;
-    private readonly AuthService authService;
+    private readonly CmsifyClient cmsify;
     private UserSummary? user;
     private bool isAuthenticated;
     private bool mustChangePassword;
@@ -17,12 +16,10 @@ public sealed class AuthState : IDisposable
 
     public AuthState(
         AuthenticationStateProvider authenticationStateProvider,
-        IApiTokenAccessor apiTokenAccessor,
-        AuthService authService)
+        CmsifyClient cmsify)
     {
         this.authenticationStateProvider = authenticationStateProvider;
-        this.apiTokenAccessor = apiTokenAccessor;
-        this.authService = authService;
+        this.cmsify = cmsify;
         this.authenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
     }
 
@@ -47,8 +44,7 @@ public sealed class AuthState : IDisposable
 
     public async Task ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken ct = default)
     {
-        var token = await apiTokenAccessor.GetTokenAsync(ct);
-        await authService.ChangePasswordAsync(token, currentPassword, newPassword, ct);
+        await cmsify.Auth.ChangePasswordAsync(new ChangePasswordRequest(currentPassword, newPassword), ct);
         // Callers should follow up by POSTing to AdminAuthEndpoints.RefreshClaimsPath from the
         // browser (JS) and then reloading, so the cookie's MustChangePassword claim is cleared.
         mustChangePassword = false;

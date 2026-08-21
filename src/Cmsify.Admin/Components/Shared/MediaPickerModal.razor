@@ -1,4 +1,4 @@
-@inject MediaApiClient MediaClient
+@inject CmsifyClient Cmsify
 
 @if (Visible)
 {
@@ -37,6 +37,7 @@
 }
 
 @code {
+    private MediaClient MediaClient => Cmsify.Media;
     [Parameter] public bool Visible { get; set; }
     [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
     [Parameter] public string? MimePrefix { get; set; }
@@ -62,7 +63,8 @@
 
     private async Task UploadAsync(InputFileChangeEventArgs args)
     {
-        await MediaClient.UploadAsync(WorkspaceId, args.File, null);
+        await using var stream = args.File.OpenReadStream(1_073_741_824);
+        await MediaClient.UploadAsync(WorkspaceId, stream, args.File.Name, args.File.ContentType);
         await LoadAsync();
     }
 

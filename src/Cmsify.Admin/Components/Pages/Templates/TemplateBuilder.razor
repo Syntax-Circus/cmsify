@@ -2,9 +2,7 @@
 @rendermode InteractiveServer
 @using System.Text.Json
 @using System.Text.Json.Nodes
-@inject TemplateApiClient Templates
-@inject PickListApiClient PickLists
-@inject ComponentApiClient Components
+@inject CmsifyClient Cmsify
 @inject ToastState Toasts
 
 <div class="cms-builder">
@@ -197,6 +195,9 @@
 <ConfirmDialog Visible="@confirmDeleteField" Title="Delete Field" Message="@DeleteFieldMessage" ConfirmText="Delete" OnCancel="CancelDeleteField" OnConfirm="DeleteFieldAsync" />
 
 @code {
+    private TemplateClient Templates => Cmsify.Templates;
+    private PickListClient PickLists => Cmsify.PickLists;
+    private ComponentClient Components => Cmsify.Components;
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid TemplateId { get; set; }
 
@@ -241,7 +242,7 @@
             picklists = (await PickLists.ListAsync(WorkspaceId)).ToList();
             components = (await Components.ListAsync(WorkspaceId)).ToList();
         }
-        catch (ProblemDetailsException) { }
+        catch (CmsifyApiException) { }
         RestoreSelection();
     }
 
@@ -510,7 +511,7 @@
             await operation();
             Toasts.Success(successMessage);
         }
-        catch (ProblemDetailsException ex)
+        catch (CmsifyApiException ex)
         {
             error = ex.Message;
         }
