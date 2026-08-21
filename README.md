@@ -116,19 +116,19 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 
 ## Run in production with Docker
 
-The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. It expects versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images. Docker Hub publishing is not currently enabled in this repository, so publish those images to an accessible registry or build and tag them locally before using the template. It uses a pinned version instead of `latest`, so upgrades are deliberate and reversible.
+The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. It defaults to versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images, but `CMSIFY_IMAGE_PREFIX` can point it at a private registry. It uses a pinned version instead of `latest`, so upgrades are deliberate and reversible.
 
 On the production host, copy the environment template and replace every placeholder with a real value. Keep the resulting file outside source control.
 
 ```bash
 cp docker-compose.prod.env.example .env.prod
-# Edit .env.prod: set CMSIFY_VERSION, database/admin passwords, encryption key, and CORS origin.
+# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, encryption key, and CORS origin.
 # Pull only when CMSIFY_VERSION names an image available from the configured registry.
 docker compose --env-file .env.prod -f docker-compose.prod.yml pull
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
 
-When using locally built images, set `CMSIFY_VERSION=local` and run only `up -d`; see [Operating Cmsify](docs/operations.md#container-deployment) for the build commands.
+When using locally built images, run `./Build-CmsifyDocker.ps1 -ImageTag local`, set `CMSIFY_VERSION=local`, and run only `up -d`; see [Operating Cmsify](docs/operations.md#container-deployment) for private-registry publishing commands.
 
 The Compose sample binds the Admin and API ports to `127.0.0.1` (`5001` and `5000` by default). Put a TLS-terminating reverse proxy such as Caddy or Nginx on the host in front of those ports; configure its public Admin origin as `CORS_ALLOWED_ORIGIN`. To expose the containers directly instead, remove `127.0.0.1:` from the two `ports` mappings and provide TLS outside this sample. Do not expose the PostgreSQL service publicly.
 

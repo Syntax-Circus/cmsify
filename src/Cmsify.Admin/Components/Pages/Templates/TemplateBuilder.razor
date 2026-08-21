@@ -28,12 +28,12 @@
             {
                 <div class="alert alert-danger py-2 px-3 small">@error</div>
             }
-            @foreach (var section in Sections)
+            @foreach (var templateSection in Sections)
             {
-                <button type="button" class="cms-tree-section cms-tree-section--button @(selectedSectionId == section.Id ? "is-active" : "")" @onclick="() => Select(section)">
-                    @section.Name
+                <button type="button" class="cms-tree-section cms-tree-section--button @(selectedSectionId == templateSection.Id ? "is-active" : "")" @onclick="() => Select(templateSection)">
+                    @templateSection.Name
                 </button>
-                @foreach (var field in Fields.Where(f => f.SectionId == section.Id))
+                @foreach (var field in Fields.Where(f => f.SectionId == templateSection.Id))
                 {
                     <button type="button" class="cms-tree-field @(selectedFieldId == field.Id ? "is-active" : "")" draggable="true" @onclick="() => Select(field)">
                         <i class="bi bi-grip-vertical"></i> @field.Label
@@ -69,9 +69,9 @@
                     <label class="form-label">Section</label>
                     <select class="form-select mb-3" value="@FieldSectionValue" @onchange="OnFieldSectionChanged" disabled="@(!CanEdit)">
                         <option value="">No section</option>
-                        @foreach (var section in Sections)
+                        @foreach (var templateSection in Sections)
                         {
-                            <option value="@section.Id">@section.Name</option>
+                            <option value="@templateSection.Id">@templateSection.Name</option>
                         }
                     </select>
                     <label class="form-label">Help text</label>

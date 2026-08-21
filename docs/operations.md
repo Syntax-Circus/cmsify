@@ -8,14 +8,18 @@ Use environment-specific secret management in production. Do not commit credenti
 
 ## Container deployment
 
-The repository's [`docker-compose.prod.yml`](../docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and named volumes for database data, local media, and Admin Data Protection keys. It expects versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images. Docker Hub publishing is currently inactive in this repository; publish the images to an accessible registry or build and tag them locally before using the template:
+The repository's [`docker-compose.prod.yml`](../docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and named volumes for database data, local media, and Admin Data Protection keys. It defaults to versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images. Use `CMSIFY_IMAGE_PREFIX` to pull from a private registry/repository instead.
 
 ```powershell
-docker build -f src/Cmsify.Api/Dockerfile -t syntaxcircus/cmsify-api:local .
-docker build -f src/Cmsify.Admin/Dockerfile -t syntaxcircus/cmsify-admin:local .
+# Build both local images (including amd64 and arm64 tags).
+./Build-CmsifyDocker.ps1 -ImageTag local
+
+# Authenticate separately, then publish a multi-architecture test build.
+docker login registry.example.internal
+./Build-CmsifyDocker.ps1 -ImageTag 0.1.0-test -Registry registry.example.internal/cmsify -Push
 ```
 
-Copy [`docker-compose.prod.env.example`](../docker-compose.prod.env.example) to a private environment file, set `CMSIFY_VERSION=local` (or an exact published image tag), replace all placeholder secrets, then run Compose with `--env-file`.
+Copy [`docker-compose.prod.env.example`](../docker-compose.prod.env.example) to a private environment file, set `CMSIFY_VERSION=local` (or an exact published image tag), set `CMSIFY_IMAGE_PREFIX` to the registry prefix when applicable, replace all placeholder secrets, then run Compose with `--env-file`. The script requires `-Registry` whenever `-Push` is used, and it never accepts registry credentials; authenticate with `docker login` first.
 
 Bind the API and Admin ports to loopback and terminate TLS at a host reverse proxy. If ports are published publicly instead, secure them with TLS and configure the proxy/trusted-forwarded-header settings for that deployment.
 

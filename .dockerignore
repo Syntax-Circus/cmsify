@@ -1,0 +1,23 @@
+# Host build output must not overwrite the container's Linux restore assets.
+**/bin/
+**/obj/
+
+# Local tooling, dependencies, and runtime data are not part of the image context.
+.git/
+.vs/
+**/node_modules/
+.local/
+local/
+artifacts/
+TestResults/
+
+# Keep development secrets and user-specific settings out of images.
+.env
+.env.local
+**/.env
+**/.env.local
+**/.env.*
+!*.env.example
+*.user
+*.suo
+*.rsuser
