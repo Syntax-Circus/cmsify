@@ -11,6 +11,7 @@ theme:
   name: material
   language: en
   logo: assets/cmsify-logo.webp
+  favicon: assets/favicon.ico
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate

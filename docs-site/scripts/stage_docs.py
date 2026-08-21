@@ -68,6 +68,8 @@ def main() -> None:
     logo_destination = STAGED / "assets" / logo_source.name
     logo_destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(logo_source, logo_destination)
+    favicon_source = ROOT / "src" / "Cmsify.Admin" / "wwwroot" / "favicon.ico"
+    shutil.copy2(favicon_source, STAGED / "assets" / favicon_source.name)
 
     for guide in GUIDES:
         write_markdown(STAGED / guide, ROOT / "docs" / guide)
