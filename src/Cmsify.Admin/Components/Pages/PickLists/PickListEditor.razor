@@ -28,7 +28,8 @@
             <label class="form-label mt-2">Name</label>
             <InputText class="form-control mb-3" @bind-Value="name" />
             <label class="form-label">Slug</label>
-            <InputText class="form-control mb-3 font-monospace" @bind-Value="slug" />
+            <InputText class="form-control mb-1 font-monospace" @bind-Value="slug" aria-describedby="slug-rule" />
+            <div id="slug-rule" class="form-text mb-3">@SlugRules.ValidationMessage</div>
             <label class="form-label">Description</label>
             <InputTextArea class="form-control" @bind-Value="description" />
         </div>
@@ -107,7 +108,13 @@
         error = null;
         if (string.IsNullOrWhiteSpace(slug))
         {
-            slug = string.Join('-', (name ?? "").ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            slug = SlugFormatter.FromDisplayName(name);
+        }
+
+        if (!SlugRules.IsValid(slug))
+        {
+            error = SlugRules.ValidationMessage;
+            return;
         }
 
         var request = new PickListRequest(name ?? "", slug, description, options.Select(option => new PickListOptionRequest(option.Label, option.Value, option.Order)).ToArray());

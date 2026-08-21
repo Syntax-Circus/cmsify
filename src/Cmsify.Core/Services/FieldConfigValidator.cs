@@ -12,6 +12,10 @@ public sealed class FieldConfigValidator : IFieldConfigValidator
         var failures = new List<ValidationFailure>();
         if (config is null)
         {
+            if (type == PrimitiveType.PickList)
+            {
+                failures.Add(new ValidationFailure("fieldConfig", "PickList fields require a PickList binding."));
+            }
             return new ValidationResult(failures);
         }
 
@@ -65,17 +69,28 @@ public sealed class FieldConfigValidator : IFieldConfigValidator
 
         if (type == PrimitiveType.PickList)
         {
-            if (config.Value.TryGetProperty("picklistId", out var picklistId)
-                && picklistId.ValueKind != JsonValueKind.Null
-                && (picklistId.ValueKind != JsonValueKind.String || !Guid.TryParse(picklistId.GetString(), out _)))
+            if (!config.Value.TryGetProperty("picklistId", out var picklistId)
+                || picklistId.ValueKind != JsonValueKind.String
+                || !Guid.TryParse(picklistId.GetString(), out _))
             {
-                failures.Add(new ValidationFailure("fieldConfig.picklistId", "PickList picklistId must be a GUID."));
+                failures.Add(new ValidationFailure("fieldConfig.picklistId", "PickList fields require a picklistId GUID."));
+            }
+
+            if (!config.Value.TryGetProperty("picklistRevisionId", out var picklistRevisionId)
+                || picklistRevisionId.ValueKind != JsonValueKind.String
+                || !Guid.TryParse(picklistRevisionId.GetString(), out _))
+            {
+                failures.Add(new ValidationFailure("fieldConfig.picklistRevisionId", "PickList fields require a picklistRevisionId GUID."));
             }
 
             if (config.Value.TryGetProperty("multiple", out var multiple) && multiple.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
             {
                 failures.Add(new ValidationFailure("fieldConfig.multiple", "PickList multiple must be a boolean."));
             }
+        }
+        else if (config.Value.TryGetProperty("picklistId", out _) || config.Value.TryGetProperty("picklistRevisionId", out _) || config.Value.TryGetProperty("multiple", out _))
+        {
+            failures.Add(new ValidationFailure("fieldConfig", "PickList configuration is only supported on PickList fields."));
         }
 
         return new ValidationResult(failures);

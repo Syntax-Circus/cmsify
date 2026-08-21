@@ -21,6 +21,8 @@ The API listens on `http://localhost:5000` and the admin UI on `http://localhost
 
 Cmsify applies migrations on API startup. It also creates the default workspace and the first admin user when the database is empty. The seeded values come from `Seed:DefaultWorkspace:*` and `Seed:Admin:*` configuration keys; the sample password is for local development only.
 
+Before defining your first model, read [Content modeling](content-modeling.md). It explains the roles of templates (content-type schemas), components (reusable inline schemas), and content items (the authored, publishable instances).
+
 ## Sign in and create an API client
 
 1. Open the admin UI and sign in with `Seed:Admin:Email` and `Seed:Admin:Password`.
@@ -30,6 +32,10 @@ Cmsify applies migrations on API startup. It also creates the default workspace 
 5. Copy the returned `cmsify_...` token immediately. Cmsify stores only a hash and never shows the raw token again.
 
 Use the token only from a server-side process or secret store. Do not put it in browser JavaScript, a public environment variable, a committed `.env` file, or a client-side bundle.
+
+## Slugs
+
+Workspace, template, component, picklist, and content slugs use lowercase ASCII letters and digits, with single `-` or `_` separators between alphanumeric segments. They are limited to 100 characters. For example, `blog-post` and `blog_post_2` are valid; `Blog/Post`, `blog post`, and `blog--post` are not. Content slugs are optional, but follow the same rule when supplied.
 
 ## Verify the API
 

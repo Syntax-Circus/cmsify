@@ -12,9 +12,11 @@ Use the Admin **Components** page to manage schemas. In the content editor, comp
 
 ## Choice sets
 
-Pick lists remain shared, workspace-scoped option catalogs. Every edit creates an immutable revision, and template field configuration can bind `picklistRevisionId` alongside `picklistId`.
+Pick lists remain shared, workspace-scoped option catalogs. Every edit creates an immutable revision. PickList template and component fields must bind both `picklistId` and `picklistRevisionId`; they keep that revision until a draft is deliberately rebound to a newer revision. Set `multiple` to allow multiple selected option values.
 
 At publication, Cmsify stores the option label in the content-version snapshot. Use `displayLabel` when displaying historical published content and `textValue` as the stable option value. Later option renames or deletions never change already-published labels.
+
+For component JSON, use the component field key and provide a PickList value as a string, or an array of strings when `multiple` is enabled. Every submitted value must exist in the field's bound PickList revision.
 
 ## API and SDK
 

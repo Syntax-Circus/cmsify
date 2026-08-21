@@ -127,6 +127,9 @@ public sealed class PickListApiClient : CmsifyApiClientBase
     public Task<PickListResponse> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) =>
         RequireAsync(GetWithETagAsync<PickListResponse>($"/api/v1/workspaces/{workspaceId}/picklists/{id}", ct, useConditionalRequest: false));
 
+    public Task<PickListResponse> GetRevisionAsync(Guid workspaceId, Guid id, Guid revisionId, CancellationToken ct = default) =>
+        RequireAsync(GetAsync<PickListResponse>($"/api/v1/workspaces/{workspaceId}/picklists/{id}/revisions/{revisionId}", ct));
+
     public Task<PickListResponse> CreateAsync(Guid workspaceId, PickListRequest request, CancellationToken ct = default) =>
         RequireAsync(PostAsync<PickListRequest, PickListResponse>($"/api/v1/workspaces/{workspaceId}/picklists", request, ct));
 
@@ -372,7 +375,12 @@ public sealed class PackagesApiClient : CmsifyApiClientBase
 
     public async Task<FileDownloadResponse> ExportAsync(Guid workspaceId, Guid templateId, string packageNamespace, string id, string version, CancellationToken ct = default)
     {
-        var url = $"/api/v1/workspaces/{workspaceId}/packages/export?templateIds={Uri.EscapeDataString(templateId.ToString())}&packageNamespace={Uri.EscapeDataString(packageNamespace)}&id={Uri.EscapeDataString(id)}&version={Uri.EscapeDataString(version)}";
+        return await ExportAsync(workspaceId, [templateId], [], [], packageNamespace, id, version, ct);
+    }
+
+    public async Task<FileDownloadResponse> ExportAsync(Guid workspaceId, IReadOnlyList<Guid> templateIds, IReadOnlyList<Guid> componentIds, IReadOnlyList<Guid> picklistIds, string packageNamespace, string id, string version, CancellationToken ct = default)
+    {
+        var url = $"/api/v1/workspaces/{workspaceId}/packages/export?templateIds={Uri.EscapeDataString(string.Join(',', templateIds))}&componentIds={Uri.EscapeDataString(string.Join(',', componentIds))}&picklistIds={Uri.EscapeDataString(string.Join(',', picklistIds))}&packageNamespace={Uri.EscapeDataString(packageNamespace)}&id={Uri.EscapeDataString(id)}&version={Uri.EscapeDataString(version)}";
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         // SendAsync already runs EnsureSuccessAsync (throwing ProblemDetailsException on non-success), so no
         // separate success check is needed before reading the raw byte content below.

@@ -505,6 +505,44 @@ public sealed class TemplateApiTests : IAsyncLifetime
         Assert.True((updatedSession.ExpiresAt - headerExpiry).Duration() < TimeSpan.FromSeconds(1));
     }
 
+    [Fact]
+    public async Task OfficialFoundationPackage_ListsAndImportsReusableModels()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var listResponse = await client.GetAsync("/api/v1/packages/official");
+        listResponse.EnsureSuccessStatusCode();
+        var packages = await listResponse.Content.ReadFromJsonAsync<IReadOnlyList<OfficialPackageResponse>>();
+        var foundation = Assert.Single(packages!, package => package.Id == "foundation");
+        Assert.Equal(0, foundation.TemplateCount);
+        Assert.Equal(3, foundation.ComponentCount);
+        Assert.Equal(3, foundation.PickListCount);
+
+        using var importResponse = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/packages/import/official/foundation", null);
+        Assert.True(importResponse.IsSuccessStatusCode, await importResponse.Content.ReadAsStringAsync());
+        var imported = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        Assert.NotNull(imported);
+        Assert.Empty(imported!.Imported);
+        Assert.Equal(3, imported.PickLists.Count);
+        Assert.NotNull(imported.Components);
+        Assert.Equal(3, imported.Components!.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        Assert.Equal(3, await dbContext.PickLists.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation"));
+        Assert.Equal(3, await dbContext.Components.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation"));
+
+        var callToActionStyle = await dbContext.ComponentFields.AsNoTracking()
+            .SingleAsync(field => field.Key == "style" && field.PrimitiveType == PrimitiveType.PickList);
+        Assert.NotNull(callToActionStyle.FieldConfig);
+        Assert.True(callToActionStyle.FieldConfig!.Value.TryGetProperty("picklistId", out var picklistId));
+        Assert.NotEqual(Guid.Empty.ToString(), picklistId.GetString());
+    }
+
     private static async Task<Guid> GetWorkspaceIdAsync(WebApplicationFactory<Program> factory)
     {
         using var scope = factory.Services.CreateScope();

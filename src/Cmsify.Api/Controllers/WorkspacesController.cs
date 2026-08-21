@@ -1,5 +1,6 @@
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Domain.ValueObjects;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Core.Domain.Entities;
@@ -42,6 +43,11 @@ public sealed class WorkspacesController : ControllerBase
             return Forbid();
         }
 
+        if (!SlugRules.IsValid(command.Slug))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid workspace", SlugRules.ValidationMessage);
+        }
+
         var workspace = await workspaceRepository.CreateAsync(command, ct);
         Response.Headers.ETag = ToETag(workspace);
         return CreatedAtAction(nameof(Get), new { id = workspace.Id }, workspace);
@@ -78,6 +84,11 @@ public sealed class WorkspacesController : ControllerBase
         if (!IfMatchMatches(existing))
         {
             return StatusCode(StatusCodes.Status412PreconditionFailed);
+        }
+
+        if (!SlugRules.IsValid(request.Slug))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid workspace", SlugRules.ValidationMessage);
         }
 
         var workspace = await workspaceRepository.UpdateAsync(new UpdateWorkspaceCommand(id, request.Name, request.Slug, request.Description), ct);

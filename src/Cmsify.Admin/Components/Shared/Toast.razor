@@ -1,12 +1,70 @@
 @if (!string.IsNullOrWhiteSpace(Message))
 {
-    <div class="cms-toast @(Variant == "danger" ? "cms-toast--danger" : null)" role="status">
+    <div class="cms-toast @(Variant == "danger" ? "cms-toast--danger" : null)" role="status" aria-live="polite">
         <i class="bi @(Variant == "danger" ? "bi-x-octagon-fill" : "bi-check-circle-fill")"></i>
         <span>@Message</span>
+        <button class="cms-toast__dismiss" type="button" title="Dismiss notification" aria-label="Dismiss notification" @onclick="DismissAsync"><i class="bi bi-x-lg"></i></button>
     </div>
 }
+
+@implements IDisposable
 
 @code {
     [Parameter] public string? Message { get; set; }
     [Parameter] public string Variant { get; set; } = "success";
+    [Parameter] public int Version { get; set; }
+    [Parameter] public EventCallback OnDismiss { get; set; }
+
+    private CancellationTokenSource? dismissalCancellation;
+    private int scheduledVersion = -1;
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Message))
+        {
+            CancelDismissal();
+            return Task.CompletedTask;
+        }
+
+        if (scheduledVersion == Version)
+        {
+            return Task.CompletedTask;
+        }
+
+        CancelDismissal();
+        scheduledVersion = Version;
+        dismissalCancellation = new CancellationTokenSource();
+        _ = DismissAfterDelayAsync(Version, dismissalCancellation.Token);
+        return Task.CompletedTask;
+    }
+
+    public void Dispose() => CancelDismissal();
+
+    private async Task DismissAfterDelayAsync(int version, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            if (!cancellationToken.IsCancellationRequested && scheduledVersion == version)
+            {
+                await InvokeAsync(() => OnDismiss.InvokeAsync());
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task DismissAsync()
+    {
+        CancelDismissal();
+        await OnDismiss.InvokeAsync();
+    }
+
+    private void CancelDismissal()
+    {
+        dismissalCancellation?.Cancel();
+        dismissalCancellation?.Dispose();
+        dismissalCancellation = null;
+    }
 }

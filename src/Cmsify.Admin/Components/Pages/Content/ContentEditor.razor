@@ -59,7 +59,8 @@
                 <StatusBadge Status="@item.Status" />
             }
             <label class="form-label mt-3">Slug</label>
-            <InputText class="form-control mb-3" @bind-Value="slug" />
+            <InputText class="form-control mb-1 font-monospace" @bind-Value="slug" aria-describedby="slug-rule" />
+            <div id="slug-rule" class="form-text mb-3">Optional. If supplied: @SlugRules.ValidationMessage</div>
             <label class="form-label">Locale</label>
             <InputText class="form-control mb-3" @bind-Value="locale" />
             <label class="form-label">Tags</label>
@@ -189,9 +190,9 @@
 
         var ids = templateVersion.Fields
             .Where(field => field.PrimitiveType == PrimitiveType.PickList)
-            .Select(field => GetPicklistBinding(field).PicklistId)
-            .Where(id => id.HasValue)
-            .Select(id => id!.Value)
+            .Select(GetPicklistBinding)
+            .Where(binding => binding.PicklistId.HasValue && binding.RevisionId.HasValue)
+            .Select(binding => binding.RevisionId!.Value)
             .Distinct()
             .ToList();
 
@@ -202,20 +203,22 @@
                 continue;
             }
 
+            var binding = templateVersion.Fields.Select(GetPicklistBinding).First(binding => binding.RevisionId == id);
             try
             {
-                var loaded = await PickLists.GetAsync(WorkspaceId, id);
+                var loaded = await PickLists.GetRevisionAsync(WorkspaceId, binding.PicklistId!.Value, id);
                 picklistCache[id] = loaded;
             }
             catch (ProblemDetailsException) { }
         }
     }
 
-    private static (Guid? PicklistId, bool Multiple) GetPicklistBinding(TemplateFieldResponse field)
+    private static (Guid? PicklistId, Guid? RevisionId, bool Multiple) GetPicklistBinding(TemplateFieldResponse field)
     {
         if (field.FieldConfig is JsonElement config && config.ValueKind == JsonValueKind.Object)
         {
             Guid? picklistId = null;
+            Guid? revisionId = null;
             var multiple = false;
             if (config.TryGetProperty("picklistId", out var pickProp) && pickProp.ValueKind == JsonValueKind.String && Guid.TryParse(pickProp.GetString(), out var parsed))
             {
@@ -225,10 +228,14 @@
             {
                 multiple = multiProp.GetBoolean();
             }
-            return (picklistId, multiple);
+            if (config.TryGetProperty("picklistRevisionId", out var revisionProp) && revisionProp.ValueKind == JsonValueKind.String && Guid.TryParse(revisionProp.GetString(), out var parsedRevision))
+            {
+                revisionId = parsedRevision;
+            }
+            return (picklistId, revisionId, multiple);
         }
 
-        return (null, false);
+        return (null, null, false);
     }
 
     private async Task LoadReferenceOptionsForFieldsAsync()
@@ -303,6 +310,7 @@
             }
             return;
         }
+
         if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
         {
             if (field.CompositionMode == CompositionMode.Reference)
@@ -380,7 +388,7 @@
         else if (field.PrimitiveType == PrimitiveType.PickList)
         {
             var binding = GetPicklistBinding(field);
-            if (!binding.PicklistId.HasValue || !picklistCache.TryGetValue(binding.PicklistId.Value, out var picklist))
+            if (!binding.PicklistId.HasValue || !binding.RevisionId.HasValue || !picklistCache.TryGetValue(binding.RevisionId.Value, out var picklist))
             {
                 builder.OpenElement(sequence++, "div");
                 builder.AddAttribute(sequence++, "class", "alert alert-warning py-2 px-3 small mb-0");
@@ -492,6 +500,12 @@
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(slug) && !SlugRules.IsValid(slug))
+        {
+            error = SlugRules.ValidationMessage;
+            return;
+        }
+
         var values = new List<ContentFieldValueRequest>();
         foreach (var field in fields)
         {
@@ -580,12 +594,12 @@
             error = null;
             if (ContentId.HasValue)
             {
-                item = await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(slug, locale, item?.TranslationGroupId, null, tagList, values));
+                item = await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values));
                 Toasts.Success("Draft saved");
             }
             else
             {
-                item = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, slug, locale, null, tagList, values));
+                item = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values));
                 Toasts.Success("Draft created");
                 Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
             }

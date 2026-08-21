@@ -1,5 +1,6 @@
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
+using Cmsify.Core.Domain.ValueObjects;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
@@ -76,6 +77,34 @@ public sealed class PickListsController : ControllerBase
             ? await dbContext.PickListRevisions.Where(revision => revision.Id == picklist.CurrentRevisionId.Value).Select(revision => revision.VersionNumber).SingleOrDefaultAsync(ct)
             : 0;
         return Ok(ToResponse(picklist, revisionNumber));
+    }
+
+    [HttpGet("{id:guid}/revisions/{revisionId:guid}")]
+    public async Task<ActionResult<PickListResponse>> GetRevision(Guid workspaceId, Guid id, Guid revisionId, CancellationToken ct)
+    {
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        {
+            return NotFound();
+        }
+
+        var picklist = await dbContext.PickLists.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id && item.WorkspaceId == workspaceId && !item.IsDeleted, ct);
+        var revision = await dbContext.PickListRevisions.AsNoTracking()
+            .Include(item => item.Options)
+            .FirstOrDefaultAsync(item => item.Id == revisionId && item.PickListId == id, ct);
+        if (picklist is null || revision is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new PickListResponse(
+            picklist.Id,
+            picklist.Name,
+            picklist.Slug,
+            picklist.Description,
+            revision.Options.OrderBy(option => option.Order).Select(option => new PickListOptionResponse(option.Id, option.Label, option.Value, option.Order)).ToArray(),
+            revision.Id,
+            revision.VersionNumber));
     }
 
     [HttpPost]
@@ -241,9 +270,9 @@ public sealed class PickListsController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid picklist", "Name is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Slug))
+        if (!SlugRules.IsValid(request.Slug))
         {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid picklist", "Slug is required.");
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid picklist", SlugRules.ValidationMessage);
         }
 
         var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

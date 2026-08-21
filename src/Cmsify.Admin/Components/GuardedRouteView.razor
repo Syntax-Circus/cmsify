@@ -2,6 +2,7 @@
 @inject AuthState Auth
 @inject NavigationManager Navigation
 @inject UserPreferencesState Preferences
+@inject WorkspaceState Workspace
 
 @if (ready)
 {
@@ -29,12 +30,48 @@
             return;
         }
 
-        if (Auth.IsAuthenticated && Auth.MustChangePassword && !isChangePassword && !isLogin)
+        if (!Auth.IsAuthenticated)
+        {
+            ready = true;
+            return;
+        }
+
+        if (Auth.MustChangePassword && !isChangePassword && !isLogin)
         {
             Navigation.NavigateTo($"/account/change-password?returnUrl={Uri.EscapeDataString(path)}", replace: true);
             return;
         }
 
+        if (Auth.User is not { Id: var userId } || userId == Guid.Empty)
+        {
+            Navigation.NavigateTo("/login", replace: true);
+            return;
+        }
+
+        await Workspace.InitializeAsync(userId);
+
+        if (path.Equals("/workspaces", StringComparison.OrdinalIgnoreCase) && Workspace.Current is not null)
+        {
+            Navigation.NavigateTo($"/workspaces/{Workspace.Current.Id}", replace: true);
+            return;
+        }
+
+        if (TryGetWorkspaceId(path, out var workspaceId) && !await Workspace.SelectAvailableAsync(workspaceId))
+        {
+            await Workspace.ClearAsync();
+            Navigation.NavigateTo("/workspaces", replace: true);
+            return;
+        }
+
         ready = true;
+    }
+
+    private static bool TryGetWorkspaceId(string path, out Guid workspaceId)
+    {
+        workspaceId = Guid.Empty;
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2
+            && string.Equals(segments[0], "workspaces", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(segments[1], out workspaceId);
     }
 }

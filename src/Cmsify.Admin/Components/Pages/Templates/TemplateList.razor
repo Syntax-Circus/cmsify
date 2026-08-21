@@ -74,7 +74,8 @@ else
                     <label class="form-label">Name</label>
                     <InputText class="form-control mb-3" @bind-Value="newName" />
                     <label class="form-label">Slug</label>
-                    <InputText class="form-control mb-3" @bind-Value="newSlug" />
+                    <InputText class="form-control mb-1 font-monospace" @bind-Value="newSlug" aria-describedby="slug-rule" />
+                    <div id="slug-rule" class="form-text mb-3">@SlugRules.ValidationMessage</div>
                     <label class="form-label">Description</label>
                     <InputTextArea class="form-control" @bind-Value="newDescription" />
                 </div>
@@ -143,7 +144,13 @@ else
     {
         if (string.IsNullOrWhiteSpace(newSlug))
         {
-            newSlug = string.Join('-', newName.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+            newSlug = SlugFormatter.FromDisplayName(newName);
+        }
+
+        if (!SlugRules.IsValid(newSlug))
+        {
+            error = SlugRules.ValidationMessage;
+            return;
         }
 
         var created = await Templates.CreateAsync(WorkspaceId, new CreateTemplateRequest(newName, newSlug, newDescription));

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Domain.ValueObjects;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
@@ -142,6 +143,11 @@ public sealed class ContentController : ControllerBase
             return NotFound();
         }
 
+        if (request.Slug is not null && !SlugRules.IsValid(request.Slug))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", SlugRules.ValidationMessage);
+        }
+
         var version = await LoadTemplateVersionAsync(request.TemplateVersionId, ct);
         if (version is null || !await TemplateVersionBelongsToWorkspaceAsync(version.Id, workspaceId, ct))
         {
@@ -163,6 +169,10 @@ public sealed class ContentController : ControllerBase
         if (!validation.IsValid)
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
+        }
+        if (await ValidatePickListValuesAsync(content, version, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
         }
 
         content.SearchVector = searchVectorBuilder.Build(content, version);
@@ -227,6 +237,11 @@ public sealed class ContentController : ControllerBase
     [RequireRole(UserRole.Editor)]
     public async Task<ActionResult<ContentItemDetailResponse>> Update(Guid workspaceId, Guid id, UpdateContentItemRequest request, CancellationToken ct)
     {
+        if (request.Slug is not null && !SlugRules.IsValid(request.Slug))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", SlugRules.ValidationMessage);
+        }
+
         var content = await LoadContentForEditAsync(workspaceId, id, ct);
         if (content is null)
         {
@@ -269,6 +284,10 @@ public sealed class ContentController : ControllerBase
         if (!validation.IsValid)
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
+        }
+        if (await ValidatePickListValuesAsync(content, version!, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
         }
 
         content.SearchVector = searchVectorBuilder.Build(content, version!);
@@ -347,6 +366,10 @@ public sealed class ContentController : ControllerBase
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
         }
+        if (await ValidatePickListValuesAsync(content, target, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", pickListError);
+        }
 
         content.SearchVector = searchVectorBuilder.Build(content, target);
         content.UpdatedAt = DateTimeOffset.UtcNow;
@@ -374,6 +397,16 @@ public sealed class ContentController : ControllerBase
         if (content is null)
         {
             return NotFound();
+        }
+
+        var templateVersion = await LoadTemplateVersionAsync(content.TemplateVersionId, ct);
+        if (templateVersion is null)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", "Template version is unavailable.");
+        }
+        if (await ValidatePickListValuesAsync(content, templateVersion, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
         }
 
         var effectiveRangeResult = BuildEffectiveRange(request?.EffectiveStartAt, request?.EffectiveEndAt);
@@ -486,6 +519,19 @@ public sealed class ContentController : ControllerBase
         if (!lifecycleService.CanTransition(content.Status, targetStatus))
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "invalid-state-transition", "Invalid content state transition", $"Content cannot transition from {content.Status} to {targetStatus}.");
+        }
+
+        if (targetStatus == ContentStatus.Published)
+        {
+            var templateVersion = await LoadTemplateVersionAsync(content.TemplateVersionId, ct);
+            if (templateVersion is null)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", "Template version is unavailable.");
+            }
+            if (await ValidatePickListValuesAsync(content, templateVersion, ct) is { } pickListError)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", pickListError);
+            }
         }
 
         await lifecycleService.TransitionAsync(content, targetStatus, currentActor.UserId ?? Guid.Empty);
@@ -614,6 +660,10 @@ public sealed class ContentController : ControllerBase
         if (!validation.IsValid)
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Snapshot does not satisfy its template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
+        }
+        if (await ValidatePickListValuesAsync(content, templateVersion, ct) is { } pickListError)
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Snapshot does not satisfy its template version", pickListError);
         }
 
         var previousActiveNumber = await dbContext.ContentVersions.AsNoTracking()
@@ -993,6 +1043,161 @@ public sealed class ContentController : ControllerBase
             .Join(dbContext.Tags.AsNoTracking(), join => join.TagId, tag => tag.Id, (_, tag) => tag.Name)
             .OrderBy(tag => tag)
             .ToListAsync(ct);
+
+    private async Task<string?> ValidatePickListValuesAsync(ContentItem content, TemplateVersion version, CancellationToken ct)
+    {
+        var bindings = new Dictionary<Guid, (string Key, Guid RevisionId, bool Multiple)>();
+        foreach (var field in version.Fields.Where(field => field.PrimitiveType == PrimitiveType.PickList))
+        {
+            if (!TryGetPickListBinding(field.FieldConfig, out var revisionId, out var multiple))
+            {
+                return $"Field '{field.Key}' must bind a PickList revision.";
+            }
+
+            bindings[field.Id] = (field.Key, revisionId, multiple);
+        }
+
+        var valuesByRevision = new Dictionary<Guid, HashSet<string>>();
+        if (bindings.Count > 0)
+        {
+            var optionValues = await dbContext.PickListRevisionOptions.AsNoTracking()
+                .Where(option => bindings.Values.Select(binding => binding.RevisionId).Contains(option.PickListRevisionId))
+                .Select(option => new { option.PickListRevisionId, option.Value })
+                .ToListAsync(ct);
+            valuesByRevision = optionValues
+                .GroupBy(option => option.PickListRevisionId)
+                .ToDictionary(group => group.Key, group => group.Select(option => option.Value).ToHashSet(StringComparer.OrdinalIgnoreCase));
+        }
+
+        foreach (var group in content.FieldValues.Where(value => bindings.ContainsKey(value.FieldId)).GroupBy(value => value.FieldId))
+        {
+            var binding = bindings[group.Key];
+            if (!binding.Multiple && group.Count() > 1)
+            {
+                return $"Field '{binding.Key}' allows only one PickList selection.";
+            }
+
+            if (!valuesByRevision.TryGetValue(binding.RevisionId, out var allowedValues))
+            {
+                return $"Field '{binding.Key}' references an unavailable PickList revision.";
+            }
+
+            foreach (var value in group)
+            {
+                if (string.IsNullOrWhiteSpace(value.TextValue) || !allowedValues.Contains(value.TextValue))
+                {
+                    return $"Field '{binding.Key}' contains a value that is not in its PickList revision.";
+                }
+            }
+        }
+
+        var revisionValueCache = valuesByRevision;
+        foreach (var field in version.Fields.Where(field => field.ComponentId.HasValue))
+        {
+            foreach (var value in content.FieldValues.Where(value => value.FieldId == field.Id && value.JsonValue is not null))
+            {
+                if (await ValidateComponentPickListValuesAsync(field.ComponentId!.Value, value.JsonValue!.Value, revisionValueCache, ct) is { } componentError)
+                {
+                    return $"Field '{field.Key}': {componentError}";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<string?> ValidateComponentPickListValuesAsync(Guid componentId, JsonElement value, Dictionary<Guid, HashSet<string>> revisionValueCache, CancellationToken ct)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            return "component values must be JSON objects.";
+        }
+
+        var component = await dbContext.Components.AsNoTracking()
+            .Include(candidate => candidate.Versions).ThenInclude(candidate => candidate.Fields)
+            .FirstOrDefaultAsync(candidate => candidate.Id == componentId && !candidate.IsDeleted, ct);
+        if (component is null)
+        {
+            return "references an unavailable component schema.";
+        }
+
+        var version = component.Versions.FirstOrDefault(candidate => candidate.Id == component.CurrentVersionId && candidate.Status == TemplateVersionStatus.Published && !candidate.IsDeleted);
+        if (version is null)
+        {
+            return "references an unavailable component schema.";
+        }
+
+        foreach (var field in version.Fields)
+        {
+            if (!value.TryGetProperty(field.Key, out var property))
+            {
+                if (field.IsRequired)
+                {
+                    return $"component field '{field.Key}' is required.";
+                }
+                continue;
+            }
+
+            if (field.PrimitiveType == PrimitiveType.PickList)
+            {
+                if (!TryGetPickListBinding(field.FieldConfig, out var revisionId, out var multiple))
+                {
+                    return $"component field '{field.Key}' must bind a PickList revision.";
+                }
+
+                if (!revisionValueCache.TryGetValue(revisionId, out var allowedValues))
+                {
+                    allowedValues = (await dbContext.PickListRevisionOptions.AsNoTracking()
+                        .Where(option => option.PickListRevisionId == revisionId)
+                        .Select(option => option.Value)
+                        .ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    revisionValueCache[revisionId] = allowedValues;
+                }
+
+                var submittedValues = property.ValueKind == JsonValueKind.Array
+                    ? property.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()).ToArray()
+                    : property.ValueKind == JsonValueKind.String ? [property.GetString()] : [];
+                if (submittedValues.Length == 0 || (!multiple && submittedValues.Length != 1) || submittedValues.Any(item => string.IsNullOrWhiteSpace(item) || !allowedValues.Contains(item)))
+                {
+                    return $"component field '{field.Key}' contains a value that is not in its PickList revision.";
+                }
+            }
+
+            if (field.NestedComponentId.HasValue)
+            {
+                var nestedValues = property.ValueKind == JsonValueKind.Array ? property.EnumerateArray().ToArray() : [property];
+                foreach (var nestedValue in nestedValues)
+                {
+                    if (await ValidateComponentPickListValuesAsync(field.NestedComponentId.Value, nestedValue, revisionValueCache, ct) is { } nestedError)
+                    {
+                        return nestedError;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetPickListBinding(JsonElement? fieldConfig, out Guid revisionId, out bool multiple)
+    {
+        revisionId = Guid.Empty;
+        multiple = false;
+        if (fieldConfig is not { ValueKind: JsonValueKind.Object } config
+            || !config.TryGetProperty("picklistRevisionId", out var revision)
+            || revision.ValueKind != JsonValueKind.String
+            || !Guid.TryParse(revision.GetString(), out revisionId))
+        {
+            return false;
+        }
+
+        if (config.TryGetProperty("multiple", out var multipleValue) && multipleValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            multiple = multipleValue.GetBoolean();
+        }
+
+        return true;
+    }
 
     private async Task<IReadOnlyList<Guid>> ReferencingContentIdsAsync(Guid id, bool onlyReferenceFields, CancellationToken ct)
     {

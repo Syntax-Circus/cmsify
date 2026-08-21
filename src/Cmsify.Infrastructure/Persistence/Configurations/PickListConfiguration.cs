@@ -29,6 +29,9 @@ public sealed class PickListConfiguration : IEntityTypeConfiguration<PickList>
         builder.Property(picklist => picklist.Name).HasMaxLength(200).IsRequired();
         builder.Property(picklist => picklist.Slug).HasMaxLength(100).IsRequired();
         builder.Property(picklist => picklist.Description).HasMaxLength(1_000);
+        builder.Property(picklist => picklist.PackageNamespace).HasMaxLength(200);
+        builder.Property(picklist => picklist.PackageId).HasMaxLength(200);
+        builder.Property(picklist => picklist.PackageVersion).HasMaxLength(50);
     }
 }
 

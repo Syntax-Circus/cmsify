@@ -28,7 +28,9 @@ The first API start applies database migrations and seeds the configured admin u
 - [Getting started](docs/getting-started.md) — local setup, first login, workspace, and API client token.
 - [Operating Cmsify](docs/operations.md) — configuration, production essentials, persistence, health checks, and security.
 - [Integrating with the API](docs/integrating.md) — authentication, workspace-scoped requests, REST conventions, and server-side consumers.
+- [Content modeling](docs/content-modeling.md) — how templates, components, and publishable content items fit together.
 - [Components and choice sets](docs/content-components-and-choice-sets.md) — reusable inline schemas, nested values, and immutable pick-list revisions.
+- [Reusable model packages](docs/packages.md) — portable template, component, and picklist bundles.
 - [TypeScript client](sdk/typescript/README.md) — `@cmsify/client` usage, framework examples, pagination, errors, and regeneration.
 - [.NET client](sdk/dotnet/README.md) — NuGet packages, dependency injection, authentication, and service examples.
 - [Agent and contributor instructions](AGENTS.md) — repository conventions and validation workflow for coding agents.

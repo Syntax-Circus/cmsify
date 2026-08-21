@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Domain.ValueObjects;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -130,7 +131,8 @@ public sealed class ComponentsController : ControllerBase
     private async Task<ComponentDefinition?> LoadAsync(Guid workspaceId, Guid id, bool tracking, CancellationToken ct) => await (tracking ? db.Components : db.Components.AsNoTracking()).Include(x => x.Versions).ThenInclude(x => x.Fields).FirstOrDefaultAsync(x => x.Id == id && x.WorkspaceId == workspaceId && !x.IsDeleted, ct);
     private async Task<ObjectResult?> ValidateDefinitionAsync(Guid workspaceId, ComponentRequest request, Guid? id, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Slug)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component", "Name and slug are required.");
+        if (string.IsNullOrWhiteSpace(request.Name)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component", "Name is required.");
+        if (!SlugRules.IsValid(request.Slug)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component", SlugRules.ValidationMessage);
         if (await db.Components.AnyAsync(x => x.WorkspaceId == workspaceId && x.Id != id && x.Slug == request.Slug && !x.IsDeleted, ct)) return this.Error(StatusCodes.Status409Conflict, "conflict", "Component slug already exists", "Component slugs are unique within a workspace.");
         return null;
     }
@@ -141,9 +143,29 @@ public sealed class ComponentsController : ControllerBase
         {
             if (string.IsNullOrWhiteSpace(field.Key) || string.IsNullOrWhiteSpace(field.Label) || field.Order < 0 || field.MinOccurrences < 0 || field.MaxOccurrences < field.MinOccurrences || (field.PrimitiveType.HasValue == field.NestedComponentId.HasValue)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component field", "Each component field requires exactly one primitive type or nested component and valid occurrence limits.");
             if (field.PrimitiveType.HasValue && !fieldConfigValidator.Validate(field.PrimitiveType.Value, field.FieldConfig).IsValid) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component field configuration", "Field configuration is invalid for its primitive type.");
+            if (field.PrimitiveType == PrimitiveType.PickList && !await HasValidPickListBindingAsync(workspaceId, field.FieldConfig, ct)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid PickList binding", "The PickList and its pinned revision must belong to this workspace.");
             if (field.NestedComponentId.HasValue && !await db.Components.AnyAsync(x => x.Id == field.NestedComponentId && x.WorkspaceId == workspaceId && !x.IsDeleted, ct)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Unknown nested component", "Nested components must belong to the workspace.");
         }
         return null;
+    }
+
+    private async Task<bool> HasValidPickListBindingAsync(Guid workspaceId, JsonElement? fieldConfig, CancellationToken ct)
+    {
+        if (!TryGetPickListBinding(fieldConfig, out var picklistId, out var revisionId)) return false;
+        return await db.PickLists.AnyAsync(picklist => picklist.Id == picklistId && picklist.WorkspaceId == workspaceId && !picklist.IsDeleted && db.PickListRevisions.Any(revision => revision.Id == revisionId && revision.PickListId == picklist.Id), ct);
+    }
+
+    private static bool TryGetPickListBinding(JsonElement? fieldConfig, out Guid picklistId, out Guid revisionId)
+    {
+        picklistId = Guid.Empty;
+        revisionId = Guid.Empty;
+        return fieldConfig is { ValueKind: JsonValueKind.Object } config
+            && config.TryGetProperty("picklistId", out var picklist)
+            && picklist.ValueKind == JsonValueKind.String
+            && Guid.TryParse(picklist.GetString(), out picklistId)
+            && config.TryGetProperty("picklistRevisionId", out var revision)
+            && revision.ValueKind == JsonValueKind.String
+            && Guid.TryParse(revision.GetString(), out revisionId);
     }
     private async Task<bool> HasCycleAsync(Guid workspaceId, Guid originId, ComponentVersion draft, CancellationToken ct)
     {

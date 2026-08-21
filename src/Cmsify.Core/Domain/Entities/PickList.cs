@@ -10,6 +10,10 @@ public sealed class PickList : SoftDeletableEntity
 
     public string? Description { get; set; }
 
+    public string? PackageNamespace { get; set; }
+    public string? PackageId { get; set; }
+    public string? PackageVersion { get; set; }
+
     public Guid? CurrentRevisionId { get; set; }
 
     public IList<PickListOption> Options { get; } = new List<PickListOption>();

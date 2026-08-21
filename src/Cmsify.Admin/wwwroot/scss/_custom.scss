@@ -152,6 +152,8 @@ html, body { min-height: 100%; background: var(--cms-bg); color: var(--cms-text)
 .cms-empty__icon { width: 56px; height: 56px; border-radius: 12px; background: var(--cms-surface-2); display: inline-grid; place-items: center; font-size: 24px; margin-bottom: 12px; color: var(--cms-text-muted); }
 .cms-toast { position: fixed; top: 72px; right: 16px; z-index: 1100; background: var(--cms-surface); border: 1px solid var(--cms-border); border-left: 4px solid var(--bs-success); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
 .cms-toast--danger { border-left-color: var(--bs-danger); }
+.cms-toast__dismiss { appearance: none; border: 0; background: transparent; color: var(--bs-secondary-color); cursor: pointer; line-height: 1; margin-left: 4px; padding: 4px; }
+.cms-toast__dismiss:hover, .cms-toast__dismiss:focus-visible { color: var(--bs-body-color); }
 .cms-pagination { display: flex; gap: 4px; }
 .cms-pagination button { min-width: 32px; height: 32px; border: 1px solid var(--cms-border); background: var(--cms-surface); border-radius: 6px; }
 .cms-pagination .is-active { background: var(--bs-primary); border-color: var(--bs-primary); color: #fff; }

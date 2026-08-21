@@ -127,7 +127,7 @@ public sealed record StorageConfigResponse(string Provider, bool IsConfigured);
 
 public sealed record StorageTestResponse(string Provider, bool Success, string Message);
 
-public sealed record OfficialPackageResponse(string PackageNamespace, string Id, string Version, string Name, string? Description, string? Author, string? License, string? Homepage, int TemplateCount, IReadOnlyList<OfficialPackageTemplateResponse> Templates);
+public sealed record OfficialPackageResponse(string PackageNamespace, string Id, string Version, string Name, string? Description, string? Author, string? License, string? Homepage, int TemplateCount, IReadOnlyList<OfficialPackageTemplateResponse> Templates, int PickListCount = 0, int ComponentCount = 0);
 
 public sealed record OfficialPackageTemplateResponse(string Slug, string Name, string? Description);
 
@@ -138,18 +138,22 @@ public sealed record PackageImportResponse(
     IReadOnlyList<PackageTemplateImportResult> Imported,
     IReadOnlyList<string> Skipped,
     IReadOnlyList<string> Errors,
-    IReadOnlyList<PackagePickListImportResult>? PickLists = null);
+    IReadOnlyList<PackagePickListImportResult>? PickLists = null,
+    IReadOnlyList<PackageComponentImportResult>? Components = null);
 
 public sealed record PackageTemplateImportResult(Guid TemplateId, string Slug, string Name, Guid TemplateVersionId, int VersionNumber);
 
 public sealed record PackagePickListImportResult(string Slug, string ResolvedSlug, Guid PickListId, string Action);
+
+public sealed record PackageComponentImportResult(string Slug, string ResolvedSlug, Guid ComponentId, string Action, Guid? ComponentVersionId, int? VersionNumber);
 
 public sealed record PackageImportPreviewResponse(
     string PackageNamespace,
     string Id,
     string Version,
     IReadOnlyList<PackagePickListPreview> PickLists,
-    IReadOnlyList<PackageTemplatePreview> Templates);
+    IReadOnlyList<PackageTemplatePreview> Templates,
+    IReadOnlyList<PackageComponentPreview>? Components = null);
 
 public sealed record PackagePickListPreview(
     string Slug,
@@ -167,7 +171,9 @@ public sealed record PackagePickListOptionPreview(string Label, string Value, in
 
 public sealed record PackageTemplatePreview(string Slug, string Name, string Status);
 
-public sealed record PackageImportResolutionsRequest(IReadOnlyDictionary<string, string>? PickLists);
+public sealed record PackageComponentPreview(string Slug, string Name, string? Description, int FieldCount, string Status, Guid? ExistingId, string? ExistingName, int? ExistingFieldCount, string SuggestedAction);
+
+public sealed record PackageImportResolutionsRequest(IReadOnlyDictionary<string, string>? PickLists, IReadOnlyDictionary<string, string>? Components = null);
 
 
 public sealed record LoginRequest(string Email, string Password);

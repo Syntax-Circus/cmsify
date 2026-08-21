@@ -10,6 +10,9 @@ public sealed class ComponentDefinition : SoftDeletableEntity
     public required string Name { get; set; }
     public required string Slug { get; set; }
     public string? Description { get; set; }
+    public string? PackageNamespace { get; set; }
+    public string? PackageId { get; set; }
+    public string? PackageVersion { get; set; }
     public Guid? CurrentVersionId { get; set; }
     public IList<ComponentVersion> Versions { get; } = new List<ComponentVersion>();
 }

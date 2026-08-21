@@ -12,6 +12,9 @@ public sealed class ComponentDefinitionConfiguration : IEntityTypeConfiguration<
         builder.Property(component => component.Name).HasMaxLength(200).IsRequired();
         builder.Property(component => component.Slug).HasMaxLength(200).IsRequired();
         builder.Property(component => component.Description).HasMaxLength(1_000);
+        builder.Property(component => component.PackageNamespace).HasMaxLength(200);
+        builder.Property(component => component.PackageId).HasMaxLength(200);
+        builder.Property(component => component.PackageVersion).HasMaxLength(50);
         builder.HasIndex(component => new { component.WorkspaceId, component.Slug }).IsUnique().HasFilter("is_deleted = false");
         builder.HasOne<Workspace>().WithMany().HasForeignKey(component => component.WorkspaceId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<ComponentVersion>().WithMany().HasForeignKey(component => component.CurrentVersionId).OnDelete(DeleteBehavior.Restrict);

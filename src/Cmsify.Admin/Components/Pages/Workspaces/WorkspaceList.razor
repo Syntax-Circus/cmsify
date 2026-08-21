@@ -59,10 +59,15 @@ else
                     <button type="button" class="btn-close" @onclick="Close"></button>
                 </div>
                 <div class="modal-body">
+                    @if (!string.IsNullOrWhiteSpace(editError))
+                    {
+                        <div class="alert alert-danger">@editError</div>
+                    }
                     <label class="form-label">Name</label>
                     <InputText class="form-control mb-3" @bind-Value="editing.Name" @oninput="SlugFromName" />
                     <label class="form-label">Slug</label>
-                    <InputText class="form-control mb-3" @bind-Value="editing.Slug" />
+                    <InputText class="form-control mb-1 font-monospace" @bind-Value="editing.Slug" aria-describedby="slug-rule" />
+                    <div id="slug-rule" class="form-text mb-3">@SlugRules.ValidationMessage</div>
                     <label class="form-label">Description</label>
                     <InputTextArea class="form-control" @bind-Value="editing.Description" />
                 </div>
@@ -80,26 +85,38 @@ else
     private List<WorkspaceDto> items = [];
     private string? search;
     private WorkspaceEdit? editing;
+    private string? editError;
 
     private IEnumerable<WorkspaceDto> Filtered => items.Where(item => string.IsNullOrWhiteSpace(search) || item.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || item.Slug.Contains(search, StringComparison.OrdinalIgnoreCase));
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
-        var page = await Workspaces.ListAsync();
-        items = page.Items.ToList();
+        items = WorkspaceState.Available.ToList();
+        return Task.CompletedTask;
     }
 
-    private void Open(WorkspaceDto workspace)
+    private async Task Open(WorkspaceDto workspace)
     {
-        WorkspaceState.Set(workspace);
+        await WorkspaceState.SelectAsync(workspace);
         Navigation.NavigateTo($"/workspaces/{workspace.Id}");
     }
+    private void NewWorkspace()
+    {
+        editError = null;
+        editing = new WorkspaceEdit();
+    }
 
-    private void NewWorkspace() => editing = new WorkspaceEdit();
+    private void Edit(WorkspaceDto workspace)
+    {
+        editError = null;
+        editing = new WorkspaceEdit(workspace.Id, workspace.Name, workspace.Slug, workspace.Description);
+    }
 
-    private void Edit(WorkspaceDto workspace) => editing = new WorkspaceEdit(workspace.Id, workspace.Name, workspace.Slug, workspace.Description);
-
-    private void Close() => editing = null;
+    private void Close()
+    {
+        editError = null;
+        editing = null;
+    }
 
     private void SlugFromName(ChangeEventArgs args)
     {
@@ -116,15 +133,36 @@ else
             return;
         }
 
-        var request = new WorkspaceRequest(editing.Name, editing.Slug, editing.Description);
-        var saved = editing.Id == Guid.Empty ? await Workspaces.CreateAsync(request) : await Workspaces.UpdateAsync(editing.Id, request);
+        if (!SlugRules.IsValid(editing.Slug))
+        {
+            editError = SlugRules.ValidationMessage;
+            return;
+        }
+
+        WorkspaceDto saved;
+        try
+        {
+            var request = new WorkspaceRequest(editing.Name, editing.Slug, editing.Description);
+            saved = editing.Id == Guid.Empty ? await Workspaces.CreateAsync(request) : await Workspaces.UpdateAsync(editing.Id, request);
+        }
+        catch (ProblemDetailsException ex)
+        {
+            editError = ex.Message;
+            return;
+        }
         items.RemoveAll(item => item.Id == saved.Id);
         items.Add(saved);
         editing = null;
         Toasts.Success("Workspace saved");
+
+        if (items.Count == 1)
+        {
+            await WorkspaceState.SelectAsync(saved);
+            Navigation.NavigateTo($"/workspaces/{saved.Id}");
+        }
     }
 
-    private static string Slugify(string value) => string.Join('-', value.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    private static string Slugify(string value) => SlugFormatter.FromDisplayName(value);
 
     private sealed class WorkspaceEdit
     {

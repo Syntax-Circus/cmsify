@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Domain.ValueObjects;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
@@ -61,6 +62,16 @@ public sealed class TemplatesController : ControllerBase
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
             return NotFound();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid template", "Name is required.");
+        }
+
+        if (!SlugRules.IsValid(request.Slug))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid template", SlugRules.ValidationMessage);
         }
 
         var template = new Template
@@ -354,7 +365,7 @@ public sealed class TemplatesController : ControllerBase
             return version.Result;
         }
 
-        var validation = ValidateFieldRequest(version.Value!, request);
+        var validation = await ValidateFieldRequestAsync(workspaceId, version.Value!, request, ct);
         if (validation is not null)
         {
             return validation;
@@ -390,7 +401,7 @@ public sealed class TemplatesController : ControllerBase
             return NotFound();
         }
 
-        var validation = ValidateFieldRequest(version.Value!, request, field.Id);
+        var validation = await ValidateFieldRequestAsync(workspaceId, version.Value!, request, ct, field.Id);
         if (validation is not null)
         {
             return validation;
@@ -541,7 +552,7 @@ public sealed class TemplatesController : ControllerBase
     private static TemplateFieldResponse ToFieldResponse(TemplateField field) =>
         new(field.Id, field.SectionId, field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, field.TemplateId, field.AllowedTypes.Select(type => new TemplateFieldAllowedTypeResponse(type.Id, type.PrimitiveType, type.AllowedTemplateId)).ToArray(), field.FieldConfig.Clone(), field.ComponentId);
 
-    private ObjectResult? ValidateFieldRequest(TemplateVersion version, TemplateFieldRequest request, Guid? currentFieldId = null)
+    private async Task<ObjectResult?> ValidateFieldRequestAsync(Guid workspaceId, TemplateVersion version, TemplateFieldRequest request, CancellationToken ct, Guid? currentFieldId = null)
     {
         if (request.SectionId.HasValue && version.Sections.All(section => section.Id != request.SectionId.Value))
         {
@@ -579,9 +590,41 @@ public sealed class TemplatesController : ControllerBase
             {
                 return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Field configuration is invalid", string.Join(" ", result.Errors.Select(error => error.ErrorMessage)));
             }
+
+            if (request.PrimitiveType == PrimitiveType.PickList && !await HasValidPickListBindingAsync(workspaceId, request.FieldConfig, ct))
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid PickList binding", "The PickList and its pinned revision must belong to this workspace.");
+            }
         }
 
         return null;
+    }
+
+    private async Task<bool> HasValidPickListBindingAsync(Guid workspaceId, JsonElement? fieldConfig, CancellationToken ct)
+    {
+        if (!TryGetPickListBinding(fieldConfig, out var picklistId, out var revisionId))
+        {
+            return false;
+        }
+
+        return await dbContext.PickLists.AnyAsync(picklist =>
+            picklist.Id == picklistId
+            && picklist.WorkspaceId == workspaceId
+            && !picklist.IsDeleted
+            && dbContext.PickListRevisions.Any(revision => revision.Id == revisionId && revision.PickListId == picklist.Id), ct);
+    }
+
+    private static bool TryGetPickListBinding(JsonElement? fieldConfig, out Guid picklistId, out Guid revisionId)
+    {
+        picklistId = Guid.Empty;
+        revisionId = Guid.Empty;
+        return fieldConfig is { ValueKind: JsonValueKind.Object } config
+            && config.TryGetProperty("picklistId", out var picklist)
+            && picklist.ValueKind == JsonValueKind.String
+            && Guid.TryParse(picklist.GetString(), out picklistId)
+            && config.TryGetProperty("picklistRevisionId", out var revision)
+            && revision.ValueKind == JsonValueKind.String
+            && Guid.TryParse(revision.GetString(), out revisionId);
     }
 
     private static TemplateField ToField(Guid versionId, TemplateFieldRequest request)
