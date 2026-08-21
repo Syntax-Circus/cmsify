@@ -25,6 +25,7 @@ The local stack provides:
 - Swagger/OpenAPI UI: <http://localhost:5000/swagger>
 - Liveness: <http://localhost:5000/health/live>
 - Readiness (database and storage): <http://localhost:5000/health/ready>
+- Optional operator dashboard: <http://localhost:5000/health/dashboard> (enable `Api__HealthDashboardEnabled=true`; restrict it at the reverse proxy)
 
 The first API start applies database migrations and seeds the configured admin user and default workspace. Change the development password in `.env` before sharing a running instance. Never commit `.env` or an API token.
 
@@ -48,6 +49,7 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `ConnectionStrings__Cmsify` | local PostgreSQL connection string | Required PostgreSQL connection for the API. Treat its password as a secret. |
 | `Cors__AllowedOrigins` | `http://localhost:5001,https://localhost:7002` | Browser origins permitted to call the API. Use explicit HTTPS origins in production. |
 | `Api__SwaggerEnabled` | `false` | Enables Swagger outside Development. |
+| `Api__HealthDashboardEnabled` | `false` | Enables the internal `/health/dashboard` HTML operator view. Restrict this endpoint at the reverse proxy; it is not a public status page. |
 | `Serilog__MinimumLevel__Default` | `Information` | Default API log level. |
 | `Serilog__MinimumLevel__Override__Microsoft.AspNetCore` | `Warning` | Log level for ASP.NET Core framework events. |
 | `Serilog__File__Enabled` | `false` | Enables the rolling API log file sink. |

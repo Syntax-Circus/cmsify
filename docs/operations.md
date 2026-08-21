@@ -50,11 +50,28 @@ API clients use `Authorization: Bearer cmsify_...`. Keep those tokens server-sid
 ## Health and diagnostics
 
 - `GET /health/live` confirms that the process is running.
-- `GET /health/ready` confirms that the database and storage dependencies are reachable.
+- `GET /health/ready` confirms that the database and storage dependencies are reachable. It returns machine-readable JSON with the overall status, per-check status/duration/description, and `metadata` containing the deployed application version and report generation time.
+- `GET /health/dashboard` is an optional, self-contained HTML view of the same readiness checks for operators. Enable it with `Api__HealthDashboardEnabled=true` (or `Api:HealthDashboardEnabled=true` in configuration). It is disabled by default and should be exposed only through an internal reverse-proxy allow-list: the page can reveal dependency failure details and is not a public status page.
 - Swagger/OpenAPI is served at `/swagger` when enabled.
 - Responses include RFC 7807 ProblemDetails for failures. The API and SDK use correlation IDs; retain the `X-Correlation-Id` and `traceId` values when escalating an error.
 
-Monitor readiness separately from liveness. A failed readiness check should remove the instance from traffic while leaving the process available for diagnosis.
+Use `/health/live` and `/health/ready` for container orchestration and monitoring. A failed readiness check should remove the instance from traffic while leaving the process available for diagnosis. Use the dashboard only for a human operator investigating a deployment or incident; it always renders the current report and is not a probe target.
+
+For example, a healthy readiness response contains the existing dependency results plus deployment metadata:
+
+```json
+{
+  "status": "Healthy",
+  "checks": [
+    { "name": "database", "status": "Healthy" },
+    { "name": "storage", "status": "Healthy" }
+  ],
+  "metadata": {
+    "version": "0.1.0+build",
+    "generatedAt": "2026-08-21T00:00:00+00:00"
+  }
+}
+```
 
 ## Incident response checklist
 

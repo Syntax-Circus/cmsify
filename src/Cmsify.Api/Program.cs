@@ -206,7 +206,27 @@ if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
 app.UseMiddleware<CmsifyAuthMiddleware>();
 app.UseRateLimiter();
 app.MapControllers();
-app.MapStandardHealthChecks();
+app.MapStandardHealthChecks(metadataFactory: _ => new Dictionary<string, object?>
+{
+    ["version"] = GetApplicationVersion(),
+    ["generatedAt"] = DateTimeOffset.UtcNow,
+});
+
+if (builder.Configuration.GetValue("Api:HealthDashboardEnabled", false))
+{
+    app.MapHealthCheckDashboard(configure: (_, options) =>
+    {
+        options.Title = "Cmsify API";
+        options.Subtitle = "Headless CMS operator status";
+        options.ApiLinks =
+        [
+            new HealthDashboardLink("Machine-readable readiness", "/health/ready"),
+            new HealthDashboardLink("Liveness probe", "/health/live"),
+        ];
+
+        return Task.CompletedTask;
+    });
+}
 
 app.Run();
 
@@ -244,5 +264,13 @@ static string StatusCodeToErrorCode(int statusCode) =>
         StatusCodes.Status429TooManyRequests => CmsifyError.RateLimitExceeded,
         _ => CmsifyError.InternalServerError
     };
+
+static string GetApplicationVersion() =>
+    typeof(Program).Assembly
+        .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), inherit: false)
+        .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+        .SingleOrDefault()?.InformationalVersion
+    ?? typeof(Program).Assembly.GetName().Version?.ToString()
+    ?? "unknown";
 
 public partial class Program;
