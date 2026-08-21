@@ -6,7 +6,27 @@
 <div class="cms-page-head"><div><h1>Components</h1><div class="lead">Reusable inline schemas for structured content blocks.</div></div><button class="btn btn-primary" @onclick="NewComponent">New Component</button></div>
 @if (!string.IsNullOrWhiteSpace(error)) { <div class="alert alert-danger">@error</div> }
 @if (items.Count == 0) { <EmptyState Title="No components yet" Body="Create reusable blocks such as calls to action, cards, or profile snippets." /> }
-else { <div class="cms-card"><table class="table mb-0"><thead><tr><th>Name</th><th>Slug</th><th>Published schema</th><th></th></tr></thead><tbody>@foreach (var item in items) { <tr><td>@item.Name</td><td><code>@item.Slug</code></td><td>@(item.CurrentVersionId.HasValue ? "Yes" : "Draft only")</td><td><button class="btn btn-sm btn-outline-secondary" @onclick="(() => Edit(item.Id))">Edit</button></td></tr> }</tbody></table></div> }
+else
+{
+    <div class="cms-card p-0">
+        <table class="cms-table">
+            <thead>
+                <tr><th>Name</th><th>Slug</th><th>Published schema</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var item in items)
+                {
+                    <tr>
+                        <td>@item.Name</td>
+                        <td><code>@item.Slug</code></td>
+                        <td>@(item.CurrentVersionId.HasValue ? "Yes" : "Draft only")</td>
+                        <td><button class="btn btn-sm btn-outline-secondary" @onclick="(() => Edit(item.Id))">Edit</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
 
 @code {
     [Parameter] public Guid WorkspaceId { get; set; }
