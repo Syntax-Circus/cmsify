@@ -81,55 +81,51 @@ jobs:
           git tag "$tag" "$GITHUB_SHA"
           git push origin "$tag"
 
-# Docker Hub publishing is intentionally inactive until the registry and secrets are ready.
-# When enabled, this job publishes the API and Admin images with the GitVersion SemVer
-# embedded in both the Docker tags and the compiled assembly metadata.
-#
-#  docker:
-#    needs: publish
-#    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#        with:
-#          fetch-depth: 0
-#      - uses: gittools/actions/gitversion/setup@v4.1.0
-#        with:
-#          versionSpec: 6.8.x
-#      - name: Resolve GitVersion metadata
-#        id: gitversion
-#        uses: gittools/actions/gitversion/execute@v4.1.0
-#        with:
-#          useConfigFile: true
-#      - uses: docker/setup-buildx-action@v3
-#      - name: Log in to Docker Hub
-#        uses: docker/login-action@v3
-#        with:
-#          username: ${{ secrets.DOCKERHUB_USERNAME }}
-#          password: ${{ secrets.DOCKERHUB_TOKEN }}
-#      - name: Build and push API image
-#        uses: docker/build-push-action@v6
-#        with:
-#          context: .
-#          file: src/Cmsify.Api/Dockerfile
-#          push: true
-#          tags: |
-#            syntaxcircus/cmsify-api:${{ steps.gitversion.outputs.semVer }}
-#            syntaxcircus/cmsify-api:latest
-#          build-args: |
-#            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
-#            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
-#            DISABLE_GITVERSION_TASK=true
-#      - name: Build and push Admin image
-#        uses: docker/build-push-action@v6
-#        with:
-#          context: .
-#          file: src/Cmsify.Admin/Dockerfile
-#          push: true
-#          tags: |
-#            syntaxcircus/cmsify-admin:${{ steps.gitversion.outputs.semVer }}
-#            syntaxcircus/cmsify-admin:latest
-#          build-args: |
-#            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
-#            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
-#            DISABLE_GITVERSION_TASK=true
+  docker:
+    needs: publish
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gittools/actions/gitversion/setup@v4.1.0
+        with:
+          versionSpec: 6.8.x
+      - name: Resolve GitVersion metadata
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v4.1.0
+        with:
+          useConfigFile: true
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/Cmsify.Api/Dockerfile
+          push: true
+          tags: |
+            syntaxcircus/cmsify-api:${{ steps.gitversion.outputs.semVer }}
+            syntaxcircus/cmsify-api:latest
+          build-args: |
+            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
+            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
+            DISABLE_GITVERSION_TASK=true
+      - name: Build and push Admin image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/Cmsify.Admin/Dockerfile
+          push: true
+          tags: |
+            syntaxcircus/cmsify-admin:${{ steps.gitversion.outputs.semVer }}
+            syntaxcircus/cmsify-admin:latest
+          build-args: |
+            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
+            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
+            DISABLE_GITVERSION_TASK=true

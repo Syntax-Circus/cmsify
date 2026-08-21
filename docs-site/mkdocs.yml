@@ -1,0 +1,85 @@
+site_name: Cmsify
+site_description: Documentation for the composable, versioned headless CMS.
+site_url: https://docs.cmsify.dev
+repo_url: https://github.com/Syntax-Circus/cmsify
+repo_name: Syntax-Circus/cmsify
+docs_dir: .generated
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: en
+  logo: material/library
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Use light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Use dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.top
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - toc.follow
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Get started: getting-started.md
+  - Build with Cmsify:
+      - Configuration: configuration.md
+      - Authentication and authorization: authentication-and-authorization.md
+      - Integrating with the API: integrating.md
+      - Content modeling: content-modeling.md
+      - Components and choice sets: content-components-and-choice-sets.md
+      - Model packages: packages.md
+  - Operate Cmsify:
+      - Operations: operations.md
+  - SDKs:
+      - TypeScript client: sdk/typescript.md
+      - .NET client: sdk/dotnet.md
+  - Project:
+      - Changelog: changelog.md
+      - Roadmap: roadmap.md
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Syntax-Circus/cmsify
+      name: Cmsify on GitHub
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true

@@ -118,14 +118,14 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 
 ## Run in production with Docker
 
-The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. It defaults to versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images, but `CMSIFY_IMAGE_PREFIX` can point it at a private registry. It uses a pinned version instead of `latest`, so upgrades are deliberate and reversible.
+The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. Every successful `main` release publishes versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images to Docker Hub, alongside the moving `latest` tag. The template uses a pinned version instead of `latest`, so upgrades are deliberate and reversible; `CMSIFY_IMAGE_PREFIX` can point it at a private registry instead.
 
 On the production host, copy the environment template and replace every placeholder with a real value. Keep the resulting file outside source control.
 
 ```bash
 cp docker-compose.prod.env.example .env.prod
 # Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, encryption key, and CORS origin.
-# Pull only when CMSIFY_VERSION names an image available from the configured registry.
+# Pull the exact published CMSIFY_VERSION from Docker Hub (or the configured registry).
 docker compose --env-file .env.prod -f docker-compose.prod.yml pull
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
@@ -157,7 +157,8 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 
 - [TypeScript client](sdk/typescript/README.md) — `@cmsify/client` usage, framework examples, pagination, errors, and regeneration.
 - [.NET client](sdk/dotnet/README.md) — NuGet packages, dependency injection, authentication, and service examples.
-- [Project roadmap](docs/roadmap.md) — planned client and platform work.
+- [Changelog](CHANGELOG.md) — released and upcoming changes.
+- [Project roadmap](docs/roadmap.md) — committed future work, when available.
 
 ## Repository layout
 

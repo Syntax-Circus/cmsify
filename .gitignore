@@ -9,6 +9,8 @@
 # Environment variables (local dev secrets)
 .env
 .env.local
+docs-site/.generated/
+docs-site/site/
 **/.env
 **/.env.local
 **/.env.*
