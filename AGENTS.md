@@ -1,6 +1,6 @@
 # Agent and contributor instructions
 
-Read this file before changing Cmsify. Keep changes scoped, preserve existing user work, and prefer the smallest implementation that matches the documented API and project plan.
+Read this file before changing Cmsify. Keep changes scoped, preserve existing user work, and prefer the smallest implementation that matches the documented API. Source code, tests, and checked-in OpenAPI define current behavior; [`docs/project plan`](docs/project%20plan/00_index.md) records design intent and may be superseded.
 
 ## Project map
 
@@ -8,8 +8,11 @@ Read this file before changing Cmsify. Keep changes scoped, preserve existing us
 - `src/Cmsify.Infrastructure` contains EF Core/PostgreSQL, repositories, storage providers, authentication helpers, audit interception, and hosted services.
 - `src/Cmsify.Api` contains the versioned HTTP API, controllers, middleware, OpenAPI, authentication, rate limiting, and health endpoints.
 - `src/Cmsify.Admin` is the Blazor administration UI. It does not access the database directly; its service clients call the API.
+- `src/Cmsify.Contracts` contains shared handwritten public wire contracts used by the API, Admin, and .NET client.
 - `sdk/typescript` contains the first-party client and checked-in OpenAPI-generated types.
-- `tests` contains unit, infrastructure, API integration, and admin integration tests.
+- `sdk/dotnet` contains the first-party .NET client, optional distributed content cache, and client tests.
+- `examples` contains server-side integration examples for supported application frameworks.
+- `tests` contains core, infrastructure, API integration, and Admin integration tests.
 
 ## Build and test
 
@@ -39,6 +42,26 @@ npm run build
 ```
 
 The API and infrastructure integration tests use Testcontainers PostgreSQL. Admin integration tests use a fake API handler where documented. Do not skip tests merely because they need Docker; report the environment limitation.
+
+## Choose validation by change
+
+Run the narrowest relevant checks first, then the full solution test suite for cross-cutting changes:
+
+| Changed area | Required focused validation |
+| --- | --- |
+| Core domain and validation | `Cmsify.Core.Tests` |
+| Infrastructure, PostgreSQL, storage, audit, or hosted services | `Cmsify.Infrastructure.Tests` (PostgreSQL and MinIO Testcontainers) |
+| Controllers, middleware, auth, or HTTP contracts | `Cmsify.Api.Integration.Tests` (PostgreSQL Testcontainers) |
+| Admin UI or Admin authentication | `Cmsify.Admin.Integration.Tests`; run the accessibility workflow when markup or interaction changes |
+| .NET SDK or Contracts | `SyntaxCircus.Cmsify.Client.Tests` |
+| TypeScript SDK or an OpenAPI contract | `npm run generate:check`, `npm run typecheck`, `npm test`, and `npm run build` from `sdk/typescript` |
+
+## Agent preflight and hand-off
+
+- Inspect `git status --short` before editing; treat every existing change as user work unless it is clearly part of the assigned task.
+- Identify generated files before editing. In particular, never hand-edit `sdk/typescript/src/generated`; regenerate it from the contract.
+- When API behavior changes, update controller/API tests, regenerate the TypeScript SDK, and update the closest integration guide or example.
+- Report the exact checks run and any environment limitation, especially unavailable Docker/Testcontainers dependencies.
 
 ## Local stack and configuration
 

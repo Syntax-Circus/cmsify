@@ -54,9 +54,7 @@ builder.Services.AddDataProtection()
 
 builder.Services.AddHttpClient("CmsifyApi", client =>
 {
-    var baseUrl = builder.Configuration["Admin:ApiBaseUrl"]
-        ?? builder.Configuration["Api:BaseUrl"]
-        ?? "https://localhost:61241";
+    var baseUrl = builder.Configuration["Admin:ApiBaseUrl"] ?? "https://localhost:61241";
     client.BaseAddress = new Uri(baseUrl);
 });
 builder.Services.AddScoped<CmsifyClient>(services =>
