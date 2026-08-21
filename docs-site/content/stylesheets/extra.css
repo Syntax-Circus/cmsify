@@ -33,22 +33,9 @@
   letter-spacing: -0.02em;
 }
 
-.md-header__button.md-logo::after {
-  content: "C";
-  display: grid;
-  width: 1.45rem;
-  height: 1.45rem;
-  place-items: center;
-  color: #fff;
-  font-weight: 800;
-  font-size: 0.82rem;
-  background: linear-gradient(145deg, #06b6d4, #6d28d9 55%, #db2777);
-  border-radius: 0.35rem;
-}
-
-.md-header__button.md-logo svg,
 .md-header__button.md-logo img {
-  display: none;
+  width: 1.55rem;
+  height: 1.55rem;
 }
 
 .cmsify-hero__eyebrow {

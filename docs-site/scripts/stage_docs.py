@@ -64,6 +64,10 @@ def main() -> None:
     STAGED.mkdir(parents=True)
 
     shutil.copytree(CONTENT, STAGED, dirs_exist_ok=True)
+    logo_source = ROOT / "src" / "Cmsify.Admin" / "wwwroot" / "img" / "cmsify-logo.webp"
+    logo_destination = STAGED / "assets" / logo_source.name
+    logo_destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(logo_source, logo_destination)
 
     for guide in GUIDES:
         write_markdown(STAGED / guide, ROOT / "docs" / guide)
