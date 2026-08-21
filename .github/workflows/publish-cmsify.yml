@@ -129,3 +129,19 @@ jobs:
             BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
             BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
             DISABLE_GITVERSION_TASK=true
+      - name: Update API Docker Hub overview
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: syntaxcircus/cmsify-api
+          short-description: Headless CMS API for composable, versioned content.
+          readme-filepath: ./docs/dockerhub/cmsify-api.md
+      - name: Update Admin Docker Hub overview
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: syntaxcircus/cmsify-admin
+          short-description: Blazor admin UI for managing content in Cmsify.
+          readme-filepath: ./docs/dockerhub/cmsify-admin.md
