@@ -19,7 +19,6 @@ RUN dotnet publish "src/Cmsify.Admin/Cmsify.Admin.csproj" -c Release -o /app/pub
     -p:InformationalVersion="${BUILD_INFORMATIONAL_VERSION}" \
     -p:DisableGitVersionTask="${DISABLE_GITVERSION_TASK}"
 RUN test -f /app/publish/wwwroot/_framework/blazor.web.js
-
 FROM base AS final
 WORKDIR /app
 COPY --from=build /app/publish .
