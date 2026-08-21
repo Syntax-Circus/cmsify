@@ -18,7 +18,7 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet restore Cmsify.slnx
       - run: dotnet build Cmsify.slnx --no-restore --configuration Release
-      - run: dotnet test --solution Cmsify.slnx --no-build --configuration Release
+      - run: dotnet test Cmsify.slnx --no-build --configuration Release
       - name: Pack SDK packages
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
