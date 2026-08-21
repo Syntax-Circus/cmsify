@@ -37,9 +37,12 @@ def extract_configuration(readme: str) -> str:
 
 def rewrite_links(text: str) -> str:
     replacements = {
+        "(.env.example)": f"({REPOSITORY_URL}/blob/main/.env.example)",
         "../README.md#configuration": "configuration.md",
         "../sdk/typescript/README.md": "sdk/typescript.md",
         "../sdk/dotnet/README.md": "sdk/dotnet.md",
+        "../docker-compose.prod.yml": f"{REPOSITORY_URL}/blob/main/docker-compose.prod.yml",
+        "../docker-compose.prod.env.example": f"{REPOSITORY_URL}/blob/main/docker-compose.prod.env.example",
         "../../docs/integrating.md": "../integrating.md",
         "../../examples": f"{REPOSITORY_URL}/tree/main/examples",
         "../examples/nextjs-app-router/cmsify.ts": f"{REPOSITORY_URL}/blob/main/examples/nextjs-app-router/cmsify.ts",
