@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.Persistence;
@@ -15,6 +16,7 @@ namespace Cmsify.Api.Integration.Tests;
 public sealed class TemplateApiTests : IAsyncLifetime
 {
     private const string SessionExpiresAtHeaderName = "X-Session-Expires-At";
+    private static readonly JsonSerializerOptions ApiJsonOptions = SyntaxCircus.Cmsify.Contracts.CmsifyJsonOptions.Create();
 
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("cmsify")
@@ -52,7 +54,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
             $"/api/v1/workspaces/{workspaceId}/templates",
             new CreateTemplateRequest("Test Template", $"test-template-{Guid.NewGuid():N}", null));
         createResponse.EnsureSuccessStatusCode();
-        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>();
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions);
 
         Assert.NotNull(template);
         Assert.NotNull(template.CurrentVersion);
@@ -61,7 +63,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
             $"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/sections",
             new TemplateSectionRequest("New Section", null, 0, true));
         addSectionResponse.EnsureSuccessStatusCode();
-        var section = await addSectionResponse.Content.ReadFromJsonAsync<TemplateSectionResponse>();
+        var section = await addSectionResponse.Content.ReadFromJsonAsync<TemplateSectionResponse>(ApiJsonOptions);
 
         Assert.NotNull(section);
         Assert.Equal("New Section", section.Name);
@@ -80,7 +82,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
             $"/api/v1/workspaces/{workspaceId}/templates",
             new CreateTemplateRequest("Field Template", $"field-template-{Guid.NewGuid():N}", null));
         createResponse.EnsureSuccessStatusCode();
-        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>();
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions);
 
         Assert.NotNull(template);
         Assert.NotNull(template.CurrentVersion);
@@ -89,7 +91,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
             $"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields",
             new TemplateFieldRequest(null, "title", "Title", null, 0, false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null));
         addFieldResponse.EnsureSuccessStatusCode();
-        var field = await addFieldResponse.Content.ReadFromJsonAsync<TemplateFieldResponse>();
+        var field = await addFieldResponse.Content.ReadFromJsonAsync<TemplateFieldResponse>(ApiJsonOptions);
 
         Assert.NotNull(field);
         Assert.Equal("title", field.Key);
@@ -108,7 +110,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
             $"/api/v1/workspaces/{workspaceId}/templates",
             new CreateTemplateRequest("Duplicate Field Template", $"duplicate-field-template-{Guid.NewGuid():N}", null));
         createResponse.EnsureSuccessStatusCode();
-        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>();
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions);
 
         Assert.NotNull(template);
         Assert.NotNull(template.CurrentVersion);
@@ -246,10 +248,10 @@ public sealed class TemplateApiTests : IAsyncLifetime
 
         var first = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Hero", $"hero-{Guid.NewGuid():N}", null));
         Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
-        var hero = await first.Content.ReadFromJsonAsync<ComponentResponse>();
+        var hero = await first.Content.ReadFromJsonAsync<ComponentResponse>(ApiJsonOptions);
         var second = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Call to action", $"cta-{Guid.NewGuid():N}", null));
         Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
-        var cta = await second.Content.ReadFromJsonAsync<ComponentResponse>();
+        var cta = await second.Content.ReadFromJsonAsync<ComponentResponse>(ApiJsonOptions);
         Assert.NotNull(hero?.CurrentVersion);
         Assert.NotNull(cta?.CurrentVersion);
 
