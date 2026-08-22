@@ -27,6 +27,8 @@ The workspace slug is useful for discovery and configuration, but requests to wo
 ## REST conventions
 
 - Use Swagger at `/swagger` or `/swagger/v1/swagger.json` for the complete request/response reference.
+- Workspace responses include an actor-specific `canWrite` capability. Treat it as a UI hint; the API remains the authorization authority for workspace updates and deletion.
+- JSON uses camel-case property names and string enum values, such as `"Editor"`, `"Write"`, `"Draft"`, and `"Text"`.
 - List responses are paginated; send `page` and `pageSize` and follow the returned totals.
 - Non-success responses use RFC 7807 `application/problem+json` with a Cmsify error type and a `traceId` extension.
 - Mutable resources use `ETag` and require a matching `If-Match` value when the endpoint enforces optimistic concurrency.

@@ -1,6 +1,7 @@
 @page "/workspaces"
 @rendermode InteractiveServer
 @inject CmsifyClient Cmsify
+@inject AuthState Auth
 @inject WorkspaceState WorkspaceState
 @inject ToastState Toasts
 @inject NavigationManager Navigation
@@ -8,9 +9,12 @@
 <div class="cms-page-head">
     <div>
         <h1>Workspaces</h1>
-        <div class="lead">Manage the workspaces available in Cmsify.</div>
+        <div class="lead">@(CanCreateWorkspaces ? "Manage the workspaces available in Cmsify." : "Choose a workspace to continue.")</div>
     </div>
-    <button class="btn btn-primary" @onclick="NewWorkspace">New Workspace</button>
+    @if (CanCreateWorkspaces)
+    {
+        <button class="btn btn-primary" @onclick="NewWorkspace">New Workspace</button>
+    }
 </div>
 
 <div class="cms-search mb-3" style="max-width:320px">
@@ -20,9 +24,16 @@
 
 @if (items.Count == 0)
 {
-    <EmptyState Title="No workspaces yet" Body="Create your first workspace to begin modeling content.">
-        <button class="btn btn-primary btn-sm" @onclick="NewWorkspace">Create workspace</button>
-    </EmptyState>
+    @if (CanCreateWorkspaces)
+    {
+        <EmptyState Title="No workspaces yet" Body="Create your first workspace to begin modeling content.">
+            <button class="btn btn-primary btn-sm" @onclick="NewWorkspace">Create workspace</button>
+        </EmptyState>
+    }
+    else
+    {
+        <EmptyState Title="No workspaces available" Body="Contact an administrator to request workspace access." />
+    }
 }
 else
 {
@@ -41,7 +52,10 @@ else
                     <p class="text-muted mt-3">@workspace.Description</p>
                     <div class="d-flex gap-2">
                         <button class="btn btn-primary btn-sm" @onclick="() => Open(workspace)">Open</button>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(workspace)">Edit</button>
+                        @if (CanManageWorkspace(workspace))
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(workspace)">Edit</button>
+                        }
                     </div>
                 </div>
             </div>
@@ -64,9 +78,9 @@ else
                         <div class="alert alert-danger">@editError</div>
                     }
                     <label class="form-label">Name</label>
-                    <InputText class="form-control mb-3" @bind-Value="editing.Name" @oninput="SlugFromName" />
+                    <input class="form-control mb-3" value="@editing.Name" @oninput="UpdateName" />
                     <label class="form-label">Slug</label>
-                    <InputText class="form-control mb-1 font-monospace" @bind-Value="editing.Slug" aria-describedby="slug-rule" />
+                    <input class="form-control mb-1 font-monospace" value="@editing.Slug.Value" @oninput="UpdateSlug" aria-describedby="slug-rule" />
                     <div id="slug-rule" class="form-text mb-3">@SlugRules.ValidationMessage</div>
                     <label class="form-label">Description</label>
                     <InputTextArea class="form-control" @bind-Value="editing.Description" />
@@ -88,6 +102,12 @@ else
     private WorkspaceEdit? editing;
     private string? editError;
 
+    private bool IsAdmin => string.Equals(Auth.User?.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanCreateWorkspaces => IsAdmin && Auth.User?.IsSuperAdmin == true;
+
+    private bool CanManageWorkspace(WorkspaceDto workspace) => IsAdmin && workspace.CanWrite;
+
     private IEnumerable<WorkspaceDto> Filtered => items.Where(item => string.IsNullOrWhiteSpace(search) || item.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || item.Slug.Contains(search, StringComparison.OrdinalIgnoreCase));
 
     protected override Task OnInitializedAsync()
@@ -103,12 +123,22 @@ else
     }
     private void NewWorkspace()
     {
+        if (!CanCreateWorkspaces)
+        {
+            return;
+        }
+
         editError = null;
         editing = new WorkspaceEdit();
     }
 
     private void Edit(WorkspaceDto workspace)
     {
+        if (!CanManageWorkspace(workspace))
+        {
+            return;
+        }
+
         editError = null;
         editing = new WorkspaceEdit(workspace.Id, workspace.Name, workspace.Slug, workspace.Description);
     }
@@ -119,13 +149,18 @@ else
         editing = null;
     }
 
-    private void SlugFromName(ChangeEventArgs args)
+    private void UpdateName(ChangeEventArgs args)
     {
-        if (editing is not null && string.IsNullOrWhiteSpace(editing.Slug))
+        if (editing is null)
         {
-            editing.Slug = Slugify(editing.Name);
+            return;
         }
+
+        editing.Name = args.Value?.ToString() ?? string.Empty;
+        editing.Slug.UpdateFromName(editing.Name);
     }
+
+    private void UpdateSlug(ChangeEventArgs args) => editing?.Slug.SetManually(args.Value?.ToString());
 
     private async Task SaveAsync()
     {
@@ -134,23 +169,39 @@ else
             return;
         }
 
-        if (!SlugRules.IsValid(editing.Slug))
+        var canSave = editing.Id == Guid.Empty
+            ? CanCreateWorkspaces
+            : items.FirstOrDefault(item => item.Id == editing.Id) is { } existing && CanManageWorkspace(existing);
+        if (!canSave)
+        {
+            Close();
+            return;
+        }
+
+        editing.Slug.EnsureDefault(editing.Name);
+        if (!SlugRules.IsValid(editing.Slug.Value))
         {
             editError = SlugRules.ValidationMessage;
             return;
         }
 
-        WorkspaceDto saved;
+        WorkspaceDto? saved;
         try
         {
-            var request = new WorkspaceRequest(editing.Name, editing.Slug, editing.Description);
+            var request = new WorkspaceRequest(editing.Name, editing.Slug.Value, editing.Description);
             saved = editing.Id == Guid.Empty ? await Workspaces.CreateAsync(request) : await Workspaces.UpdateAsync(editing.Id, request);
         }
         catch (CmsifyApiException ex)
         {
-            editError = ex.Message;
+            editError = ProblemDetailsDisplay.Format(ex);
             return;
         }
+        if (saved is null)
+        {
+            editError = "The workspace API returned an empty response.";
+            return;
+        }
+
         items.RemoveAll(item => item.Id == saved.Id);
         items.Add(saved);
         editing = null;
@@ -163,8 +214,6 @@ else
         }
     }
 
-    private static string Slugify(string value) => SlugFormatter.FromDisplayName(value);
-
     private sealed class WorkspaceEdit
     {
         public WorkspaceEdit() { }
@@ -173,13 +222,13 @@ else
         {
             Id = id;
             Name = name;
-            Slug = slug;
+            Slug = new AutoSlugState(slug, isManual: true);
             Description = description;
         }
 
         public Guid Id { get; set; }
         public string Name { get; set; } = "";
-        public string Slug { get; set; } = "";
+        public AutoSlugState Slug { get; } = new();
         public string? Description { get; set; }
     }
 }

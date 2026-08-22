@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
@@ -51,8 +52,37 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         Assert.NotNull(response);
         Assert.Collection(
             response.Items,
-            workspace => Assert.Equal(grantedWorkspaceId, workspace.Id));
+            workspace =>
+            {
+                Assert.Equal(grantedWorkspaceId, workspace.Id);
+                Assert.False(workspace.CanWrite);
+            });
         Assert.DoesNotContain(response.Items, workspace => workspace.Id == hiddenWorkspaceId);
+    }
+
+    [Fact]
+    public async Task List_ReportsWriteCapability_ForGrantedWriter()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await SeedWorkspaceWriterAsync(factory);
+        var login = await LoginAsync(client, "writer@example.test", "writer-password");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var response = await client.GetFromJsonAsync<PagedResult<WorkspaceDto>>("/api/v1/workspaces");
+
+        Assert.NotNull(response);
+        Assert.Collection(
+            response.Items,
+            workspace =>
+            {
+                Assert.Equal(workspaceId, workspace.Id);
+                Assert.True(workspace.CanWrite);
+            });
+
+        var workspace = await client.GetFromJsonAsync<WorkspaceDto>($"/api/v1/workspaces/{workspaceId}");
+        Assert.NotNull(workspace);
+        Assert.True(workspace.CanWrite);
     }
 
     [Fact]
@@ -69,6 +99,23 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.NotFound, workspaceResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, templatesResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateUser_AcceptsStringEnumValues_FromThePublicWireContract()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var request = new StringContent(
+            """{"email":"editor@example.test","displayName":"Editor","role":"Editor","temporaryPassword":"temporary-password","isSuperAdmin":false,"workspaceAccesses":[]}""",
+            Encoding.UTF8,
+            "application/json");
+        using var response = await client.PostAsync("/api/v1/users", request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
     private static async Task<(Guid GrantedWorkspaceId, Guid HiddenWorkspaceId)> SeedRestrictedUserAsync(WebApplicationFactory<Program> factory)
@@ -98,6 +145,34 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         await dbContext.SaveChangesAsync();
 
         return (grantedWorkspace.Id, hiddenWorkspace.Id);
+    }
+
+    private static async Task<Guid> SeedWorkspaceWriterAsync(WebApplicationFactory<Program> factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+
+        var workspace = new Workspace { Name = "Writable Workspace", Slug = $"writable-{Guid.NewGuid():N}" };
+        var user = new User
+        {
+            Email = "writer@example.test",
+            DisplayName = "Workspace Writer",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("writer-password", 4),
+            Role = UserRole.Admin,
+            IsActive = true
+        };
+
+        user.WorkspaceAccesses.Add(new UserWorkspaceAccess
+        {
+            WorkspaceId = workspace.Id,
+            AccessLevel = WorkspaceAccessLevel.Write
+        });
+
+        dbContext.Workspaces.Add(workspace);
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        return workspace.Id;
     }
 
     private static async Task<LoginResponse> LoginAsync(HttpClient client, string email, string password)

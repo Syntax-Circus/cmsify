@@ -26,9 +26,9 @@
         <div class="cms-card">
             <h2 class="h6">Details</h2>
             <label class="form-label mt-2">Name</label>
-            <InputText class="form-control mb-3" @bind-Value="name" />
+            <input class="form-control mb-3" value="@name" @oninput="UpdateName" />
             <label class="form-label">Slug</label>
-            <InputText class="form-control mb-1 font-monospace" @bind-Value="slug" aria-describedby="slug-rule" />
+            <input class="form-control mb-1 font-monospace" value="@slug.Value" @oninput="UpdateSlug" aria-describedby="slug-rule" />
             <div id="slug-rule" class="form-text mb-3">@SlugRules.ValidationMessage</div>
             <label class="form-label">Description</label>
             <InputTextArea class="form-control" @bind-Value="description" />
@@ -72,7 +72,7 @@
     [Parameter] public Guid? PickListId { get; set; }
 
     private string name = "";
-    private string slug = "";
+    private AutoSlugState slug = new();
     private string? description;
     private List<OptionEdit> options = [];
     private string? error;
@@ -85,7 +85,7 @@
             {
                 var loaded = await PickLists.GetAsync(WorkspaceId, PickListId.Value);
                 name = loaded.Name;
-                slug = loaded.Slug;
+                slug = new AutoSlugState(loaded.Slug, isManual: true);
                 description = loaded.Description;
                 options = loaded.Options.Select(option => new OptionEdit { Label = option.Label, Value = option.Value, Order = option.Order }).ToList();
             }
@@ -96,6 +96,7 @@
         }
         else
         {
+            slug = new AutoSlugState();
             options = [new OptionEdit { Label = "", Value = "", Order = 0 }];
         }
     }
@@ -104,21 +105,25 @@
 
     private void Remove(int index) => options.RemoveAt(index);
 
+    private void UpdateName(ChangeEventArgs args)
+    {
+        name = args.Value?.ToString() ?? string.Empty;
+        slug.UpdateFromName(name);
+    }
+
+    private void UpdateSlug(ChangeEventArgs args) => slug.SetManually(args.Value?.ToString());
+
     private async Task SaveAsync()
     {
         error = null;
-        if (string.IsNullOrWhiteSpace(slug))
-        {
-            slug = SlugFormatter.FromDisplayName(name);
-        }
-
-        if (!SlugRules.IsValid(slug))
+        slug.EnsureDefault(name);
+        if (!SlugRules.IsValid(slug.Value))
         {
             error = SlugRules.ValidationMessage;
             return;
         }
 
-        var request = new PickListRequest(name ?? "", slug, description, options.Select(option => new PickListOptionRequest(option.Label, option.Value, option.Order)).ToArray());
+        var request = new PickListRequest(name ?? "", slug.Value, description, options.Select(option => new PickListOptionRequest(option.Label, option.Value, option.Order)).ToArray());
         try
         {
             if (PickListId.HasValue)
@@ -138,7 +143,7 @@
         }
         catch (CmsifyApiException ex)
         {
-            error = ex.Message;
+            error = ProblemDetailsDisplay.Format(ex);
         }
     }
 

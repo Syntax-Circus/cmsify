@@ -5,10 +5,8 @@
 
 <div class="cms-page-head">
     <div><h1>Users</h1><div class="lead">Create users, assign roles, workspace grants, and temporary passwords.</div></div>
-    <button class="btn btn-primary" @onclick="() => creating = true">Create User</button>
+    <button class="btn btn-primary" @onclick="BeginCreate">Create User</button>
 </div>
-
-<Toast Message="@toast" />
 
 <div class="cms-card p-0">
     <table class="cms-table">
@@ -37,6 +35,10 @@
             <div class="modal-content">
                 <div class="modal-header"><h5 class="modal-title">@(editing is null ? "Create User" : "Edit User")</h5><button class="btn-close" @onclick="Close"></button></div>
                 <div class="modal-body">
+                    @if (!string.IsNullOrWhiteSpace(formError))
+                    {
+                        <div class="alert alert-danger" role="alert">@formError</div>
+                    }
                     <label class="form-label">Email</label><InputText class="form-control mb-3" @bind-Value="form.Email" />
                     <label class="form-label">Display name</label><InputText class="form-control mb-3" @bind-Value="form.DisplayName" />
                     <label class="form-label">Role</label><InputSelect class="form-select mb-3" @bind-Value="form.Role" disabled="@IsProtectedLastSuperAdmin">@foreach (var role in Enum.GetValues<UserRole>()) { <option value="@role">@role</option> }</InputSelect>
@@ -89,7 +91,7 @@
     private UserDto? editing;
     private UserForm form = new();
     private string? oneTimeSecret;
-    private string? toast;
+    private string? formError;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -106,20 +108,29 @@
     private void Edit(UserDto user)
     {
         editing = user;
+        formError = null;
         form = new UserForm { Email = user.Email, DisplayName = user.DisplayName, Role = user.Role, IsSuperAdmin = user.IsSuperAdmin, IsActive = user.IsActive, TimeZoneId = user.TimeZoneId };
         ResetWorkspaceGrantForm(user.WorkspaceAccesses);
+    }
+
+    private void BeginCreate()
+    {
+        formError = null;
+        creating = true;
     }
 
     private void Close()
     {
         creating = false;
         editing = null;
+        formError = null;
         form = new();
         ResetWorkspaceGrantForm([]);
     }
 
     private async Task SaveAsync()
     {
+        formError = null;
         try
         {
             if (editing is null)
@@ -136,7 +147,7 @@
         }
         catch (CmsifyApiException ex)
         {
-            toast = ex.Message;
+            formError = ProblemDetailsDisplay.Format(ex);
             return;
         }
 

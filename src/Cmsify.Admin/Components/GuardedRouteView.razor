@@ -50,12 +50,6 @@
 
         await Workspace.InitializeAsync(userId);
 
-        if (path.Equals("/workspaces", StringComparison.OrdinalIgnoreCase) && Workspace.Current is not null)
-        {
-            Navigation.NavigateTo($"/workspaces/{Workspace.Current.Id}", replace: true);
-            return;
-        }
-
         if (TryGetWorkspaceId(path, out var workspaceId) && !await Workspace.SelectAvailableAsync(workspaceId))
         {
             await Workspace.ClearAsync();

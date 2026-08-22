@@ -31,7 +31,7 @@ public sealed class UsersController : ControllerBase
     {
         if (!currentActor.IsSuperAdmin)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         var limit = Math.Clamp(pageSize, 1, 200);
@@ -44,7 +44,7 @@ public sealed class UsersController : ControllerBase
     {
         if (!currentActor.IsSuperAdmin)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         var workspaceAccesses = NormalizeWorkspaceAccesses(request.WorkspaceAccesses);
@@ -64,7 +64,7 @@ public sealed class UsersController : ControllerBase
     {
         if (!currentActor.IsSuperAdmin)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         var user = await userRepository.GetAsync(id, ct);
@@ -76,7 +76,7 @@ public sealed class UsersController : ControllerBase
     {
         if (!currentActor.IsSuperAdmin)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         if (currentActor.UserId == id && !request.IsActive)
@@ -110,7 +110,7 @@ public sealed class UsersController : ControllerBase
     {
         if (!currentActor.IsSuperAdmin)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         var existing = await userRepository.GetAsync(id, ct);

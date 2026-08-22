@@ -11,16 +11,28 @@
     {
         <aside class="cms-sidebar">
             <a class="cms-sidebar__brand" href="/">
-                <img class="cms-navbar-logo" src="img/cmsify-logo.webp" alt="" />
+                <img class="cms-navbar-logo" src="@Assets["img/cmsify-logo.webp"]" alt="" />
                 <span>Cmsify</span>
             </a>
-            <button class="cms-ws-switcher text-start" @onclick="NavigateWorkspaces">
-                <div>
-                    <div class="cms-ws-switcher__name">@(Workspace.Current?.Name ?? "Select workspace")</div>
-                    <div class="cms-ws-switcher__slug">@(Workspace.Current?.Slug ?? "workspaces")</div>
+            @if (CanSwitchWorkspaces)
+            {
+                <button type="button" class="cms-ws-switcher text-start" @onclick="NavigateWorkspaces">
+                    <div>
+                        <div class="cms-ws-switcher__name">@(Workspace.Current?.Name ?? "Select workspace")</div>
+                        <div class="cms-ws-switcher__slug">@(Workspace.Current?.Slug ?? "workspaces")</div>
+                    </div>
+                    <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                </button>
+            }
+            else
+            {
+                <div class="cms-ws-switcher cms-ws-switcher--static">
+                    <div>
+                        <div class="cms-ws-switcher__name">@(Workspace.Current?.Name ?? "Select workspace")</div>
+                        <div class="cms-ws-switcher__slug">@(Workspace.Current?.Slug ?? "workspaces")</div>
+                    </div>
                 </div>
-                <i class="bi bi-chevron-down"></i>
-            </button>
+            }
             <nav class="cms-nav">
                 @if (Workspace.Current is not null)
                 {
@@ -31,17 +43,32 @@
                     <NavLink class="cms-nav__item" href="@WorkspaceHref("content")"><i class="bi bi-file-earmark-text"></i><span>Content</span></NavLink>
                     <NavLink class="cms-nav__item" href="@WorkspaceHref("media")"><i class="bi bi-images"></i><span>Media</span></NavLink>
                 }
-                <NavLink class="cms-nav__item" href="/settings/users"><i class="bi bi-gear"></i><span>Settings</span></NavLink>
-                <div class="cms-nav__sub">
-                    <NavLink class="cms-nav__item" href="/settings/users">Users</NavLink>
-                    <NavLink class="cms-nav__item" href="/settings/api-clients">API Clients</NavLink>
-                    <NavLink class="cms-nav__item" href="/settings/audit">Audit Log</NavLink>
-                    @if (Workspace.Current is not null)
-                    {
-                        <NavLink class="cms-nav__item" href="/settings/webhooks">Webhooks</NavLink>
-                        <NavLink class="cms-nav__item" href="/settings/packages">Packages</NavLink>
-                    }
-                </div>
+                @if (HasSettingsNavigation)
+                {
+                    <div class="cms-nav__item"><i class="bi bi-gear"></i><span>Settings</span></div>
+                    <div class="cms-nav__sub">
+                        @if (CanManageUsers)
+                        {
+                            <NavLink class="cms-nav__item" href="/settings/users">Users</NavLink>
+                        }
+                        @if (CanManageApiClients)
+                        {
+                            <NavLink class="cms-nav__item" href="/settings/api-clients">API Clients</NavLink>
+                        }
+                        @if (CanViewAuditLog)
+                        {
+                            <NavLink class="cms-nav__item" href="/settings/audit">Audit Log</NavLink>
+                        }
+                        @if (CanManageWebhooks)
+                        {
+                            <NavLink class="cms-nav__item" href="/settings/webhooks">Webhooks</NavLink>
+                        }
+                        @if (CanManagePackages)
+                        {
+                            <NavLink class="cms-nav__item" href="/settings/packages">Packages</NavLink>
+                        }
+                    </div>
+                }
             </nav>
             <div class="cms-sidebar__foot">
                 <div class="cms-avatar">@Initials</div>
@@ -96,6 +123,22 @@
     private bool ShowChrome => !Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("login", StringComparison.OrdinalIgnoreCase);
 
     private string EffectiveTheme => Preferences.EffectiveTheme;
+
+    private bool CanSwitchWorkspaces => Workspace.Available.Count > 1;
+
+    private UserRole CurrentRole => Enum.TryParse<UserRole>(Auth.User?.Role, ignoreCase: true, out var role) ? role : UserRole.Reader;
+
+    private bool CanManageUsers => CurrentRole >= UserRole.Admin && Auth.User?.IsSuperAdmin == true;
+
+    private bool CanManageApiClients => CurrentRole >= UserRole.Admin;
+
+    private bool CanViewAuditLog => CurrentRole >= UserRole.TemplateAdmin;
+
+    private bool CanManageWebhooks => Workspace.Current is not null && CurrentRole >= UserRole.Editor;
+
+    private bool CanManagePackages => Workspace.Current is not null && CurrentRole >= UserRole.TemplateAdmin;
+
+    private bool HasSettingsNavigation => CanManageUsers || CanManageApiClients || CanViewAuditLog || CanManageWebhooks || CanManagePackages;
 
     private string Initials => string.Join("", (Auth.User?.DisplayName ?? "User").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => part[0])).ToUpperInvariant();
 
