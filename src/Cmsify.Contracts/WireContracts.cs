@@ -14,7 +14,7 @@ public sealed record UserSummary(Guid Id, string Email, string DisplayName, stri
 
 public sealed record LoginResponse(string Token, DateTimeOffset ExpiresAt, bool MustChangePassword, UserSummary User);
 
-public sealed record WorkspaceDto(Guid Id, string Name, string Slug, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+public sealed record WorkspaceDto(Guid Id, string Name, string Slug, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool CanWrite = false);
 
 public sealed record WorkspaceRequest(string Name, string Slug, string? Description);
 

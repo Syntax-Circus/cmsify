@@ -32,7 +32,7 @@ public sealed class AuthTests
     }
 
     [Theory]
-    [InlineData(UserRole.Reader, UserRole.Admin, typeof(ForbidResult))]
+    [InlineData(UserRole.Reader, UserRole.Admin, typeof(StatusCodeResult))]
     [InlineData(UserRole.Admin, UserRole.Admin, null)]
     [InlineData(UserRole.Editor, UserRole.Reader, null)]
     public async Task RequireRole_EnforcesRoleHierarchy(UserRole actorRole, UserRole requiredRole, Type? resultType)
@@ -53,6 +53,11 @@ public sealed class AuthTests
         else
         {
             Assert.IsType(resultType, context.Result);
+            if (resultType == typeof(StatusCodeResult))
+            {
+                var statusCodeResult = Assert.IsType<StatusCodeResult>(context.Result);
+                Assert.Equal(StatusCodes.Status403Forbidden, statusCodeResult.StatusCode);
+            }
         }
     }
 
@@ -68,6 +73,7 @@ public sealed class AuthTests
 
         await new RequireRoleAttribute(UserRole.Reader).OnAuthorizationAsync(context);
 
-        Assert.IsType<UnauthorizedResult>(context.Result);
+        var result = Assert.IsType<StatusCodeResult>(context.Result);
+        Assert.Equal(StatusCodes.Status401Unauthorized, result.StatusCode);
     }
 }

@@ -147,6 +147,18 @@ body {
   gap: 8px;
 }
 
+button.cms-ws-switcher {
+  cursor: pointer;
+}
+
+button.cms-ws-switcher:hover {
+  border-color: rgba(255, 255, 255, .18);
+}
+
+.cms-ws-switcher--static {
+  cursor: default;
+}
+
 .cms-ws-switcher__name {
   font-weight: 600;
   font-size: 13px;

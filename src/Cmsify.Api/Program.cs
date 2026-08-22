@@ -16,6 +16,7 @@ using Serilog;
 using Serilog.Events;
 using SyntaxCircus.AspNetCore.Common;
 using SyntaxCircus.AspNetCore.Serilog;
+using SyntaxCircus.Cmsify.Contracts;
 using SyntaxCircus.DotEnv;
 
 const string CorrelationHeaderName = "X-Correlation-Id";
@@ -36,7 +37,8 @@ builder.AddStandardSerilog(fileLoggingOptions =>
     fileLoggingOptions.RetainedFileCountLimit = builder.Configuration.GetValue<int?>("Serilog:File:RetainedFileCountLimit", 14);
 });
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options => CmsifyJsonOptions.Configure(options.JsonSerializerOptions));
 builder.Services.AddCorrelationId(options => options.HeaderName = CorrelationHeaderName);
 builder.Services.AddSecurityHeaders(builder.Configuration);
 builder.Services.AddTrustedProxyForwardedHeaders(builder.Configuration);

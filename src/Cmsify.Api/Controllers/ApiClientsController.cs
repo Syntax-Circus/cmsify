@@ -38,7 +38,7 @@ public sealed class ApiClientsController : ControllerBase
     {
         if (!await CanManageClientScopeAsync(request.WorkspaceId, ct))
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         var tokenIdentifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(12));

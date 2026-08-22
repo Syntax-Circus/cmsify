@@ -17,13 +17,13 @@ public sealed class RequireRoleAttribute : Attribute, IAsyncAuthorizationFilter
         var actor = context.HttpContext.RequestServices.GetRequiredService<ICurrentActor>();
         if (!actor.IsAuthenticated)
         {
-            context.Result = new UnauthorizedResult();
+            context.Result = new StatusCodeResult(StatusCodes.Status401Unauthorized);
             return Task.CompletedTask;
         }
 
         if (actor.Role < requiredRole)
         {
-            context.Result = new ForbidResult();
+            context.Result = new StatusCodeResult(StatusCodes.Status403Forbidden);
         }
 
         return Task.CompletedTask;

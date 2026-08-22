@@ -47,6 +47,33 @@ A password change uses `CmsifyClient.Auth.ChangePasswordAsync`; the API verifies
 
 On logout, the Admin calls `CmsifyClient.Auth.LogoutAsync` to invalidate the API session, then always clears the Admin cookie. Clearing the local cookie is intentional even if the API session was already unavailable or revoked.
 
+## Roles and workspace access
+
+Local users have a global role plus an access grant for each workspace. Both checks must succeed for a workspace-scoped operation: the role determines which kind of operation is permitted, while the workspace grant determines where it is permitted. Higher roles inherit the permissions of lower roles.
+
+| Role | Permitted actions when the workspace grant also permits them |
+| --- | --- |
+| `Reader` | Read accessible workspaces and their content, templates, components, picklists, media, tags, and account preferences. |
+| `Editor` | Reader permissions, plus create and manage content, media, and webhooks. |
+| `TemplateAdmin` | Editor permissions, plus create, change, and publish templates, components, and picklists; import/export packages; approve or reject content; and read audit logs. |
+| `Admin` | TemplateAdmin permissions, plus edit/delete a workspace, delete tags, manage storage settings, and manage API clients. |
+
+Workspace grants have the following effect:
+
+| Workspace access | Effect |
+| --- | --- |
+| **No access** | No grant is stored. The user cannot access the workspace or its scoped resources. |
+| **Read** | The user can use read endpoints for the workspace but cannot modify its resources, regardless of their role. |
+| **Write** | The user can use write endpoints in that workspace only when their role permits that action. For example, an `Editor` with Write access can edit content but cannot edit templates; a `TemplateAdmin` with Write access can do both. |
+
+`Write` is not a role upgrade and does not allow a user to create workspaces. Workspace creation and user management require both the `Admin` role and the host-superadmin flag. Editing or deleting an existing workspace requires the `Admin` role plus Write access to that workspace.
+
+The Admin navigation reflects these permissions. `Users` is visible only to host superadmins with the `Admin` role; `API Clients` requires `Admin`; `Audit Log` and `Packages` require `TemplateAdmin`; and `Webhooks` requires `Editor` plus a selected workspace. Webhooks are workspace-scoped: their API routes are under `/api/v1/workspaces/{workspaceId}/webhooks`, and Write access is required to modify endpoint subscriptions or retry deliveries.
+
+### Host superadmins
+
+The **Host superadmin** flag is separate from the role. It bypasses per-workspace grants, giving the user access to every workspace, but it does not raise the user's role. For a full host administrator, assign both `Admin` and Host superadmin. A superadmin assigned `Reader`, for example, can read every workspace but still cannot call endpoints that require `Editor`, `TemplateAdmin`, or `Admin`.
+
 ## API-client tokens
 
 API-client tokens are opaque machine credentials, sometimes called API keys. They have this format:
@@ -88,6 +115,8 @@ For workspace resources, the token must be scoped to the requested workspace. `R
 ## API authorization and failure handling
 
 After authentication, controllers apply role checks and workspace authorization. Super-admin local users can access all workspaces; local users otherwise need workspace access records. API-client actors are limited by their configured role and workspace scope. Missing or invalid credentials return `401`; an authenticated actor without sufficient role returns `403`; workspace resources can return `404` when access must not reveal the workspace exists.
+
+Workspace list and detail responses include `canWrite`, an actor-specific capability suitable for client-side affordances. It does not replace API authorization. API JSON property names are camel case, and enum values use their string names (for example, `"Editor"`, `"Write"`, and `"Text"`).
 
 The .NET SDK maps non-success responses to `CmsifyApiException`, preserving RFC 7807 ProblemDetails, the API `traceId`, and the correlation ID. It retries only safe read requests, honors `Retry-After`, and never automatically replays writes.
 

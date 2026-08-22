@@ -31,7 +31,13 @@ public sealed class WorkspacesController : ControllerBase
     public async Task<ActionResult<PagedResult<WorkspaceDto>>> List([FromQuery] int offset = 0, [FromQuery] int limit = 50, CancellationToken ct = default)
     {
         var result = await workspaceRepository.ListAsync(new PageRequest(offset, limit), ct);
-        return Ok(result);
+        var workspaces = new List<WorkspaceDto>(result.Items.Count);
+        foreach (var workspace in result.Items)
+        {
+            workspaces.Add(await WithCapabilitiesAsync(workspace, ct));
+        }
+
+        return Ok(new PagedResult<WorkspaceDto>(workspaces, result.TotalCount, result.Offset, result.Limit));
     }
 
     [HttpPost]
@@ -40,7 +46,7 @@ public sealed class WorkspacesController : ControllerBase
     {
         if (!currentActor.IsSuperAdmin)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         if (!SlugRules.IsValid(command.Slug))
@@ -50,7 +56,7 @@ public sealed class WorkspacesController : ControllerBase
 
         var workspace = await workspaceRepository.CreateAsync(command, ct);
         Response.Headers.ETag = ToETag(workspace);
-        return CreatedAtAction(nameof(Get), new { id = workspace.Id }, workspace);
+        return CreatedAtAction(nameof(Get), new { id = workspace.Id }, await WithCapabilitiesAsync(workspace, ct));
     }
 
     [HttpGet("{id:guid}")]
@@ -63,7 +69,7 @@ public sealed class WorkspacesController : ControllerBase
         }
 
         Response.Headers.ETag = ToETag(workspace);
-        return Ok(workspace);
+        return Ok(await WithCapabilitiesAsync(workspace, ct));
     }
 
     [HttpPut("{id:guid}")]
@@ -94,7 +100,7 @@ public sealed class WorkspacesController : ControllerBase
         var workspace = await workspaceRepository.UpdateAsync(new UpdateWorkspaceCommand(id, request.Name, request.Slug, request.Description), ct);
         await webhookQueue.EnqueueAsync(new WebhookEvent("workspace.updated", id, id, JsonSerializer.SerializeToElement(new { workspaceId = id, workspace.Name, workspace.Slug }), DateTimeOffset.UtcNow), ct);
         Response.Headers.ETag = ToETag(workspace);
-        return Ok(workspace);
+        return Ok(await WithCapabilitiesAsync(workspace, ct));
     }
 
     [HttpDelete("{id:guid}")]
@@ -128,6 +134,9 @@ public sealed class WorkspacesController : ControllerBase
     }
 
     private static string ToETag(WorkspaceDto workspace) => $"\"{workspace.UpdatedAt.UtcTicks}\"";
+
+    private async Task<WorkspaceDto> WithCapabilitiesAsync(WorkspaceDto workspace, CancellationToken ct) =>
+        workspace with { CanWrite = await workspaceAuthorization.CanWriteWorkspaceAsync(workspace.Id, ct) };
 }
 
 public sealed record UpdateWorkspaceRequest(string Name, string Slug, string? Description);

@@ -7,7 +7,7 @@ public sealed record PageRequest(int Offset = 0, int Limit = 50);
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount, int Offset, int Limit);
 
-public sealed record WorkspaceDto(Guid Id, string Name, string Slug, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+public sealed record WorkspaceDto(Guid Id, string Name, string Slug, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool CanWrite = false);
 
 public sealed record CreateWorkspaceCommand(string Name, string Slug, string? Description);
 

@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
@@ -13,6 +14,8 @@ namespace Cmsify.Api.Integration.Tests;
 
 public sealed class ContentPublishRangeTests : IAsyncLifetime
 {
+    private static readonly JsonSerializerOptions ApiJsonOptions = SyntaxCircus.Cmsify.Contracts.CmsifyJsonOptions.Create();
+
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("cmsify")
         .WithUsername("cmsify")
@@ -58,7 +61,7 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
         var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/seasonal?asOf=2026-12-24T12:00:00Z");
 
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ContentItemDetailResponse>();
+        var body = await response.Content.ReadFromJsonAsync<ContentItemDetailResponse>(ApiJsonOptions);
         Assert.NotNull(body);
         Assert.Equal(contentId, body.Id);
         Assert.Equal("seasonal", body.Slug);
