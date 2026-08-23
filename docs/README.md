@@ -10,6 +10,7 @@ Use the guide that matches the job you are doing. The current API behavior is de
 
 ## Build with Cmsify
 
+- [Published artifacts](../README.md#published-artifacts) — NuGet SDK packages and Docker Hub images.
 - [Authentication and authorization](authentication-and-authorization.md) — credentials, roles, scopes, and token lifecycle.
 - [Integrating with the API](integrating.md) — workspace-scoped HTTP use, errors, pagination, retries, and SDK integration.
 - [Content modeling](content-modeling.md) — templates, components, and content lifecycle.
