@@ -3,11 +3,18 @@
 [![.NET tests](https://github.com/Syntax-Circus/cmsify/actions/workflows/dotnet-test.yml/badge.svg)](https://github.com/Syntax-Circus/cmsify/actions/workflows/dotnet-test.yml)
 [![NuGet: SyntaxCircus.Cmsify.Client](https://img.shields.io/nuget/v/SyntaxCircus.Cmsify.Client.svg?label=NuGet%20Client)](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client)
 [![NuGet: SyntaxCircus.Cmsify.Client.DistributedCaching](https://img.shields.io/nuget/v/SyntaxCircus.Cmsify.Client.DistributedCaching.svg?label=NuGet%20Distributed%20Caching)](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client.DistributedCaching)
+[![Docker: syntaxcircus/cmsify-api](https://img.shields.io/docker/v/syntaxcircus/cmsify-api?label=Docker%20API&sort=semver)](https://hub.docker.com/r/syntaxcircus/cmsify-api)
+[![Docker: syntaxcircus/cmsify-admin](https://img.shields.io/docker/v/syntaxcircus/cmsify-admin?label=Docker%20Admin&sort=semver)](https://hub.docker.com/r/syntaxcircus/cmsify-admin)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 Cmsify is a headless CMS with composable, versioned templates, built with .NET 10, PostgreSQL, EF Core, and a Blazor admin UI. It exposes a versioned HTTP API and a first-party TypeScript client for server-side applications.
 
 > **No support guaranteed.** Cmsify is published as-is and maintained on a best-effort basis. Issues and pull requests are welcome, but there is no SLA or guaranteed support response.
+
+## Published artifacts
+
+- **NuGet SDK packages:** [`SyntaxCircus.Cmsify.Client`](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client) and [`SyntaxCircus.Cmsify.Client.DistributedCaching`](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client.DistributedCaching)
+- **Docker Hub images:** [`syntaxcircus/cmsify-api`](https://hub.docker.com/r/syntaxcircus/cmsify-api) and [`syntaxcircus/cmsify-admin`](https://hub.docker.com/r/syntaxcircus/cmsify-admin)
 
 ## Start locally
 
