@@ -7,6 +7,8 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
@@ -310,10 +312,3 @@ public sealed class WebhooksController : ControllerBase
     private static WebhookEndpointResponse ToResponse(WebhookEndpoint endpoint) =>
         new(endpoint.Id, endpoint.WorkspaceId, endpoint.Name, endpoint.Url, endpoint.IsActive, endpoint.CreatedAt, endpoint.UpdatedAt, endpoint.Subscriptions.Select(subscription => subscription.EventType).OrderBy(evt => evt).ToArray());
 }
-
-public sealed record CreateWebhookEndpointRequest(string Name, string Url, string? Secret, IReadOnlyList<string> Events);
-public sealed record UpdateWebhookEndpointRequest(string Name, string Url, bool IsActive, IReadOnlyList<string> Events);
-public sealed record WebhookEndpointResponse(Guid Id, Guid WorkspaceId, string Name, string Url, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, IReadOnlyList<string> Events);
-public sealed record CreateWebhookEndpointResponse(WebhookEndpointResponse Endpoint, string Secret);
-public sealed record RotateWebhookSecretResponse(Guid Id, string Secret, string Warning);
-public sealed record WebhookDeliveryResponse(Guid Id, Guid WebhookEndpointId, string EventType, JsonElement Payload, int AttemptCount, DateTimeOffset? LastAttemptAt, DateTimeOffset? NextRetryAt, int? StatusCode, bool IsDelivered, bool IsFailed, DateTimeOffset CreatedAt);

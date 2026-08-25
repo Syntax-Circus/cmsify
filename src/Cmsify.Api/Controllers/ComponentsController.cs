@@ -7,6 +7,10 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType;
+using TemplateVersionStatus = Cmsify.Core.Domain.Enums.TemplateVersionStatus;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
@@ -151,8 +155,8 @@ public sealed class ComponentsController : ControllerBase
         foreach (var field in fields)
         {
             if (string.IsNullOrWhiteSpace(field.Key) || string.IsNullOrWhiteSpace(field.Label) || field.Order < 0 || field.MinOccurrences < 0 || field.MaxOccurrences < field.MinOccurrences || (field.PrimitiveType.HasValue == field.NestedComponentId.HasValue)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component field", "Each component field requires exactly one primitive type or nested component and valid occurrence limits.");
-            if (field.PrimitiveType.HasValue && !fieldConfigValidator.Validate(field.PrimitiveType.Value, field.FieldConfig).IsValid) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component field configuration", "Field configuration is invalid for its primitive type.");
-            if (field.PrimitiveType == PrimitiveType.PickList && !await HasValidPickListBindingAsync(workspaceId, field.FieldConfig, ct)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid PickList binding", "The PickList and its pinned revision must belong to this workspace.");
+            if (field.PrimitiveType.HasValue && !fieldConfigValidator.Validate(field.PrimitiveType.Value.ToCore(), field.FieldConfig).IsValid) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid component field configuration", "Field configuration is invalid for its primitive type.");
+            if (field.PrimitiveType == SyntaxCircus.Cmsify.Contracts.PrimitiveType.PickList && !await HasValidPickListBindingAsync(workspaceId, field.FieldConfig, ct)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid PickList binding", "The PickList and its pinned revision must belong to this workspace.");
             if (field.NestedComponentId.HasValue && !await db.Components.AnyAsync(x => x.Id == field.NestedComponentId && x.WorkspaceId == workspaceId && !x.IsDeleted, ct)) return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Unknown nested component", "Nested components must belong to the workspace.");
         }
         return null;
@@ -200,16 +204,8 @@ public sealed class ComponentsController : ControllerBase
             return hasCycle;
         }
     }
-    private static ComponentField ToField(Guid versionId, ComponentFieldRequest field) => new() { ComponentVersionId = versionId, Key = field.Key, Label = field.Label, HelpText = field.HelpText, Order = field.Order, IsRequired = field.IsRequired, MinOccurrences = field.MinOccurrences, MaxOccurrences = field.MaxOccurrences, PrimitiveType = field.PrimitiveType, NestedComponentId = field.NestedComponentId, FieldConfig = field.FieldConfig.Clone() };
+    private static ComponentField ToField(Guid versionId, ComponentFieldRequest field) => new() { ComponentVersionId = versionId, Key = field.Key, Label = field.Label, HelpText = field.HelpText, Order = field.Order, IsRequired = field.IsRequired, MinOccurrences = field.MinOccurrences, MaxOccurrences = field.MaxOccurrences, PrimitiveType = field.PrimitiveType.ToCore(), NestedComponentId = field.NestedComponentId, FieldConfig = field.FieldConfig.Clone() };
     private static ComponentField CopyField(ComponentField field, Guid versionId) => new() { ComponentVersionId = versionId, Key = field.Key, Label = field.Label, HelpText = field.HelpText, Order = field.Order, IsRequired = field.IsRequired, MinOccurrences = field.MinOccurrences, MaxOccurrences = field.MaxOccurrences, PrimitiveType = field.PrimitiveType, NestedComponentId = field.NestedComponentId, FieldConfig = field.FieldConfig.Clone() };
     private static ComponentResponse ToResponse(ComponentDefinition component) { var current = component.Versions.FirstOrDefault(x => x.Id == component.CurrentVersionId); return new(component.Id, component.WorkspaceId, component.Name, component.Slug, component.Description, current is null ? null : ToResponse(current)); }
-    private static ComponentVersionResponse ToResponse(ComponentVersion version) => new(version.Id, version.ComponentId, version.VersionNumber, version.Status, version.PublishedAt, version.Notes, version.Fields.OrderBy(x => x.Order).Select(x => new ComponentFieldResponse(x.Id, x.Key, x.Label, x.HelpText, x.Order, x.IsRequired, x.MinOccurrences, x.MaxOccurrences, x.PrimitiveType, x.NestedComponentId, x.FieldConfig.Clone())).ToArray());
+    private static ComponentVersionResponse ToResponse(ComponentVersion version) => new(version.Id, version.ComponentId, version.VersionNumber, version.Status.ToContract(), version.PublishedAt, version.Notes, version.Fields.OrderBy(x => x.Order).Select(x => new ComponentFieldResponse(x.Id, x.Key, x.Label, x.HelpText, x.Order, x.IsRequired, x.MinOccurrences, x.MaxOccurrences, x.PrimitiveType.ToContract(), x.NestedComponentId, x.FieldConfig.Clone())).ToArray());
 }
-
-public sealed record ComponentSummaryResponse(Guid Id, string Name, string Slug, string? Description, Guid? CurrentVersionId);
-public sealed record ComponentResponse(Guid Id, Guid WorkspaceId, string Name, string Slug, string? Description, ComponentVersionResponse? CurrentVersion);
-public sealed record ComponentVersionResponse(Guid Id, Guid ComponentId, int VersionNumber, TemplateVersionStatus Status, DateTimeOffset? PublishedAt, string? Notes, IReadOnlyList<ComponentFieldResponse> Fields);
-public sealed record ComponentFieldResponse(Guid Id, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, PrimitiveType? PrimitiveType, Guid? NestedComponentId, JsonElement? FieldConfig);
-public sealed record ComponentRequest(string Name, string Slug, string? Description);
-public sealed record ComponentVersionRequest(string? Notes);
-public sealed record ComponentFieldRequest(string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, PrimitiveType? PrimitiveType, Guid? NestedComponentId, JsonElement? FieldConfig);

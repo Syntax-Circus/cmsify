@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.Persistence;
@@ -9,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
+using ContentItemDetailResponse = SyntaxCircus.Cmsify.Contracts.ContentItemDetailResponse;
 
 namespace Cmsify.Api.Integration.Tests;
 

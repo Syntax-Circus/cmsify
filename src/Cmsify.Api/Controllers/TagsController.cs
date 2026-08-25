@@ -4,6 +4,8 @@ using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using SyntaxCircus.Cmsify.Contracts;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using Microsoft.EntityFrameworkCore;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
@@ -71,5 +73,3 @@ public sealed class TagsController : ControllerBase
     }
 
 }
-
-public sealed record TagResponse(Guid Id, string Name, int UsageCount);

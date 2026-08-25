@@ -4,6 +4,8 @@ using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using SyntaxCircus.Cmsify.Contracts;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Api.Controllers;
@@ -72,8 +74,3 @@ public sealed class SettingsController : ControllerBase
         return Ok(new StorageTestResponse(provider, exists, exists ? "Storage connection test succeeded." : "Storage connection test failed."));
     }
 }
-
-public sealed record AccountPreferencesResponse(Guid UserId, string DisplayName, string Email, string? TimeZoneId, string Theme);
-public sealed record UpdateAccountPreferencesRequest(string? TimeZoneId, string Theme);
-public sealed record StorageConfigResponse(string Provider, bool IsConfigured);
-public sealed record StorageTestResponse(string Provider, bool Success, string Message);

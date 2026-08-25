@@ -6,6 +6,8 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 using Microsoft.Net.Http.Headers;
 
@@ -243,6 +245,3 @@ public sealed class MediaController : ControllerBase
     private static MediaAssetResponse ToResponse(MediaAsset asset) =>
         new(asset.Id, asset.FileName, asset.MimeType, asset.SizeBytes, asset.AltText, $"/api/v1/workspaces/{asset.WorkspaceId}/media/{asset.Id}/file", asset.CreatedAt, asset.UpdatedAt);
 }
-
-public sealed record UpdateMediaAssetRequest(string? AltText);
-public sealed record MediaAssetResponse(Guid Id, string FileName, string MimeType, long SizeBytes, string? AltText, string Url, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);

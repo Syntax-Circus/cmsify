@@ -113,9 +113,9 @@ public sealed record UserWorkspaceAccessDto(Guid WorkspaceId, WorkspaceAccessLev
 
 public sealed record UserDto(Guid Id, string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, bool MustChangePassword, string? TimeZoneId, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset? LastLoginAt, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
 
-public sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role, string TemporaryPassword, bool IsSuperAdmin, string? TimeZoneId, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
+public sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role, string TemporaryPassword, bool IsSuperAdmin, string? TimeZoneId, IReadOnlyList<UserWorkspaceAccessRequest>? WorkspaceAccesses);
 
-public sealed record UpdateUserRequest(string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, string? TimeZoneId, bool IsActive, IReadOnlyList<UserWorkspaceAccessDto> WorkspaceAccesses);
+public sealed record UpdateUserRequest(string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, string? TimeZoneId, bool IsActive, IReadOnlyList<UserWorkspaceAccessRequest>? WorkspaceAccesses);
 
 public sealed record ResetPasswordRequest(string TemporaryPassword);
 

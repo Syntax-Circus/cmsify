@@ -3,13 +3,15 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
+using SyntaxCircus.Cmsify.Contracts;
+using CompositionMode = SyntaxCircus.Cmsify.Contracts.CompositionMode;
+using PrimitiveType = SyntaxCircus.Cmsify.Contracts.PrimitiveType;
 
 namespace Cmsify.Api.Integration.Tests;
 
@@ -227,7 +229,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
         Assert.Equal(2, picklist.Options.Count);
 
         var field = await dbContext.TemplateFields.AsNoTracking()
-            .Where(item => item.Key == "rating" && item.PrimitiveType == PrimitiveType.PickList)
+            .Where(item => item.Key == "rating" && item.PrimitiveType == Cmsify.Core.Domain.Enums.PrimitiveType.PickList)
             .FirstAsync();
         Assert.NotNull(field.FieldConfig);
         Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistId", out var idElement));
@@ -533,7 +535,8 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var imported = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
         Assert.NotNull(imported);
         Assert.Empty(imported!.Imported);
-        Assert.Equal(3, imported.PickLists.Count);
+        Assert.NotNull(imported.PickLists);
+        Assert.Equal(3, imported.PickLists!.Count);
         Assert.NotNull(imported.Components);
         Assert.Equal(3, imported.Components!.Count);
 
@@ -543,7 +546,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
         Assert.Equal(3, await dbContext.Components.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation"));
 
         var callToActionStyle = await dbContext.ComponentFields.AsNoTracking()
-            .SingleAsync(field => field.Key == "style" && field.PrimitiveType == PrimitiveType.PickList);
+            .SingleAsync(field => field.Key == "style" && field.PrimitiveType == Cmsify.Core.Domain.Enums.PrimitiveType.PickList);
         Assert.NotNull(callToActionStyle.FieldConfig);
         Assert.True(callToActionStyle.FieldConfig!.Value.TryGetProperty("picklistId", out var picklistId));
         Assert.NotEqual(Guid.Empty.ToString(), picklistId.GetString());

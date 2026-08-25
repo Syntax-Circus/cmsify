@@ -121,6 +121,23 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
+    [Fact]
+    public async Task CreateUser_AcceptsAnOmittedWorkspaceAccessList()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var request = new StringContent(
+            """{"email":"reader-without-grants@example.test","displayName":"Reader without grants","role":"Reader","temporaryPassword":"temporary-password","isSuperAdmin":false}""",
+            Encoding.UTF8,
+            "application/json");
+        using var response = await client.PostAsync("/api/v1/users", request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
     private static async Task<(Guid GrantedWorkspaceId, Guid HiddenWorkspaceId)> SeedRestrictedUserAsync(WebApplicationFactory<Program> factory)
     {
         using var scope = factory.Services.CreateScope();

@@ -6,6 +6,9 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
@@ -314,13 +317,3 @@ public sealed class PickListsController : ControllerBase
         new(picklist.Id, picklist.Name, picklist.Slug, picklist.Description,
             picklist.Options.OrderBy(option => option.Order).Select(option => new PickListOptionResponse(option.Id, option.Label, option.Value, option.Order)).ToArray(), picklist.CurrentRevisionId, revisionNumber);
 }
-
-public sealed record PickListSummaryResponse(Guid Id, string Name, string Slug, string? Description, int OptionCount, Guid? CurrentRevisionId = null, int CurrentVersionNumber = 0);
-
-public sealed record PickListResponse(Guid Id, string Name, string Slug, string? Description, IReadOnlyList<PickListOptionResponse> Options, Guid? CurrentRevisionId = null, int CurrentVersionNumber = 0);
-
-public sealed record PickListOptionResponse(Guid Id, string Label, string Value, int Order);
-
-public sealed record PickListOptionRequest(string Label, string Value, int? Order);
-
-public sealed record PickListRequest(string Name, string Slug, string? Description, IReadOnlyList<PickListOptionRequest> Options);

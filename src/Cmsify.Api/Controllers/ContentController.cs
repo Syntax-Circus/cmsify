@@ -8,6 +8,14 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using CompositionMode = Cmsify.Core.Domain.Enums.CompositionMode;
+using ContentStatus = Cmsify.Core.Domain.Enums.ContentStatus;
+using ContentVersionStatus = Cmsify.Core.Domain.Enums.ContentVersionStatus;
+using PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType;
+using TemplateVersionStatus = Cmsify.Core.Domain.Enums.TemplateVersionStatus;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
+using ValueKind = Cmsify.Core.Domain.Enums.ValueKind;
 using ContentListQuery = SyntaxCircus.Cmsify.Contracts.ContentListQuery;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
@@ -65,7 +73,7 @@ public sealed class ContentController : ControllerBase
 
         if (query.Status.HasValue)
         {
-            var status = (ContentStatus)(int)query.Status.Value;
+            var status = query.Status.Value.ToCore();
             items = items.Where(content => content.Status == status);
         }
 
@@ -734,7 +742,7 @@ public sealed class ContentController : ControllerBase
     }
 
     private static ContentVersionSummaryResponse ToVersionSummary(ContentVersion version) =>
-        new(version.Id, version.ContentItemId, version.VersionNumber, version.Status, version.TemplateVersionId,
+        new(version.Id, version.ContentItemId, version.VersionNumber, version.Status.ToContract(), version.TemplateVersionId,
             version.Slug, version.LocaleCode, version.EffectiveStartAt, version.EffectiveEndAt, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
             version.RolledBackFromVersionNumber, version.Tags.ToList());
 
@@ -754,12 +762,12 @@ public sealed class ContentController : ControllerBase
             {
                 templateFields.TryGetValue(value.FieldId, out var field);
                 return new ContentVersionFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order,
-                    value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId,
+                    value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId,
                     value.ChildContentItemId, value.JsonValue?.Clone(), value.DisplayLabel);
             })
             .ToList();
         return new ContentVersionDetailResponse(version.Id, version.ContentItemId, version.VersionNumber,
-            version.Status, version.TemplateVersionId, templateName, version.Slug, version.LocaleCode,
+            version.Status.ToContract(), version.TemplateVersionId, templateName, version.Slug, version.LocaleCode,
             version.TranslationGroupId, version.EffectiveStartAt, version.EffectiveEndAt, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
             version.RolledBackFromVersionNumber, version.Tags.ToList(), fields);
     }
@@ -812,7 +820,7 @@ public sealed class ContentController : ControllerBase
                 ContentItemId = content.Id,
                 FieldId = value.FieldId,
                 Order = value.Order,
-                ValueKind = value.ValueKind,
+                ValueKind = value.ValueKind.ToCore(),
                 TextValue = value.TextValue,
                 BoolValue = value.BoolValue,
                 MediaAssetId = value.MediaAssetId,
@@ -860,7 +868,7 @@ public sealed class ContentController : ControllerBase
             var next = requestedValues[index];
             if (current.FieldId != next.FieldId
                 || current.Order != next.Order
-                || current.ValueKind != next.ValueKind
+                || current.ValueKind != next.ValueKind.ToCore()
                 || current.TextValue != next.TextValue
                 || current.BoolValue != next.BoolValue
                 || current.MediaAssetId != next.MediaAssetId
@@ -1015,7 +1023,7 @@ public sealed class ContentController : ControllerBase
             .Where(templateVersion => templateVersion.Id == version.TemplateVersionId)
             .Select(templateVersion => dbContext.Templates.Where(template => template.Id == templateVersion.TemplateId).Select(template => template.Name).First())
             .FirstAsync(ct);
-        return new ContentItemSummaryResponse(version.ContentItemId, version.TemplateVersionId, template, ContentStatus.Published, version.Slug, version.LocaleCode, version.TranslationGroupId, version.Tags.ToList(), version.PublishedAt, version.PublishedAt, version.PublishedAt);
+        return new ContentItemSummaryResponse(version.ContentItemId, version.TemplateVersionId, template, ContentStatus.Published.ToContract(), version.Slug, version.LocaleCode, version.TranslationGroupId, version.Tags.ToList(), version.PublishedAt, version.PublishedAt, version.PublishedAt);
     }
 
     private async Task<ContentItemDetailResponse> ToResolvedDetailResponseAsync(ContentVersion version, DateTimeOffset asOf, int depth = 0, CancellationToken ct = default)
@@ -1036,7 +1044,7 @@ public sealed class ContentController : ControllerBase
                 }
             }
 
-            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone(), value.DisplayLabel));
+            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone(), value.DisplayLabel));
         }
 
         return new ContentItemDetailResponse(summary.Id, summary.TemplateVersionId, summary.TemplateName, summary.Status, summary.Slug, summary.LocaleCode, summary.TranslationGroupId, summary.Tags, summary.CreatedAt, summary.UpdatedAt, summary.PublishedAt, fields);
@@ -1049,7 +1057,7 @@ public sealed class ContentController : ControllerBase
             .Select(version => dbContext.Templates.Where(template => template.Id == version.TemplateId).Select(template => template.Name).First())
             .FirstAsync(ct);
         var tags = await GetTagNamesAsync(content.Id, ct);
-        return new ContentItemSummaryResponse(content.Id, content.TemplateVersionId, template, content.Status, content.Slug, content.LocaleCode, content.TranslationGroupId, tags, content.CreatedAt, content.UpdatedAt, content.PublishedAt);
+        return new ContentItemSummaryResponse(content.Id, content.TemplateVersionId, template, content.Status.ToContract(), content.Slug, content.LocaleCode, content.TranslationGroupId, tags, content.CreatedAt, content.UpdatedAt, content.PublishedAt);
     }
 
     private async Task<ContentItemDetailResponse> ToDetailResponseAsync(Guid id, int depth = 0, CancellationToken ct = default)
@@ -1067,7 +1075,7 @@ public sealed class ContentController : ControllerBase
                 child = await ToDetailResponseAsync(value.ChildContentItemId.Value, depth + 1, ct);
             }
 
-            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone()));
+            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone()));
         }
 
         return new ContentItemDetailResponse(summary.Id, summary.TemplateVersionId, summary.TemplateName, summary.Status, summary.Slug, summary.LocaleCode, summary.TranslationGroupId, summary.Tags, summary.CreatedAt, summary.UpdatedAt, summary.PublishedAt, fields);
@@ -1262,20 +1270,3 @@ public sealed class ContentController : ControllerBase
 
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
 }
-
-public sealed record CreateContentItemRequest(Guid TemplateVersionId, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
-public sealed record UpdateContentItemRequest(string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? PublishAt, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
-public sealed record ContentFieldValueRequest(Guid FieldId, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
-public sealed record RejectContentRequest(string Reason);
-public sealed record PublishContentRequest(DateTimeOffset? PublishAt, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt);
-public sealed record PublishContentResponse(ContentItemDetailResponse Content, IReadOnlyList<string> Warnings);
-public sealed record LinkTranslationRequest(Guid TargetContentItemId);
-public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt);
-public sealed record ContentItemDetailResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt, IReadOnlyList<ContentFieldValueResponse> Fields);
-public sealed record ContentFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentItemDetailResponse? Child, JsonElement? JsonValue, string? DisplayLabel = null);
-
-public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string? Slug, string? LocaleCode, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags);
-
-public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue, string? DisplayLabel = null);
-
-public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, IReadOnlyList<ContentVersionFieldValueResponse> Fields);

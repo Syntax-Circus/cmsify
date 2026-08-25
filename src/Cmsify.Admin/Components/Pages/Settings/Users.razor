@@ -169,12 +169,12 @@
         await LoadAsync();
     }
 
-    private IReadOnlyList<UserWorkspaceAccessDto> SelectedWorkspaceAccesses() =>
+    private IReadOnlyList<UserWorkspaceAccessRequest> SelectedWorkspaceAccesses() =>
         form.IsSuperAdmin
             ? []
             : form.WorkspaceAccesses
                 .Where(access => access.Access != WorkspaceGrantOption.None)
-                .Select(access => new UserWorkspaceAccessDto(access.WorkspaceId, access.Access == WorkspaceGrantOption.Write ? WorkspaceAccessLevel.Write : WorkspaceAccessLevel.Read))
+                .Select(access => new UserWorkspaceAccessRequest(access.WorkspaceId, access.Access == WorkspaceGrantOption.Write ? WorkspaceAccessLevel.Write : WorkspaceAccessLevel.Read))
                 .ToArray();
 
     private void ResetWorkspaceGrantForm(IReadOnlyList<UserWorkspaceAccessDto> existing)
