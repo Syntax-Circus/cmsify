@@ -1,0 +1,135 @@
+name: OpenAPI contract
+
+on:
+  pull_request:
+    paths:
+      - "src/Cmsify.Api/**"
+      - "src/Cmsify.Contracts/**"
+      - "sdk/typescript/**"
+      - "scripts/openapi.mjs"
+      - ".config/dotnet-tools.json"
+      - ".github/workflows/openapi-contract.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "src/Cmsify.Api/**"
+      - "src/Cmsify.Contracts/**"
+      - "sdk/typescript/**"
+      - "scripts/openapi.mjs"
+      - ".config/dotnet-tools.json"
+      - ".github/workflows/openapi-contract.yml"
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    outputs:
+      breaking: ${{ steps.diff.outputs.breaking }}
+      base-sha: ${{ steps.revisions.outputs.base-sha }}
+      head-sha: ${{ steps.revisions.outputs.head-sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Install TypeScript generator
+        working-directory: sdk/typescript
+        run: npm ci
+      - name: Restore pinned OpenAPI exporter
+        run: dotnet tool restore
+      - name: Resolve exact comparison revisions
+        id: revisions
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+            if [[ "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+              base_sha="$(git rev-parse "${{ github.sha }}^")"
+            fi
+          fi
+          git cat-file -e "$base_sha:sdk/typescript/openapi.snapshot.json"
+          echo "base-sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "head-sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - name: Verify live OpenAPI and tracked generated output
+        run: node scripts/openapi.mjs check
+      - name: Export live head document
+        run: node scripts/openapi.mjs export --output "$RUNNER_TEMP/openapi-head.json"
+      - name: Materialize target-branch contract
+        run: git show "${{ steps.revisions.outputs.base-sha }}:sdk/typescript/openapi.snapshot.json" > "$RUNNER_TEMP/openapi-base.json"
+      - name: Detect breaking /api/v1 changes with oasdiff 1.28.0
+        id: diff
+        shell: bash
+        run: |
+          set +e
+          docker run --rm -v "$RUNNER_TEMP:/work:ro" tufin/oasdiff:v1.28.0 breaking /work/openapi-base.json /work/openapi-head.json --match-path '^/api/v1(?:/|$)' --fail-on ERR > "$RUNNER_TEMP/oasdiff.txt" 2>&1
+          result=$?
+          cat "$RUNNER_TEMP/oasdiff.txt"
+          if [[ $result -eq 0 ]]; then
+            echo "breaking=false" >> "$GITHUB_OUTPUT"
+          elif [[ $result -eq 1 ]]; then
+            echo "breaking=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "oasdiff failed with exit code $result; only exit code 1 is an approvable breaking-change result." >&2
+            exit "$result"
+          fi
+          exit 0
+      - name: Publish comparison evidence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## OpenAPI comparison"
+            echo
+            echo "- Target/base: \`${{ steps.revisions.outputs.base-sha }}\`"
+            echo "- Head: \`${{ steps.revisions.outputs.head-sha }}\`"
+            echo "- Scope: \`/api/v1\`"
+            echo "- oasdiff: \`1.28.0\`"
+            echo "- Breaking: \`${{ steps.diff.outputs.breaking }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  breaking_change_approval:
+    needs: contract
+    if: needs.contract.outputs.breaking == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: api-breaking-change-approved
+    steps:
+      - name: Require protected approval evidence
+        shell: bash
+        env:
+          APPROVAL_EVIDENCE: ${{ secrets.API_BREAKING_CHANGE_EVIDENCE }}
+        run: |
+          test -n "$APPROVAL_EVIDENCE"
+          {
+            echo "## Approved breaking API change"
+            echo
+            echo "- Protected environment: \`api-breaking-change-approved\`"
+            echo "- Compared target/base: \`${{ needs.contract.outputs.base-sha }}\`"
+            echo "- Compared head: \`${{ needs.contract.outputs.head-sha }}\`"
+            echo "- Approval evidence: supplied through the protected environment secret."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  contract-gate:
+    needs: [contract, breaking_change_approval]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a successful contract check and protected approval when needed
+        shell: bash
+        run: |
+          if [[ "${{ needs.contract.result }}" != "success" ]]; then
+            echo "The OpenAPI contract job did not succeed." >&2
+            exit 1
+          fi
+          if [[ "${{ needs.contract.outputs.breaking }}" == "true" && "${{ needs.breaking_change_approval.result }}" != "success" ]]; then
+            echo "A breaking /api/v1 change requires successful protected approval evidence." >&2
+            exit 1
+          fi

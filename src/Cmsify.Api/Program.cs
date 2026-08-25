@@ -11,7 +11,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi;
 using Serilog;
 using Serilog.Events;
 using SyntaxCircus.AspNetCore.Common;
@@ -106,37 +105,7 @@ builder.Services.AddRateLimiter(options =>
             isExempt: context => IsRateLimitExempt(context.Request.Path)));
     options.UseProblemDetailsRejection(CmsifyError.RateLimitExceeded);
 });
-builder.Services.AddSwaggerGen(options =>
-{
-    options.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "Cmsify API",
-        Version = "v1",
-        Description = "Headless CMS API"
-    });
-    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = ParameterLocation.Header,
-        Description = "Enter a Cmsify user session token, API client token, or JWT bearer token."
-    });
-    options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecuritySchemeReference("Bearer", null, null),
-            []
-        }
-    });
-
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
-    if (File.Exists(xmlPath))
-    {
-        options.IncludeXmlComments(xmlPath);
-    }
-});
+builder.Services.AddCmsifySwagger();
 if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
 {
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -154,7 +123,10 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
-await app.MigrateCmsifyDatabaseAsync();
+if (!builder.Configuration.GetValue("Api:OpenApiExport", false))
+{
+    await app.MigrateCmsifyDatabaseAsync();
+}
 
 app.UseCorrelationId();
 app.UseSecurityHeaders();

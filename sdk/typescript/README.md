@@ -80,11 +80,15 @@ Read responses with `ETag` headers are tracked automatically and echoed as `If-M
 Generated files are under `src/generated` and should not be edited by hand. After an API contract change:
 
 ```powershell
-npm run generate
+Set-Location ../..
+node scripts/openapi.mjs update
+Set-Location sdk/typescript
 npm run generate:check
 npm run typecheck
 npm test
 npm run build
 ```
 
-The generator reads the API's Swagger document when available or the pinned `openapi.snapshot.json` for offline/CI checks. CI fails if generated output drifts from the source contract.
+`update` is the only command allowed to modify the checked-in OpenAPI snapshot or generated TypeScript files. It builds the API and exports the live `v1` Swagger document with database migrations disabled, then derives both tracked artifacts from that one document. `generate:check` is non-mutating: it exports the live document and generates into a temporary directory before checking both live-to-snapshot and generated-to-tracked drift.
+
+For inspection without updating tracked artifacts, run `node scripts/openapi.mjs export --output <path>`. The API contract is additive within `/api/v1`; a breaking change needs a new version or an approved exception recorded by the protected `api-breaking-change-approved` CI environment.

@@ -2,6 +2,7 @@ using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SyntaxCircus.Cmsify.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
+    [AllowAnonymous]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken ct)
     {
         var user = await dbContext.Users.FirstOrDefaultAsync(candidate => candidate.Email == request.Email && candidate.IsActive, ct);

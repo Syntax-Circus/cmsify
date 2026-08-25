@@ -5,12 +5,16 @@ on:
     paths:
       - "sdk/typescript/**"
       - "src/Cmsify.Api/**"
+      - "scripts/openapi.mjs"
+      - ".config/dotnet-tools.json"
       - ".github/workflows/typescript-sdk.yml"
   push:
     branches: [ main ]
     paths:
       - "sdk/typescript/**"
       - "src/Cmsify.Api/**"
+      - "scripts/openapi.mjs"
+      - ".config/dotnet-tools.json"
       - ".github/workflows/typescript-sdk.yml"
 
 jobs:
@@ -26,8 +30,13 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: sdk/typescript/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
       - name: Install
         run: npm ci
+      - name: Restore pinned OpenAPI exporter
+        run: dotnet tool restore
       - name: Check generated output
         run: npm run generate:check
       - name: Typecheck
