@@ -23,6 +23,7 @@ WORKDIR /app
 ARG BUILD_VERSION=0.0.0-local
 ARG BUILD_SOURCE_REVISION=unknown
 LABEL org.opencontainers.image.title="Cmsify Admin" \
+      org.opencontainers.image.ref.name="syntaxcircus/cmsify-admin:${BUILD_VERSION}" \
       org.opencontainers.image.version="${BUILD_VERSION}" \
       org.opencontainers.image.revision="${BUILD_SOURCE_REVISION}" \
       org.opencontainers.image.source="https://github.com/Syntax-Circus/cmsify" \

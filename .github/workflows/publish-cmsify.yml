@@ -55,9 +55,9 @@ jobs:
           dotnet build Cmsify.slnx --configuration Release --no-restore -p:Version="$VERSION" -p:InformationalVersion="$VERSION+$SOURCE_SHA"
           dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
           mkdir -p artifacts/nuget
-          dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:IncludeSymbols=false
-          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:IncludeSymbols=false
-          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:IncludeSymbols=false
+          dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
       - name: Pack npm candidate once
         working-directory: sdk/typescript
         run: |
@@ -69,20 +69,41 @@ jobs:
       - name: Build exact OCI layouts once
         run: |
           mkdir -p artifacts/oci
-          docker buildx build --platform linux/amd64 --tag "syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --metadata-file artifacts/oci/cmsify-api.metadata.json --output type=oci,dest=artifacts/oci/cmsify-api.oci.tar,name=syntaxcircus/cmsify-api:$VERSION .
-          docker buildx build --platform linux/amd64 --tag "syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --metadata-file artifacts/oci/cmsify-admin.metadata.json --output type=oci,dest=artifacts/oci/cmsify-admin.oci.tar,name=syntaxcircus/cmsify-admin:$VERSION .
+          docker buildx build --platform linux/amd64 --provenance=false --tag "syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --metadata-file artifacts/oci/cmsify-api.metadata.json --output type=oci,dest=artifacts/oci/cmsify-api.oci.tar,name=syntaxcircus/cmsify-api:$VERSION .
+          docker buildx build --platform linux/amd64 --provenance=false --tag "syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --metadata-file artifacts/oci/cmsify-admin.metadata.json --output type=oci,dest=artifacts/oci/cmsify-admin.oci.tar,name=syntaxcircus/cmsify-admin:$VERSION .
       - name: Smoke exact OCI candidates and configuration identity
         shell: bash
         run: |
           docker load --input artifacts/oci/cmsify-api.oci.tar && docker load --input artifacts/oci/cmsify-admin.oci.tar
           docker network create cmsify-smoke
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              docker logs cmsify-api-smoke 2>/dev/null || true
+              docker logs cmsify-admin-smoke 2>/dev/null || true
+              docker logs cmsify-postgres-smoke 2>/dev/null || true
+            fi
+            docker rm -f cmsify-api-smoke cmsify-admin-smoke cmsify-postgres-smoke 2>/dev/null || true
+            docker network rm cmsify-smoke 2>/dev/null || true
+            exit "$status"
+          }
+          trap cleanup EXIT
           docker run -d --rm --name cmsify-postgres-smoke --network cmsify-smoke -e POSTGRES_DB=cmsify -e POSTGRES_USER=cmsify -e POSTGRES_PASSWORD=cmsify postgres:17-alpine
-          until docker exec cmsify-postgres-smoke pg_isready -U cmsify -d cmsify; do sleep 2; done
+          postgres_ready=false
+          for attempt in {1..30}; do
+            if docker exec cmsify-postgres-smoke pg_isready -U cmsify -d cmsify; then postgres_ready=true; break; fi
+            sleep 2
+          done
+          test "$postgres_ready" = true
           docker run -d --rm --name cmsify-api-smoke --network cmsify-smoke -p 18080:8080 -e ConnectionStrings__Cmsify="Host=cmsify-postgres-smoke;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify" "syntaxcircus/cmsify-api:$VERSION"
           docker run -d --rm --name cmsify-admin-smoke -p 18081:8080 "syntaxcircus/cmsify-admin:$VERSION"
-          trap 'docker rm -f cmsify-api-smoke cmsify-admin-smoke cmsify-postgres-smoke; docker network rm cmsify-smoke' EXIT
-          for attempt in {1..30}; do curl -fsS http://127.0.0.1:18080/health/live && curl -fsS http://127.0.0.1:18081/ >/dev/null && break; sleep 2; done
-          curl -fsS http://127.0.0.1:18080/health/live && curl -fsS http://127.0.0.1:18081/ >/dev/null
+          candidates_ready=false
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18080/health/live >/dev/null && curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18081/ >/dev/null; then candidates_ready=true; break; fi
+            sleep 2
+          done
+          test "$candidates_ready" = true
           for image in "syntaxcircus/cmsify-api:$VERSION" "syntaxcircus/cmsify-admin:$VERSION"; do test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" = "$VERSION"; test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE_SHA"; test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = AGPL-3.0-or-later; done
       - name: Generate four named SPDX SBOMs with pinned Syft
         run: |
@@ -91,11 +112,14 @@ jobs:
           ${{ steps.syft.outputs.cmd }} dir:artifacts/npm -o spdx-json=artifacts/sbom/cmsify-npm.spdx.json
           ${{ steps.syft.outputs.cmd }} docker:syntaxcircus/cmsify-api:$VERSION -o spdx-json=artifacts/sbom/cmsify-api.spdx.json
           ${{ steps.syft.outputs.cmd }} docker:syntaxcircus/cmsify-admin:$VERSION -o spdx-json=artifacts/sbom/cmsify-admin.spdx.json
+          node scripts/release/finalize-spdx.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
       - name: Bind OCI descriptors before certification
         shell: bash
         run: |
           API_DIGEST="$(jq -r '."containerimage.descriptor".digest' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_DIGEST="$(jq -r '."containerimage.descriptor".digest' artifacts/oci/cmsify-admin.metadata.json)"
-          jq -n --arg version "$VERSION" --arg sourceSha "$SOURCE_SHA" --arg api "$API_DIGEST" --arg admin "$ADMIN_DIGEST" '{version:$version,sourceSha:$sourceSha,oci:{api:{repository:"syntaxcircus/cmsify-api",digest:$api},admin:{repository:"syntaxcircus/cmsify-admin",digest:$admin}}}' > artifacts/release-manifest.json
+          API_SIZE="$(jq -r '."containerimage.descriptor".size' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_SIZE="$(jq -r '."containerimage.descriptor".size' artifacts/oci/cmsify-admin.metadata.json)"
+          API_MEDIA="$(jq -r '."containerimage.descriptor".mediaType' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_MEDIA="$(jq -r '."containerimage.descriptor".mediaType' artifacts/oci/cmsify-admin.metadata.json)"
+          jq -n --arg version "$VERSION" --arg sourceSha "$SOURCE_SHA" --arg api "$API_DIGEST" --arg admin "$ADMIN_DIGEST" --arg apiSize "$API_SIZE" --arg adminSize "$ADMIN_SIZE" --arg apiMedia "$API_MEDIA" --arg adminMedia "$ADMIN_MEDIA" '{version:$version,sourceSha:$sourceSha,oci:{api:{repository:"syntaxcircus/cmsify-api",ref:("syntaxcircus/cmsify-api:"+$version),digest:$api,size:($apiSize|tonumber),mediaType:$apiMedia,platform:{os:"linux",architecture:"amd64"}},admin:{repository:"syntaxcircus/cmsify-admin",ref:("syntaxcircus/cmsify-admin:"+$version),digest:$admin,size:($adminSize|tonumber),mediaType:$adminMedia,platform:{os:"linux",architecture:"amd64"}}}}' > artifacts/release-manifest.json
           (cd artifacts && find . -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum) > artifacts/SHA256SUMS
       - run: node scripts/release/verify-release-artifacts.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -177,10 +201,15 @@ jobs:
         run: |
           mkdir -p artifacts/oci/api artifacts/oci/admin && tar -xf artifacts/oci/cmsify-api.oci.tar -C artifacts/oci/api && tar -xf artifacts/oci/cmsify-admin.oci.tar -C artifacts/oci/admin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          test "$(oras manifest fetch --oci-layout --oci-layout-path artifacts/oci/api --descriptor "syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)" = "$API_EXPECTED"
-          test "$(oras manifest fetch --oci-layout --oci-layout-path artifacts/oci/admin --descriptor "syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)" = "$ADMIN_EXPECTED"
+          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)" = "$API_EXPECTED"
+          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)" = "$ADMIN_EXPECTED"
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 --user "$DOCKERHUB_USERNAME:$DOCKERHUB_TOKEN" -H 'Accept: application/vnd.oci.image.manifest.v1+json' "https://registry-1.docker.io/v2/$image/manifests/$VERSION")" || exit 1; case "$status" in 404) ;; 200) exit 1 ;; *) echo "Unexpected OCI preflight HTTP $status"; exit 1 ;; esac; done
+          ACCEPT_MANIFESTS="application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json"
+          for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do
+            bearer="$(curl --fail --silent --show-error --connect-timeout 20 --max-time 60 --user "$DOCKERHUB_USERNAME:$DOCKERHUB_TOKEN" "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$image:pull,push" | jq -er .token)" || exit 1
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 --header "Authorization: Bearer $bearer" --header "Accept: $ACCEPT_MANIFESTS" "https://registry-1.docker.io/v2/$image/manifests/$VERSION")" || exit 1
+            case "$status" in 404) ;; *) echo "OCI tag must be absent; registry returned HTTP $status"; exit 1 ;; esac
+          done
         env: { DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}, DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }} }
       - id: nuget_login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
@@ -189,20 +218,26 @@ jobs:
         shell: bash
         run: |
           for package in syntaxcircus.cmsify.contracts syntaxcircus.cmsify.client syntaxcircus.cmsify.client.distributedcaching; do http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://api.nuget.org/v3-flatcontainer/$package/$VERSION/$package.$VERSION.nupkg")" || exit 1; case "$http_code" in 404) ;; 200) exit 1 ;; *) echo "Unexpected NuGet preflight HTTP $http_code"; exit 1 ;; esac; done
-      - run: dotnet nuget push artifacts/nuget/*.nupkg --api-key "${{ steps.nuget_login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
-      - name: Use supported npm OIDC trusted publishing
-        run: npm install --global npm@11.11.0 && test "$(npm --version)" = 11.11.0
-      - run: npm publish artifacts/npm/*.tgz --access public --provenance --tag "$NPM_CHANNEL"
+      - name: Reject existing npm exact version before promotion
+        shell: bash
+        run: |
+          npm_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://registry.npmjs.org/@cmsify%2Fclient/$VERSION")" || exit 1
+          case "$npm_status" in 404) ;; *) echo "npm version must be absent; registry returned HTTP $npm_status"; exit 1 ;; esac
       - name: Copy certified OCI descriptors and compare remote digests
         shell: bash
         run: |
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          mkdir -p artifacts/oci/api artifacts/oci/admin && tar -xf artifacts/oci/cmsify-api.oci.tar -C artifacts/oci/api && tar -xf artifacts/oci/cmsify-admin.oci.tar -C artifacts/oci/admin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          oras cp --from-oci-layout --from-oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api:$VERSION" "docker.io/syntaxcircus/cmsify-api:$VERSION" && oras cp --from-oci-layout --from-oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin:$VERSION" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
-          API_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)"; ADMIN_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)"; test "$API_REMOTE" = "$API_EXPECTED" && test "$ADMIN_REMOTE" = "$ADMIN_EXPECTED"
+          oras cp --from-oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api:$VERSION" "docker.io/syntaxcircus/cmsify-api:$VERSION"
+          oras cp --from-oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin:$VERSION" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
+          API_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)"; ADMIN_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)"
+          test "$API_REMOTE" = "$API_EXPECTED" && test "$ADMIN_REMOTE" = "$ADMIN_EXPECTED"
           printf 'syntaxcircus/cmsify-api@%s\nsyntaxcircus/cmsify-admin@%s\n' "$API_REMOTE" "$ADMIN_REMOTE" > artifacts/OCI-DIGESTS
         env: { DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}, DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }} }
+      - run: dotnet nuget push artifacts/nuget/*.nupkg --api-key "${{ steps.nuget_login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
+      - name: Use supported npm OIDC trusted publishing
+        run: npm install --global npm@11.11.0 && test "$(npm --version)" = 11.11.0
+      - run: npm publish artifacts/npm/*.tgz --access public --provenance --tag "$NPM_CHANNEL"
       - name: Create correct prerelease/stable GitHub Release
         env: { GH_TOKEN: ${{ github.token }} }
         shell: bash

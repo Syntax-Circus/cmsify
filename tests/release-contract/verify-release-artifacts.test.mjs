@@ -1,43 +1,186 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  SOURCE_SHA,
+  VERSION,
+  candidatePath,
+  createValidCandidate,
+  mutateJsonFile,
+  mutateOciLayout,
+  removeCandidate,
+  swapFiles,
+} from "./release-candidate-fixture.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const verifier = resolve(repositoryRoot, "scripts", "release", "verify-release-artifacts.mjs");
 
-test("fails closed when a candidate is missing its archives, SBOMs, checksums, and OCI layouts", () => {
-  const artifacts = mkdtempSync(resolve(tmpdir(), "cmsify-release-artifacts-"));
+function verify(root, { version = VERSION, sourceSha = SOURCE_SHA } = {}) {
+  return spawnSync(process.execPath, [verifier, "--artifacts", root, "--version", version, "--source-sha", sourceSha], { encoding: "utf8" });
+}
+
+function expectInvalid(options, diagnostic) {
+  const root = createValidCandidate(options);
   try {
-    const result = spawnSync(process.execPath, [verifier, "--artifacts", artifacts, "--version", "1.0.0", "--source-sha", "0123456789abcdef0123456789abcdef01234567"], { encoding: "utf8" });
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /NuGet|npm|OCI|SBOM|checksum/i);
+    const result = verify(root);
+    assert.notEqual(result.status, 0, "mutation unexpectedly passed artifact verification");
+    assert.match(result.stderr, diagnostic);
   } finally {
-    rmSync(artifacts, { recursive: true, force: true });
+    removeCandidate(root);
+  }
+}
+
+test("accepts a complete Dockerless release candidate fixture", () => {
+  const root = createValidCandidate();
+  try {
+    const result = verify(root);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, new RegExp(`Release artifacts verified for ${VERSION}`));
+  } finally {
+    removeCandidate(root);
   }
 });
 
-test("rejects a candidate with an invalid source SHA before artifact inspection", () => {
-  const artifacts = mkdtempSync(resolve(tmpdir(), "cmsify-release-artifacts-"));
+test("rejects an invalid source SHA before artifact inspection", () => {
+  const root = createValidCandidate();
   try {
-    const result = spawnSync(process.execPath, [verifier, "--artifacts", artifacts, "--version", "1.0.0", "--source-sha", "not-a-commit"], { encoding: "utf8" });
+    const result = verify(root, { sourceSha: "not-a-commit" });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /immutable 40-character source SHA/i);
-  } finally {
-    rmSync(artifacts, { recursive: true, force: true });
-  }
+  } finally { removeCandidate(root); }
 });
 
 test("rejects an invalid SemVer candidate before artifact inspection", () => {
-  const artifacts = mkdtempSync(resolve(tmpdir(), "cmsify-release-artifacts-"));
+  const root = createValidCandidate();
   try {
-    const result = spawnSync(process.execPath, [verifier, "--artifacts", artifacts, "--version", "1.0", "--source-sha", "0123456789abcdef0123456789abcdef01234567"], { encoding: "utf8" });
+    const result = verify(root, { version: "1.0" });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /requires a SemVer version/i);
-  } finally {
-    rmSync(artifacts, { recursive: true, force: true });
-  }
+  } finally { removeCandidate(root); }
 });
+
+const nugetMutations = [
+  ["nuspec package ID", (state) => { state.nuget[0].id = "SyntaxCircus.Cmsify.Wrong"; }, /NuGet.*exact package ID.*SyntaxCircus\.Cmsify\.Contracts/i],
+  ["nuspec version", (state) => { state.nuget[0].version = "9.9.9"; }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*release version 1\.2\.3/i],
+  ["target framework", (state) => { state.nuget[0].framework = "net9.0"; }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*net10\.0/i],
+  ["MIT expression", (state) => { state.nuget[0].licenseExpression = "AGPL-3.0-or-later"; }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*MIT license expression/i],
+  ["license file declaration", (state) => { state.nuget[0].licenseFile = "COPYING.txt"; }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*license file.*LICENSE-MIT\.txt/i],
+  ["MIT license payload", (state) => { state.nuget[0].licensePayload = "not the MIT license\n"; }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*MIT license payload/i],
+  ["repository type", (state) => { state.nuget[0].repositoryType = "svn"; }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*source repository/i],
+  ["repository URL", (state) => { state.nuget[0].repositoryUrl = "https://example.invalid/repo"; }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*source repository/i],
+  ["repository commit", (state) => { state.nuget[0].repositoryCommit = "f".repeat(40); }, /NuGet.*SyntaxCircus\.Cmsify\.Contracts.*source commit/i],
+];
+
+for (const [name, mutate, diagnostic] of nugetMutations) {
+  test(`rejects an otherwise-valid NuGet candidate with the wrong ${name}`, () => expectInvalid({ mutate }, diagnostic));
+}
+
+const npmMetadataMutations = [
+  ["name", (metadata) => { metadata.name = "@cmsify/not-client"; }, /npm.*name.*@cmsify\/client/i],
+  ["version", (metadata) => { metadata.version = "9.9.9"; }, /npm.*version.*1\.2\.3/i],
+  ["license", (metadata) => { metadata.license = "AGPL-3.0-or-later"; }, /npm.*license.*MIT/i],
+  ["Node floor", (metadata) => { metadata.engines.node = ">=18"; }, /npm.*Node.*>=20/i],
+  ["private true", (metadata) => { metadata.private = true; }, /npm.*public.*private.*absent.*false/i],
+  ["private string false", (metadata) => { metadata.private = "false"; }, /npm.*public.*private.*absent.*false/i],
+  ["repository type", (metadata) => { metadata.repository.type = "svn"; }, /npm.*repository.*type/i],
+  ["repository URL", (metadata) => { metadata.repository.url = "https://example.invalid/repo"; }, /npm.*repository.*url/i],
+  ["repository directory", (metadata) => { metadata.repository.directory = "sdk/js"; }, /npm.*repository.*directory.*sdk\/typescript/i],
+  ["gitHead", (metadata) => { metadata.gitHead = "f".repeat(40); }, /npm.*gitHead.*source SHA/i],
+  ["module type", (metadata) => { metadata.type = "commonjs"; }, /npm.*type.*module/i],
+  ["main", (metadata) => { metadata.main = "./dist/not-cjs.cjs"; }, /npm.*main.*dist\/index\.cjs/i],
+  ["module", (metadata) => { metadata.module = "./dist/not-esm.js"; }, /npm.*module.*dist\/index\.js/i],
+  ["types", (metadata) => { metadata.types = "./dist/not-types.d.ts"; }, /npm.*types.*dist\/index\.d\.ts/i],
+  ["exports import", (metadata) => { metadata.exports["."].import = "./dist/not-esm.js"; }, /npm.*exports.*import.*dist\/index\.js/i],
+  ["exports require", (metadata) => { metadata.exports["."].require = "./dist/not-cjs.cjs"; }, /npm.*exports.*require.*dist\/index\.cjs/i],
+  ["exports declarations", (metadata) => { metadata.exports["."].types = "./dist/not-types.d.ts"; }, /npm.*exports.*types.*dist\/index\.d\.ts/i],
+  ["extra exports target", (metadata) => { metadata.exports["./private"] = "./dist/private.js"; }, /npm.*exports surface.*only.*public entrypoint/i],
+];
+
+for (const [name, mutateMetadata, diagnostic] of npmMetadataMutations) {
+  test(`rejects an otherwise-valid packed npm candidate with wrong ${name} metadata`, () => expectInvalid({ mutate(state) { mutateMetadata(state.npm.metadata); } }, diagnostic));
+}
+
+const npmMemberMutations = [
+  ["LICENSE", "package/LICENSE", /npm.*exact member package\/LICENSE/i],
+  ["CommonJS entrypoint", "package/dist/index.cjs", /npm.*main.*archive member.*package\/dist\/index\.cjs/i],
+  ["ESM entrypoint", "package/dist/index.js", /npm.*module.*archive member.*package\/dist\/index\.js/i],
+  ["declaration entrypoint", "package/dist/index.d.ts", /npm.*types.*archive member.*package\/dist\/index\.d\.ts/i],
+];
+
+for (const [name, member, diagnostic] of npmMemberMutations) {
+  test(`rejects a packed npm candidate missing its exact ${name} member`, () => expectInvalid({ mutate(state) { delete state.npm.members[member]; state.npm.members[`${member}.bak`] = "wrong member\n"; } }, diagnostic));
+}
+
+test("rejects a packed npm candidate with a non-MIT LICENSE payload", () => expectInvalid({ mutate(state) { state.npm.members["package/LICENSE"] = "not the MIT license\n"; } }, /npm.*LICENSE payload.*MIT License/i));
+test("rejects a packed npm candidate with a private implementation member", () => expectInvalid({ mutate(state) { state.npm.members["package/.env"] = "SECRET=fixture\n"; } }, /npm.*unsupported archive member.*package\/\.env/i));
+
+const ociStateMutations = [
+  ["API repository", (state) => { state.oci.api.repository = "syntaxcircus/not-api"; }, /OCI API.*repository.*syntaxcircus\/cmsify-api/i],
+  ["API qualified ref", (state) => { state.oci.api.ref = "syntaxcircus/cmsify-api:wrong"; }, /OCI API.*ref.*syntaxcircus\/cmsify-api:1\.2\.3/i],
+  ["descriptor media type", (state) => { state.oci.api.descriptorMediaType = "application/json"; }, /OCI API.*descriptor media type/i],
+  ["descriptor platform OS", (state) => { state.oci.api.descriptorPlatform.os = "windows"; }, /OCI API.*descriptor platform.*linux\/amd64/i],
+  ["descriptor platform architecture", (state) => { state.oci.api.descriptorPlatform.architecture = "arm64"; }, /OCI API.*descriptor platform.*linux\/amd64/i],
+  ["config media type", (state) => { state.oci.api.configMediaType = "application/json"; }, /OCI API.*config media type/i],
+  ["config OS", (state) => { state.oci.api.config.os = "windows"; }, /OCI API.*configuration platform.*linux\/amd64/i],
+  ["config architecture", (state) => { state.oci.api.config.architecture = "arm64"; }, /OCI API.*configuration platform.*linux\/amd64/i],
+  ["source label", (state) => { state.oci.api.config.config.Labels["org.opencontainers.image.source"] = "https://example.invalid/repo"; }, /OCI API.*source label/i],
+  ["source SHA label", (state) => { state.oci.api.config.config.Labels["org.opencontainers.image.revision"] = "f".repeat(40); }, /OCI API.*revision label.*source SHA/i],
+  ["version label", (state) => { state.oci.api.config.config.Labels["org.opencontainers.image.version"] = "9.9.9"; }, /OCI API.*version label/i],
+  ["license label", (state) => { state.oci.api.config.config.Labels["org.opencontainers.image.licenses"] = "MIT"; }, /OCI API.*license label.*AGPL-3\.0-or-later/i],
+  ["image title", (state) => { state.oci.api.config.config.Labels["org.opencontainers.image.title"] = "Cmsify Admin"; }, /OCI API.*title label.*Cmsify API/i],
+  ["image ref label", (state) => { state.oci.api.config.config.Labels["org.opencontainers.image.ref.name"] = `syntaxcircus/cmsify-admin:${VERSION}`; }, /OCI API.*ref\.name label/i],
+];
+
+for (const [name, mutate, diagnostic] of ociStateMutations) {
+  test(`rejects an otherwise-valid OCI candidate with the wrong ${name}`, () => expectInvalid({ mutate }, diagnostic));
+}
+
+const ociDescriptorMutations = [
+  ["digest", ({ descriptor }) => { descriptor.digest = `sha256:${"f".repeat(64)}`; }, /OCI API.*descriptor digest.*blob/i],
+  ["size", ({ descriptor }) => { descriptor.size += 1; }, /OCI API.*descriptor size/i],
+  ["media type", ({ descriptor }) => { descriptor.mediaType = "application/json"; }, /OCI API.*descriptor media type/i],
+  ["platform", ({ descriptor }) => { descriptor.platform.architecture = "arm64"; }, /OCI API.*descriptor platform.*linux\/amd64/i],
+];
+
+for (const [name, mutate, diagnostic] of ociDescriptorMutations) {
+  test(`rejects an OCI index whose selected descriptor has the wrong ${name}`, () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", mutate); } }, diagnostic));
+}
+
+test("resolves the OCI descriptor by exact ref rather than manifests[0]", () => {
+  const root = createValidCandidate();
+  try { const result = verify(root); assert.equal(result.status, 0, result.stderr || result.stdout); }
+  finally { removeCandidate(root); }
+});
+
+test("rejects an OCI manifest whose config digest does not match a blob", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ manifest }) => { manifest.config.digest = `sha256:${"e".repeat(64)}`; }); } }, /OCI API.*config digest.*blob/i));
+test("rejects an OCI manifest whose config declared size is wrong", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ manifest }) => { manifest.config.size += 1; }); } }, /OCI API.*config.*declared size/i));
+test("rejects swapped API and Admin OCI subjects", () => expectInvalid({ afterRender({ root }) { swapFiles(root, "oci/cmsify-api.oci.tar", "oci/cmsify-admin.oci.tar"); swapFiles(root, "oci/cmsify-api.metadata.json", "oci/cmsify-admin.metadata.json"); } }, /OCI API.*exact ref|API.*Admin.*swap/i));
+
+const spdxDefinitions = [
+  ["nuget", "NuGet", "SyntaxCircus.Cmsify.Contracts", "AGPL-3.0-or-later", "MIT"],
+  ["npm", "npm", "@cmsify/client", "AGPL-3.0-or-later", "MIT"],
+  ["api", "API", "syntaxcircus/cmsify-api", "MIT", "AGPL-3.0-or-later"],
+  ["admin", "Admin", "syntaxcircus/cmsify-admin", "MIT", "AGPL-3.0-or-later"],
+];
+
+for (const [kind, label, expectedPackage, wrongLicense, expectedLicense] of spdxDefinitions) {
+  test(`rejects the ${label} SPDX document with the wrong document name`, () => expectInvalid({ mutate(state) { state.spdx[kind].name = "Unrelated SBOM"; } }, new RegExp(`SPDX ${label}.*document name`, "i")));
+  test(`rejects the ${label} SPDX document with the wrong document namespace`, () => expectInvalid({ mutate(state) { state.spdx[kind].namespaceFile = "unrelated.spdx.json"; } }, new RegExp(`SPDX ${label}.*document namespace`, "i")));
+  test(`rejects the ${label} SPDX document with an unrelated subject package`, () => expectInvalid({ mutate(state) { state.spdx[kind].packageNames = state.spdx[kind].packageNames.map((name, index) => index === 0 ? "unrelated-package" : name); } }, new RegExp(`SPDX ${label}.*package.*${expectedPackage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")));
+  test(`rejects the ${label} SPDX subject package with the wrong license`, () => expectInvalid({ mutate(state) { state.spdx[kind].license = wrongLicense; } }, new RegExp(`SPDX ${label}.*license.*${expectedLicense.replaceAll(".", "\\.")}`, "i")));
+}
+
+test("rejects an SPDX package with the wrong release version", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages[0].versionInfo = "9.9.9"; }); } }, /SPDX npm.*package version.*1\.2\.3/i));
+test("rejects an SPDX documentDescribes identity unrelated to its subject", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.documentDescribes = ["SPDXRef-unrelated"]; }); } }, /SPDX npm.*documentDescribes.*SPDXRef-npm-1/i));
+test("rejects an OCI SPDX package whose purl is not digest-bound", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-api.spdx.json", (document) => { document.packages[0].externalRefs[0].referenceLocator = "pkg:oci/syntaxcircus/cmsify-api@sha256:bad"; }); } }, /SPDX API.*purl.*certified OCI digest/i));
+test("rejects an SPDX document without the immutable source SHA", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.creationInfo.comment = "unrelated source"; }); } }, /SPDX npm.*source SHA/i));
+test("rejects swapped npm and NuGet SPDX documents", () => expectInvalid({ afterRender({ root }) { swapFiles(root, "sbom/cmsify-npm.spdx.json", "sbom/cmsify-nuget.spdx.json"); } }, /SPDX npm.*document name|SPDX npm.*package/i));
+test("rejects swapped API and Admin SPDX subjects", () => expectInvalid({ afterRender({ root }) { swapFiles(root, "sbom/cmsify-api.spdx.json", "sbom/cmsify-admin.spdx.json"); } }, /SPDX API.*document name|SPDX API.*package/i));
+
+test("rejects a checksum omission", () => expectInvalid({ afterChecksums({ root }) { const path = candidatePath(root, "SHA256SUMS"); const lines = readFileSync(path, "utf8").trimEnd().split(/\r?\n/); writeFileSync(path, `${lines.slice(1).join("\n")}\n`); } }, /SHA256SUMS.*omits/i));
+test("rejects a changed checksum", () => expectInvalid({ afterChecksums({ root }) { const path = candidatePath(root, "SHA256SUMS"); const contents = readFileSync(path, "utf8"); writeFileSync(path, contents.replace(/^[0-9a-f]{64}/, "f".repeat(64))); } }, /Checksum mismatch/i));
+test("rejects an extra checksum entry", () => expectInvalid({ afterChecksums({ root }) { appendFileSync(candidatePath(root, "SHA256SUMS"), `${"0".repeat(64)}  unrelated.txt\n`); } }, /SHA256SUMS.*extra entry.*unrelated\.txt/i));
+test("rejects an unchecked extra candidate file", () => expectInvalid({ afterChecksums({ root }) { writeFileSync(candidatePath(root, "unrelated.txt"), "extra\n"); } }, /unchecked extra file.*unrelated\.txt/i));
