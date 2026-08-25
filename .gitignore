@@ -17,6 +17,7 @@ docs-site/site/
 !.env.example
 !**/.env.example
 .local/
+.superpowers/
 
 # LibMan output (Bootstrap etc) — restored at build
 wwwroot/lib/
