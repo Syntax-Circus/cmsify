@@ -55,6 +55,20 @@ function update(liveDocument: string, snapshot: string, generated: string) {
   }
 }
 
+function updateDefaultOutputs(liveDocument: string) {
+  try {
+    execFileSync(process.execPath, [
+      resolve(repositoryRoot, "scripts/openapi.mjs"),
+      "update",
+      "--live-document", liveDocument,
+    ], { cwd: repositoryRoot, encoding: "utf8", stdio: "pipe" });
+    return { status: 0, output: "" };
+  } catch (error) {
+    const result = error as { status?: number; stdout?: string; stderr?: string };
+    return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+  }
+}
+
 describe("OpenAPI workflow", () => {
   it("preserves required non-null contracts and bearer security from the live API", () => {
     const document = JSON.parse(readFileSync(resolve(sdkRoot, "openapi.snapshot.json"), "utf8"));
@@ -100,6 +114,24 @@ describe("OpenAPI workflow", () => {
     writeFileSync(live, "{");
 
     expect(update(live, snapshot, generated)).not.toBe(0);
+    expect(readFileSync(snapshot, "utf8")).toBe(expectedSnapshot);
+    expect(readFileSync(schema, "utf8")).toBe(expectedSchema);
+  });
+
+  it("refuses arbitrary live documents when update targets tracked artifacts", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "cmsify-openapi-authority-"));
+    temporaryDirectories.push(directory);
+    const live = resolve(directory, "untrusted.json");
+    const snapshot = resolve(sdkRoot, "openapi.snapshot.json");
+    const schema = resolve(sdkRoot, "src/generated/schema.ts");
+    const expectedSnapshot = readFileSync(snapshot, "utf8");
+    const expectedSchema = readFileSync(schema, "utf8");
+    writeFileSync(live, "{");
+
+    const result = updateDefaultOutputs(live);
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain("--live-document is only allowed when both --snapshot and --generated-dir target test fixtures.");
     expect(readFileSync(snapshot, "utf8")).toBe(expectedSnapshot);
     expect(readFileSync(schema, "utf8")).toBe(expectedSchema);
   });

@@ -95,8 +95,19 @@ function check(commandOptions) {
 function update(commandOptions) {
   const temporaryDirectory = mkdtempSync(resolve(tmpdir(), "cmsify-openapi-update-"));
   try {
-    const snapshot = resolve(commandOptions.get("--snapshot") ?? resolve(sdkRoot, "openapi.snapshot.json"));
-    const generatedDirectory = resolve(commandOptions.get("--generated-dir") ?? resolve(sdkRoot, "src/generated"));
+    const trackedSnapshot = resolve(sdkRoot, "openapi.snapshot.json");
+    const trackedGeneratedDirectory = resolve(sdkRoot, "src/generated");
+    const snapshotOption = commandOptions.get("--snapshot");
+    const generatedDirectoryOption = commandOptions.get("--generated-dir");
+    const snapshot = resolve(snapshotOption ?? trackedSnapshot);
+    const generatedDirectory = resolve(generatedDirectoryOption ?? trackedGeneratedDirectory);
+    if (commandOptions.has("--live-document")
+      && (!snapshotOption
+        || !generatedDirectoryOption
+        || snapshot === trackedSnapshot
+        || generatedDirectory === trackedGeneratedDirectory)) {
+      throw new Error("--live-document is only allowed when both --snapshot and --generated-dir target test fixtures.");
+    }
     const liveDocument = resolveLiveDocument(commandOptions, temporaryDirectory);
     const stagedGeneratedDirectory = resolve(temporaryDirectory, "generated");
     generate(liveDocument, stagedGeneratedDirectory);
