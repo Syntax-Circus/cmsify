@@ -125,7 +125,7 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 
 ## Run in production with Docker
 
-The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. Every successful `main` release publishes versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images to Docker Hub, alongside the moving `latest` tag. The template uses a pinned version instead of `latest`, so upgrades are deliberate and reversible; `CMSIFY_IMAGE_PREFIX` can point it at a private registry instead.
+The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. A reviewed SemVer tag publishes matching versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images from one immutable commit; branch builds never publish. The template uses a pinned version instead of `latest`, so upgrades are deliberate and reversible; `CMSIFY_IMAGE_PREFIX` can point it at a private registry instead.
 
 On the production host, copy the environment template and replace every placeholder with a real value. Keep the resulting file outside source control.
 

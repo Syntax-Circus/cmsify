@@ -9,7 +9,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 ARG BUILD_VERSION=0.0.0-local
 ARG BUILD_INFORMATIONAL_VERSION=0.0.0-local
-ARG DISABLE_GITVERSION_TASK=true
+ARG BUILD_SOURCE_REVISION=unknown
 
 COPY ["Directory.Packages.props", "./"]
 COPY ["src/Cmsify.Api/Cmsify.Api.csproj", "src/Cmsify.Api/"]
@@ -20,10 +20,16 @@ RUN dotnet restore "src/Cmsify.Api/Cmsify.Api.csproj"
 COPY . .
 RUN dotnet publish "src/Cmsify.Api/Cmsify.Api.csproj" -c Release -o /app/publish --no-restore \
     -p:Version="${BUILD_VERSION}" \
-    -p:InformationalVersion="${BUILD_INFORMATIONAL_VERSION}" \
-    -p:DisableGitVersionTask="${DISABLE_GITVERSION_TASK}"
+    -p:InformationalVersion="${BUILD_INFORMATIONAL_VERSION}"
 
 FROM base AS final
 WORKDIR /app
+ARG BUILD_VERSION=0.0.0-local
+ARG BUILD_SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.title="Cmsify API" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.opencontainers.image.revision="${BUILD_SOURCE_REVISION}" \
+      org.opencontainers.image.source="https://github.com/Syntax-Circus/cmsify" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
 COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "Cmsify.Api.dll"]

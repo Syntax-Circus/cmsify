@@ -1,147 +1,233 @@
-name: Build and publish Cmsify packages and Docker images
+name: Certify and promote Cmsify release
 
 on:
   push:
-    branches: ["*"]
-  pull_request:
-    branches: ["*"]
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cmsify-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  resolve:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-      - run: dotnet restore Cmsify.slnx
-      - run: dotnet build Cmsify.slnx --no-restore --configuration Release
-      - run: dotnet test Cmsify.slnx --no-build --configuration Release
-      - name: Pack SDK packages
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+          persist-credentials: false
+      - id: release
+        shell: bash
         run: |
-          dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --no-build --configuration Release --output artifacts
-          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --no-build --configuration Release --output artifacts
-          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --no-build --configuration Release --output artifacts
-      - name: Upload package artifact
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/upload-artifact@v4
-        with:
-          name: nuget-package
-          path: artifacts/*.*nupkg
-          retention-days: 7
+          SOURCE_SHA="$(git rev-list -n 1 "$GITHUB_REF")"
+          VERSION="$(node scripts/release/validate-release-tag.mjs "$GITHUB_REF_NAME" --source-sha "$SOURCE_SHA")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
-  publish:
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip release]')
+  build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Restore and validate .NET source
+        run: |
+          dotnet restore Cmsify.slnx
+          dotnet build Cmsify.slnx --configuration Release --no-restore -p:Version="$VERSION" -p:InformationalVersion="$VERSION+$SOURCE_SHA"
+          dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
+      - name: Pack candidate NuGet archives once
+        run: |
+          mkdir -p artifacts/nuget
+          dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:PackageVersion="$VERSION"
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:PackageVersion="$VERSION"
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --configuration Release --no-build --output artifacts/nuget -p:PackageVersion="$VERSION"
+      - name: Pack candidate npm archive once
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          npm version "$VERSION" --no-git-tag-version
+          npm run generate:check
+          npm run typecheck
+          npm test
+          npm run build
+          mkdir -p ../../artifacts/npm
+          npm pack --pack-destination ../../artifacts/npm
+      - name: Build OCI candidate layouts once
+        run: |
+          mkdir -p artifacts/oci
+          docker buildx build --platform linux/amd64 --tag "syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --output type=oci,dest=artifacts/oci/cmsify-api.oci.tar .
+          docker buildx build --platform linux/amd64 --tag "syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --output type=oci,dest=artifacts/oci/cmsify-admin.oci.tar .
+      - name: Load and smoke-inspect immutable OCI layouts
+        run: |
+          docker load --input artifacts/oci/cmsify-api.oci.tar
+          docker load --input artifacts/oci/cmsify-admin.oci.tar
+          for image in "syntaxcircus/cmsify-api:$VERSION" "syntaxcircus/cmsify-admin:$VERSION"; do
+            test "$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "$VERSION"
+            test "$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
+            test "$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.licenses" }}')" = "AGPL-3.0-or-later"
+          done
+      - name: Generate SPDX SBOMs
+        run: |
+          mkdir -p artifacts/sbom
+          docker sbom --format spdx-json --output artifacts/sbom/cmsify-nuget.spdx.json dir:artifacts/nuget
+          docker sbom --format spdx-json --output artifacts/sbom/cmsify-npm.spdx.json dir:artifacts/npm
+          docker sbom --format spdx-json --output artifacts/sbom/cmsify-api.spdx.json "syntaxcircus/cmsify-api:$VERSION"
+          docker sbom --format spdx-json --output artifacts/sbom/cmsify-admin.spdx.json "syntaxcircus/cmsify-admin:$VERSION"
+      - name: Record source and checksum manifest
+        shell: bash
+        run: |
+          printf '{"version":"%s","sourceSha":"%s"}\n' "$VERSION" "$SOURCE_SHA" > artifacts/release-manifest.json
+          find artifacts -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > artifacts/SHA256SUMS
+      - name: Verify candidate archive and supply-chain layout
+        run: node scripts/release/verify-release-artifacts.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 14
+
+  dotnet-consumer:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
+      - name: Install the candidate into a clean .NET 10 consumer
+        shell: bash
+        run: |
+          mkdir consumer
+          cd consumer
+          dotnet new console --framework net10.0 --no-restore
+          dotnet add package SyntaxCircus.Cmsify.Client --version "${{ needs.resolve.outputs.version }}" --source "$GITHUB_WORKSPACE/artifacts/nuget"
+          dotnet build --configuration Release
+
+  node-consumer:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ["20", "22"]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
+      - name: Install the candidate into a clean Node consumer
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          CMSIFY_CLIENT_TARBALL="$GITHUB_WORKSPACE/artifacts/npm/cmsify-client-${{ needs.resolve.outputs.version }}.tgz" npm run test:consumer
+
+  certify:
+    needs: [resolve, build, dotnet-consumer, node-consumer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
+      - name: Recheck candidate checksums before attestation
+        run: sha256sum --check artifacts/SHA256SUMS
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-checksums: artifacts/SHA256SUMS
+
+  promote:
+    needs: [resolve, certify]
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
-      id-token: write # enable GitHub OIDC token issuance for NuGet Trusted Publishing
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          fetch-depth: 0
-      - uses: actions/setup-dotnet@v6
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.0.0
         with:
-          dotnet-version: 10.0.x
-      - name: Download package artifact
-        uses: actions/download-artifact@v8
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          name: nuget-package
+          node-version: "22"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
           path: artifacts
-      - name: NuGet login (OIDC -> temporary API key)
-        uses: NuGet/login@v1
-        id: login
-        with:
-          user: ${{ secrets.NUGET_USER }}
-      - name: Publish to NuGet
-        run: dotnet nuget push artifacts/*.nupkg --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
-      - name: Tag published version
+      - name: Verify exactly the certified candidate
+        run: |
+          sha256sum --check artifacts/SHA256SUMS
+          node scripts/release/verify-release-artifacts.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
+      - name: Promote NuGet archives without rebuilding
+        run: dotnet nuget push artifacts/nuget/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      - name: Promote npm archive without rebuilding
+        run: npm publish artifacts/npm/*.tgz --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Promote OCI layouts without rebuilding
         shell: bash
         run: |
-          package_path=$(find artifacts -maxdepth 1 -type f -name 'SyntaxCircus.Cmsify.Client.*.nupkg' ! -name '*.snupkg' | head -n 1)
-          if [ -z "$package_path" ]; then
-            echo "No client package found to derive the release tag."
-            exit 1
-          fi
-          package_name=$(basename "$package_path")
-          version=${package_name#SyntaxCircus.Cmsify.Client.}
-          version=${version%.nupkg}
-          tag="v$version"
-          if git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
-            echo "Tag $tag already exists on origin."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "$tag" "$GITHUB_SHA"
-          git push origin "$tag"
-
-  docker:
-    needs: publish
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip release]')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: gittools/actions/gitversion/setup@v4.1.0
-        with:
-          versionSpec: 6.8.x
-      - name: Resolve GitVersion metadata
-        id: gitversion
-        uses: gittools/actions/gitversion/execute@v4.1.0
-        with:
-          useConfigFile: true
-      - uses: docker/setup-buildx-action@v3
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push API image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: src/Cmsify.Api/Dockerfile
-          push: true
-          tags: |
-            syntaxcircus/cmsify-api:${{ steps.gitversion.outputs.semVer }}
-            syntaxcircus/cmsify-api:latest
-          build-args: |
-            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
-            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
-            DISABLE_GITVERSION_TASK=true
-      - name: Build and push Admin image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: src/Cmsify.Admin/Dockerfile
-          push: true
-          tags: |
-            syntaxcircus/cmsify-admin:${{ steps.gitversion.outputs.semVer }}
-            syntaxcircus/cmsify-admin:latest
-          build-args: |
-            BUILD_VERSION=${{ steps.gitversion.outputs.semVer }}
-            BUILD_INFORMATIONAL_VERSION=${{ steps.gitversion.outputs.informationalVersion }}
-            DISABLE_GITVERSION_TASK=true
-      - name: Update API Docker Hub overview
-        uses: peter-evans/dockerhub-description@v5
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: syntaxcircus/cmsify-api
-          short-description: Headless CMS API for composable, versioned content.
-          readme-filepath: ./docs/dockerhub/cmsify-api.md
-      - name: Update Admin Docker Hub overview
-        uses: peter-evans/dockerhub-description@v5
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: syntaxcircus/cmsify-admin
-          short-description: Blazor admin UI for managing content in Cmsify.
-          readme-filepath: ./docs/dockerhub/cmsify-admin.md
+          echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+          docker load --input artifacts/oci/cmsify-api.oci.tar
+          docker load --input artifacts/oci/cmsify-admin.oci.tar
+          docker push "syntaxcircus/cmsify-api:$VERSION"
+          docker push "syntaxcircus/cmsify-admin:$VERSION"
+          {
+            docker image inspect "syntaxcircus/cmsify-api:$VERSION" --format '{{index .RepoDigests 0}}'
+            docker image inspect "syntaxcircus/cmsify-admin:$VERSION" --format '{{index .RepoDigests 0}}'
+          } > artifacts/OCI-DIGESTS
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Create the release from certified files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v$VERSION" artifacts/SHA256SUMS artifacts/OCI-DIGESTS artifacts/release-manifest.json artifacts/sbom/*.spdx.json --title "Cmsify v$VERSION" --generate-notes --target "$SOURCE_SHA"

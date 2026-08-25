@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const sdkRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const examplesRoot = resolve(sdkRoot, "..", "..", "examples");
 const temporaryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-client-consumer-"));
+const suppliedTarball = process.env.CMSIFY_CLIENT_TARBALL;
 const typescriptPackage = resolve(sdkRoot, "node_modules", "typescript");
 const openapiFetchPackage = resolve(sdkRoot, "node_modules", "openapi-fetch");
 const openapiHelpersPackage = resolve(sdkRoot, "node_modules", "openapi-typescript-helpers");
@@ -23,9 +24,14 @@ const npm = (arguments_, cwd) => execFileSync(process.execPath, [npmCli, ...argu
 });
 
 try {
-  npm(["run", "build"], sdkRoot);
-  const packed = JSON.parse(npm(["pack", "--json", "--pack-destination", temporaryRoot], sdkRoot));
-  const tarball = resolve(temporaryRoot, packed[0].filename);
+  const tarball = suppliedTarball
+    ? resolve(suppliedTarball)
+    : (() => {
+      npm(["run", "build"], sdkRoot);
+      const packed = JSON.parse(npm(["pack", "--json", "--pack-destination", temporaryRoot], sdkRoot));
+      return resolve(temporaryRoot, packed[0].filename);
+    })();
+  if (!existsSync(tarball)) throw new Error(`CMSIFY_CLIENT_TARBALL does not exist: ${tarball}`);
   const consumerRoot = resolve(temporaryRoot, "consumer");
   mkdirSync(consumerRoot);
   writeFileSync(resolve(consumerRoot, "package.json"), JSON.stringify({ private: true, type: "module" }, null, 2));

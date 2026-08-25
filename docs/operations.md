@@ -8,7 +8,7 @@ Use environment-specific secret management in production. Do not commit credenti
 
 ## Container deployment
 
-The repository's [`docker-compose.prod.yml`](../docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and named volumes for database data, local media, and Admin Data Protection keys. Successful `main` releases publish versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images to Docker Hub, as well as `latest`. The template defaults to the versioned image pair; use `CMSIFY_IMAGE_PREFIX` to pull from a private registry/repository instead.
+The repository's [`docker-compose.prod.yml`](../docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and named volumes for database data, local media, and Admin Data Protection keys. A reviewed SemVer tag promotes matching versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images from one immutable commit; branch builds never publish. The template defaults to the versioned image pair; use `CMSIFY_IMAGE_PREFIX` to pull from a private registry/repository instead.
 
 ```powershell
 # Build both local images (including amd64 and arm64 tags).

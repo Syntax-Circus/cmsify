@@ -28,6 +28,6 @@ foreach ($project in $packageProjects) {
 
 $packages = @(Get-ChildItem -Path $OutputDirectory -Filter "*.nupkg" | Where-Object Name -notlike "*.symbols.nupkg")
 if ($packages.Count -eq 0) { throw "No NuGet packages were produced." }
-Write-Host "GitVersion-derived packages: $($packages.Name -join ', ')"
+Write-Host "Local non-publishable packages: $($packages.Name -join ', ')"
 if ($DryRun) { Write-Host "Dry run complete: $($packages.Name -join ', ')"; exit 0 }
 Write-Host "Packages are published through GitHub Actions NuGet Trusted Publishing using secrets.NUGET_USER."

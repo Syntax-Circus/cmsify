@@ -1,8 +1,11 @@
 {
   "name": "@cmsify/client",
-  "version": "1.0.0",
+  "version": "0.0.0-local",
   "description": "First-party TypeScript client for the Cmsify API.",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

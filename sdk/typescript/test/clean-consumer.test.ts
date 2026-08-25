@@ -10,4 +10,15 @@ describe("published package consumer", () => {
 
     expect(output).toContain("Clean consumer typecheck passed.");
   });
+
+  it("fails closed when release validation supplies a missing packed archive", () => {
+    const missingTarball = resolve(sdkRoot, "missing-release-candidate.tgz");
+
+    expect(() => execFileSync(process.execPath, ["scripts/check-clean-consumer.mjs"], {
+      cwd: sdkRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, CMSIFY_CLIENT_TARBALL: missingTarball },
+    })).toThrow(/CMSIFY_CLIENT_TARBALL/);
+  });
 });
