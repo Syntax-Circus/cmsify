@@ -5,6 +5,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -27,16 +28,15 @@ public sealed class UsersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<UserDto>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<UserDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
         if (!currentActor.IsSuperAdmin)
         {
             return StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var limit = Math.Clamp(pageSize, 1, 200);
-        var result = await userRepository.ListAsync(new PageRequest((Math.Max(1, page) - 1) * limit, limit), ct);
-        return Ok(new PagedResponse<UserDto>(result.Items, result.TotalCount, Math.Max(1, page), limit));
+        var result = await userRepository.ListAsync(new PageRequest(ControllerHelpers.Offset(pagination.Page, pagination.PageSize), pagination.PageSize), ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<UserDto>(result.Items, result.TotalCount, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]

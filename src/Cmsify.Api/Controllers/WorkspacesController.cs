@@ -6,6 +6,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Core.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -28,16 +29,16 @@ public sealed class WorkspacesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResult<WorkspaceDto>>> List([FromQuery] int offset = 0, [FromQuery] int limit = 50, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
-        var result = await workspaceRepository.ListAsync(new PageRequest(offset, limit), ct);
+        var result = await workspaceRepository.ListAsync(new PageRequest(ControllerHelpers.Offset(pagination.Page, pagination.PageSize), pagination.PageSize), ct);
         var workspaces = new List<WorkspaceDto>(result.Items.Count);
         foreach (var workspace in result.Items)
         {
             workspaces.Add(await WithCapabilitiesAsync(workspace, ct));
         }
 
-        return Ok(new PagedResult<WorkspaceDto>(workspaces, result.TotalCount, result.Offset, result.Limit));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>(workspaces, result.TotalCount, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]

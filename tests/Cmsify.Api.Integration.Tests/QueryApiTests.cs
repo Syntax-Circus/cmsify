@@ -70,6 +70,69 @@ public sealed class QueryApiTests : IAsyncLifetime
         Assert.Equal(2, translations.GetArrayLength());
     }
 
+    [Fact]
+    public async Task WorkspaceList_UsesThePublicPageEnvelope()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        await SeedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>("/api/v1/workspaces?page=1&pageSize=1");
+
+        Assert.Equal(1, response.GetProperty("page").GetInt32());
+        Assert.Equal(1, response.GetProperty("pageSize").GetInt32());
+        Assert.True(response.TryGetProperty("totalPages", out _));
+        Assert.False(response.TryGetProperty("offset", out _));
+        Assert.False(response.TryGetProperty("limit", out _));
+    }
+
+    [Theory]
+    [InlineData("page=0")]
+    [InlineData("pageSize=0")]
+    [InlineData("pageSize=101")]
+    public async Task ContentList_RejectsInvalidPaginationWithCmsifyProblemDetails(string query)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+        client.DefaultRequestHeaders.Add("X-Correlation-Id", "pagination-contract-test");
+
+        var response = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content?{query}");
+        var body = await response.Content.ReadAsStringAsync();
+        var problem = JsonSerializer.Deserialize<JsonElement>(body);
+
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.BadRequest, body);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("https://cmsify.dev/errors/bad-request", problem.GetProperty("type").GetString());
+        Assert.Equal(400, problem.GetProperty("status").GetInt32());
+        Assert.True(problem.TryGetProperty("title", out _));
+        Assert.True(problem.TryGetProperty("instance", out _));
+        Assert.True(problem.TryGetProperty("traceId", out _));
+        Assert.Equal("pagination-contract-test", problem.GetProperty("correlationId").GetString());
+        Assert.True(response.Headers.TryGetValues("X-Correlation-Id", out var correlations));
+        Assert.Contains("pagination-contract-test", correlations);
+    }
+
+    [Fact]
+    public async Task UnauthenticatedRequest_ReturnsCmsifyProblemDetailsWithCorrelation()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Correlation-Id", "unauthenticated-contract-test");
+
+        var response = await client.GetAsync("/api/v1/workspaces");
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("https://cmsify.dev/errors/unauthenticated", problem.GetProperty("type").GetString());
+        Assert.Equal("unauthenticated-contract-test", problem.GetProperty("correlationId").GetString());
+        Assert.True(response.Headers.TryGetValues("X-Correlation-Id", out var correlations));
+        Assert.Contains("unauthenticated-contract-test", correlations);
+    }
+
     private WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>();
 

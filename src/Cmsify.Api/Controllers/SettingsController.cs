@@ -30,7 +30,7 @@ public sealed class SettingsController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only user sessions have account preferences.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only user sessions have account preferences.");
         }
 
         var user = await dbContext.Users.AsNoTracking().FirstAsync(candidate => candidate.Id == currentActor.UserId.Value, ct);
@@ -43,7 +43,7 @@ public sealed class SettingsController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only user sessions have account preferences.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only user sessions have account preferences.");
         }
 
         var user = await dbContext.Users.FirstAsync(candidate => candidate.Id == currentActor.UserId.Value, ct);

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.ComponentModel.DataAnnotations;
 namespace SyntaxCircus.Cmsify.Contracts;
 
 public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int TotalCount, int Page, int PageSize)
@@ -6,7 +7,28 @@ public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int TotalCount, in
     public int TotalPages => (int)Math.Ceiling(TotalCount / (double)Math.Max(1, PageSize));
 }
 
-public sealed record PagedResult<T>(IReadOnlyList<T> Items, int TotalCount, int Offset, int Limit);
+public sealed record PaginationQuery(
+    int Page = 1,
+    int PageSize = 20) : IValidatableObject
+{
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) => PaginationValidation.Validate(Page, PageSize);
+}
+
+internal static class PaginationValidation
+{
+    public static IEnumerable<ValidationResult> Validate(int page, int pageSize)
+    {
+        if (page < 1)
+        {
+            yield return new ValidationResult("Page must be at least 1.", ["Page"]);
+        }
+
+        if (pageSize is < 1 or > 100)
+        {
+            yield return new ValidationResult("PageSize must be between 1 and 100.", ["PageSize"]);
+        }
+    }
+}
 
 public sealed record FileDownloadResponse(string FileName, string ContentType, byte[] Content);
 
@@ -179,11 +201,17 @@ public sealed record PackageImportResolutionsRequest(IReadOnlyDictionary<string,
 public sealed record LoginRequest(string Email, string Password);
 public sealed record ActorResponse(Guid? UserId, Guid? ApiClientId, string Role, Guid? WorkspaceId, bool IsSuperAdmin);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
-public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20);
+public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20) : IValidatableObject
+{
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) => PaginationValidation.Validate(Page, PageSize);
+}
 public sealed record RejectContentRequest(string Reason);
 public sealed record UpdateTemplateRequest(string Name, string? Description);
 public sealed record CreateTemplateVersionRequest(string? Notes);
 public sealed record RotateWebhookSecretResponse(Guid Id, string Secret, string Warning);
 public sealed record TagResponse(Guid Id, string Name, int UsageCount);
-public sealed record AuditQueryRequest(string? EntityType, Guid? EntityId, AuditAction? Action, Guid? ActorUserId, Guid? ActorApiClientId, DateTimeOffset? After, DateTimeOffset? Before, int Page = 1, int PageSize = 50);
+public sealed record AuditQueryRequest(string? EntityType, Guid? EntityId, AuditAction? Action, Guid? ActorUserId, Guid? ActorApiClientId, DateTimeOffset? After, DateTimeOffset? Before, int Page = 1, int PageSize = 50) : IValidatableObject
+{
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) => PaginationValidation.Validate(Page, PageSize);
+}
 public sealed record UserWorkspaceAccessRequest(Guid WorkspaceId, WorkspaceAccessLevel AccessLevel);

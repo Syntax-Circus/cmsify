@@ -7,6 +7,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -43,7 +44,7 @@ public sealed class WebhooksController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<WebhookEndpointResponse>>> List(Guid workspaceId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookEndpointResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -55,8 +56,8 @@ public sealed class WebhooksController : ControllerBase
             .Where(endpoint => endpoint.WorkspaceId == workspaceId && !endpoint.IsDeleted)
             .OrderBy(endpoint => endpoint.Name);
         var total = await query.CountAsync(ct);
-        var items = await query.Skip(ControllerHelpers.Offset(page, pageSize)).Take(ControllerHelpers.Limit(pageSize)).Select(endpoint => ToResponse(endpoint)).ToListAsync(ct);
-        return Ok(new PagedResponse<WebhookEndpointResponse>(items, total, Math.Max(1, page), ControllerHelpers.Limit(pageSize)));
+        var items = await query.Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize)).Take(pagination.PageSize).Select(endpoint => ToResponse(endpoint)).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookEndpointResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]
@@ -202,7 +203,7 @@ public sealed class WebhooksController : ControllerBase
     }
 
     [HttpGet("{id:guid}/deliveries")]
-    public async Task<ActionResult<PagedResponse<WebhookDeliveryResponse>>> ListDeliveries(Guid workspaceId, Guid id, [FromQuery] bool? isDelivered = null, [FromQuery] bool? isFailed = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookDeliveryResponse>>> ListDeliveries(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, [FromQuery] bool? isDelivered = null, [FromQuery] bool? isFailed = null, CancellationToken ct = default)
     {
         if (!await EndpointExistsAsync(workspaceId, id, requireWrite: false, ct))
         {
@@ -222,11 +223,11 @@ public sealed class WebhooksController : ControllerBase
 
         var total = await query.CountAsync(ct);
         var items = await query.OrderByDescending(log => log.CreatedAt)
-            .Skip(ControllerHelpers.Offset(page, pageSize))
-            .Take(ControllerHelpers.Limit(pageSize))
+            .Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize))
+            .Take(pagination.PageSize)
             .Select(log => new WebhookDeliveryResponse(log.Id, log.WebhookEndpointId, log.EventType, log.Payload, log.AttemptCount, log.LastAttemptAt, log.NextRetryAt, log.StatusCode, log.IsDelivered, log.IsFailed, log.CreatedAt))
             .ToListAsync(ct);
-        return Ok(new PagedResponse<WebhookDeliveryResponse>(items, total, Math.Max(1, page), ControllerHelpers.Limit(pageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookDeliveryResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost("{id:guid}/deliveries/{deliveryId:guid}/retry")]

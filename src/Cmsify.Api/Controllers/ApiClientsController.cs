@@ -5,6 +5,7 @@ using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -27,10 +28,10 @@ public sealed class ApiClientsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<ApiClientDto>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ApiClientDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
-        var result = await apiClientRepository.ListAsync(new PageRequest((Math.Max(1, page) - 1) * Math.Clamp(pageSize, 1, 200), Math.Clamp(pageSize, 1, 200)), ct);
-        return Ok(new PagedResponse<ApiClientDto>(result.Items, result.TotalCount, Math.Max(1, page), result.Limit));
+        var result = await apiClientRepository.ListAsync(new PageRequest(ControllerHelpers.Offset(pagination.Page, pagination.PageSize), pagination.PageSize), ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ApiClientDto>(result.Items, result.TotalCount, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]

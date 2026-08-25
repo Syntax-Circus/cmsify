@@ -8,6 +8,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ContentListQuery = SyntaxCircus.Cmsify.Contracts.ContentListQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -38,7 +39,7 @@ public sealed class ContentController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -63,7 +64,8 @@ public sealed class ContentController : ControllerBase
 
         if (query.Status.HasValue)
         {
-            items = items.Where(content => content.Status == query.Status.Value);
+            var status = (ContentStatus)(int)query.Status.Value;
+            items = items.Where(content => content.Status == status);
         }
 
         if (!string.IsNullOrWhiteSpace(query.LocaleCode))
@@ -131,7 +133,7 @@ public sealed class ContentController : ControllerBase
             responses.Add(await ToSummaryResponseAsync(item, ct));
         }
 
-        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, total, query.Page, query.PageSize));
     }
 
     [HttpPost]
@@ -852,11 +854,11 @@ public sealed class ContentController : ControllerBase
         left.HasValue == right.HasValue
         && (!left.HasValue || left.Value.GetRawText() == right!.Value.GetRawText());
 
-    private async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
+    private async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
     {
-        if (query.Status.HasValue && query.Status.Value != ContentStatus.Published)
+        if (query.Status.HasValue && query.Status.Value != SyntaxCircus.Cmsify.Contracts.ContentStatus.Published)
         {
-            return Ok(new PagedResponse<ContentItemSummaryResponse>([], 0, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], 0, query.Page, query.PageSize));
         }
 
         var asOf = query.AsOf ?? DateTimeOffset.UtcNow;
@@ -938,7 +940,7 @@ public sealed class ContentController : ControllerBase
             responses.Add(await ToResolvedSummaryResponseAsync(version, ct));
         }
 
-        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, total, query.Page, query.PageSize));
     }
 
     private async Task<ContentVersion?> ResolvePublishedVersionAsync(Guid workspaceId, Guid? contentItemId, string? slug, DateTimeOffset asOf, CancellationToken ct)
@@ -1227,7 +1229,6 @@ public sealed class ContentController : ControllerBase
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
 }
 
-public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20);
 public sealed record CreateContentItemRequest(Guid TemplateVersionId, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
 public sealed record UpdateContentItemRequest(string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? PublishAt, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
 public sealed record ContentFieldValueRequest(Guid FieldId, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);

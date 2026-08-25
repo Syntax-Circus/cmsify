@@ -77,7 +77,7 @@ public sealed class AuthController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only user sessions can be refreshed.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only user sessions can be refreshed.");
         }
 
         var rawToken = GetBearerToken();
@@ -115,7 +115,7 @@ public sealed class AuthController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only local users can change passwords.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only local users can change passwords.");
         }
 
         var user = await dbContext.Users.FirstAsync(candidate => candidate.Id == currentActor.UserId.Value, ct);

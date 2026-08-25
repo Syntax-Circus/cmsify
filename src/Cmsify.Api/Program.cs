@@ -57,10 +57,16 @@ builder.Services.AddProblemDetails(options =>
     options.CustomizeProblemDetails = context =>
     {
         context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
-        if (context.ProblemDetails.Type == "about:blank" && context.ProblemDetails.Status is int status)
+        var correlationId = context.HttpContext.Request.Headers[CorrelationHeaderName].FirstOrDefault()
+            ?? context.HttpContext.TraceIdentifier;
+        context.HttpContext.Response.Headers[CorrelationHeaderName] = correlationId;
+        context.ProblemDetails.Extensions["correlationId"] = correlationId;
+        if (context.ProblemDetails.Status is int status && !(context.ProblemDetails.Type?.StartsWith(CmsifyError.BaseUri, StringComparison.Ordinal) ?? false))
         {
             context.ProblemDetails.Type = CmsifyError.TypeUri(StatusCodeToErrorCode(status));
         }
+        context.ProblemDetails.Title ??= ReasonPhrases.GetReasonPhrase(context.ProblemDetails.Status ?? StatusCodes.Status500InternalServerError);
+        context.ProblemDetails.Instance ??= context.HttpContext.Request.Path;
     };
 });
 builder.Services.AddHttpContextAccessor();
@@ -175,6 +181,10 @@ app.UseStatusCodePages(async context =>
         Instance = httpContext.Request.Path
     };
     problem.Extensions["traceId"] = httpContext.TraceIdentifier;
+    var correlationId = httpContext.Request.Headers[CorrelationHeaderName].FirstOrDefault()
+        ?? httpContext.TraceIdentifier;
+    httpContext.Response.Headers[CorrelationHeaderName] = correlationId;
+    problem.Extensions["correlationId"] = correlationId;
     httpContext.Response.ContentType = "application/problem+json";
     await httpContext.Response.WriteAsJsonAsync(problem);
 });

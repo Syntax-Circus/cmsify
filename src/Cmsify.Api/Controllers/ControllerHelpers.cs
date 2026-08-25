@@ -5,9 +5,9 @@ namespace Cmsify.Api.Controllers;
 
 internal static class ControllerHelpers
 {
-    public static int Offset(int page, int pageSize) => (Math.Max(1, page) - 1) * Math.Clamp(pageSize, 1, 100);
+    public static int Offset(int page, int pageSize) => (page - 1) * pageSize;
 
-    public static int Limit(int pageSize) => Math.Clamp(pageSize, 1, 100);
+    public static int Limit(int pageSize) => pageSize;
 
     public static string ETag(DateTimeOffset updatedAt) => $"\"{updatedAt.UtcTicks}\"";
 
@@ -28,6 +28,10 @@ internal static class ControllerHelpers
             Instance = controller.HttpContext.Request.Path
         };
         problem.Extensions["traceId"] = controller.HttpContext.TraceIdentifier;
+        var correlationId = controller.HttpContext.Request.Headers["X-Correlation-Id"].FirstOrDefault()
+            ?? controller.HttpContext.TraceIdentifier;
+        controller.HttpContext.Response.Headers["X-Correlation-Id"] = correlationId;
+        problem.Extensions["correlationId"] = correlationId;
         if (extensions is not null)
         {
             foreach (var extension in extensions)

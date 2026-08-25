@@ -8,6 +8,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -32,7 +33,7 @@ public sealed class TemplatesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResult<TemplateSummaryResponse>>> List(Guid workspaceId, [FromQuery] bool? isSystem = null, [FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateSummaryResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, [FromQuery] bool? isSystem = null, [FromQuery] string? search = null, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -47,12 +48,12 @@ public sealed class TemplatesController : ControllerBase
 
         var total = await query.CountAsync(ct);
         var items = await query.OrderBy(template => template.Name)
-            .Skip(ControllerHelpers.Offset(page, pageSize))
-            .Take(ControllerHelpers.Limit(pageSize))
+            .Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize))
+            .Take(pagination.PageSize)
             .Select(template => new TemplateSummaryResponse(template.Id, template.WorkspaceId, template.Name, template.Slug, template.Description, template.CurrentVersionId))
             .ToListAsync(ct);
 
-        return Ok(new PagedResult<TemplateSummaryResponse>(items, total, ControllerHelpers.Offset(page, pageSize), ControllerHelpers.Limit(pageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateSummaryResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]

@@ -47,7 +47,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "reader@example.test", "reader-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var response = await client.GetFromJsonAsync<PagedResult<WorkspaceDto>>("/api/v1/workspaces");
+        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10");
 
         Assert.NotNull(response);
         Assert.Collection(
@@ -69,9 +69,15 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "writer@example.test", "writer-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var response = await client.GetFromJsonAsync<PagedResult<WorkspaceDto>>("/api/v1/workspaces");
+        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10");
 
         Assert.NotNull(response);
+        Assert.Equal(1, response.Page);
+        Assert.Equal(10, response.PageSize);
+        Assert.Equal(1, response.TotalPages);
+        Assert.Equal(1, response.Page);
+        Assert.Equal(10, response.PageSize);
+        Assert.Equal(1, response.TotalPages);
         Assert.Collection(
             response.Items,
             workspace =>

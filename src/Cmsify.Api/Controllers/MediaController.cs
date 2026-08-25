@@ -6,6 +6,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 using Microsoft.Net.Http.Headers;
 
 namespace Cmsify.Api.Controllers;
@@ -89,7 +90,7 @@ public sealed class MediaController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<MediaAssetResponse>>> List(Guid workspaceId, [FromQuery] string? mimeType = null, [FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<MediaAssetResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, [FromQuery] string? mimeType = null, [FromQuery] string? search = null, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -109,12 +110,12 @@ public sealed class MediaController : ControllerBase
 
         var total = await query.CountAsync(ct);
         var items = await query.OrderBy(asset => asset.FileName)
-            .Skip(ControllerHelpers.Offset(page, pageSize))
-            .Take(ControllerHelpers.Limit(pageSize))
+            .Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize))
+            .Take(pagination.PageSize)
             .Select(asset => ToResponse(asset))
             .ToListAsync(ct);
 
-        return Ok(new PagedResponse<MediaAssetResponse>(items, total, Math.Max(1, page), ControllerHelpers.Limit(pageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<MediaAssetResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpGet("{id:guid}")]

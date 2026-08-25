@@ -22,7 +22,7 @@ public sealed class HealthClient(CmsifyClient client)
 
 public sealed class WorkspaceClient(CmsifyClient client)
 {
-    public Task<PagedResult<WorkspaceDto>?> ListAsync(int offset = 0, int limit = 50, CancellationToken ct = default) => client.GetAsync<PagedResult<WorkspaceDto>>($"/api/v1/workspaces?offset={offset}&limit={limit}", ct);
+    public Task<PagedResponse<WorkspaceDto>?> ListAsync(int page = 1, int pageSize = 50, CancellationToken ct = default) => client.GetAsync<PagedResponse<WorkspaceDto>>($"/api/v1/workspaces?page={page}&pageSize={pageSize}", ct);
     public Task<WorkspaceDto?> GetAsync(Guid id, CancellationToken ct = default) => client.GetAsync<WorkspaceDto>($"/api/v1/workspaces/{id}", ct);
     public Task<WorkspaceDto?> CreateAsync(WorkspaceRequest request, CancellationToken ct = default) => client.PostAsync<WorkspaceDto>("/api/v1/workspaces", request, ct);
     public Task<WorkspaceDto?> UpdateAsync(Guid id, WorkspaceRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<WorkspaceDto>($"/api/v1/workspaces/{id}", request, ct) : client.PutAsync<WorkspaceDto>($"/api/v1/workspaces/{id}", request, ifMatch, ct);
@@ -31,9 +31,9 @@ public sealed class WorkspaceClient(CmsifyClient client)
 
 public sealed class TemplateClient(CmsifyClient client)
 {
-    public Task<PagedResult<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, string? search, CancellationToken ct = default) => ListAsync(workspaceId, null, search, ct: ct);
-    public Task<PagedResult<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, bool? isSystem = null, string? search = null, int page = 1, int pageSize = 20, CancellationToken ct = default) =>
-        client.GetAsync<PagedResult<TemplateSummaryResponse>>($"{CmsifyClient.WorkspacePath(workspaceId, "/templates")}?page={page}&pageSize={pageSize}{Query.Optional("isSystem", isSystem)}{Query.Optional("search", search)}", ct);
+    public Task<PagedResponse<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, string? search, CancellationToken ct = default) => ListAsync(workspaceId, null, search, ct: ct);
+    public Task<PagedResponse<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, bool? isSystem = null, string? search = null, int page = 1, int pageSize = 20, CancellationToken ct = default) =>
+        client.GetAsync<PagedResponse<TemplateSummaryResponse>>($"{CmsifyClient.WorkspacePath(workspaceId, "/templates")}?page={page}&pageSize={pageSize}{Query.Optional("isSystem", isSystem)}{Query.Optional("search", search)}", ct);
     public Task<TemplateResponse?> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), ct);
     public Task<TemplateResponse?> CreateAsync(Guid workspaceId, CreateTemplateRequest request, CancellationToken ct = default) => client.PostAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, "/templates"), request, ct);
     public Task<TemplateResponse?> UpdateAsync(Guid workspaceId, Guid id, UpdateTemplateRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), request, ct) : client.PutAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), request, ifMatch, ct);
