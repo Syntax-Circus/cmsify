@@ -39,10 +39,17 @@ try {
   expect(typeScriptPackage.license === "MIT", "@cmsify/client must declare the MIT license.");
   expect(typeScriptPackage.version === "0.0.0-local", "@cmsify/client source version must be 0.0.0-local.");
   expect(typeScriptPackage.private === true, "@cmsify/client source package must be private until the validated release build overrides it.");
-  expect(typeScriptPackage.repository?.type === "git" && typeScriptPackage.repository?.url === "git+https://github.com/SyntaxCircus/cmsify.git" && typeScriptPackage.repository?.directory === "sdk/typescript", "@cmsify/client must declare its public GitHub repository and SDK directory for trusted publishing provenance.");
+  expect(typeScriptPackage.repository?.type === "git" && typeScriptPackage.repository?.url === "git+https://github.com/Syntax-Circus/cmsify.git" && typeScriptPackage.repository?.directory === "sdk/typescript", "@cmsify/client repository must use canonical Syntax-Circus GitHub identity and sdk/typescript directory for trusted publishing provenance.");
   expect(/^>=20(?:\.0\.0)?$/.test(typeScriptPackage.engines?.node ?? ""), "@cmsify/client must require Node 20 or later.");
 } catch {
   errors.push("sdk/typescript/package.json must be valid JSON.");
+}
+try {
+  const typeScriptLock = JSON.parse(file("sdk/typescript/package-lock.json"));
+  const rootPackage = typeScriptLock.packages?.[""];
+  expect(rootPackage?.repository?.type === "git" && rootPackage?.repository?.url === "git+https://github.com/Syntax-Circus/cmsify.git" && rootPackage?.repository?.directory === "sdk/typescript", "sdk/typescript/package-lock.json repository must use canonical Syntax-Circus GitHub identity and sdk/typescript directory.");
+} catch {
+  errors.push("sdk/typescript/package-lock.json must be valid JSON.");
 }
 expect(/MIT License/i.test(file("sdk/typescript/LICENSE")), "@cmsify/client archive must include the MIT license text.");
 
@@ -90,12 +97,20 @@ expect(/docker run -d[\s\S]*health\/live[\s\S]*curl[\s\S]*18081/s.test(workflow)
 const smoke = workflow.match(/- name: Smoke exact OCI candidates[\s\S]*?(?=^\s{6}- name:|^\s{6}- uses:|^\s{6}- run:)/m)?.[0] ?? "";
 const firstSmokeResource = smoke.indexOf("docker network create cmsify-smoke");
 const cleanupRegistration = smoke.indexOf("trap cleanup EXIT");
-const firstContainer = smoke.indexOf("docker run -d --rm --name cmsify-postgres-smoke");
+const firstContainer = smoke.indexOf("docker run -d --name cmsify-postgres-smoke");
 const beforeCleanup = firstSmokeResource >= 0 && cleanupRegistration > firstSmokeResource ? smoke.slice(firstSmokeResource + "docker network create cmsify-smoke".length, cleanupRegistration) : "";
 expect(firstSmokeResource >= 0 && cleanupRegistration > firstSmokeResource && cleanupRegistration < firstContainer && !/docker\s+(?:run|network create)\b/.test(beforeCleanup), "OCI smoke cleanup must be registered immediately after first resource creation and before any container is created.");
+for (const container of ["cmsify-postgres-smoke", "cmsify-api-smoke", "cmsify-admin-smoke"]) {
+  const runLine = smoke.match(new RegExp(`^\\s*docker run[^\\n]*--name ${container}[^\\n]*$`, "m"))?.[0] ?? "";
+  expect(runLine.includes("docker run -d --name") && !runLine.includes("--rm"), `OCI smoke ${container} must omit --rm so failure logs remain available.`);
+}
 expect(/cleanup\(\)[\s\S]*status=\$\?[\s\S]*docker logs cmsify-api-smoke[\s\S]*docker logs cmsify-admin-smoke[\s\S]*docker logs cmsify-postgres-smoke[\s\S]*docker rm -f cmsify-api-smoke cmsify-admin-smoke cmsify-postgres-smoke[\s\S]*docker network rm cmsify-smoke/s.test(smoke), "OCI smoke failure must show logs and clean every container and network on every exit.");
+const firstContainerRemoval = smoke.indexOf("docker rm -f");
+const lastFailureLog = Math.max(...["cmsify-api-smoke", "cmsify-admin-smoke", "cmsify-postgres-smoke"].map((container) => smoke.indexOf(`docker logs ${container}`)));
+expect(lastFailureLog >= 0 && firstContainerRemoval > lastFailureLog, "OCI smoke failure logs must be collected before any container remove operation.");
 expect(/for attempt in \{1\.\.30\}; do[\s\S]*pg_isready[\s\S]*test "\$postgres_ready" = true/s.test(smoke), "PostgreSQL readiness must be bounded and fail closed.");
-expect(/for attempt in \{1\.\.30\}; do[\s\S]*--connect-timeout 2 --max-time 5[\s\S]*test "\$candidates_ready" = true/s.test(smoke), "API/Admin readiness must use bounded attempts and request timeouts.");
+expect(/candidates_ready=false\s+for attempt in \{1\.\.30\}; do[\s\S]*--connect-timeout 2 --max-time 5[\s\S]*test "\$candidates_ready" = true/s.test(smoke), "API/Admin readiness must use bounded attempts and request timeouts.");
+expect(/127\.0\.0\.1:18081\/[\s\S]*grep -Fq '<title>Cmsify Admin<\/title>'/s.test(smoke), "Admin smoke probe must assert Cmsify-specific content after HTTP success.");
 expect(/cmsify-api\.metadata\.json[\s\S]*containerimage\.descriptor[\s\S]*size:[\s\S]*mediaType:[\s\S]*platform:[\s\S]*release-manifest\.json/s.test(workflow), "Candidate manifest must bind OCI descriptor digest, size, media type, and platform before certification.");
 expect(/finalize-spdx\.mjs --artifacts artifacts --version "\$VERSION" --source-sha "\$SOURCE_SHA"/s.test(workflow) && existsSync(resolve(repositoryRoot, "scripts/release/finalize-spdx.mjs")), "All four SPDX documents must receive stable exact document/source/package identities before certification.");
 expect(/dotnet-consumer:[\s\S]*setup-dotnet[\s\S]*download-artifact[\s\S]*dotnet new console[\s\S]*SyntaxCircus\.Cmsify\.Contracts[\s\S]*SyntaxCircus\.Cmsify\.Client[\s\S]*SyntaxCircus\.Cmsify\.Client\.DistributedCaching/s.test(workflow), "Release workflow must install all three candidate packages into a clean .NET 10 consumer.");
@@ -136,6 +151,7 @@ expect(/sudo install|GITHUB_PATH/.test(promotion), "Pinned ORAS installation mus
 
 const branchWorkflow = file(".github/workflows/dotnet-test.yml");
 expect(/pull_request:/i.test(branchWorkflow) && /verify-release-contract\.mjs/i.test(branchWorkflow) && /tests\/release-contract/i.test(branchWorkflow), "Branch/PR validation must execute the release-contract verifier and tests.");
+expect(/tests\/release-contract\/finalize-spdx\.test\.mjs/i.test(branchWorkflow), "Branch validation must execute SPDX finalizer roundtrip and negative tests.");
 
 if (errors.length > 0) {
   process.stderr.write(`${errors.join("\n")}\n`);

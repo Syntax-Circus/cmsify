@@ -89,18 +89,18 @@ jobs:
             exit "$status"
           }
           trap cleanup EXIT
-          docker run -d --rm --name cmsify-postgres-smoke --network cmsify-smoke -e POSTGRES_DB=cmsify -e POSTGRES_USER=cmsify -e POSTGRES_PASSWORD=cmsify postgres:17-alpine
+          docker run -d --name cmsify-postgres-smoke --network cmsify-smoke -e POSTGRES_DB=cmsify -e POSTGRES_USER=cmsify -e POSTGRES_PASSWORD=cmsify postgres:17-alpine
           postgres_ready=false
           for attempt in {1..30}; do
             if docker exec cmsify-postgres-smoke pg_isready -U cmsify -d cmsify; then postgres_ready=true; break; fi
             sleep 2
           done
           test "$postgres_ready" = true
-          docker run -d --rm --name cmsify-api-smoke --network cmsify-smoke -p 18080:8080 -e ConnectionStrings__Cmsify="Host=cmsify-postgres-smoke;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify" "syntaxcircus/cmsify-api:$VERSION"
-          docker run -d --rm --name cmsify-admin-smoke -p 18081:8080 "syntaxcircus/cmsify-admin:$VERSION"
+          docker run -d --name cmsify-api-smoke --network cmsify-smoke -p 18080:8080 -e ConnectionStrings__Cmsify="Host=cmsify-postgres-smoke;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify" "syntaxcircus/cmsify-api:$VERSION"
+          docker run -d --name cmsify-admin-smoke -p 18081:8080 "syntaxcircus/cmsify-admin:$VERSION"
           candidates_ready=false
           for attempt in {1..30}; do
-            if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18080/health/live >/dev/null && curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18081/ >/dev/null; then candidates_ready=true; break; fi
+            if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18080/health/live >/dev/null && curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18081/ | grep -Fq '<title>Cmsify Admin</title>'; then candidates_ready=true; break; fi
             sleep 2
           done
           test "$candidates_ready" = true

@@ -15,6 +15,7 @@ const contractFiles = [
   "CHANGELOG.md",
   "Directory.Build.props",
   "sdk/typescript/package.json",
+  "sdk/typescript/package-lock.json",
   "sdk/typescript/LICENSE",
   "src/Cmsify.Contracts/Cmsify.Contracts.csproj",
   "src/Cmsify.Api/Dockerfile",
@@ -31,8 +32,10 @@ function write(root, path, contents) {
   writeFileSync(destination, contents);
 }
 
-function round4Workflow(contents) {
-  return contents;
+function round5Workflow(contents) {
+  return contents
+    .replaceAll("docker run -d --rm --name", "docker run -d --name")
+    .replace("curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18081/ >/dev/null", "curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18081/ | grep -Fq '<title>Cmsify Admin</title>'");
 }
 
 function createFixture(mutator) {
@@ -42,7 +45,14 @@ function createFixture(mutator) {
     mkdirSync(dirname(destination), { recursive: true });
     cpSync(resolve(repositoryRoot, path), destination);
   }
-  write(root, workflowPath, round4Workflow(readFileSync(resolve(root, workflowPath), "utf8")));
+  for (const path of ["sdk/typescript/package.json", "sdk/typescript/package-lock.json"]) {
+    write(root, path, readFileSync(resolve(root, path), "utf8").replaceAll("github.com/SyntaxCircus/cmsify", "github.com/Syntax-Circus/cmsify"));
+  }
+  const branchWorkflow = readFileSync(resolve(root, ".github/workflows/dotnet-test.yml"), "utf8");
+  write(root, ".github/workflows/dotnet-test.yml", branchWorkflow.includes("tests/release-contract/finalize-spdx.test.mjs")
+    ? branchWorkflow
+    : branchWorkflow.replace("tests/release-contract/validate-release-tag.test.mjs", "tests/release-contract/validate-release-tag.test.mjs tests/release-contract/finalize-spdx.test.mjs"));
+  write(root, workflowPath, round5Workflow(readFileSync(resolve(root, workflowPath), "utf8")));
   write(root, "scripts/release/finalize-spdx.mjs", "// fixture: stable SPDX identities are finalized before checksums\n");
   for (const [path, image] of [["src/Cmsify.Api/Dockerfile", "api"], ["src/Cmsify.Admin/Dockerfile", "admin"]]) {
     const dockerfile = readFileSync(resolve(root, path), "utf8");
@@ -82,6 +92,8 @@ test("accepts the isolated complete release-contract source fixture", () => {
 });
 
 test("rejects branch publication", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('tags: ["v*"]', "branches: [main]")), /tag-only/i));
+test("rejects the legacy npm repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /@cmsify\/client.*repository.*Syntax-Circus/i));
+test("rejects the legacy npm lockfile repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package-lock.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /package-lock.*repository.*Syntax-Circus/i));
 test("rejects an unpinned release action", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@v4")), /pinned/i));
 test("rejects a promotion rebuild", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('REMOTE_SHA="${PEELED_SHA:-$LIGHTWEIGHT_SHA}";', 'docker buildx build --push .\n          REMOTE_SHA="${PEELED_SHA:-$LIGHTWEIGHT_SHA}";')), /Promotion must not rebuild/i));
 
@@ -100,3 +112,16 @@ test("rejects an OCI Dockerfile with a wrong qualified image identity label", ()
 test("rejects SBOM generation without stable identity finalization", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node scripts\/release\/finalize-spdx\.mjs[^\n]*/, "")), /four SPDX[\s\S]*stable[\s\S]*identit/i));
 test("rejects smoke resources created before cleanup registration", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("trap cleanup EXIT", "docker run -d --name leaked-resource busybox true\n          trap cleanup EXIT")), /smoke cleanup.*immediately after first resource/i));
 test("rejects unbounded PostgreSQL readiness", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("for attempt in {1..30}; do\n            if docker exec cmsify-postgres-smoke", "while true; do\n            if docker exec cmsify-postgres-smoke")), /PostgreSQL readiness.*bounded/i));
+test("rejects unbounded API and Admin readiness", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => {
+  const marker = "for attempt in {1..30}; do";
+  const index = workflow.lastIndexOf(marker);
+  return `${workflow.slice(0, index)}while true; do${workflow.slice(index + marker.length)}`;
+}), /API\/Admin readiness.*bounded/i));
+
+for (const container of ["cmsify-postgres-smoke", "cmsify-api-smoke", "cmsify-admin-smoke"]) {
+  test(`rejects --rm on ${container} before failure logs can be collected`, () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(`docker run -d --name ${container}`, `docker run -d --rm --name ${container}`)), new RegExp(`smoke.*${container}.*--rm.*logs`, "i")));
+}
+
+test("rejects smoke cleanup that removes containers before collecting failure logs", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("docker logs cmsify-api-smoke 2>/dev/null || true", "docker rm -f cmsify-api-smoke 2>/dev/null || true\n              docker logs cmsify-api-smoke 2>/dev/null || true")), /smoke failure.*logs.*before.*remove/i));
+test("rejects an Admin smoke probe that accepts arbitrary HTTP success", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" | grep -Fq '<title>Cmsify Admin</title>'", " >/dev/null")), /Admin.*Cmsify-specific content/i));
+test("rejects branch validation that omits SPDX finalizer roundtrip tests", () => expectInvalid((root) => { const path = resolve(root, ".github/workflows/dotnet-test.yml"); writeFileSync(path, readFileSync(path, "utf8").replace(" tests/release-contract/finalize-spdx.test.mjs", "")); }, /branch.*SPDX finalizer.*tests/i));

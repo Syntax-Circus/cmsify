@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { gunzipSync } from "node:zlib";
 
 const argv = process.argv.slice(2);
 const option = (name) => argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined;
@@ -12,15 +13,30 @@ const sourceSha = option("--source-sha");
 const errors = [];
 
 const REPOSITORY_SOURCE = "https://github.com/Syntax-Circus/cmsify";
-const NPM_REPOSITORY_SOURCE = "git+https://github.com/SyntaxCircus/cmsify.git";
+const NPM_REPOSITORY_SOURCE = "git+https://github.com/Syntax-Circus/cmsify.git";
 const OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
 const OCI_CONFIG = "application/vnd.oci.image.config.v1+json";
+const OCI_LAYER = "application/vnd.oci.image.layer.v1.tar";
+const OCI_LAYER_GZIP = "application/vnd.oci.image.layer.v1.tar+gzip";
 const MIT_LICENSE_SHA256 = "119f46213616bf4e390565949d6a9e03e8b76c13d23c8dbfbaf2384a9ffa29a4";
 const EXPECTED_NUGET = [
   "SyntaxCircus.Cmsify.Contracts",
   "SyntaxCircus.Cmsify.Client",
   "SyntaxCircus.Cmsify.Client.DistributedCaching",
 ];
+const EXPECTED_NPM_MEMBERS = new Set([
+  "package/LICENSE",
+  "package/README.md",
+  "package/package.json",
+  "package/dist/index.cjs",
+  "package/dist/index.cjs.map",
+  "package/dist/index.d.cts",
+  "package/dist/index.d.ts",
+  "package/dist/index.js",
+  "package/dist/index.js.map",
+  "package/src/generated/client.ts",
+  "package/src/generated/schema.ts",
+]);
 
 function expect(condition, message) {
   if (!condition) errors.push(message);
@@ -132,11 +148,12 @@ function verifyNpm(expectedFiles) {
   const members = new Set(listing.filter((name) => !name.endsWith("/")));
   expect(members.has("package/package.json"), "Packed npm candidate must include exact member package/package.json.");
   expect(members.has("package/LICENSE"), "Packed npm candidate must include exact member package/LICENSE.");
-  const invalidMembers = [...members].filter((name) => !(
-    name === "package/package.json" || name === "package/LICENSE" || /^package\/README(?:\.[^/]+)?$/i.test(name) ||
-    name.startsWith("package/dist/") || name.startsWith("package/src/generated/")
-  ));
-  for (const member of invalidMembers) errors.push(`Packed npm candidate contains unsupported archive member ${member}.`);
+  for (const member of EXPECTED_NPM_MEMBERS) {
+    expect(members.has(member), `Packed npm candidate is missing archive member ${member}.`);
+  }
+  for (const member of members) {
+    if (!EXPECTED_NPM_MEMBERS.has(member)) errors.push(`Packed npm candidate contains unsupported archive member ${member}; unexpected archive member ${member}.`);
+  }
 
   const metadata = parseJsonText(command("tar", ["-xOf", path, "package/package.json"], "Packed npm candidate"), "Packed npm package/package.json");
   if (!metadata) return;
@@ -150,6 +167,7 @@ function verifyNpm(expectedFiles) {
   expect(metadata.repository?.directory === "sdk/typescript", "Packed npm repository directory must be exactly sdk/typescript.");
   expect(metadata.gitHead === sourceSha, "Packed npm gitHead must equal the immutable source SHA.");
   expect(metadata.type === "module", "Packed npm type must be exactly module.");
+  expect(Array.isArray(metadata.files) && metadata.files.length === 2 && metadata.files[0] === "dist" && metadata.files[1] === "src/generated", "Packed npm files must contain exactly dist and src/generated.");
   const exportKeys = metadata.exports && typeof metadata.exports === "object" ? Object.keys(metadata.exports) : [];
   const rootExportKeys = metadata.exports?.["."] && typeof metadata.exports["."] === "object" ? Object.keys(metadata.exports["."]) : [];
   expect(exportKeys.length === 1 && exportKeys[0] === "." && rootExportKeys.length === 3 && ["types", "import", "require"].every((key) => rootExportKeys.includes(key)), "Packed npm exports surface must contain only the public entrypoint with types, import, and require targets.");
@@ -220,6 +238,30 @@ function verifyOci(expectedFiles, releaseManifest) {
       const config = parseJsonText(configContents.toString("utf8"), `OCI ${label} config blob`);
       if (!config) continue;
       expect(config.os === "linux" && config.architecture === "amd64", `OCI ${label} configuration platform must be linux/amd64.`);
+      const layers = Array.isArray(manifest.layers) ? manifest.layers : [];
+      expect(layers.length > 0, `OCI ${label} manifest must contain at least one filesystem layer.`);
+      expect(config.rootfs?.type === "layers", `OCI ${label} rootfs type must be exactly layers.`);
+      const diffIds = Array.isArray(config.rootfs?.diff_ids) ? config.rootfs.diff_ids : [];
+      expect(diffIds.length === layers.length, `OCI ${label} rootfs diff_ids count must equal manifest layers count and preserve order.`);
+      for (let index = 0; index < layers.length; index += 1) {
+        const layer = layers[index];
+        const context = `OCI ${label} layer ${index + 1}`;
+        expect(layer?.mediaType === OCI_LAYER || layer?.mediaType === OCI_LAYER_GZIP, `${context} media type must be ${OCI_LAYER} or ${OCI_LAYER_GZIP}.`);
+        const compressed = readBlob(layout, layer, context);
+        if (!compressed || (layer.mediaType !== OCI_LAYER && layer.mediaType !== OCI_LAYER_GZIP)) continue;
+        let uncompressed;
+        try {
+          uncompressed = layer.mediaType === OCI_LAYER_GZIP ? gunzipSync(compressed) : compressed;
+        } catch {
+          errors.push(`${context} gzip payload must decompress successfully.`);
+          continue;
+        }
+        const actualDiffId = `sha256:${createHash("sha256").update(uncompressed).digest("hex")}`;
+        expect(diffIds[index] === actualDiffId, `${context} rootfs diff_id must equal the uncompressed layer SHA-256 in manifest order.`);
+      }
+      if (Array.isArray(config.history)) {
+        expect(config.history.filter((entry) => entry?.empty_layer !== true).length === layers.length, `OCI ${label} history non-empty layer count must equal manifest layers count.`);
+      }
       const labels = config.config?.Labels ?? {};
       expect(labels["org.opencontainers.image.title"] === `Cmsify ${label}`, `OCI ${label} title label must be exactly Cmsify ${label}.`);
       expect(labels["org.opencontainers.image.ref.name"] === expectedRef, `OCI ${label} ref.name label must be exactly ${expectedRef}.`);
@@ -247,10 +289,10 @@ function verifyOci(expectedFiles, releaseManifest) {
 
 function verifySpdx(expectedFiles, oci) {
   const definitions = {
-    nuget: { label: "NuGet", name: `Cmsify NuGet SDK ${version}`, packages: EXPECTED_NUGET, license: "MIT" },
-    npm: { label: "npm", name: `Cmsify npm SDK ${version}`, packages: ["@cmsify/client"], license: "MIT" },
-    api: { label: "API", name: `Cmsify API OCI ${version}`, packages: ["syntaxcircus/cmsify-api"], license: "AGPL-3.0-or-later" },
-    admin: { label: "Admin", name: `Cmsify Admin OCI ${version}`, packages: ["syntaxcircus/cmsify-admin"], license: "AGPL-3.0-or-later" },
+    nuget: { label: "NuGet", name: `Cmsify NuGet SDK ${version}`, packages: EXPECTED_NUGET, license: "MIT", purl: (name) => `pkg:nuget/${name}@${version}` },
+    npm: { label: "npm", name: `Cmsify npm SDK ${version}`, packages: ["@cmsify/client"], license: "MIT", purl: () => `pkg:npm/%40cmsify/client@${version}` },
+    api: { label: "API", name: `Cmsify API OCI ${version}`, packages: ["syntaxcircus/cmsify-api"], license: "AGPL-3.0-or-later", purl: (name) => `pkg:oci/${name}@${oci.api?.digest}` },
+    admin: { label: "Admin", name: `Cmsify Admin OCI ${version}`, packages: ["syntaxcircus/cmsify-admin"], license: "AGPL-3.0-or-later", purl: (name) => `pkg:oci/${name}@${oci.admin?.digest}` },
   };
   for (const [kind, definition] of Object.entries(definitions)) {
     const fileName = `cmsify-${kind}.spdx.json`;
@@ -263,11 +305,17 @@ function verifySpdx(expectedFiles, oci) {
     const document = parseJsonFile(path, `SPDX ${definition.label}`);
     if (!document) continue;
     expect(document.spdxVersion === "SPDX-2.3", `SPDX ${definition.label} version must be SPDX-2.3.`);
+    expect(document.dataLicense === "CC0-1.0" && document.SPDXID === "SPDXRef-DOCUMENT", `SPDX ${definition.label} document identity must use CC0-1.0 and SPDXRef-DOCUMENT.`);
     expect(document.name === definition.name, `SPDX ${definition.label} document name must be exactly ${definition.name}.`);
     const namespace = `https://github.com/Syntax-Circus/cmsify/releases/download/v${version}/${fileName}`;
     expect(document.documentNamespace === namespace, `SPDX ${definition.label} document namespace must be exactly ${namespace}.`);
-    expect(document.creationInfo?.comment?.includes(sourceSha), `SPDX ${definition.label} creation identity must contain source SHA ${sourceSha}.`);
-    const subjects = definition.packages.map((name) => (document.packages ?? []).find((candidate) => candidate.name === name));
+    expect(document.creationInfo?.comment === `Cmsify source ${sourceSha}`, `SPDX ${definition.label} creation identity must contain exact source SHA ${sourceSha}.`);
+    const packages = Array.isArray(document.packages) ? document.packages : [];
+    const subjects = definition.packages.map((name) => {
+      const matches = packages.filter((candidate) => candidate.name === name);
+      expect(matches.length === 1, `SPDX ${definition.label} must contain exactly one intended package ${name}.`);
+      return matches[0];
+    });
     for (let index = 0; index < definition.packages.length; index += 1) {
       const packageName = definition.packages[index];
       const subject = subjects[index];
@@ -275,15 +323,40 @@ function verifySpdx(expectedFiles, oci) {
       if (!subject) continue;
       expect(subject.versionInfo === version, `SPDX ${definition.label} package version for ${packageName} must be ${version}.`);
       expect(subject.licenseDeclared === definition.license, `SPDX ${definition.label} package license for ${packageName} must be ${definition.license}.`);
+      expect(subject.licenseConcluded === definition.license, `SPDX ${definition.label} package concluded license for ${packageName} must be ${definition.license}.`);
       expect(document.documentDescribes?.includes(subject.SPDXID), `SPDX ${definition.label} documentDescribes must contain subject ${subject.SPDXID}.`);
-      if (kind === "api" || kind === "admin") {
-        const expectedPurl = `pkg:oci/${packageName}@${oci[kind]?.digest}`;
-        expect(subject.externalRefs?.some((entry) => entry.referenceCategory === "PACKAGE-MANAGER" && entry.referenceType === "purl" && entry.referenceLocator === expectedPurl), `SPDX ${definition.label} package purl must bind certified OCI digest ${oci[kind]?.digest}.`);
-      }
+      const expectedPurl = definition.purl(packageName);
+      const purlMatches = (subject.externalRefs ?? []).filter((entry) => entry.referenceCategory === "PACKAGE-MANAGER" && entry.referenceType === "purl");
+      const purlMessage = kind === "api" || kind === "admin"
+        ? `SPDX ${definition.label} package purl must bind certified OCI digest ${oci[kind]?.digest}.`
+        : `SPDX ${definition.label} package purl for ${packageName} must be exactly ${expectedPurl}.`;
+      expect(purlMatches.length === 1 && purlMatches[0].referenceLocator === expectedPurl, purlMessage);
     }
     const described = new Set(document.documentDescribes ?? []);
     const intendedIds = new Set(subjects.filter(Boolean).map((subject) => subject.SPDXID));
     expect(described.size === intendedIds.size && [...described].every((id) => intendedIds.has(id)), `SPDX ${definition.label} documentDescribes must identify only its intended release subjects.`);
+    const allElements = [document, ...packages, ...(document.files ?? []), ...(document.snippets ?? [])];
+    const ids = allElements.map((element) => element?.SPDXID).filter(Boolean);
+    expect(new Set(ids).size === ids.length, `SPDX ${definition.label} SPDXIDs must be unique.`);
+    const ownedIds = new Set(ids);
+    const externalDocumentIds = new Set((document.externalDocumentRefs ?? []).map((reference) => reference.externalDocumentId));
+    const ownsReference = (reference) => ownedIds.has(reference) || [...externalDocumentIds].some((documentId) => reference?.startsWith(`${documentId}:`));
+    const relationships = Array.isArray(document.relationships) ? document.relationships : [];
+    expect(relationships.length > 0, `SPDX ${definition.label} must retain meaningful inventory relationships.`);
+    for (const relationship of relationships) {
+      for (const reference of [relationship?.spdxElementId, relationship?.relatedSpdxElement]) {
+        if (!ownsReference(reference)) errors.push(`SPDX ${definition.label} relationship has dangling reference ${reference}.`);
+      }
+      if (relationship?.spdxElementId === document.SPDXID && relationship?.relationshipType === "DESCRIBES" && !described.has(relationship.relatedSpdxElement)) {
+        errors.push(`SPDX ${definition.label} DESCRIBES relationship must agree with documentDescribes.`);
+      }
+      if (relationship?.relatedSpdxElement === document.SPDXID && relationship?.relationshipType === "DESCRIBED_BY" && !described.has(relationship.spdxElementId)) {
+        errors.push(`SPDX ${definition.label} DESCRIBED_BY relationship must agree with documentDescribes.`);
+      }
+    }
+    const dependencyIds = new Set(packages.filter((candidate) => !intendedIds.has(candidate.SPDXID)).map((candidate) => candidate.SPDXID));
+    const inventoryRelated = relationships.some((relationship) => dependencyIds.has(relationship.spdxElementId) || dependencyIds.has(relationship.relatedSpdxElement));
+    expect(dependencyIds.size > 0 && inventoryRelated, `SPDX ${definition.label} must retain nonempty meaningful dependency inventory.`);
   }
 }
 

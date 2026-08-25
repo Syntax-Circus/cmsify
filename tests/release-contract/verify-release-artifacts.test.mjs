@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -87,6 +87,7 @@ const npmMetadataMutations = [
   ["private string false", (metadata) => { metadata.private = "false"; }, /npm.*public.*private.*absent.*false/i],
   ["repository type", (metadata) => { metadata.repository.type = "svn"; }, /npm.*repository.*type/i],
   ["repository URL", (metadata) => { metadata.repository.url = "https://example.invalid/repo"; }, /npm.*repository.*url/i],
+  ["legacy repository URL", (metadata) => { metadata.repository.url = "git+https://github.com/SyntaxCircus/cmsify.git"; }, /npm.*repository.*url.*Syntax-Circus/i],
   ["repository directory", (metadata) => { metadata.repository.directory = "sdk/js"; }, /npm.*repository.*directory.*sdk\/typescript/i],
   ["gitHead", (metadata) => { metadata.gitHead = "f".repeat(40); }, /npm.*gitHead.*source SHA/i],
   ["module type", (metadata) => { metadata.type = "commonjs"; }, /npm.*type.*module/i],
@@ -97,6 +98,7 @@ const npmMetadataMutations = [
   ["exports require", (metadata) => { metadata.exports["."].require = "./dist/not-cjs.cjs"; }, /npm.*exports.*require.*dist\/index\.cjs/i],
   ["exports declarations", (metadata) => { metadata.exports["."].types = "./dist/not-types.d.ts"; }, /npm.*exports.*types.*dist\/index\.d\.ts/i],
   ["extra exports target", (metadata) => { metadata.exports["./private"] = "./dist/private.js"; }, /npm.*exports surface.*only.*public entrypoint/i],
+  ["published files allowlist", (metadata) => { metadata.files = ["dist"]; }, /npm.*files.*dist.*src\/generated/i],
 ];
 
 for (const [name, mutateMetadata, diagnostic] of npmMetadataMutations) {
@@ -116,6 +118,19 @@ for (const [name, member, diagnostic] of npmMemberMutations) {
 
 test("rejects a packed npm candidate with a non-MIT LICENSE payload", () => expectInvalid({ mutate(state) { state.npm.members["package/LICENSE"] = "not the MIT license\n"; } }, /npm.*LICENSE payload.*MIT License/i));
 test("rejects a packed npm candidate with a private implementation member", () => expectInvalid({ mutate(state) { state.npm.members["package/.env"] = "SECRET=fixture\n"; } }, /npm.*unsupported archive member.*package\/\.env/i));
+test("rejects package/dist/private.js even when every declared entrypoint remains valid", () => expectInvalid({ mutate(state) { state.npm.members["package/dist/private.js"] = "export const secret = true;\n"; } }, /npm.*unexpected archive member.*package\/dist\/private\.js/i));
+test("rejects package/src/generated/private.ts even when every declared entrypoint remains valid", () => expectInvalid({ mutate(state) { state.npm.members["package/src/generated/private.ts"] = "export interface Private {}\n"; } }, /npm.*unexpected archive member.*package\/src\/generated\/private\.ts/i));
+
+for (const member of [
+  "package/README.md",
+  "package/dist/index.cjs.map",
+  "package/dist/index.js.map",
+  "package/dist/index.d.cts",
+  "package/src/generated/client.ts",
+  "package/src/generated/schema.ts",
+]) {
+  test(`rejects a packed npm candidate missing intentional member ${member}`, () => expectInvalid({ mutate(state) { delete state.npm.members[member]; } }, new RegExp(`npm.*missing archive member.*${member.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")));
+}
 
 const ociStateMutations = [
   ["API repository", (state) => { state.oci.api.repository = "syntaxcircus/not-api"; }, /OCI API.*repository.*syntaxcircus\/cmsify-api/i],
@@ -158,6 +173,16 @@ test("resolves the OCI descriptor by exact ref rather than manifests[0]", () => 
 test("rejects an OCI manifest whose config digest does not match a blob", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ manifest }) => { manifest.config.digest = `sha256:${"e".repeat(64)}`; }); } }, /OCI API.*config digest.*blob/i));
 test("rejects an OCI manifest whose config declared size is wrong", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ manifest }) => { manifest.config.size += 1; }); } }, /OCI API.*config.*declared size/i));
 test("rejects swapped API and Admin OCI subjects", () => expectInvalid({ afterRender({ root }) { swapFiles(root, "oci/cmsify-api.oci.tar", "oci/cmsify-admin.oci.tar"); swapFiles(root, "oci/cmsify-api.metadata.json", "oci/cmsify-admin.metadata.json"); } }, /OCI API.*exact ref|API.*Admin.*swap/i));
+test("rejects an OCI image with no filesystem layers", () => expectInvalid({ mutate(state) { state.oci.api.layers = []; } }, /OCI API.*at least one filesystem layer/i));
+test("rejects an OCI layer whose digest is not sha256", () => expectInvalid({ mutate(state) { state.oci.api.layers[0].digest = `sha512:${"f".repeat(128)}`; } }, /OCI API.*layer 1 digest.*sha256/i));
+test("rejects an OCI layer whose declared size is wrong", () => expectInvalid({ mutate(state) { state.oci.api.layers[0].sizeDelta = 1; } }, /OCI API.*layer 1.*declared size/i));
+test("rejects an OCI layer whose media type is unsupported", () => expectInvalid({ mutate(state) { state.oci.api.layers[0].mediaType = "application/json"; } }, /OCI API.*layer 1 media type/i));
+test("rejects an OCI manifest whose referenced layer blob is missing", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ staging, manifest }) => { unlinkSync(resolve(staging, "blobs", "sha256", manifest.layers[0].digest.slice(7))); }); } }, /OCI API.*layer 1 digest.*existing blob/i));
+test("rejects an OCI layer whose compressed bytes do not match its digest", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ staging, manifest }) => { writeFileSync(resolve(staging, "blobs", "sha256", manifest.layers[0].digest.slice(7)), "corrupt compressed layer"); }); } }, /OCI API.*layer 1 digest.*blob SHA-256/i));
+test("rejects an OCI config whose rootfs type is not layers", () => expectInvalid({ mutate(state) { state.oci.api.rootfsType = "rootfs"; } }, /OCI API.*rootfs type.*layers/i));
+test("rejects an OCI config with fewer diff_ids than manifest layers", () => expectInvalid({ mutate(state) { state.oci.api.rootfsDiffIds = (diffIds) => diffIds.slice(1); } }, /OCI API.*rootfs diff_ids count.*manifest layers/i));
+test("rejects an OCI config whose rootfs diff_ids are in the wrong layer order", () => expectInvalid({ mutate(state) { state.oci.api.rootfsDiffIds = (diffIds) => diffIds.reverse(); } }, /OCI API.*layer 1.*diff_id.*uncompressed/i));
+test("rejects an OCI config whose rootfs diff_id does not match the uncompressed layer", () => expectInvalid({ mutate(state) { state.oci.api.rootfsDiffIds = (diffIds) => [`sha256:${"f".repeat(64)}`, ...diffIds.slice(1)]; } }, /OCI API.*layer 1.*diff_id.*uncompressed/i));
 
 const spdxDefinitions = [
   ["nuget", "NuGet", "SyntaxCircus.Cmsify.Contracts", "AGPL-3.0-or-later", "MIT"],
@@ -176,6 +201,13 @@ for (const [kind, label, expectedPackage, wrongLicense, expectedLicense] of spdx
 test("rejects an SPDX package with the wrong release version", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages[0].versionInfo = "9.9.9"; }); } }, /SPDX npm.*package version.*1\.2\.3/i));
 test("rejects an SPDX documentDescribes identity unrelated to its subject", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.documentDescribes = ["SPDXRef-unrelated"]; }); } }, /SPDX npm.*documentDescribes.*SPDXRef-npm-1/i));
 test("rejects an OCI SPDX package whose purl is not digest-bound", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-api.spdx.json", (document) => { document.packages[0].externalRefs[0].referenceLocator = "pkg:oci/syntaxcircus/cmsify-api@sha256:bad"; }); } }, /SPDX API.*purl.*certified OCI digest/i));
+test("rejects a NuGet SPDX package with the wrong exact purl", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-nuget.spdx.json", (document) => { document.packages[0].externalRefs[0].referenceLocator = `pkg:nuget/SyntaxCircus.Cmsify.Wrong@${VERSION}`; }); } }, /SPDX NuGet.*purl.*SyntaxCircus\.Cmsify\.Contracts/i));
+test("rejects an npm SPDX package with the wrong scoped-package purl", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages[0].externalRefs[0].referenceLocator = `pkg:npm/@cmsify%2Fclient@${VERSION}`; }); } }, /SPDX npm.*purl.*%40cmsify\/client/i));
+test("rejects swapped NuGet SPDX purls", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-nuget.spdx.json", (document) => { const first = document.packages[0].externalRefs[0].referenceLocator; document.packages[0].externalRefs[0].referenceLocator = document.packages[1].externalRefs[0].referenceLocator; document.packages[1].externalRefs[0].referenceLocator = first; }); } }, /SPDX NuGet.*purl.*SyntaxCircus\.Cmsify\.(?:Contracts|Client)/i));
+test("rejects an SPDX document with no retained dependency inventory", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages = document.packages.filter((candidate) => candidate.name === "@cmsify/client"); document.relationships = document.relationships.filter((relationship) => relationship.relationshipType === "DESCRIBES"); }); } }, /SPDX npm.*meaningful dependency inventory/i));
+test("rejects a dangling SPDX relationship reference", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.relationships[0].relatedSpdxElement = "SPDXRef-missing-dependency"; }); } }, /SPDX npm.*relationship.*dangling.*SPDXRef-missing-dependency/i));
+test("rejects a contradictory SPDX DESCRIBES relationship", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.relationships.push({ spdxElementId: "SPDXRef-DOCUMENT", relationshipType: "DESCRIBES", relatedSpdxElement: "SPDXRef-npm-dependency" }); }); } }, /SPDX npm.*DESCRIBES relationship.*documentDescribes/i));
+test("rejects a retained dependency whose changed SPDXID leaves a stale relationship", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages.find((candidate) => candidate.name === "fixture-npm-dependency").SPDXID = "SPDXRef-renamed-dependency"; }); } }, /SPDX npm.*relationship.*dangling.*SPDXRef-npm-dependency/i));
 test("rejects an SPDX document without the immutable source SHA", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.creationInfo.comment = "unrelated source"; }); } }, /SPDX npm.*source SHA/i));
 test("rejects swapped npm and NuGet SPDX documents", () => expectInvalid({ afterRender({ root }) { swapFiles(root, "sbom/cmsify-npm.spdx.json", "sbom/cmsify-nuget.spdx.json"); } }, /SPDX npm.*document name|SPDX npm.*package/i));
 test("rejects swapped API and Admin SPDX subjects", () => expectInvalid({ afterRender({ root }) { swapFiles(root, "sbom/cmsify-api.spdx.json", "sbom/cmsify-admin.spdx.json"); } }, /SPDX API.*document name|SPDX API.*package/i));

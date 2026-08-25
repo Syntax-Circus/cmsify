@@ -12,12 +12,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, relative, resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 
 export const VERSION = "1.2.3";
 export const SOURCE_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 const OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
 const OCI_CONFIG = "application/vnd.oci.image.config.v1+json";
+const OCI_LAYER_GZIP = "application/vnd.oci.image.layer.v1.tar+gzip";
 const MIT_LICENSE = `MIT License
 
 Copyright (c) Syntax Circus LLC
@@ -102,6 +104,38 @@ function zip(entries) {
   ]);
 }
 
+function tar(entries) {
+  const blocks = [];
+  for (const [name, rawContents] of Object.entries(entries)) {
+    const contents = Buffer.isBuffer(rawContents) ? rawContents : Buffer.from(rawContents);
+    const header = Buffer.alloc(512);
+    header.write(name, 0, 100, "utf8");
+    header.write("0000644\0", 100, 8, "ascii");
+    header.write("0000000\0", 108, 8, "ascii");
+    header.write("0000000\0", 116, 8, "ascii");
+    header.write(`${contents.length.toString(8).padStart(11, "0")}\0`, 124, 12, "ascii");
+    header.write("00000000000\0", 136, 12, "ascii");
+    header.fill(0x20, 148, 156);
+    header.write("0", 156, 1, "ascii");
+    header.write("ustar\0", 257, 6, "ascii");
+    header.write("00", 263, 2, "ascii");
+    const checksum = [...header].reduce((sum, value) => sum + value, 0);
+    header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
+    blocks.push(header, contents, Buffer.alloc((512 - (contents.length % 512)) % 512));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+
+function imageLayer(name, contents) {
+  return {
+    mediaType: OCI_LAYER_GZIP,
+    uncompressed: tar({ [name]: contents }),
+    digest: undefined,
+    sizeDelta: 0,
+  };
+}
+
 function allFiles(root, prefix = "") {
   return readdirSync(root).flatMap((name) => {
     const path = resolve(root, name);
@@ -145,7 +179,7 @@ function defaultState() {
         license: "MIT",
         repository: {
           type: "git",
-          url: "git+https://github.com/SyntaxCircus/cmsify.git",
+          url: "git+https://github.com/Syntax-Circus/cmsify.git",
           directory: "sdk/typescript",
         },
         gitHead: SOURCE_SHA,
@@ -161,6 +195,7 @@ function defaultState() {
             require: "./dist/index.cjs",
           },
         },
+        files: ["dist", "src/generated"],
       },
       members: {
         "package/LICENSE": MIT_LICENSE,
@@ -171,6 +206,8 @@ function defaultState() {
         "package/dist/index.js.map": "{}\n",
         "package/dist/index.d.ts": "export {};\n",
         "package/dist/index.d.cts": "export {};\n",
+        "package/src/generated/client.ts": "export const generatedClient = true;\n",
+        "package/src/generated/schema.ts": "export interface GeneratedSchema {}\n",
       },
     },
     oci: {
@@ -195,6 +232,12 @@ function imageState(kind) {
     descriptorMediaType: OCI_MANIFEST,
     descriptorPlatform: { os: "linux", architecture: "amd64" },
     configMediaType: OCI_CONFIG,
+    rootfsType: "layers",
+    rootfsDiffIds: (diffIds) => diffIds,
+    layers: [
+      imageLayer("cmsify-layer-one.txt", "first Cmsify fixture layer\n"),
+      imageLayer("cmsify-layer-two.txt", "second Cmsify fixture layer\n"),
+    ],
     config: {
       architecture: "amd64",
       os: "linux",
@@ -218,7 +261,6 @@ function spdxState(kind, names, license) {
     namespaceFile: `cmsify-${kind}.spdx.json`,
     packageNames: names,
     license,
-    swapDescribes: false,
   };
 }
 
@@ -249,14 +291,32 @@ function renderOci(root, state) {
   for (const [kind, image] of Object.entries(state)) {
     const staging = mkdtempSync(resolve(tmpdir(), `cmsify-${kind}-oci-`));
     try {
-      const config = json(image.config);
+      const layers = image.layers.map((layer) => {
+        const contents = gzipSync(layer.uncompressed, { level: 9, mtime: 0 });
+        const digest = sha256(contents);
+        write(staging, `blobs/sha256/${digest.slice(7)}`, contents);
+        return {
+          mediaType: layer.mediaType,
+          digest: layer.digest ?? digest,
+          size: contents.length + (layer.sizeDelta ?? 0),
+        };
+      });
+      const diffIds = image.layers.map((layer) => sha256(layer.uncompressed));
+      const config = json({
+        ...image.config,
+        rootfs: {
+          type: image.rootfsType,
+          diff_ids: image.rootfsDiffIds([...diffIds]),
+        },
+        history: image.layers.map((_, index) => ({ created_by: `fixture layer ${index + 1}` })),
+      });
       const configDigest = sha256(config);
       write(staging, `blobs/sha256/${configDigest.slice(7)}`, config);
       const manifest = json({
         schemaVersion: 2,
         mediaType: OCI_MANIFEST,
         config: { mediaType: image.configMediaType, digest: configDigest, size: config.length },
-        layers: [],
+        layers,
       });
       const manifestDigest = sha256(manifest);
       write(staging, `blobs/sha256/${manifestDigest.slice(7)}`, manifest);
@@ -288,13 +348,24 @@ function renderSpdx(root, state, manifests) {
   for (const [kind, sbom] of Object.entries(state)) {
     const packages = sbom.packageNames.map((name, index) => {
       const SPDXID = `SPDXRef-${kind}-${index + 1}`;
-      const result = { SPDXID, name, versionInfo: VERSION, licenseDeclared: sbom.license, downloadLocation: "NOASSERTION" };
+      const result = { SPDXID, name, versionInfo: VERSION, licenseConcluded: sbom.license, licenseDeclared: sbom.license, downloadLocation: "NOASSERTION" };
       if (kind === "api" || kind === "admin") result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:oci/${name}@${manifests[kind].digest}` }];
-      else result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:${kind}/${encodeURIComponent(name)}@${VERSION}` }];
+      else if (kind === "nuget") result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:nuget/${name}@${VERSION}` }];
+      else result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:npm/%40cmsify/client@${VERSION}` }];
       return result;
     });
+    const dependency = {
+      SPDXID: `SPDXRef-${kind}-dependency`,
+      name: `fixture-${kind}-dependency`,
+      versionInfo: "4.5.6",
+      licenseDeclared: "Apache-2.0",
+      downloadLocation: "NOASSERTION",
+    };
     const documentDescribes = packages.map(({ SPDXID }) => SPDXID);
-    if (sbom.swapDescribes) documentDescribes.reverse();
+    const relationships = [
+      ...packages.map(({ SPDXID }) => ({ spdxElementId: SPDXID, relationshipType: "DEPENDS_ON", relatedSpdxElement: dependency.SPDXID })),
+      ...packages.map(({ SPDXID }) => ({ spdxElementId: "SPDXRef-DOCUMENT", relationshipType: "DESCRIBES", relatedSpdxElement: SPDXID })),
+    ];
     write(root, `sbom/cmsify-${kind}.spdx.json`, json({
       spdxVersion: "SPDX-2.3",
       dataLicense: "CC0-1.0",
@@ -303,7 +374,8 @@ function renderSpdx(root, state, manifests) {
       documentNamespace: `https://github.com/Syntax-Circus/cmsify/releases/download/v${VERSION}/${sbom.namespaceFile}`,
       creationInfo: { created: "2026-08-25T00:00:00Z", creators: ["Tool: syft-1.42.3"], comment: `Cmsify source ${SOURCE_SHA}` },
       documentDescribes,
-      packages,
+      packages: [...packages, dependency],
+      relationships,
     }));
   }
 }
