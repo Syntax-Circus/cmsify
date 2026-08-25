@@ -67,7 +67,9 @@ public sealed class QueryApiTests : IAsyncLifetime
         var translations = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content/{seed.PublishedContentId}/translations");
 
         Assert.Equal(seed.PublishedContentId, bySlug.GetProperty("id").GetGuid());
-        Assert.Equal(2, translations.GetArrayLength());
+        Assert.Equal(1, translations.GetProperty("page").GetInt32());
+        Assert.Equal(20, translations.GetProperty("pageSize").GetInt32());
+        Assert.Equal(2, translations.GetProperty("items").GetArrayLength());
     }
 
     [Fact]
@@ -131,6 +133,65 @@ public sealed class QueryApiTests : IAsyncLifetime
         Assert.Equal("unauthenticated-contract-test", problem.GetProperty("correlationId").GetString());
         Assert.True(response.Headers.TryGetValues("X-Correlation-Id", out var correlations));
         Assert.Contains("unauthenticated-contract-test", correlations);
+    }
+
+    [Fact]
+    public async Task ApiTokenRefreshRejection_UsesProblemJsonContentType()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        await SeedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.PostAsync("/api/v1/auth/refresh", null);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("https://cmsify.dev/errors/bad-request", problem.GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task CollectionRoutes_UseThePublicPageEnvelope()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+        var endpoints = new[]
+        {
+            $"/api/v1/workspaces/{seed.WorkspaceId}/components?page=1&pageSize=10",
+            $"/api/v1/workspaces/{seed.WorkspaceId}/tags?page=1&pageSize=10",
+            $"/api/v1/workspaces/{seed.WorkspaceId}/picklists?page=1&pageSize=10",
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content/{seed.PublishedContentId}/translations?page=1&pageSize=10",
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content/{seed.PublishedContentId}/versions?page=1&pageSize=10",
+            $"/api/v1/workspaces/{seed.WorkspaceId}/templates/{seed.TemplateId}/versions?page=1&pageSize=10",
+            "/api/v1/packages/official?page=1&pageSize=10"
+        };
+
+        foreach (var endpoint in endpoints)
+        {
+            var response = await client.GetFromJsonAsync<JsonElement>(endpoint);
+            Assert.Equal(1, response.GetProperty("page").GetInt32());
+            Assert.Equal(10, response.GetProperty("pageSize").GetInt32());
+            Assert.True(response.TryGetProperty("totalPages", out _));
+        }
+    }
+
+    [Fact]
+    public async Task ContentList_HugePageReturnsAnEmptyPage()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content?page={int.MaxValue}&pageSize=100");
+
+        Assert.Equal(int.MaxValue, response.GetProperty("page").GetInt32());
+        Assert.Equal(100, response.GetProperty("pageSize").GetInt32());
+        Assert.Equal(3, response.GetProperty("totalCount").GetInt32());
+        Assert.Equal(0, response.GetProperty("items").GetArrayLength());
     }
 
     private WebApplicationFactory<Program> CreateFactory() =>

@@ -31,11 +31,11 @@
     [Parameter] public Guid TemplateId { get; set; }
     private IReadOnlyList<TemplateVersionSummaryResponse> versions = [];
 
-    protected override async Task OnParametersSetAsync() => versions = await Templates.ListVersionsAsync(WorkspaceId, TemplateId);
+    protected override async Task OnParametersSetAsync() => versions = await Templates.ListAllVersionsAsync(WorkspaceId, TemplateId);
 
     private async Task NewVersionAsync()
     {
         await Templates.CreateDraftAsync(WorkspaceId, TemplateId, "New draft");
-        versions = await Templates.ListVersionsAsync(WorkspaceId, TemplateId);
+        versions = await Templates.ListAllVersionsAsync(WorkspaceId, TemplateId);
     }
 }

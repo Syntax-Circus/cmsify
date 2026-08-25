@@ -71,7 +71,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        packages = await Packages.ListOfficialAsync();
+        packages = await Packages.ListAllOfficialAsync();
     }
 
     private void Toggle(string packageId, bool isSelected)

@@ -11,6 +11,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -40,7 +41,7 @@ public sealed class PackagesController : ControllerBase
 
     [HttpGet("/api/v1/packages/official")]
     [RequireRole(UserRole.Reader)]
-    public async Task<ActionResult<IReadOnlyList<OfficialPackageResponse>>> Official(CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>>> Official([FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         var packages = new List<OfficialPackageResponse>();
         foreach (var manifest in await LoadOfficialPackagesAsync(ct))
@@ -60,7 +61,13 @@ public sealed class PackagesController : ControllerBase
                 manifest.Components?.Count ?? 0));
         }
 
-        return Ok(packages.OrderBy(package => package.Name).ToArray());
+        var ordered = packages.OrderBy(package => package.Name).ToArray();
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>([], ordered.Length, pagination.Page, pagination.PageSize));
+        }
+
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>(ordered.Skip(offset).Take(pagination.PageSize).ToArray(), ordered.Length, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost("/api/v1/workspaces/{workspaceId:guid}/packages/import")]

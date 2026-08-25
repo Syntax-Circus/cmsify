@@ -123,12 +123,12 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        packages = await PackageClient.ListOfficialAsync();
+        packages = await PackageClient.ListAllOfficialAsync();
         if (Workspace.Current is { } workspace)
         {
             templates = (await Templates.ListAsync(workspace.Id)).Items;
-            components = await Components.ListAsync(workspace.Id);
-            picklists = await PickLists.ListAsync(workspace.Id);
+            components = await Components.ListAllAsync(workspace.Id);
+            picklists = await PickLists.ListAllAsync(workspace.Id);
         }
     }
 

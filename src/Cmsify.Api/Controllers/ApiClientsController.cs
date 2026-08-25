@@ -30,7 +30,13 @@ public sealed class ApiClientsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ApiClientDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
-        var result = await apiClientRepository.ListAsync(new PageRequest(ControllerHelpers.Offset(pagination.Page, pagination.PageSize), pagination.PageSize), ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            var countResult = await apiClientRepository.ListAsync(new PageRequest(0, 1), ct);
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ApiClientDto>([], countResult.TotalCount, pagination.Page, pagination.PageSize));
+        }
+
+        var result = await apiClientRepository.ListAsync(new PageRequest(offset, pagination.PageSize), ct);
         return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ApiClientDto>(result.Items, result.TotalCount, pagination.Page, pagination.PageSize));
     }
 

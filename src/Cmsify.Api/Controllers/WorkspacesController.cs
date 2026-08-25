@@ -31,7 +31,13 @@ public sealed class WorkspacesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
-        var result = await workspaceRepository.ListAsync(new PageRequest(ControllerHelpers.Offset(pagination.Page, pagination.PageSize), pagination.PageSize), ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            var countResult = await workspaceRepository.ListAsync(new PageRequest(0, 1), ct);
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>([], countResult.TotalCount, pagination.Page, pagination.PageSize));
+        }
+
+        var result = await workspaceRepository.ListAsync(new PageRequest(offset, pagination.PageSize), ct);
         var workspaces = new List<WorkspaceDto>(result.Items.Count);
         foreach (var workspace in result.Items)
         {

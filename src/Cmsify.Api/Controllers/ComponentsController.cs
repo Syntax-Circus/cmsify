@@ -7,6 +7,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -25,11 +26,19 @@ public sealed class ComponentsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<ComponentSummaryResponse>>> List(Guid workspaceId, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ComponentSummaryResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await authorization.CanReadWorkspaceAsync(workspaceId, ct)) return NotFound();
-        return Ok(await db.Components.AsNoTracking().Where(x => x.WorkspaceId == workspaceId && !x.IsDeleted)
-            .OrderBy(x => x.Name).Select(x => new ComponentSummaryResponse(x.Id, x.Name, x.Slug, x.Description, x.CurrentVersionId)).ToListAsync(ct));
+        var query = db.Components.AsNoTracking().Where(x => x.WorkspaceId == workspaceId && !x.IsDeleted)
+            .OrderBy(x => x.Name).Select(x => new ComponentSummaryResponse(x.Id, x.Name, x.Slug, x.Description, x.CurrentVersionId));
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ComponentSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var items = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ComponentSummaryResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpGet("{id:guid}")]

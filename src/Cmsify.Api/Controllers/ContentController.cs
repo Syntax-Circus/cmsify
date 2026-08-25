@@ -9,6 +9,7 @@ using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ContentListQuery = SyntaxCircus.Cmsify.Contracts.ContentListQuery;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -126,7 +127,12 @@ public sealed class ContentController : ControllerBase
         };
 
         var total = await items.CountAsync(ct);
-        var pageItems = await items.Skip(ControllerHelpers.Offset(query.Page, query.PageSize)).Take(ControllerHelpers.Limit(query.PageSize)).ToListAsync(ct);
+        if (!ControllerHelpers.TryOffset(query.Page, query.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], total, query.Page, query.PageSize));
+        }
+
+        var pageItems = await items.Skip(offset).Take(ControllerHelpers.Limit(query.PageSize)).ToListAsync(ct);
         var responses = new List<ContentItemSummaryResponse>();
         foreach (var item in pageItems)
         {
@@ -478,11 +484,21 @@ public sealed class ContentController : ControllerBase
         source.TranslationGroupId = groupId;
         target.TranslationGroupId = groupId;
         await dbContext.SaveChangesAsync(ct);
-        return await GetTranslations(workspaceId, id, ct);
+        var translations = await BaseContentQuery(workspaceId).AsNoTracking()
+            .Where(content => content.TranslationGroupId == groupId)
+            .OrderBy(content => content.LocaleCode)
+            .ToListAsync(ct);
+        var responses = new List<ContentItemSummaryResponse>();
+        foreach (var translation in translations)
+        {
+            responses.Add(await ToSummaryResponseAsync(translation, ct));
+        }
+
+        return Ok(responses);
     }
 
     [HttpGet("{id:guid}/translations")]
-    public async Task<ActionResult<IReadOnlyList<ContentItemSummaryResponse>>> GetTranslations(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> GetTranslations(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -497,17 +513,24 @@ public sealed class ContentController : ControllerBase
 
         if (!source.TranslationGroupId.HasValue)
         {
-            return Ok(Array.Empty<ContentItemSummaryResponse>());
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], 0, pagination.Page, pagination.PageSize));
         }
 
-        var translations = await BaseContentQuery(workspaceId).AsNoTracking().Where(content => content.TranslationGroupId == source.TranslationGroupId).OrderBy(content => content.LocaleCode).ToListAsync(ct);
+        var query = BaseContentQuery(workspaceId).AsNoTracking().Where(content => content.TranslationGroupId == source.TranslationGroupId).OrderBy(content => content.LocaleCode);
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var translations = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
         var responses = new List<ContentItemSummaryResponse>();
         foreach (var translation in translations)
         {
             responses.Add(await ToSummaryResponseAsync(translation, ct));
         }
 
-        return Ok(responses);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, total, pagination.Page, pagination.PageSize));
     }
 
     private async Task<ActionResult<ContentItemDetailResponse>> Transition(Guid workspaceId, Guid id, ContentStatus targetStatus, string? reason, CancellationToken ct)
@@ -557,7 +580,7 @@ public sealed class ContentController : ControllerBase
     }
 
     [HttpGet("{id:guid}/versions")]
-    public async Task<ActionResult<IReadOnlyList<ContentVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -570,11 +593,17 @@ public sealed class ContentController : ControllerBase
             return NotFound();
         }
 
-        var versions = await dbContext.ContentVersions.AsNoTracking()
+        var query = dbContext.ContentVersions.AsNoTracking()
             .Where(version => version.ContentItemId == id)
-            .OrderByDescending(version => version.VersionNumber)
-            .ToListAsync(ct);
-        return Ok(versions.Select(ToVersionSummary).ToList());
+            .OrderByDescending(version => version.VersionNumber);
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentVersionSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var versions = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentVersionSummaryResponse>(versions.Select(ToVersionSummary).ToList(), total, pagination.Page, pagination.PageSize));
     }
 
     [HttpGet("{id:guid}/versions/{versionNumber:int}")]
@@ -933,7 +962,12 @@ public sealed class ContentController : ControllerBase
         };
 
         var total = resolved.Count;
-        var pageItems = resolved.Skip(ControllerHelpers.Offset(query.Page, query.PageSize)).Take(ControllerHelpers.Limit(query.PageSize)).ToList();
+        if (!ControllerHelpers.TryOffset(query.Page, query.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], total, query.Page, query.PageSize));
+        }
+
+        var pageItems = resolved.Skip(offset).Take(ControllerHelpers.Limit(query.PageSize)).ToList();
         var responses = new List<ContentItemSummaryResponse>();
         foreach (var version in pageItems)
         {

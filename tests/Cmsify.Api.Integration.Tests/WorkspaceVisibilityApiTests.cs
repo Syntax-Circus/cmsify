@@ -75,9 +75,6 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         Assert.Equal(1, response.Page);
         Assert.Equal(10, response.PageSize);
         Assert.Equal(1, response.TotalPages);
-        Assert.Equal(1, response.Page);
-        Assert.Equal(10, response.PageSize);
-        Assert.Equal(1, response.TotalPages);
         Assert.Collection(
             response.Items,
             workspace =>

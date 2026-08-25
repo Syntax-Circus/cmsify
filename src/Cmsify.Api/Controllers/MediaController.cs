@@ -109,8 +109,13 @@ public sealed class MediaController : ControllerBase
         }
 
         var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<MediaAssetResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
         var items = await query.OrderBy(asset => asset.FileName)
-            .Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize))
+            .Skip(offset)
             .Take(pagination.PageSize)
             .Select(asset => ToResponse(asset))
             .ToListAsync(ct);

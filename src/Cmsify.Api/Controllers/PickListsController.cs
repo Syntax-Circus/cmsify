@@ -6,6 +6,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -26,7 +27,7 @@ public sealed class PickListsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<PickListSummaryResponse>>> List(Guid workspaceId, [FromQuery] string? search = null, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<PickListSummaryResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, [FromQuery] string? search = null, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -40,7 +41,7 @@ public sealed class PickListsController : ControllerBase
             query = query.Where(picklist => EF.Functions.ILike(picklist.Name, $"%{search}%") || EF.Functions.ILike(picklist.Slug, $"%{search}%"));
         }
 
-        var items = await query
+        var responseQuery = query
             .OrderBy(picklist => picklist.Name)
             .Select(picklist => new PickListSummaryResponse(
                 picklist.Id,
@@ -51,9 +52,15 @@ public sealed class PickListsController : ControllerBase
                 picklist.CurrentRevisionId,
                 picklist.CurrentRevisionId.HasValue
                     ? dbContext.PickListRevisions.Where(revision => revision.Id == picklist.CurrentRevisionId.Value).Select(revision => revision.VersionNumber).SingleOrDefault()
-                    : 0))
-            .ToListAsync(ct);
-        return Ok(items);
+                    : 0));
+        var total = await responseQuery.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<PickListSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var items = await responseQuery.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<PickListSummaryResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpGet("{id:guid}")]

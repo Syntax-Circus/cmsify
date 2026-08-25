@@ -5,7 +5,18 @@ namespace Cmsify.Api.Controllers;
 
 internal static class ControllerHelpers
 {
-    public static int Offset(int page, int pageSize) => (page - 1) * pageSize;
+    public static bool TryOffset(int page, int pageSize, out int offset)
+    {
+        var calculatedOffset = ((long)page - 1) * pageSize;
+        if (calculatedOffset > int.MaxValue)
+        {
+            offset = 0;
+            return false;
+        }
+
+        offset = (int)calculatedOffset;
+        return true;
+    }
 
     public static int Limit(int pageSize) => pageSize;
 
@@ -40,7 +51,10 @@ internal static class ControllerHelpers
             }
         }
 
-        return controller.StatusCode(status, problem);
+        var result = controller.StatusCode(status, problem);
+        result.ContentTypes.Clear();
+        result.ContentTypes.Add("application/problem+json");
+        return result;
     }
 
     public static JsonElement? Clone(this JsonElement? element) => element?.Clone();

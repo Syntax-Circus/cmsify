@@ -47,8 +47,13 @@ public sealed class TemplatesController : ControllerBase
         }
 
         var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
         var items = await query.OrderBy(template => template.Name)
-            .Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize))
+            .Skip(offset)
             .Take(pagination.PageSize)
             .Select(template => new TemplateSummaryResponse(template.Id, template.WorkspaceId, template.Name, template.Slug, template.Description, template.CurrentVersionId))
             .ToListAsync(ct);
@@ -178,19 +183,25 @@ public sealed class TemplatesController : ControllerBase
     }
 
     [HttpGet("{id:guid}/versions")]
-    public async Task<ActionResult<IReadOnlyList<TemplateVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await TemplateExistsAsync(workspaceId, id, requireWrite: false, ct))
         {
             return NotFound();
         }
 
-        var versions = await dbContext.TemplateVersions.AsNoTracking()
+        var query = dbContext.TemplateVersions.AsNoTracking()
             .Where(version => version.TemplateId == id && !version.IsDeleted)
             .OrderByDescending(version => version.VersionNumber)
-            .Select(version => new TemplateVersionSummaryResponse(version.Id, version.VersionNumber, version.Status, version.PublishedAt, version.Notes, version.Fields.Count))
-            .ToListAsync(ct);
-        return Ok(versions);
+            .Select(version => new TemplateVersionSummaryResponse(version.Id, version.VersionNumber, version.Status, version.PublishedAt, version.Notes, version.Fields.Count));
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateVersionSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var versions = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateVersionSummaryResponse>(versions, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost("{id:guid}/versions")]

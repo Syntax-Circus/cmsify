@@ -56,7 +56,12 @@ public sealed class WebhooksController : ControllerBase
             .Where(endpoint => endpoint.WorkspaceId == workspaceId && !endpoint.IsDeleted)
             .OrderBy(endpoint => endpoint.Name);
         var total = await query.CountAsync(ct);
-        var items = await query.Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize)).Take(pagination.PageSize).Select(endpoint => ToResponse(endpoint)).ToListAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookEndpointResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var items = await query.Skip(offset).Take(pagination.PageSize).Select(endpoint => ToResponse(endpoint)).ToListAsync(ct);
         return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookEndpointResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
@@ -222,8 +227,13 @@ public sealed class WebhooksController : ControllerBase
         }
 
         var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookDeliveryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
         var items = await query.OrderByDescending(log => log.CreatedAt)
-            .Skip(ControllerHelpers.Offset(pagination.Page, pagination.PageSize))
+            .Skip(offset)
             .Take(pagination.PageSize)
             .Select(log => new WebhookDeliveryResponse(log.Id, log.WebhookEndpointId, log.EventType, log.Payload, log.AttemptCount, log.LastAttemptAt, log.NextRetryAt, log.StatusCode, log.IsDelivered, log.IsFailed, log.CreatedAt))
             .ToListAsync(ct);

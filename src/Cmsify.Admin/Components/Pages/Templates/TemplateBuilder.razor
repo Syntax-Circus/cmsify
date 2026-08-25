@@ -239,8 +239,8 @@
         version = template.CurrentVersion ?? await EnsureDraftAsync();
         try
         {
-            picklists = (await PickLists.ListAsync(WorkspaceId)).ToList();
-            components = (await Components.ListAsync(WorkspaceId)).ToList();
+            picklists = (await PickLists.ListAllAsync(WorkspaceId)).ToList();
+            components = (await Components.ListAllAsync(WorkspaceId)).ToList();
         }
         catch (CmsifyApiException) { }
         RestoreSelection();
@@ -248,7 +248,7 @@
 
     private async Task<TemplateVersionResponse> EnsureDraftAsync()
     {
-        var versions = await Templates.ListVersionsAsync(WorkspaceId, TemplateId);
+        var versions = await Templates.ListAllVersionsAsync(WorkspaceId, TemplateId);
         var draft = versions.FirstOrDefault(v => v.Status == TemplateVersionStatus.Draft);
         return draft is null
             ? await Templates.CreateDraftAsync(WorkspaceId, TemplateId, "Initial draft")

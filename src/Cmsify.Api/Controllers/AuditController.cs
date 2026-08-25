@@ -103,8 +103,13 @@ public sealed class AuditController : ControllerBase
 
         var pageSize = request.PageSize;
         var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(request.Page, pageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<AuditLogResponse>([], total, request.Page, pageSize));
+        }
+
         var logs = await query.OrderByDescending(log => log.Timestamp)
-            .Skip(ControllerHelpers.Offset(request.Page, pageSize))
+            .Skip(offset)
             .Take(pageSize)
             .ToListAsync(ct);
 

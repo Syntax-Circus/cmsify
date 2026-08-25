@@ -518,8 +518,12 @@ public sealed class TemplateApiTests : IAsyncLifetime
 
         using var listResponse = await client.GetAsync("/api/v1/packages/official");
         listResponse.EnsureSuccessStatusCode();
-        var packages = await listResponse.Content.ReadFromJsonAsync<IReadOnlyList<OfficialPackageResponse>>();
-        var foundation = Assert.Single(packages!, package => package.Id == "foundation");
+        var packages = await listResponse.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>>();
+        Assert.NotNull(packages);
+        Assert.Equal(1, packages.Page);
+        Assert.Equal(20, packages.PageSize);
+        Assert.True(packages.TotalPages >= 1);
+        var foundation = Assert.Single(packages.Items, package => package.Id == "foundation");
         Assert.Equal(0, foundation.TemplateCount);
         Assert.Equal(3, foundation.ComponentCount);
         Assert.Equal(3, foundation.PickListCount);

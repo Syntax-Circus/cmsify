@@ -269,6 +269,17 @@ public sealed class CmsifyClient
         }
     }
 
+    internal static async Task<IReadOnlyList<T>> ListAllToListAsync<T>(Func<int, CancellationToken, Task<PagedResponse<T>?>> loader, CancellationToken cancellationToken = default)
+    {
+        var items = new List<T>();
+        await foreach (var item in ListAll(loader, cancellationToken))
+        {
+            items.Add(item);
+        }
+
+        return items;
+    }
+
     private static JsonSerializerOptions CreateJsonOptions() => new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() }

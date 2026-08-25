@@ -35,7 +35,13 @@ public sealed class UsersController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var result = await userRepository.ListAsync(new PageRequest(ControllerHelpers.Offset(pagination.Page, pagination.PageSize), pagination.PageSize), ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            var countResult = await userRepository.ListAsync(new PageRequest(0, 1), ct);
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<UserDto>([], countResult.TotalCount, pagination.Page, pagination.PageSize));
+        }
+
+        var result = await userRepository.ListAsync(new PageRequest(offset, pagination.PageSize), ct);
         return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<UserDto>(result.Items, result.TotalCount, pagination.Page, pagination.PageSize));
     }
 

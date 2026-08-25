@@ -69,7 +69,7 @@ else
         error = null;
         try
         {
-            picklists = (await PickLists.ListAsync(WorkspaceId, search)).ToList();
+            picklists = (await PickLists.ListAllAsync(WorkspaceId, search)).ToList();
         }
         catch (CmsifyApiException ex)
         {

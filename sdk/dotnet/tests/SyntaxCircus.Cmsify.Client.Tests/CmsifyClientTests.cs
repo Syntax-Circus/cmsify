@@ -214,6 +214,65 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task ComponentListAllAsync_TraversesEveryPage()
+    {
+        var requests = new List<string>();
+        var workspaceId = Guid.NewGuid();
+        var component = new { id = Guid.NewGuid(), name = "Hero", slug = "hero", description = (string?)null, currentVersionId = (Guid?)null };
+        var client = CreateClient(request =>
+        {
+            requests.Add(request.RequestUri!.PathAndQuery);
+            var page = requests.Count;
+            return Json(HttpStatusCode.OK, new PagedResponse<object>([component], 101, page, 100));
+        });
+
+        var components = await client.Components.ListAllAsync(workspaceId, TestContext.Current.CancellationToken);
+
+        components.Count.ShouldBe(2);
+        requests.ShouldBe([
+            $"/api/v1/workspaces/{workspaceId}/components?page=1&pageSize=100",
+            $"/api/v1/workspaces/{workspaceId}/components?page=2&pageSize=100"
+        ]);
+    }
+
+    [Fact]
+    public async Task ComponentListAsync_UsesThePagedPublicEnvelope()
+    {
+        string? route = null;
+        var workspaceId = Guid.NewGuid();
+        var client = CreateClient(request =>
+        {
+            route = request.RequestUri!.PathAndQuery;
+            return Json(HttpStatusCode.OK, new PagedResponse<object>([], 11, 2, 10));
+        });
+
+        var response = await client.Components.ListAsync(workspaceId, page: 2, pageSize: 10, ct: TestContext.Current.CancellationToken);
+
+        response!.Page.ShouldBe(2);
+        response.PageSize.ShouldBe(10);
+        response.TotalCount.ShouldBe(11);
+        response.TotalPages.ShouldBe(2);
+        route.ShouldBe($"/api/v1/workspaces/{workspaceId}/components?page=2&pageSize=10");
+    }
+
+    [Fact]
+    public async Task ComponentListAllAsync_HonorsCancellationBeforeLoadingAPage()
+    {
+        var requests = 0;
+        var client = CreateClient(_ =>
+        {
+            requests++;
+            return Json(HttpStatusCode.OK, new PagedResponse<object>([], 0, 1, 100));
+        });
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => client.Components.ListAllAsync(Guid.NewGuid(), cancellation.Token));
+
+        requests.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task ContentReadThenUpdate_UsesTheTrackedEtag()
     {
         string? ifMatch = null;
