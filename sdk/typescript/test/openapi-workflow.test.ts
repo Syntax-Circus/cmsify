@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -132,6 +132,21 @@ describe("OpenAPI workflow", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.output).toContain("--live-document is only allowed when both --snapshot and --generated-dir target test fixtures.");
+    expect(readFileSync(snapshot, "utf8")).toBe(expectedSnapshot);
+    expect(readFileSync(schema, "utf8")).toBe(expectedSchema);
+  });
+
+  it("refuses tracked artifacts addressed through a filesystem alias", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "cmsify-openapi-alias-"));
+    temporaryDirectories.push(directory);
+    const alias = resolve(directory, "sdk-alias");
+    const snapshot = resolve(sdkRoot, "openapi.snapshot.json");
+    const schema = resolve(sdkRoot, "src/generated/schema.ts");
+    const expectedSnapshot = readFileSync(snapshot, "utf8");
+    const expectedSchema = readFileSync(schema, "utf8");
+    symlinkSync(sdkRoot, alias, process.platform === "win32" ? "junction" : "dir");
+
+    expect(update(snapshot, resolve(alias, "openapi.snapshot.json"), resolve(alias, "src/generated"))).not.toBe(0);
     expect(readFileSync(snapshot, "utf8")).toBe(expectedSnapshot);
     expect(readFileSync(schema, "utf8")).toBe(expectedSchema);
   });

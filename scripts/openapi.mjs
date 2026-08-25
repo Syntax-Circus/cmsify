@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -31,6 +31,22 @@ function run(command, argumentsList, environment = {}) {
 
 function normalizedFile(path) {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+function canonicalPath(path) {
+  let existingPath = resolve(path);
+  const missingSegments = [];
+  while (!existsSync(existingPath)) {
+    const parent = dirname(existingPath);
+    if (parent === existingPath) {
+      throw new Error(`Unable to resolve filesystem path: ${path}`);
+    }
+    missingSegments.unshift(basename(existingPath));
+    existingPath = parent;
+  }
+
+  const canonical = resolve(realpathSync.native(existingPath), ...missingSegments);
+  return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
 function exportLiveDocument(output) {
@@ -104,8 +120,8 @@ function update(commandOptions) {
     if (commandOptions.has("--live-document")
       && (!snapshotOption
         || !generatedDirectoryOption
-        || snapshot === trackedSnapshot
-        || generatedDirectory === trackedGeneratedDirectory)) {
+        || canonicalPath(snapshot) === canonicalPath(trackedSnapshot)
+        || canonicalPath(generatedDirectory) === canonicalPath(trackedGeneratedDirectory))) {
       throw new Error("--live-document is only allowed when both --snapshot and --generated-dir target test fixtures.");
     }
     const liveDocument = resolveLiveDocument(commandOptions, temporaryDirectory);
