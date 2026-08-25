@@ -39,7 +39,7 @@ try {
   expect(typeScriptPackage.license === "MIT", "@cmsify/client must declare the MIT license.");
   expect(typeScriptPackage.version === "0.0.0-local", "@cmsify/client source version must be 0.0.0-local.");
   expect(typeScriptPackage.private === true, "@cmsify/client source package must be private until the validated release build overrides it.");
-  expect(typeScriptPackage.repository?.type === "git" && typeScriptPackage.repository?.url === "git+https://github.com/SyntaxCircus/cmsify.git", "@cmsify/client must declare its public GitHub repository for trusted publishing provenance.");
+  expect(typeScriptPackage.repository?.type === "git" && typeScriptPackage.repository?.url === "git+https://github.com/SyntaxCircus/cmsify.git" && typeScriptPackage.repository?.directory === "sdk/typescript", "@cmsify/client must declare its public GitHub repository and SDK directory for trusted publishing provenance.");
   expect(/^>=20(?:\.0\.0)?$/.test(typeScriptPackage.engines?.node ?? ""), "@cmsify/client must require Node 20 or later.");
 } catch {
   errors.push("sdk/typescript/package.json must be valid JSON.");
@@ -96,7 +96,7 @@ expect(/--prerelease/.test(promotion), "GitHub Release promotion must mark SemVe
 expect(!/docker push/i.test(promotion) && /oras cp --from-oci-layout[\s\S]*oras manifest fetch[\s\S]*API_EXPECTED/s.test(promotion), "OCI promotion must copy certified descriptors and compare remote digests without mutable docker push.");
 expect(/refs\/tags\/\$GITHUB_REF_NAME\^\{\}[\s\S]*refs\/tags\/\$GITHUB_REF_NAME[\s\S]*REMOTE_SHA/s.test(promotion), "Promotion must peel annotated tags and safely fall back to lightweight tags.");
 expect(/http_code=.*curl[\s\S]*404[\s\S]*200/s.test(promotion), "NuGet preflight must accept only explicit 404 absence and fail closed for all other responses.");
-expect(/oras manifest fetch --descriptor[\s\S]*oras cp --from-oci-layout/s.test(promotion), "Promotion must prove candidate-layout descriptors before any package publication or OCI copy.");
+expect(/oras manifest fetch --oci-layout --oci-layout-path[\s\S]*oras cp --from-oci-layout --from-oci-layout-path/s.test(promotion), "Promotion must use ORAS 1.3 documented local OCI-layout syntax before descriptor-preserving copy.");
 expect(/sudo install|GITHUB_PATH/.test(promotion), "Pinned ORAS installation must use a verified writable tool path.");
 
 const branchWorkflow = file(".github/workflows/dotnet-test.yml");

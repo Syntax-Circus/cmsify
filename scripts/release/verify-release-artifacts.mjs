@@ -48,6 +48,8 @@ for (const packagePath of nuget) {
   const nuspec = command("unzip", ["-p", packagePath, "*.nuspec"]);
   const listing = command("unzip", ["-Z1", packagePath]);
   expect(new RegExp(`<version>${version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</version>`, "i").test(nuspec), `NuGet archive ${relative(artifacts, packagePath)} must have release version ${version}.`);
+  const expectedId = expectedNuget.find((id) => packagePath.endsWith(`${id}.${version}.nupkg`));
+  expect(new RegExp(`<id>${expectedId}</id>`, "i").test(nuspec), `NuGet archive ${relative(artifacts, packagePath)} must contain its exact package ID.`);
   expect(/<license type="expression">MIT<\/license>/i.test(nuspec), `NuGet archive ${relative(artifacts, packagePath)} must retain the MIT license expression.`);
   expect(new RegExp(`<repository[^>]*commit="${sourceSha}"`, "i").test(nuspec), `NuGet archive ${relative(artifacts, packagePath)} must record source commit ${sourceSha}.`);
   expect(/lib\/net10\.0\//i.test(listing), `NuGet archive ${relative(artifacts, packagePath)} must contain net10.0 assets.`);
@@ -65,7 +67,7 @@ for (const packagePath of npm) {
     expect(metadata.license === "MIT", "Packed npm archive must retain the MIT license.");
     expect(/^>=20(?:\.0\.0)?$/.test(metadata.engines?.node ?? ""), "Packed npm archive must support Node 20 or later.");
     expect(metadata.private === undefined || metadata.private === false, "Packed npm archive must be public (private absent or boolean false).");
-    expect(metadata.repository?.type === "git" && metadata.repository?.url === "git+https://github.com/SyntaxCircus/cmsify.git", "Packed npm archive must retain the public GitHub repository identity.");
+    expect(metadata.repository?.type === "git" && metadata.repository?.url === "git+https://github.com/SyntaxCircus/cmsify.git" && metadata.repository?.directory === "sdk/typescript", "Packed npm archive must retain the public GitHub repository identity and SDK directory.");
     expect(metadata.gitHead === sourceSha, "Packed npm archive must record the immutable source commit.");
     const listing = command("tar", ["-tzf", packagePath]);
     expect(/package\/LICENSE\r?$/m.test(listing) && /package\/dist\/index\.js/m.test(listing) && /package\/dist\/index\.d\.ts/m.test(listing), "Packed npm archive must include MIT LICENSE and supported public distribution files.");

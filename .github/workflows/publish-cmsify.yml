@@ -63,7 +63,7 @@ jobs:
         run: |
           npm ci
           npm pkg delete private
-          npm pkg set version="$VERSION"
+          npm pkg set version="$VERSION" gitHead="$SOURCE_SHA"
           npm run generate:check && npm run typecheck && npm test && npm run build
           mkdir -p ../../artifacts/npm && npm pack --pack-destination ../../artifacts/npm
       - name: Build exact OCI layouts once
@@ -177,10 +177,10 @@ jobs:
         run: |
           mkdir -p artifacts/oci/api artifacts/oci/admin && tar -xf artifacts/oci/cmsify-api.oci.tar -C artifacts/oci/api && tar -xf artifacts/oci/cmsify-admin.oci.tar -C artifacts/oci/admin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          test "$(oras manifest fetch --descriptor --from-oci-layout "artifacts/oci/api:syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)" = "$API_EXPECTED"
-          test "$(oras manifest fetch --descriptor --from-oci-layout "artifacts/oci/admin:syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)" = "$ADMIN_EXPECTED"
+          test "$(oras manifest fetch --oci-layout --oci-layout-path artifacts/oci/api --descriptor "syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)" = "$API_EXPECTED"
+          test "$(oras manifest fetch --oci-layout --oci-layout-path artifacts/oci/admin --descriptor "syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)" = "$ADMIN_EXPECTED"
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do if oras manifest fetch --descriptor "docker.io/$image:$VERSION" 2>oras-error; then exit 1; elif ! grep -Eqi '404|not found' oras-error; then cat oras-error; exit 1; fi; done
+          for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 --user "$DOCKERHUB_USERNAME:$DOCKERHUB_TOKEN" -H 'Accept: application/vnd.oci.image.manifest.v1+json' "https://registry-1.docker.io/v2/$image/manifests/$VERSION")" || exit 1; case "$status" in 404) ;; 200) exit 1 ;; *) echo "Unexpected OCI preflight HTTP $status"; exit 1 ;; esac; done
         env: { DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}, DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }} }
       - id: nuget_login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
@@ -199,7 +199,7 @@ jobs:
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
           mkdir -p artifacts/oci/api artifacts/oci/admin && tar -xf artifacts/oci/cmsify-api.oci.tar -C artifacts/oci/api && tar -xf artifacts/oci/cmsify-admin.oci.tar -C artifacts/oci/admin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          oras cp --from-oci-layout "artifacts/oci/api:syntaxcircus/cmsify-api:$VERSION" "docker.io/syntaxcircus/cmsify-api:$VERSION" && oras cp --from-oci-layout "artifacts/oci/admin:syntaxcircus/cmsify-admin:$VERSION" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
+          oras cp --from-oci-layout --from-oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api:$VERSION" "docker.io/syntaxcircus/cmsify-api:$VERSION" && oras cp --from-oci-layout --from-oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin:$VERSION" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
           API_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)"; ADMIN_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)"; test "$API_REMOTE" = "$API_EXPECTED" && test "$ADMIN_REMOTE" = "$ADMIN_EXPECTED"
           printf 'syntaxcircus/cmsify-api@%s\nsyntaxcircus/cmsify-admin@%s\n' "$API_REMOTE" "$ADMIN_REMOTE" > artifacts/OCI-DIGESTS
         env: { DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}, DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }} }
