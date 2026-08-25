@@ -121,7 +121,7 @@ export class CmsifyClient {
       throw new CmsifyApiError(problem, correlationId);
     }
 
-    if (response.status === 204 || response.headers.get("Content-Length") === "0") return undefined as T;
+    if (hasEmptySuccessBody(response)) return undefined as T;
     if (responseType === "blob") return await response.blob() as T;
     return await this.safeReadJson(response) as T;
   }
@@ -182,14 +182,14 @@ const isMutation = (method: string): boolean => !["GET", "HEAD", "OPTIONS"].incl
 const isRetryableResponse = (response: Response): boolean => response.status === 429 || response.status >= 500;
 const isTransportFault = (error: unknown): boolean => error instanceof TypeError || (error instanceof Error && error.name === "NetworkError");
 const isReplayableBody = (body: BodyInit | null | undefined): boolean => !(typeof ReadableStream !== "undefined" && body instanceof ReadableStream);
-const retryDelay = (header: string | null, attempt: number, now: () => number): number => {
-  if (header !== null) {
-    const seconds = Number(header);
-    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-    const date = Date.parse(header);
-    if (!Number.isNaN(date)) return Math.max(0, date - now());
-  }
-  return 100 * 2 ** (attempt - 1);
+const hasEmptySuccessBody = (response: Response): boolean => response.status === 204 || response.headers.get("Content-Length") === "0";
+const retryDelay = (header: string | null, attempt: number, now: () => number): number => retryAfterDelay(header, now) ?? 100 * 2 ** (attempt - 1);
+const retryAfterDelay = (header: string | null, now: () => number): number | undefined => {
+  if (header === null) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - now());
 };
 const connectAbortSignals = (controller: AbortController, callerSignal: AbortSignal | undefined, timeout: number | undefined, timeoutBudget: number | undefined): (() => void) => {
   const abortForCaller = () => controller.abort(callerSignal?.reason);
