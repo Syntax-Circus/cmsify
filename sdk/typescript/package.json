@@ -4,6 +4,10 @@
   "private": true,
   "description": "First-party TypeScript client for the Cmsify API.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SyntaxCircus/cmsify.git"
+  },
   "engines": {
     "node": ">=20"
   },

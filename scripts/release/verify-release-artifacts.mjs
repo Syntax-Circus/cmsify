@@ -64,10 +64,21 @@ for (const packagePath of npm) {
     expect(metadata.version === version, `Packed npm archive must have release version ${version}.`);
     expect(metadata.license === "MIT", "Packed npm archive must retain the MIT license.");
     expect(/^>=20(?:\.0\.0)?$/.test(metadata.engines?.node ?? ""), "Packed npm archive must support Node 20 or later.");
+    expect(metadata.private === undefined || metadata.private === false, "Packed npm archive must be public (private absent or boolean false).");
+    expect(metadata.repository?.type === "git" && metadata.repository?.url === "git+https://github.com/SyntaxCircus/cmsify.git", "Packed npm archive must retain the public GitHub repository identity.");
+    expect(metadata.gitHead === sourceSha, "Packed npm archive must record the immutable source commit.");
+    const listing = command("tar", ["-tzf", packagePath]);
+    expect(/package\/LICENSE\r?$/m.test(listing) && /package\/dist\/index\.js/m.test(listing) && /package\/dist\/index\.d\.ts/m.test(listing), "Packed npm archive must include MIT LICENSE and supported public distribution files.");
   } catch {
     errors.push("Packed npm archive must contain valid package/package.json metadata.");
   }
 }
+
+let manifestDigest = {};
+try {
+  const manifest = JSON.parse(readFileSync(resolve(artifacts, "release-manifest.json"), "utf8"));
+  manifestDigest = { api: manifest.oci?.api?.digest, admin: manifest.oci?.admin?.digest };
+} catch { /* the manifest validator below reports this independently */ }
 
 const oci = files("oci", ".oci.tar");
 expect(oci.length === 2, "Candidate must contain API and Admin OCI image layouts.");
@@ -75,6 +86,17 @@ for (const name of ["cmsify-api", "cmsify-admin"]) expect(oci.some((path) => pat
 for (const imagePath of oci) {
   const layout = command("tar", ["-tf", imagePath]);
   expect(/^index\.json$/m.test(layout) && /^oci-layout$/m.test(layout), `OCI archive ${relative(artifacts, imagePath)} must be a complete OCI image layout.`);
+  try {
+    const index = JSON.parse(command("tar", ["-xOf", imagePath, "index.json"]));
+    const descriptor = index.manifests?.[0];
+    const manifest = JSON.parse(command("tar", ["-xOf", imagePath, `blobs/sha256/${descriptor.digest.slice("sha256:".length)}`]));
+    const config = JSON.parse(command("tar", ["-xOf", imagePath, `blobs/sha256/${manifest.config.digest.slice("sha256:".length)}`]));
+    const kind = imagePath.endsWith("cmsify-api.oci.tar") ? "api" : "admin";
+    expect(descriptor?.digest === manifestDigest?.[kind], `OCI ${kind} layout descriptor must equal its certified manifest digest.`);
+    expect(config.config?.Labels?.["org.opencontainers.image.version"] === version && config.config?.Labels?.["org.opencontainers.image.revision"] === sourceSha && config.config?.Labels?.["org.opencontainers.image.licenses"] === "AGPL-3.0-or-later", `OCI ${kind} configuration labels must bind version, source SHA, and AGPL-3.0-or-later.`);
+  } catch {
+    errors.push(`OCI archive ${relative(artifacts, imagePath)} must contain parseable index, manifest, and config.`);
+  }
 }
 
 const sboms = files("sbom", ".spdx.json");

@@ -55,14 +55,15 @@ jobs:
           dotnet build Cmsify.slnx --configuration Release --no-restore -p:Version="$VERSION" -p:InformationalVersion="$VERSION+$SOURCE_SHA"
           dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
           mkdir -p artifacts/nuget
-          dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION"
-          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION"
-          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION"
+          dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:IncludeSymbols=false
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:IncludeSymbols=false
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:IncludeSymbols=false
       - name: Pack npm candidate once
         working-directory: sdk/typescript
         run: |
           npm ci
-          npm pkg set private=false version="$VERSION"
+          npm pkg delete private
+          npm pkg set version="$VERSION"
           npm run generate:check && npm run typecheck && npm test && npm run build
           mkdir -p ../../artifacts/npm && npm pack --pack-destination ../../artifacts/npm
       - name: Build exact OCI layouts once
@@ -74,9 +75,12 @@ jobs:
         shell: bash
         run: |
           docker load --input artifacts/oci/cmsify-api.oci.tar && docker load --input artifacts/oci/cmsify-admin.oci.tar
-          docker run -d --rm --name cmsify-api-smoke -p 18080:8080 "syntaxcircus/cmsify-api:$VERSION"
+          docker network create cmsify-smoke
+          docker run -d --rm --name cmsify-postgres-smoke --network cmsify-smoke -e POSTGRES_DB=cmsify -e POSTGRES_USER=cmsify -e POSTGRES_PASSWORD=cmsify postgres:17-alpine
+          until docker exec cmsify-postgres-smoke pg_isready -U cmsify -d cmsify; do sleep 2; done
+          docker run -d --rm --name cmsify-api-smoke --network cmsify-smoke -p 18080:8080 -e ConnectionStrings__Cmsify="Host=cmsify-postgres-smoke;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify" "syntaxcircus/cmsify-api:$VERSION"
           docker run -d --rm --name cmsify-admin-smoke -p 18081:8080 "syntaxcircus/cmsify-admin:$VERSION"
-          trap 'docker rm -f cmsify-api-smoke cmsify-admin-smoke' EXIT
+          trap 'docker rm -f cmsify-api-smoke cmsify-admin-smoke cmsify-postgres-smoke; docker network rm cmsify-smoke' EXIT
           for attempt in {1..30}; do curl -fsS http://127.0.0.1:18080/health/live && curl -fsS http://127.0.0.1:18081/ >/dev/null && break; sleep 2; done
           curl -fsS http://127.0.0.1:18080/health/live && curl -fsS http://127.0.0.1:18081/ >/dev/null
           for image in "syntaxcircus/cmsify-api:$VERSION" "syntaxcircus/cmsify-admin:$VERSION"; do test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" = "$VERSION"; test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE_SHA"; test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = AGPL-3.0-or-later; done
@@ -92,7 +96,7 @@ jobs:
         run: |
           API_DIGEST="$(jq -r '."containerimage.descriptor".digest' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_DIGEST="$(jq -r '."containerimage.descriptor".digest' artifacts/oci/cmsify-admin.metadata.json)"
           jq -n --arg version "$VERSION" --arg sourceSha "$SOURCE_SHA" --arg api "$API_DIGEST" --arg admin "$ADMIN_DIGEST" '{version:$version,sourceSha:$sourceSha,oci:{api:{repository:"syntaxcircus/cmsify-api",digest:$api},admin:{repository:"syntaxcircus/cmsify-admin",digest:$admin}}}' > artifacts/release-manifest.json
-          find artifacts -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > artifacts/SHA256SUMS
+          (cd artifacts && find . -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum) > artifacts/SHA256SUMS
       - run: node scripts/release/verify-release-artifacts.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts, if-no-files-found: error, retention-days: 14 }
@@ -157,26 +161,38 @@ jobs:
       - name: Revalidate remote tag and certified candidate
         shell: bash
         run: |
-          REMOTE_SHA="$(git ls-remote origin "refs/tags/$GITHUB_REF_NAME^{}" "refs/tags/$GITHUB_REF_NAME" | awk 'NR==1 {print $1}')"; test "$REMOTE_SHA" = "$SOURCE_SHA"
+          PEELED_SHA="$(git ls-remote origin "refs/tags/$GITHUB_REF_NAME^{}" | awk '$2 ~ /\^\{\}$/ {print $1}')"
+          LIGHTWEIGHT_SHA="$(git ls-remote origin "refs/tags/$GITHUB_REF_NAME" | awk '$2 !~ /\^\{\}$/ {print $1}')"
+          REMOTE_SHA="${PEELED_SHA:-$LIGHTWEIGHT_SHA}"; test -n "$REMOTE_SHA" && test "$REMOTE_SHA" = "$SOURCE_SHA"
           sha256sum --check artifacts/SHA256SUMS
           node scripts/release/verify-release-artifacts.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
+      - name: Install pinned ORAS for candidate descriptor preflight
+        shell: bash
+        run: |
+          curl --fail --location --output /tmp/oras.tar.gz https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz
+          echo '6cdc692f929100feb08aa8de584d02f7bcc30ec7d88bc2adc2054d782db57c64  /tmp/oras.tar.gz' | sha256sum --check
+          tar -xzf /tmp/oras.tar.gz -C /tmp oras && sudo install /tmp/oras /usr/local/bin/oras
+      - name: Preflight certified OCI descriptors before package promotion
+        shell: bash
+        run: |
+          mkdir -p artifacts/oci/api artifacts/oci/admin && tar -xf artifacts/oci/cmsify-api.oci.tar -C artifacts/oci/api && tar -xf artifacts/oci/cmsify-admin.oci.tar -C artifacts/oci/admin
+          API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
+          test "$(oras manifest fetch --descriptor --from-oci-layout "artifacts/oci/api:syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)" = "$API_EXPECTED"
+          test "$(oras manifest fetch --descriptor --from-oci-layout "artifacts/oci/admin:syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)" = "$ADMIN_EXPECTED"
+          echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do if oras manifest fetch --descriptor "docker.io/$image:$VERSION" 2>oras-error; then exit 1; elif ! grep -Eqi '404|not found' oras-error; then cat oras-error; exit 1; fi; done
+        env: { DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}, DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }} }
       - id: nuget_login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with: { user: ${{ secrets.NUGET_USER }} }
       - name: Reject existing NuGet versions before promotion
         shell: bash
         run: |
-          for package in syntaxcircus.cmsify.contracts syntaxcircus.cmsify.client syntaxcircus.cmsify.client.distributedcaching; do if curl --fail --silent --show-error --head "https://api.nuget.org/v3-flatcontainer/$package/$VERSION/$package.$VERSION.nupkg"; then exit 1; fi; done
+          for package in syntaxcircus.cmsify.contracts syntaxcircus.cmsify.client syntaxcircus.cmsify.client.distributedcaching; do http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://api.nuget.org/v3-flatcontainer/$package/$VERSION/$package.$VERSION.nupkg")" || exit 1; case "$http_code" in 404) ;; 200) exit 1 ;; *) echo "Unexpected NuGet preflight HTTP $http_code"; exit 1 ;; esac; done
       - run: dotnet nuget push artifacts/nuget/*.nupkg --api-key "${{ steps.nuget_login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
       - name: Use supported npm OIDC trusted publishing
         run: npm install --global npm@11.11.0 && test "$(npm --version)" = 11.11.0
       - run: npm publish artifacts/npm/*.tgz --access public --provenance --tag "$NPM_CHANNEL"
-      - name: Install pinned ORAS for descriptor-preserving copy
-        shell: bash
-        run: |
-          curl --fail --location --output /tmp/oras.tar.gz https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz
-          echo '6cdc692f929100feb08aa8de584d02f7bcc30ec7d88bc2adc2054d782db57c64  /tmp/oras.tar.gz' | sha256sum --check
-          tar -xzf /tmp/oras.tar.gz -C /tmp oras && install /tmp/oras /usr/local/bin/oras
       - name: Copy certified OCI descriptors and compare remote digests
         shell: bash
         run: |

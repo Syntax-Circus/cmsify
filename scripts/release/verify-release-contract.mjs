@@ -39,6 +39,7 @@ try {
   expect(typeScriptPackage.license === "MIT", "@cmsify/client must declare the MIT license.");
   expect(typeScriptPackage.version === "0.0.0-local", "@cmsify/client source version must be 0.0.0-local.");
   expect(typeScriptPackage.private === true, "@cmsify/client source package must be private until the validated release build overrides it.");
+  expect(typeScriptPackage.repository?.type === "git" && typeScriptPackage.repository?.url === "git+https://github.com/SyntaxCircus/cmsify.git", "@cmsify/client must declare its public GitHub repository for trusted publishing provenance.");
   expect(/^>=20(?:\.0\.0)?$/.test(typeScriptPackage.engines?.node ?? ""), "@cmsify/client must require Node 20 or later.");
 } catch {
   errors.push("sdk/typescript/package.json must be valid JSON.");
@@ -59,6 +60,7 @@ expect(/node scripts\/release\/validate-release-tag\.mjs\s+"?\$\{\{\s*github\.re
 expect(/validate-release-tag\.mjs[^\n]*--require-changelog/i.test(workflow), "Reviewed tag promotion must require an exact dated changelog entry.");
 expect(/source_sha/i.test(workflow) && /needs\.resolve\.outputs\.source_sha/i.test(workflow), "Release workflow must carry one resolved immutable source SHA into build and promotion.");
 expect(/is_prerelease/i.test(workflow) && /npm_channel/i.test(workflow), "Release workflow must derive prerelease state and npm channel from validated SemVer.");
+expect(/npm pkg delete private[\s\S]*npm pkg set version=/s.test(workflow), "Release npm candidate must remove private rather than serializing it as a string.");
 
 for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Release action must be pinned by immutable SHA: ${match[1]}`);
@@ -92,6 +94,10 @@ expect(!/--skip-duplicate|NUGET_API_KEY\s*:\s*\$\{\{\s*secrets\./i.test(promotio
 expect(/id-token:\s*write[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org[\s\S]*npm@11\.11\.0[\s\S]*--provenance[\s\S]*--tag "\$NPM_CHANNEL"/s.test(promotion), "npm trusted publishing must have OIDC, registry configuration, supported npm, provenance, and a prerelease-safe tag.");
 expect(/--prerelease/.test(promotion), "GitHub Release promotion must mark SemVer prereleases as prereleases.");
 expect(!/docker push/i.test(promotion) && /oras cp --from-oci-layout[\s\S]*oras manifest fetch[\s\S]*API_EXPECTED/s.test(promotion), "OCI promotion must copy certified descriptors and compare remote digests without mutable docker push.");
+expect(/refs\/tags\/\$GITHUB_REF_NAME\^\{\}[\s\S]*refs\/tags\/\$GITHUB_REF_NAME[\s\S]*REMOTE_SHA/s.test(promotion), "Promotion must peel annotated tags and safely fall back to lightweight tags.");
+expect(/http_code=.*curl[\s\S]*404[\s\S]*200/s.test(promotion), "NuGet preflight must accept only explicit 404 absence and fail closed for all other responses.");
+expect(/oras manifest fetch --descriptor[\s\S]*oras cp --from-oci-layout/s.test(promotion), "Promotion must prove candidate-layout descriptors before any package publication or OCI copy.");
+expect(/sudo install|GITHUB_PATH/.test(promotion), "Pinned ORAS installation must use a verified writable tool path.");
 
 const branchWorkflow = file(".github/workflows/dotnet-test.yml");
 expect(/pull_request:/i.test(branchWorkflow) && /verify-release-contract\.mjs/i.test(branchWorkflow) && /tests\/release-contract/i.test(branchWorkflow), "Branch/PR validation must execute the release-contract verifier and tests.");
