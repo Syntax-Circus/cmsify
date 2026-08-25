@@ -19,6 +19,8 @@ namespace Cmsify.Admin.Integration.Tests;
 /// </summary>
 internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
 {
+    public bool OidcEnabled { get; set; }
+
     public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } =
         _ => new HttpResponseMessage(HttpStatusCode.NotImplemented);
 
@@ -34,6 +36,11 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 ["Admin:ApiBaseUrl"] = "http://api.test",
                 ["Admin:Auth:Session:SlidingWindowMinutes"] = "60",
                 ["Admin:Auth:Session:MaxLifetimeHours"] = "24",
+                ["Auth:Oidc:Enabled"] = OidcEnabled.ToString(),
+                ["Auth:Oidc:Authority"] = "http://identity.test",
+                ["Auth:Oidc:ClientId"] = "cmsify-admin",
+                ["Auth:Oidc:ClientSecret"] = "test-secret",
+                ["Auth:Oidc:RequireHttpsMetadata"] = "false",
                 ["Admin:DataProtection:KeysPath"] = Path.Combine(Path.GetTempPath(), "cmsify-admin-test-keys", Guid.NewGuid().ToString("N"))
             });
         });
@@ -53,6 +60,17 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 {
                     // The TestServer talks plain HTTP; relax the secure policy so the auth cookie round-trips.
                     options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                });
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions>(
+                Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
+                options =>
+                {
+                    var configuration = new Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration
+                    {
+                        AuthorizationEndpoint = "http://identity.test/connect/authorize"
+                    };
+                    options.Configuration = configuration;
+                    options.ConfigurationManager = new Microsoft.IdentityModel.Protocols.StaticConfigurationManager<Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration>(configuration);
                 });
         });
     }

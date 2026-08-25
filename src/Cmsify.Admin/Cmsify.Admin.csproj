@@ -17,6 +17,7 @@
     <PackageReference Include="AspNetCore.SassCompiler" />
     <PackageReference Include="Microsoft.Web.LibraryManager.Build" />
     <PackageReference Include="SyntaxCircus.AspNetCore.Common" />
+    <PackageReference Include="SyntaxCircus.Blazor.Auth" />
     <PackageReference Include="SyntaxCircus.Blazor.Components" />
     <PackageReference Include="SyntaxCircus.DotEnv" />
   </ItemGroup>

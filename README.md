@@ -82,6 +82,10 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Auth__Oidc__Enabled` | `false` | Enables API JWT bearer authentication and the Admin OIDC sign-in option. |
 | `Auth__Oidc__Authority` | empty | OIDC issuer/authority used to validate JWT bearer tokens. Required when OIDC is enabled. |
 | `Auth__Oidc__Audience` | `cmsify` | Expected JWT audience. |
+| `Auth__Oidc__Audiences__0` | `cmsify` | First accepted JWT audience for the reusable API bearer registration; set this for every accepted audience. |
+| `Auth__Oidc__ClientId` | empty | Admin OIDC client ID. Required for the interactive Admin sign-in option. |
+| `Auth__Oidc__ClientSecret` | empty | Admin OIDC client secret. Store only in a secret manager or environment configuration. |
+| `Auth__Oidc__RequireHttpsMetadata` | production default | Require HTTPS OIDC discovery metadata; keep enabled outside controlled development. |
 | `Auth__Oidc__ClaimsMapping__Role` | `cmsify_role` | Claim name mapped to the Cmsify role. |
 | `Auth__Oidc__ClaimsMapping__WorkspaceId` | `cmsify_workspace` | Claim name mapped to the optional workspace ID. |
 | `Seed__DefaultWorkspace__Name` | `Default` | Name used only when creating the first workspace. |
@@ -122,6 +126,8 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Admin__Auth__Session__SlidingWindowMinutes` | `60` | Sliding Admin cookie lifetime. Keep it no longer than the API session lifetime. |
 | `Admin__Auth__Session__MaxLifetimeHours` | `24` | Absolute Admin cookie lifetime. |
 | `Admin__DataProtection__KeysPath` | `.local/keys/admin` | Directory used to persist Admin Data Protection keys. Persist this path across production restarts. |
+| `Auth__Oidc__TokenCache__Redis__Enabled` | `false` | Use the distributed OIDC token cache for multi-instance Admin deployments. |
+| `Auth__Oidc__TokenCache__Redis__ConnectionString` | empty | Redis connection string required when the distributed token cache is enabled. |
 
 ## Run in production with Docker
 

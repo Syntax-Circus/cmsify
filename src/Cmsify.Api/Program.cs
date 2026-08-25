@@ -5,7 +5,6 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.Extensions;
 using Cmsify.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -14,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Events;
 using SyntaxCircus.AspNetCore.Common;
+using SyntaxCircus.AspNetCore.Authentication;
 using SyntaxCircus.AspNetCore.Serilog;
 using SyntaxCircus.Cmsify.Contracts;
 using SyntaxCircus.DotEnv;
@@ -108,13 +108,7 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddCmsifySwagger();
 if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
 {
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
-        {
-            options.Authority = builder.Configuration["Auth:Oidc:Authority"];
-            options.Audience = builder.Configuration["Auth:Oidc:Audience"];
-            options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
-        });
+    builder.Services.AddSyntaxCircusJwtBearer(builder.Configuration, "Auth:Oidc");
 }
 builder.Services.AddCmsifyInfrastructure(builder.Configuration);
 builder.Services.AddHealthChecks()
@@ -183,10 +177,7 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue("Api:Swagg
 app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 app.UseCors();
-if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
-{
-    app.UseAuthentication();
-}
+app.UseAuthentication();
 app.UseMiddleware<CmsifyAuthMiddleware>();
 app.UseRateLimiter();
 app.MapControllers();

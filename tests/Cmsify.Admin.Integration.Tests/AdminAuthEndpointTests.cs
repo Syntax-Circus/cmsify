@@ -139,6 +139,20 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task OidcLogin_WhenEnabled_ChallengesTheConfiguredProviderAndPreservesLocalReturnUrl()
+    {
+        factory.OidcEnabled = true;
+        var client = CreateClient();
+
+        using var response = await client.GetAsync("/admin-auth/oidc-login?returnUrl=%2Fworkspaces");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/");
+        response.Headers.Location.Query.ShouldContain("redirect_uri=");
+        response.Headers.Location.Query.ShouldContain("state=");
+    }
+
+    [Fact]
     public async Task Logout_SignsOutAndRedirectsToLogin()
     {
         factory.Responder = request =>

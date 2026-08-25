@@ -2,6 +2,7 @@ using System.Security.Claims;
 using SyntaxCircus.Cmsify;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
@@ -13,13 +14,28 @@ public static class AdminAuthEndpoints
     public const string LoginPath = "/admin-auth/login";
     public const string LogoutPath = "/admin-auth/logout";
     public const string RefreshClaimsPath = "/admin-auth/refresh-claims";
+    public const string OidcLoginPath = "/admin-auth/oidc-login";
 
     public static IEndpointRouteBuilder MapAdminAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost(LoginPath, LoginAsync);
         endpoints.MapPost(LogoutPath, LogoutAsync);
+        endpoints.MapGet(OidcLoginPath, OidcLoginAsync);
         endpoints.MapPost(RefreshClaimsPath, (Delegate)RefreshClaimsAsync).DisableAntiforgery();
         return endpoints;
+    }
+
+    private static IResult OidcLoginAsync(HttpContext context, string? returnUrl)
+    {
+        if (!context.RequestServices.GetRequiredService<IConfiguration>().GetValue("Auth:Oidc:Enabled", false))
+        {
+            return Results.NotFound();
+        }
+
+        return Results.Challenge(new AuthenticationProperties
+        {
+            RedirectUri = NormalizeReturnUrl(returnUrl)
+        }, [OpenIdConnectDefaults.AuthenticationScheme]);
     }
 
     private static async Task<IResult> LoginAsync(
@@ -78,7 +94,17 @@ public static class AdminAuthEndpoints
             }
         }
 
+        var isOidcSession = string.Equals(context.User.FindFirstValue(CmsifyAuthClaims.OidcSession), "true", StringComparison.OrdinalIgnoreCase);
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        if (isOidcSession)
+        {
+            await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme, new AuthenticationProperties
+            {
+                RedirectUri = "/login"
+            });
+            return Results.Empty;
+        }
+
         return Results.Redirect("/login");
     }
 
