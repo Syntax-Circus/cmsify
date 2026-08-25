@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +47,20 @@ function canonicalPath(path) {
 
   const canonical = resolve(realpathSync.native(existingPath), ...missingSegments);
   return process.platform === "win32" ? canonical.toLowerCase() : canonical;
+}
+
+function sameFilesystemTarget(left, right) {
+  if (canonicalPath(left) === canonicalPath(right)) {
+    return true;
+  }
+
+  if (!existsSync(left) || !existsSync(right)) {
+    return false;
+  }
+
+  const leftStatistics = statSync(left);
+  const rightStatistics = statSync(right);
+  return leftStatistics.dev === rightStatistics.dev && leftStatistics.ino === rightStatistics.ino;
 }
 
 function exportLiveDocument(output) {
@@ -120,8 +134,8 @@ function update(commandOptions) {
     if (commandOptions.has("--live-document")
       && (!snapshotOption
         || !generatedDirectoryOption
-        || canonicalPath(snapshot) === canonicalPath(trackedSnapshot)
-        || canonicalPath(generatedDirectory) === canonicalPath(trackedGeneratedDirectory))) {
+        || sameFilesystemTarget(snapshot, trackedSnapshot)
+        || sameFilesystemTarget(generatedDirectory, trackedGeneratedDirectory))) {
       throw new Error("--live-document is only allowed when both --snapshot and --generated-dir target test fixtures.");
     }
     const liveDocument = resolveLiveDocument(commandOptions, temporaryDirectory);

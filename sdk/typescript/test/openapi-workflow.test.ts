@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -147,6 +147,22 @@ describe("OpenAPI workflow", () => {
     symlinkSync(sdkRoot, alias, process.platform === "win32" ? "junction" : "dir");
 
     expect(update(snapshot, resolve(alias, "openapi.snapshot.json"), resolve(alias, "src/generated"))).not.toBe(0);
+    expect(readFileSync(snapshot, "utf8")).toBe(expectedSnapshot);
+    expect(readFileSync(schema, "utf8")).toBe(expectedSchema);
+  });
+
+  it("refuses tracked snapshots addressed through a hard link", () => {
+    const { generated } = createFixture();
+    const directory = mkdtempSync(resolve(sdkRoot, ".openapi-hardlink-"));
+    temporaryDirectories.push(directory);
+    const snapshot = resolve(sdkRoot, "openapi.snapshot.json");
+    const schema = resolve(sdkRoot, "src/generated/schema.ts");
+    const alias = resolve(directory, "snapshot.json");
+    const expectedSnapshot = readFileSync(snapshot, "utf8");
+    const expectedSchema = readFileSync(schema, "utf8");
+    linkSync(snapshot, alias);
+
+    expect(update(snapshot, alias, generated)).not.toBe(0);
     expect(readFileSync(snapshot, "utf8")).toBe(expectedSnapshot);
     expect(readFileSync(schema, "utf8")).toBe(expectedSchema);
   });
