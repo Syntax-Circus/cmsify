@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using Cmsify.Admin.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using SyntaxCircus.Blazor.Auth;
 
 namespace Cmsify.Admin.Integration.Tests;
 
@@ -150,6 +152,118 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
         response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/");
         response.Headers.Location.Query.ShouldContain("redirect_uri=");
         response.Headers.Location.Query.ShouldContain("state=");
+    }
+
+    [Fact]
+    public async Task OidcCallback_SavesTokensAndForwardsTheAccessTokenToTheApi()
+    {
+        factory.OidcEnabled = true;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+        var client = CreateClient();
+
+        var callback = await BeginOidcSignInAsync(client);
+
+        callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        callback.Headers.Location!.OriginalString.ShouldBe("/workspaces");
+        callback.Headers.GetValues("Set-Cookie").ShouldContain(cookie =>
+            cookie.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal));
+        factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "authorization_code");
+
+        using var apiCall = await client.GetAsync("/test/api-call");
+        apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        factory.ObservedRequests.Any(request =>
+            request.Headers.Authorization is { Scheme: "Bearer", Parameter: "initial-access-token" }).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task OidcExpiredAccessToken_RefreshesAndForwardsTheReplacementToken()
+    {
+        factory.OidcEnabled = true;
+        factory.OidcAccessTokenExpiresImmediately = true;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+        var client = CreateClient();
+
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        using var apiCall = await client.GetAsync("/test/api-call");
+        apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "refresh_token" && request.RefreshToken == "refresh-token");
+        factory.ObservedRequests.Any(request =>
+            request.Headers.Authorization is { Scheme: "Bearer", Parameter: "refreshed-access-token" }).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task OidcRefreshFailure_ExpiresTheUsableApiSession()
+    {
+        factory.OidcEnabled = true;
+        factory.OidcAccessTokenExpiresImmediately = true;
+        factory.OidcRefreshSucceeds = false;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.Unauthorized);
+        var client = CreateClient();
+
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        using var apiCall = await client.GetAsync("/test/api-call");
+        apiCall.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "refresh_token");
+        factory.ObservedRequests.Last().Headers.Authorization.ShouldBeNull();
+        var cache = factory.Services.GetRequiredService<IServerTokenCache>();
+        (await cache.GetAsync("user:oidc-admin")).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task OidcLogout_RemotelySignsOutAndClearsTheLocalCookie()
+    {
+        factory.OidcEnabled = true;
+        var client = CreateClient();
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        var token = await FetchAntiforgeryTokenAsync(client);
+        using var response = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(
+            [new KeyValuePair<string, string>("__RequestVerificationToken", token)]));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/connect/logout");
+        response.Headers.GetValues("Set-Cookie").ShouldContain(cookie =>
+            cookie.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal)
+            && cookie.Contains("expires=Thu, 01 Jan 1970", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task OidcDistributedTokenCache_IsVisibleToAnotherAdminInstance()
+    {
+        await using var first = new AdminAuthTestFactory { OidcEnabled = true, OidcRedisEnabled = true };
+        await using var second = new AdminAuthTestFactory { OidcEnabled = true, OidcRedisEnabled = true };
+        _ = first.CreateClient();
+        _ = second.CreateClient();
+
+        var firstCache = first.Services.GetRequiredService<IServerTokenCache>();
+        await firstCache.SetAsync("user:oidc-admin", new ServerTokenCacheEntry(
+            "distributed-access-token", "distributed-refresh-token", null, DateTimeOffset.UtcNow.AddMinutes(5)));
+
+        var secondCache = second.Services.GetRequiredService<IServerTokenCache>();
+        var entry = await secondCache.GetAsync("user:oidc-admin");
+        entry.ShouldNotBeNull();
+        entry.AccessToken.ShouldBe("distributed-access-token");
+    }
+
+    private static async Task<HttpResponseMessage> BeginOidcSignInAsync(HttpClient client)
+    {
+        using var challenge = await client.GetAsync("/admin-auth/oidc-login?returnUrl=%2Fworkspaces");
+        challenge.StatusCode.ShouldBe(HttpStatusCode.Found);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(challenge.Headers.Location!.Query);
+        var state = query["state"].ToString();
+        state.ShouldNotBeNullOrWhiteSpace();
+        return await client.GetAsync($"/signin-oidc?code=test-code&state={Uri.EscapeDataString(state)}");
     }
 
     [Fact]

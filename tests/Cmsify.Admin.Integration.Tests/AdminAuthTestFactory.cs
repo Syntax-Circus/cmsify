@@ -7,9 +7,19 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using SyntaxCircus.Blazor.Auth;
 
 namespace Cmsify.Admin.Integration.Tests;
 
@@ -19,12 +29,20 @@ namespace Cmsify.Admin.Integration.Tests;
 /// </summary>
 internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
 {
+    private static readonly IDistributedCache SharedDistributedTokenCache = new MemoryDistributedCache(
+        Microsoft.Extensions.Options.Options.Create(new MemoryDistributedCacheOptions()));
+
     public bool OidcEnabled { get; set; }
+    public bool OidcAccessTokenExpiresImmediately { get; set; }
+    public bool OidcRefreshSucceeds { get; set; } = true;
+    public bool OidcRedisEnabled { get; set; }
 
     public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } =
         _ => new HttpResponseMessage(HttpStatusCode.NotImplemented);
 
     public List<HttpRequestMessage> ObservedRequests { get; } = new();
+
+    public List<OidcTokenRequest> OidcTokenRequests { get; } = new();
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -41,6 +59,9 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 ["Auth:Oidc:ClientId"] = "cmsify-admin",
                 ["Auth:Oidc:ClientSecret"] = "test-secret",
                 ["Auth:Oidc:RequireHttpsMetadata"] = "false",
+                ["Auth:Oidc:TokenCache:Redis:Enabled"] = OidcRedisEnabled.ToString(),
+                ["Auth:Oidc:TokenCache:Redis:ConnectionString"] = "ignored-by-test-cache",
+                ["Auth:Oidc:TokenCache:Redis:InstanceName"] = "cmsify-test:",
                 ["Admin:DataProtection:KeysPath"] = Path.Combine(Path.GetTempPath(), "cmsify-admin-test-keys", Guid.NewGuid().ToString("N"))
             });
         });
@@ -53,6 +74,14 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
         {
             services.AddHttpClient("CmsifyApi")
                 .ConfigurePrimaryHttpMessageHandler(() => new DelegatingFakeHandler(this));
+            services.AddHttpClient<OidcTokenRefreshService>()
+                .ConfigurePrimaryHttpMessageHandler(() => new OidcBackchannelHandler(
+                    this,
+                    new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-oidc-signing-key-for-cmsify-admin"))));
+            if (OidcRedisEnabled)
+            {
+                services.AddSingleton<IDistributedCache>(SharedDistributedTokenCache);
+            }
             services.AddSingleton<IStartupFilter, TestEndpointsStartupFilter>();
             services.PostConfigure<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>(
                 Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme,
@@ -61,16 +90,36 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                     // The TestServer talks plain HTTP; relax the secure policy so the auth cookie round-trips.
                     options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
                 });
-            services.PostConfigure<Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions>(
-                Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
+            services.PostConfigure<OpenIdConnectOptions>(
+                OpenIdConnectDefaults.AuthenticationScheme,
                 options =>
                 {
-                    var configuration = new Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration
+                    var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-oidc-signing-key-for-cmsify-admin"));
+                    var configuration = new OpenIdConnectConfiguration
                     {
-                        AuthorizationEndpoint = "http://identity.test/connect/authorize"
+                        Issuer = "http://identity.test",
+                        AuthorizationEndpoint = "http://identity.test/connect/authorize",
+                        TokenEndpoint = "http://identity.test/connect/token",
+                        UserInfoEndpoint = "http://identity.test/connect/userinfo",
+                        EndSessionEndpoint = "http://identity.test/connect/logout"
                     };
+                    configuration.SigningKeys.Add(signingKey);
                     options.Configuration = configuration;
-                    options.ConfigurationManager = new Microsoft.IdentityModel.Protocols.StaticConfigurationManager<Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration>(configuration);
+                    options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuerSigningKey = true,
+                        IssuerSigningKey = signingKey,
+                        ValidateIssuer = true,
+                        ValidIssuer = configuration.Issuer,
+                        ValidateAudience = true,
+                        ValidAudience = "cmsify-admin"
+                    };
+                    // TestServer uses plain HTTP, while production retains the framework's secure defaults.
+                    options.CorrelationCookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                    options.NonceCookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                    options.ProtocolValidator.RequireNonce = false;
+                    options.Backchannel = new HttpClient(new OidcBackchannelHandler(this, signingKey));
                 });
         });
     }
@@ -107,9 +156,76 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                     return;
                 }
                 await n();
+                if (HttpMethods.IsGet(ctx.Request.Method) && ctx.Request.Path == "/test/api-call" && !ctx.Response.HasStarted)
+                {
+                    using var response = await ctx.RequestServices.GetRequiredService<IHttpClientFactory>()
+                        .CreateClient("CmsifyApi")
+                        .GetAsync("/test/forwarded-api-call", ctx.RequestAborted);
+                    ctx.Response.StatusCode = (int)response.StatusCode;
+                }
             });
             next(app);
         };
+    }
+
+    public sealed record OidcTokenRequest(string GrantType, string? RefreshToken);
+
+    private sealed class OidcBackchannelHandler(AdminAuthTestFactory factory, SecurityKey signingKey) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath == "/connect/userinfo")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { sub = "oidc-admin", name = "OIDC Admin", email = "oidc@example.test", cmsify_role = "Admin" })
+                };
+            }
+
+            if (request.RequestUri?.AbsolutePath == "/connect/token")
+            {
+                var values = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(await request.Content!.ReadAsStringAsync(cancellationToken));
+                var grantType = values["grant_type"].ToString();
+                var refreshToken = values.TryGetValue("refresh_token", out var refreshTokenValue)
+                    ? refreshTokenValue.ToString()
+                    : null;
+                factory.OidcTokenRequests.Add(new OidcTokenRequest(grantType, refreshToken));
+                if (grantType == "refresh_token" && !factory.OidcRefreshSucceeds)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = JsonContent.Create(new { error = "invalid_grant" })
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new
+                    {
+                        access_token = grantType == "refresh_token" ? "refreshed-access-token" : "initial-access-token",
+                        refresh_token = "refresh-token",
+                        expires_in = factory.OidcAccessTokenExpiresImmediately && grantType != "refresh_token" ? 0 : 3600,
+                        id_token = CreateIdToken(signingKey)
+                    })
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }
+
+        private static string CreateIdToken(SecurityKey signingKey) => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+            issuer: "http://identity.test",
+            audience: "cmsify-admin",
+            claims:
+            [
+                new Claim("sub", "oidc-admin"),
+                new Claim("name", "OIDC Admin"),
+                new Claim("email", "oidc@example.test"),
+                new Claim("cmsify_role", "Admin"),
+                new Claim(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+            ],
+            notBefore: DateTime.UtcNow.AddMinutes(-1),
+            expires: DateTime.UtcNow.AddMinutes(10),
+            signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)));
     }
 
     public static HttpResponseMessage JsonOk(LoginResponse payload) => new(HttpStatusCode.OK)
