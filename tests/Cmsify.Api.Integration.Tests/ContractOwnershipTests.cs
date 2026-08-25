@@ -38,6 +38,50 @@ public sealed class ContractOwnershipTests
         Assert.Empty(actionPayloadTypes);
     }
 
+    [Fact]
+    public void CtpImportContract_PreservesRequiredPickListsAndStringEnums()
+    {
+        var pickListsProperty = typeof(PackageImportResponse).GetProperty(nameof(PackageImportResponse.PickLists));
+        Assert.NotNull(pickListsProperty);
+        Assert.Equal(NullabilityState.NotNull, new NullabilityInfoContext().Create(pickListsProperty).ReadState);
+
+        var pickListsParameter = Assert.Single(
+            typeof(PackageImportResponse).GetConstructors().Single().GetParameters(),
+            parameter => parameter.Name == "PickLists");
+        Assert.False(pickListsParameter.HasDefaultValue);
+
+        var manifest = new CtpPackageManifest(
+            "1.1", "example", "sample", "1.0.0", "Sample", null, null, null, null,
+            [new CtpTemplate("article", "Article", null, [],
+                [new CtpField("title", "Title", null, 0, true, 1, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, null)])]);
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(manifest, options));
+        var field = json.RootElement.GetProperty("templates")[0].GetProperty("fields")[0];
+
+        Assert.Equal("Inline", field.GetProperty("compositionMode").GetString());
+        Assert.Equal("Text", field.GetProperty("primitiveType").GetString());
+    }
+
+    [Fact]
+    public void BoundaryMappings_CoverEveryPublicAuditAction()
+    {
+        var mappings = ApiAssembly.GetType("Cmsify.Api.Controllers.ContractMappings");
+        Assert.NotNull(mappings);
+        var methods = mappings.GetMethods(BindingFlags.Static | BindingFlags.Public);
+        var toCore = Assert.Single(methods, method =>
+            method.Name == "ToCore" && method.GetParameters() is [{ ParameterType: var parameterType }] && parameterType == typeof(AuditAction));
+        var toContract = Assert.Single(methods, method =>
+            method.Name == "ToContract" && method.ReturnType == typeof(AuditAction) && method.GetParameters() is [{ ParameterType: var parameterType }] && parameterType == typeof(Cmsify.Core.Domain.Enums.AuditAction));
+
+        foreach (var action in Enum.GetValues<AuditAction>())
+        {
+            var core = Assert.IsType<Cmsify.Core.Domain.Enums.AuditAction>(toCore.Invoke(null, [action]));
+            Assert.Equal(action.ToString(), core.ToString());
+            Assert.Equal(action, Assert.IsType<AuditAction>(toContract.Invoke(null, [core])));
+        }
+    }
+
     private static IEnumerable<Type> GetPayloadTypes(MethodInfo method) =>
         method.GetParameters().SelectMany(parameter => FlattenPayloadType(parameter.ParameterType))
             .Concat(FlattenPayloadType(method.ReturnType));

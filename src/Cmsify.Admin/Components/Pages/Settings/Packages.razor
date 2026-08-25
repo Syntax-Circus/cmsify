@@ -279,7 +279,7 @@ else
     {
         await using var stream = file.OpenReadStream(1_073_741_824);
         var result = await PackageClient.ImportAsync(Workspace.Current!.Id, stream, file.Name, resolutions);
-        message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists?.Count ?? 0} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+        message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists.Count} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         customPackageFile = null;
         Toasts.Success("Package imported");
     }
@@ -287,7 +287,7 @@ else
     private async Task DoOfficialImportAsync(string packageId, PackageImportResolutionsRequest? resolutions)
     {
         var result = await PackageClient.ImportOfficialAsync(Workspace.Current!.Id, packageId, resolutions);
-        message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists?.Count ?? 0} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
+        message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists.Count} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         Toasts.Success("Package imported");
     }
 

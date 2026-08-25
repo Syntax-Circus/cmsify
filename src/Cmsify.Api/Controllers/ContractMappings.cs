@@ -76,6 +76,24 @@ internal static class ContractMappings
         _ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
     };
 
+    public static Cmsify.Core.Domain.Enums.AuditAction ToCore(this SyntaxCircus.Cmsify.Contracts.AuditAction value) => value switch
+    {
+        SyntaxCircus.Cmsify.Contracts.AuditAction.Created => Cmsify.Core.Domain.Enums.AuditAction.Created,
+        SyntaxCircus.Cmsify.Contracts.AuditAction.Updated => Cmsify.Core.Domain.Enums.AuditAction.Updated,
+        SyntaxCircus.Cmsify.Contracts.AuditAction.Deleted => Cmsify.Core.Domain.Enums.AuditAction.Deleted,
+        SyntaxCircus.Cmsify.Contracts.AuditAction.StatusChanged => Cmsify.Core.Domain.Enums.AuditAction.StatusChanged,
+        _ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
+    };
+
+    public static SyntaxCircus.Cmsify.Contracts.AuditAction ToContract(this Cmsify.Core.Domain.Enums.AuditAction value) => value switch
+    {
+        Cmsify.Core.Domain.Enums.AuditAction.Created => SyntaxCircus.Cmsify.Contracts.AuditAction.Created,
+        Cmsify.Core.Domain.Enums.AuditAction.Updated => SyntaxCircus.Cmsify.Contracts.AuditAction.Updated,
+        Cmsify.Core.Domain.Enums.AuditAction.Deleted => SyntaxCircus.Cmsify.Contracts.AuditAction.Deleted,
+        Cmsify.Core.Domain.Enums.AuditAction.StatusChanged => SyntaxCircus.Cmsify.Contracts.AuditAction.StatusChanged,
+        _ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
+    };
+
     public static Cmsify.Core.Domain.Enums.PrimitiveType ToCore(this SyntaxCircus.Cmsify.Contracts.PrimitiveType value) =>
         ((SyntaxCircus.Cmsify.Contracts.PrimitiveType?)value).ToCore()!.Value;
 

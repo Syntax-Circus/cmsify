@@ -160,7 +160,7 @@ public sealed record PackageImportResponse(
     IReadOnlyList<PackageTemplateImportResult> Imported,
     IReadOnlyList<string> Skipped,
     IReadOnlyList<string> Errors,
-    IReadOnlyList<PackagePickListImportResult>? PickLists = null,
+    IReadOnlyList<PackagePickListImportResult> PickLists,
     IReadOnlyList<PackageComponentImportResult>? Components = null);
 
 public sealed record PackageTemplateImportResult(Guid TemplateId, string Slug, string Name, Guid TemplateVersionId, int VersionNumber);

@@ -77,7 +77,7 @@ public sealed class AuditController : ControllerBase
 
         if (request.Action.HasValue)
         {
-            var action = (AuditAction)(int)request.Action.Value;
+            var action = request.Action.Value.ToCore();
             query = query.Where(log => log.Action == action);
         }
 
@@ -121,7 +121,7 @@ public sealed class AuditController : ControllerBase
             log.Id,
             log.EntityType,
             log.EntityId,
-            (SyntaxCircus.Cmsify.Contracts.AuditAction)(int)log.Action,
+            log.Action.ToContract(),
             ResolveActor(log.ActorUserId, log.ActorApiClientId, users, apiClients),
             log.Timestamp,
             log.WorkspaceId,

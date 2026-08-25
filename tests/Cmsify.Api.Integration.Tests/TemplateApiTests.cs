@@ -219,9 +219,8 @@ public sealed class TemplateApiTests : IAsyncLifetime
         importResponse.EnsureSuccessStatusCode();
         var importBody = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
         Assert.NotNull(importBody);
-        Assert.NotNull(importBody.PickLists);
-        Assert.Single(importBody.PickLists!);
-        Assert.Equal("imported", importBody.PickLists![0].Action);
+        Assert.Single(importBody.PickLists);
+        Assert.Equal("imported", importBody.PickLists[0].Action);
 
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
@@ -535,8 +534,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var imported = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
         Assert.NotNull(imported);
         Assert.Empty(imported!.Imported);
-        Assert.NotNull(imported.PickLists);
-        Assert.Equal(3, imported.PickLists!.Count);
+        Assert.Equal(3, imported.PickLists.Count);
         Assert.NotNull(imported.Components);
         Assert.Equal(3, imported.Components!.Count);
 
