@@ -1,8 +1,8 @@
 # `@cmsify/client`
 
-The first-party TypeScript client wraps Cmsify's OpenAPI contract with typed helpers for server-side applications. It targets Node 20+ and modern browsers, ships ESM and CJS builds, and supports workspaces, content, templates, media, health, and authentication.
+The first-party TypeScript client provides a typed, server/edge delivery facade for Cmsify content, templates, and media. It targets Node 20+ and modern edge runtimes; do not import it into browser bundles or expose its API token to client-side code.
 
-The package is currently maintained in this repository and its public npm publication is pending. During development, work from `sdk/typescript` and use the checked-in examples under [`../../examples`](../../examples).
+For management, authentication, or any endpoint beyond the curated delivery facade, use the exported generated fetch client instead.
 
 ## Install and build locally
 
@@ -12,15 +12,12 @@ npm ci
 npm run typecheck
 npm test
 npm run build
+npm run test:consumer
 ```
 
-When the package is published, the consumer install will be:
+`test:consumer` packs the SDK, installs it into an empty temporary consumer, and typechecks that consumer and the checked-in Next.js, Astro, and SvelteKit server examples through only public exports. CI runs it on Node 20 and 22.
 
-```powershell
-npm install @cmsify/client
-```
-
-## Configure a server-side client
+## Configure a server-side delivery client
 
 ```ts
 import { CmsifyClient } from "@cmsify/client";
@@ -28,13 +25,13 @@ import { CmsifyClient } from "@cmsify/client";
 const cms = new CmsifyClient({
   baseUrl: process.env.CMSIFY_API_URL!,
   apiToken: process.env.CMSIFY_API_TOKEN!,
-  workspace: process.env.CMSIFY_WORKSPACE!, // workspace ID or slug
+  workspaceId: process.env.CMSIFY_WORKSPACE_ID!, // GUID only; slugs are rejected
+  timeoutMs: 5_000,
 });
 
 const posts = await cms.content.list({
-  templateSlug: "blog-post",
   status: "Published",
-  tags: ["featured"],
+  tags: "featured",
   sortBy: "publishedAt",
   pageSize: 10,
 });
@@ -42,38 +39,38 @@ const posts = await cms.content.list({
 const post = await cms.content.bySlug("my-first-post");
 ```
 
-Keep `CMSIFY_API_TOKEN` in a server-only secret store. Do not pass it to browser code, expose it in a public environment variable, or include it in a client-side bundle. The supported integration examples use the private/server environment mechanisms for Next.js App Router, Astro, and SvelteKit.
-
-Treat API tokens as opaque bearer credentials. Newly issued tokens use a `cmsify_<identifier>_<secret>` shape, but applications must not parse or reconstruct them.
-
-## Common operations
-
-All methods return promises. List methods return `{ items, totalCount, page, pageSize, totalPages }`; use `listAll` when the application should consume every page:
+List operations return `{ items, totalCount, page, pageSize, totalPages }`, including `content.translations`. Consume every page with `content.listAll`:
 
 ```ts
-for await (const post of cms.content.listAll({ templateSlug: "blog-post" })) {
+for await (const post of cms.content.listAll({ status: "Published" })) {
   console.log(post.slug);
 }
 ```
 
-The client also exposes:
+Keep `CMSIFY_API_TOKEN` in a server-only secret store. The checked-in Next.js App Router, Astro, and SvelteKit examples use server/private environment mechanisms. API tokens are opaque bearer credentials; applications must not parse or reconstruct them.
 
-- `cms.auth` — login for interactive tooling and `tokenInfo`.
-- `cms.workspaces` — list and get by slug.
-- `cms.content` — list, get, slug lookup, translations, and lifecycle/tooling operations.
-- `cms.templates` — list and get.
-- `cms.media` — list, get, and download.
-- `cms.health` — liveness and readiness checks.
+## Generated raw client
 
-Mutating operations are available for tooling and scripts. Production content delivery should normally use a workspace-scoped `Reader` API client.
+The complete generated OpenAPI surface remains available without weakening the delivery facade:
 
-## Errors, retries, and concurrency
+```ts
+import { createCmsifyFetchClient, type paths } from "@cmsify/client";
 
-Failures are thrown as `CmsifyApiError` instances carrying the RFC 7807 ProblemDetails fields (`type`, `title`, `status`, `detail`, `errors`, `extensions`, and `traceId`) plus the request correlation ID.
+const raw = createCmsifyFetchClient(process.env.CMSIFY_API_URL!);
+const response = await raw.GET("/api/v1/workspaces/{workspaceId}/content", {
+  params: { path: { workspaceId: process.env.CMSIFY_WORKSPACE_ID! } },
+});
+```
 
-The client retries `429` responses (honoring `Retry-After`) and transient `5xx` responses with exponential backoff, up to three attempts. Pass `retry: false` to disable retries when appropriate.
+`generated`, `paths`, and `components` are also exported for generated schema access. Generated files under `src/generated` are not handwritten API surface and must be regenerated only through the OpenAPI workflow.
 
-Read responses with `ETag` headers are tracked automatically and echoed as `If-Match` on mutating requests. An explicit `ifMatch` option can override the tracked value. Preserve this behavior when dropping down to the generated client or raw HTTP.
+## Errors, retries, cancellation, and concurrency
+
+Failures are `CmsifyApiError` instances carrying RFC 7807 fields (`type`, `title`, `status`, `detail`, `errors`, `extensions`, and `traceId`) plus the server correlation ID. `CmsifyTimeoutError` identifies an expired SDK timeout budget.
+
+By default the client retries `429`, transient `5xx`, and transport faults up to three attempts for idempotent methods only. `Retry-After` supports both delta-seconds and HTTP-date values. A non-idempotent request is retried only when `RequestOptions.idempotencyKey` is supplied. Pass `retry: false`, `timeoutMs`, or a caller `signal` in `RequestOptions` to control one request; timeout budgets include retries and a caller abort is never retried.
+
+ETags from read responses are tracked and used as `If-Match` on later mutations of the same URL. An explicit `ifMatch` overrides the tracked ETag. Successful empty and `204 No Content` responses return `undefined`.
 
 ## OpenAPI generation
 
@@ -87,8 +84,7 @@ npm run generate:check
 npm run typecheck
 npm test
 npm run build
+npm run test:consumer
 ```
 
-`update` is the only command allowed to modify the checked-in OpenAPI snapshot or generated TypeScript files. It builds the API and exports the live `v1` Swagger document with database migrations disabled, then derives both tracked artifacts from that one document. `generate:check` is non-mutating: it exports the live document and generates into a temporary directory before checking both live-to-snapshot and generated-to-tracked drift.
-
-For inspection without updating tracked artifacts, run `node scripts/openapi.mjs export --output <path>`. The API contract is additive within `/api/v1`; a breaking change needs a new version or an approved exception recorded by the protected `api-breaking-change-approved` CI environment.
+`update` is the only command allowed to modify the checked-in OpenAPI snapshot or generated TypeScript files. `generate:check` is non-mutating: it exports the live document and generates into a temporary directory before checking live-to-snapshot and generated-to-tracked drift.

@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap",
     "test": "vitest run",
+    "test:consumer": "node scripts/check-clean-consumer.mjs",
     "generate": "node ../../scripts/openapi.mjs update",
     "generate:check": "node ../../scripts/openapi.mjs check",
     "typecheck": "tsc --noEmit"
