@@ -17,3 +17,15 @@ jobs:
         run: dotnet restore Cmsify.slnx
       - name: Test
         run: dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -p:DisableGitVersionTask=true
+
+  release-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+      - name: Verify branch release contract (validation only)
+        run: |
+          node --test tests/release-contract/verify-release-contract.test.mjs tests/release-contract/verify-release-artifacts.test.mjs tests/release-contract/validate-release-tag.test.mjs
+          node scripts/release/verify-release-contract.mjs

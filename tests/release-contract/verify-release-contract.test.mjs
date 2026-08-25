@@ -63,6 +63,21 @@ jobs:
         with:
           name: release-candidate
           path: artifacts
+  dotnet-consumer:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - run: dotnet new console --framework net10.0 && dotnet add package SyntaxCircus.Cmsify.Contracts && dotnet add package SyntaxCircus.Cmsify.Client && dotnet add package SyntaxCircus.Cmsify.Client.DistributedCaching
+  node-consumer:
+    needs: [resolve, build]
+    strategy:
+      matrix:
+        node-version: ["20", "22"]
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - run: CMSIFY_CLIENT_TARBALL=artifacts/npm/cmsify-client.tgz npm run test:consumer
   certify:
     needs: [resolve, build]
     runs-on: ubuntu-latest
@@ -142,7 +157,18 @@ test("rejects a release candidate that skips clean .NET 10 or Node 20/22 consume
   try {
     const result = verify(root);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /clean \.NET 10|Node 20\/22/i);
+    assert.match(result.stderr, /clean \.NET 10|all three candidate packages|Node 20\/22|Source \.NET packages/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a candidate/promotion path without deterministic OCI tooling, trusted publishing, or digest-preserving copy", () => {
+  const root = createFixture();
+  try {
+    const result = verify(root);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /buildx|SBOM|trusted npm|NuGet OIDC|digest-preserving|remote tag/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
