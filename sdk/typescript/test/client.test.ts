@@ -36,7 +36,23 @@ describe("CmsifyClient", () => {
   it("uses the explicit workspace GUID and returns the generated paged content shape", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(pagedContent));
     await expect(createClient(fetchImpl as typeof fetch).content.list({ page: 1, pageSize: 20 })).resolves.toEqual(pagedContent);
-    expect(String((fetchImpl.mock.calls as unknown[][])[0]?.[0])).toBe(`https://cms.example/api/v1/workspaces/${workspaceId}/content?Resolve=true&Page=1&PageSize=20`);
+    expect(String((fetchImpl.mock.calls as unknown[][])[0]?.[0])).toBe(`https://cms.example/api/v1/workspaces/${workspaceId}/content?Resolve=true&page=1&pageSize=20`);
+  });
+
+  it("rejects a cross-origin absolute URL before it can receive the configured bearer token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ status: "ready" }));
+    const client = createClient(fetchImpl as typeof fetch, { apiToken: "cmsify_token" });
+
+    await expect(client.request("https://attacker.example/collect")).rejects.toThrow("configured Cmsify origin");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("allows an absolute URL only when it has the configured Cmsify origin", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ status: "ready" }));
+    const client = createClient(fetchImpl as typeof fetch, { apiToken: "cmsify_token" });
+
+    await expect(client.request<{ status: string }>("https://cms.example/health/ready")).resolves.toEqual({ status: "ready" });
+    expect(requestHeaders(fetchImpl, 0).get("Authorization")).toBe("Bearer cmsify_token");
   });
 
   it("returns translations as a page so consumers retain page metadata", async () => {
@@ -99,6 +115,11 @@ describe("CmsifyClient", () => {
     await expect(createClient(fetchImpl as typeof fetch).request<void>("/health/ready")).resolves.toBeUndefined();
   });
 
+  it("returns undefined for an empty successful media download instead of an empty Blob", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    await expect(createClient(fetchImpl as typeof fetch).media.download("5b06c3e0-3b3e-46b4-9ee2-5720e33e61ee")).resolves.toBeUndefined();
+  });
+
   it("does not replay an unsafe request without an idempotency key", async () => {
     const delay = vi.fn(async () => undefined);
     const fetchImpl = vi.fn(async () => jsonResponse({ title: "Unavailable", status: 503 }, { status: 503 }));
@@ -115,6 +136,28 @@ describe("CmsifyClient", () => {
     await expect(client.request<{ accepted: boolean }>("/api/v1/commands", { method: "POST", body: "{}" }, { idempotencyKey: "operation-42" })).resolves.toEqual({ accepted: true });
     expect(requestHeaders(fetchImpl, 0).get("Idempotency-Key")).toBe("operation-42");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a stream-backed idempotent request after its body could be consumed", async () => {
+    const delay = vi.fn(async () => undefined);
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } });
+    const fetchImpl = vi.fn(async () => jsonResponse({ title: "Unavailable", status: 503 }, { status: 503 }));
+    const client = createClient(fetchImpl as typeof fetch, { delay });
+
+    await expect(client.request("/api/v1/workspaces/resource", { method: "PUT", body })).rejects.toMatchObject({ status: 503 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a stream-backed keyed POST after its body could be consumed", async () => {
+    const delay = vi.fn(async () => undefined);
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } });
+    const fetchImpl = vi.fn(async () => jsonResponse({ title: "Unavailable", status: 503 }, { status: 503 }));
+    const client = createClient(fetchImpl as typeof fetch, { delay });
+
+    await expect(client.request("/api/v1/workspaces/resource", { method: "POST", body }, { idempotencyKey: "operation-43" })).rejects.toMatchObject({ status: 503 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
   });
 
   it("retries an idempotent transport failure without sleeping in real time", async () => {

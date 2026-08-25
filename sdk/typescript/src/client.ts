@@ -71,10 +71,11 @@ export class CmsifyClient {
   readonly media = {
     list: (options: PageOptions = {}) => this.request<PagedResult<MediaAsset>>(this.workspacePath("/media", pageQuery(options))),
     get: (id: string) => this.request<MediaAsset>(this.workspacePath(`/media/${encodeURIComponent(id)}`)),
-    download: (id: string) => this.request<Blob>(this.workspacePath(`/media/${encodeURIComponent(id)}/file`), {}, {}, "blob"),
+    download: (id: string) => this.request<Blob | undefined>(this.workspacePath(`/media/${encodeURIComponent(id)}/file`), {}, {}, "blob"),
   };
 
   private readonly baseUrl: string;
+  private readonly baseOrigin: string;
   private readonly workspaceId: string;
   private readonly token: string | undefined;
   private readonly fetchImpl: typeof fetch;
@@ -86,6 +87,7 @@ export class CmsifyClient {
 
   constructor(options: CmsifyClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.baseOrigin = new URL(this.baseUrl).origin;
     this.workspaceId = options.workspaceId;
     this.token = options.apiToken;
     this.fetchImpl = options.fetch ?? fetch;
@@ -96,7 +98,7 @@ export class CmsifyClient {
   }
 
   async request<T>(path: string, init: RequestInit = {}, options: RequestOptions = {}, responseType: "json" | "blob" = "json"): Promise<T> {
-    const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
+    const url = this.requestUrl(path);
     const headers = new Headers(init.headers);
     headers.set("Accept", responseType === "blob" ? "*/*" : "application/json");
     headers.set("X-Correlation-Id", createCorrelationId());
@@ -108,7 +110,7 @@ export class CmsifyClient {
     const trackedEtag = options.ifMatch ?? this.etags.get(url);
     if (trackedEtag && isMutation(method)) headers.set("If-Match", trackedEtag);
 
-    const retry = (options.retry ?? this.retryByDefault) && (isIdempotent(method) || Boolean(options.idempotencyKey));
+    const retry = (options.retry ?? this.retryByDefault) && (isIdempotent(method) || Boolean(options.idempotencyKey)) && isReplayableBody(init.body);
     const response = await this.fetchWithRetry(url, { ...init, headers }, retry, options.signal, options.timeoutMs ?? this.timeoutMs);
     this.etags.set(url, response.headers.get("ETag"));
 
@@ -119,8 +121,8 @@ export class CmsifyClient {
       throw new CmsifyApiError(problem, correlationId);
     }
 
-    if (responseType === "blob") return await response.blob() as T;
     if (response.status === 204 || response.headers.get("Content-Length") === "0") return undefined as T;
+    if (responseType === "blob") return await response.blob() as T;
     return await this.safeReadJson(response) as T;
   }
 
@@ -130,6 +132,12 @@ export class CmsifyClient {
     for (const [key, value] of Object.entries(query ?? {})) if (value !== undefined) search.set(key, String(value));
     const suffix = search.size > 0 ? `?${search}` : "";
     return `/api/v1/workspaces/${encodeURIComponent(this.workspaceId)}${path}${suffix}`;
+  }
+
+  private requestUrl(path: string): string {
+    const url = new URL(path, `${this.baseUrl}/`);
+    if (url.origin !== this.baseOrigin) throw new Error("CmsifyClient requests must target the configured Cmsify origin.");
+    return url.toString();
   }
 
   private async fetchWithRetry(url: string, init: RequestInit, retry: boolean, callerSignal: AbortSignal | undefined, timeoutMs: number | undefined): Promise<Response> {
@@ -163,16 +171,17 @@ const contentQuery = (options: ContentListOptions, resolve: boolean): Record<str
   Q: options.q, TemplateVersionId: options.templateVersionId, TemplateId: options.templateId, Status: options.status,
   LocaleCode: options.localeCode, TranslationGroupId: options.translationGroupId, Slug: options.slug, Tags: options.tags,
   CreatedAfter: asIso(options.createdAfter), CreatedBefore: asIso(options.createdBefore), PublishedAfter: asIso(options.publishedAfter), PublishedBefore: asIso(options.publishedBefore),
-  Resolve: resolve, AsOf: asIso(options.asOf), SortBy: options.sortBy, SortDesc: options.sortDesc, Page: options.page, PageSize: options.pageSize,
+  Resolve: resolve, AsOf: asIso(options.asOf), SortBy: options.sortBy, SortDesc: options.sortDesc, page: options.page, pageSize: options.pageSize,
 });
 const detailQuery = (options: Pick<ContentListOptions, "asOf">, resolve = true): Record<string, string | boolean | undefined> => options.asOf === undefined ? {} : { ...(resolve ? { resolve: true } : {}), asOf: asIso(options.asOf) };
-const pageQuery = (options: PageOptions): Record<string, number | undefined> => ({ Page: options.page, PageSize: options.pageSize });
+const pageQuery = (options: PageOptions): Record<string, number | undefined> => ({ page: options.page, pageSize: options.pageSize });
 const asIso = (value: string | Date | undefined): string | undefined => value instanceof Date ? value.toISOString() : value;
 const isGuid = (value: string): boolean => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const isIdempotent = (method: string): boolean => ["GET", "HEAD", "OPTIONS", "PUT", "DELETE"].includes(method);
 const isMutation = (method: string): boolean => !["GET", "HEAD", "OPTIONS"].includes(method);
 const isRetryableResponse = (response: Response): boolean => response.status === 429 || response.status >= 500;
 const isTransportFault = (error: unknown): boolean => error instanceof TypeError || (error instanceof Error && error.name === "NetworkError");
+const isReplayableBody = (body: BodyInit | null | undefined): boolean => !(typeof ReadableStream !== "undefined" && body instanceof ReadableStream);
 const retryDelay = (header: string | null, attempt: number, now: () => number): number => {
   if (header !== null) {
     const seconds = Number(header);
