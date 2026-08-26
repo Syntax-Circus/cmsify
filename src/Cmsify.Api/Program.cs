@@ -106,9 +106,19 @@ builder.Services.AddRateLimiter(options =>
     options.UseProblemDetailsRejection(CmsifyError.RateLimitExceeded);
 });
 builder.Services.AddCmsifySwagger();
+builder.Services.AddAuthentication(CmsifyOpaqueBearerAuthenticationHandler.SchemeName)
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, CmsifyOpaqueBearerAuthenticationHandler>(CmsifyOpaqueBearerAuthenticationHandler.SchemeName, _ => { });
 if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
 {
     builder.Services.AddSyntaxCircusJwtBearer(builder.Configuration, "Auth:Oidc");
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = CmsifyCompositeBearer.SchemeName;
+        options.DefaultChallengeScheme = CmsifyCompositeBearer.SchemeName;
+    }).AddSyntaxCircusCompositeBearer(
+        CmsifyOpaqueBearerAuthenticationHandler.SchemeName,
+        Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
+        CmsifyCompositeBearer.SchemeName);
 }
 builder.Services.AddCmsifyInfrastructure(builder.Configuration);
 builder.Services.AddHealthChecks()

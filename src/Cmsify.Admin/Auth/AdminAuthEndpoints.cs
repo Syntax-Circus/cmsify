@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using SyntaxCircus.Blazor.Auth;
 
 namespace Cmsify.Admin.Auth;
 
@@ -95,6 +96,16 @@ public static class AdminAuthEndpoints
         }
 
         var isOidcSession = string.Equals(context.User.FindFirstValue(CmsifyAuthClaims.OidcSession), "true", StringComparison.OrdinalIgnoreCase);
+        if (isOidcSession)
+        {
+            var tokenCache = context.RequestServices.GetService<IServerTokenCache>();
+            var cacheKeyProvider = context.RequestServices.GetService<IUserTokenCacheKeyProvider>();
+            var cacheKey = cacheKeyProvider?.GetCacheKey(context.User);
+            if (tokenCache is not null && !string.IsNullOrWhiteSpace(cacheKey))
+            {
+                await tokenCache.RemoveAsync(cacheKey, ct);
+            }
+        }
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         if (isOidcSession)
         {

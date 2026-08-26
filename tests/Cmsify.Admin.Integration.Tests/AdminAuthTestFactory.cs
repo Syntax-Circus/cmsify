@@ -10,15 +10,16 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.AspNetCore.Components.Authorization;
 using SyntaxCircus.Blazor.Auth;
 
 namespace Cmsify.Admin.Integration.Tests;
@@ -29,20 +30,24 @@ namespace Cmsify.Admin.Integration.Tests;
 /// </summary>
 internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
 {
-    private static readonly IDistributedCache SharedDistributedTokenCache = new MemoryDistributedCache(
-        Microsoft.Extensions.Options.Options.Create(new MemoryDistributedCacheOptions()));
-
     public bool OidcEnabled { get; set; }
     public bool OidcAccessTokenExpiresImmediately { get; set; }
     public bool OidcRefreshSucceeds { get; set; } = true;
     public bool OidcRedisEnabled { get; set; }
+    public string? OidcRedisConnectionString { get; set; }
+    public string? OidcRedisInstanceName { get; set; }
+    public bool UseCircuitAuthenticationStateProvider { get; set; }
 
     public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } =
         _ => new HttpResponseMessage(HttpStatusCode.NotImplemented);
 
+    public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? AsyncResponder { get; set; }
+
     public List<HttpRequestMessage> ObservedRequests { get; } = new();
 
     public List<OidcTokenRequest> OidcTokenRequests { get; } = new();
+
+    private readonly object observedRequestsGate = new();
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -60,8 +65,9 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 ["Auth:Oidc:ClientSecret"] = "test-secret",
                 ["Auth:Oidc:RequireHttpsMetadata"] = "false",
                 ["Auth:Oidc:TokenCache:Redis:Enabled"] = OidcRedisEnabled.ToString(),
-                ["Auth:Oidc:TokenCache:Redis:ConnectionString"] = "ignored-by-test-cache",
-                ["Auth:Oidc:TokenCache:Redis:InstanceName"] = "cmsify-test:",
+                ["Auth:Oidc:TokenCache:Redis:ConnectionString"] = OidcRedisConnectionString ?? string.Empty,
+                ["Auth:Oidc:TokenCache:Redis:InstanceName"] = OidcRedisInstanceName ?? string.Empty,
+                ["Auth:Oidc:TokenCache:Redis:Protection:Enabled"] = "false",
                 ["Admin:DataProtection:KeysPath"] = Path.Combine(Path.GetTempPath(), "cmsify-admin-test-keys", Guid.NewGuid().ToString("N"))
             });
         });
@@ -72,16 +78,20 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureTestServices(services =>
         {
+            services.AddLogging(logging => logging.ClearProviders());
+            if (UseCircuitAuthenticationStateProvider)
+            {
+                services.RemoveAll<AuthenticationStateProvider>();
+                services.AddScoped<CircuitIdentitySlot>();
+                services.AddScoped<AuthenticationStateProvider>(sp => new CircuitAuthenticationStateProvider(
+                    sp.GetRequiredService<CircuitIdentitySlot>()));
+            }
             services.AddHttpClient("CmsifyApi")
                 .ConfigurePrimaryHttpMessageHandler(() => new DelegatingFakeHandler(this));
             services.AddHttpClient<OidcTokenRefreshService>()
                 .ConfigurePrimaryHttpMessageHandler(() => new OidcBackchannelHandler(
                     this,
                     new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-oidc-signing-key-for-cmsify-admin"))));
-            if (OidcRedisEnabled)
-            {
-                services.AddSingleton<IDistributedCache>(SharedDistributedTokenCache);
-            }
             services.AddSingleton<IStartupFilter, TestEndpointsStartupFilter>();
             services.PostConfigure<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>(
                 Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme,
@@ -136,8 +146,13 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
             {
                 await request.Content.LoadIntoBufferAsync();
             }
-            factory.ObservedRequests.Add(request);
-            return factory.Responder(request);
+            lock (factory.observedRequestsGate)
+            {
+                factory.ObservedRequests.Add(request);
+            }
+            return factory.AsyncResponder is { } asyncResponder
+                ? await asyncResponder(request, cancellationToken)
+                : factory.Responder(request);
         }
     }
 

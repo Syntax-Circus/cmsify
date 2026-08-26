@@ -218,6 +218,35 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task OidcLogout_EvictsTheCachedTokenBeforeRemoteSignOut()
+    {
+        factory.OidcEnabled = true;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+        var client = CreateClient();
+
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        using (var apiCall = await client.GetAsync("/test/api-call"))
+        {
+            apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        var cache = factory.Services.GetRequiredService<IServerTokenCache>();
+        (await cache.GetAsync("user:oidc-admin")).ShouldNotBeNull();
+
+        var token = await FetchAntiforgeryTokenAsync(client);
+        using var logout = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token
+        }));
+
+        (await cache.GetAsync("user:oidc-admin")).ShouldBeNull();
+    }
+
+    [Fact]
     public async Task OidcLogout_RemotelySignsOutAndClearsTheLocalCookie()
     {
         factory.OidcEnabled = true;
@@ -233,27 +262,11 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/connect/logout");
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(response.Headers.Location.Query);
+        query["post_logout_redirect_uri"].ToString().ShouldBe("http://localhost/login");
         response.Headers.GetValues("Set-Cookie").ShouldContain(cookie =>
             cookie.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal)
             && cookie.Contains("expires=Thu, 01 Jan 1970", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public async Task OidcDistributedTokenCache_IsVisibleToAnotherAdminInstance()
-    {
-        await using var first = new AdminAuthTestFactory { OidcEnabled = true, OidcRedisEnabled = true };
-        await using var second = new AdminAuthTestFactory { OidcEnabled = true, OidcRedisEnabled = true };
-        _ = first.CreateClient();
-        _ = second.CreateClient();
-
-        var firstCache = first.Services.GetRequiredService<IServerTokenCache>();
-        await firstCache.SetAsync("user:oidc-admin", new ServerTokenCacheEntry(
-            "distributed-access-token", "distributed-refresh-token", null, DateTimeOffset.UtcNow.AddMinutes(5)));
-
-        var secondCache = second.Services.GetRequiredService<IServerTokenCache>();
-        var entry = await secondCache.GetAsync("user:oidc-admin");
-        entry.ShouldNotBeNull();
-        entry.AccessToken.ShouldBe("distributed-access-token");
     }
 
     private static async Task<HttpResponseMessage> BeginOidcSignInAsync(HttpClient client)

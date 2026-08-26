@@ -6,6 +6,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Extensions;
 using SyntaxCircus.AspNetCore.Common;
 using SyntaxCircus.Blazor.Auth;
 using SyntaxCircus.DotEnv;
@@ -53,6 +54,7 @@ if (oidcEnabled)
         options.ResponseType = "code";
         options.SaveTokens = true;
         options.GetClaimsFromUserInfoEndpoint = true;
+        options.SignedOutRedirectUri = "/login";
         options.RequireHttpsMetadata = builder.Configuration.GetValue("Auth:Oidc:RequireHttpsMetadata", !builder.Environment.IsDevelopment());
         options.Scope.Add("email");
         options.Scope.Add("offline_access");
@@ -68,6 +70,15 @@ if (oidcEnabled)
             AddMappedClaim(identity, ClaimTypes.Email, "email");
             AddMappedClaim(identity, ClaimTypes.Role, roleClaimType);
             identity.AddClaim(new Claim(CmsifyAuthClaims.OidcSession, "true"));
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToIdentityProviderForSignOut = context =>
+        {
+            context.ProtocolMessage.PostLogoutRedirectUri = UriHelper.BuildAbsolute(
+                context.Request.Scheme,
+                context.Request.Host,
+                context.Request.PathBase,
+                "/login");
             return Task.CompletedTask;
         };
     });
@@ -102,7 +113,10 @@ builder.Services.AddScoped<CmsifyClient>(services =>
 {
     var tokenAccessor = services.GetRequiredService<IApiTokenAccessor>();
     var httpContextAccessor = services.GetRequiredService<IHttpContextAccessor>();
-    return new CmsifyClient(services.GetRequiredService<IHttpClientFactory>().CreateClient("CmsifyApi"), new CmsifyClientOptions
+    var httpClient = oidcEnabled
+        ? services.GetRequiredService<IBlazorCircuitHttpClientFactory>().CreateClient("CmsifyApi")
+        : services.GetRequiredService<IHttpClientFactory>().CreateClient("CmsifyApi");
+    return new CmsifyClient(httpClient, new CmsifyClientOptions
     {
         TokenProvider = ct =>
         {

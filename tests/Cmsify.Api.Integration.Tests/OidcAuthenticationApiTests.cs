@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using Cmsify.Core.Domain.Enums;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -41,6 +42,17 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
     {
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", null);
         await postgres.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task OidcEnabled_DefaultBearerAuthentication_UsesCompositeScheme()
+    {
+        await using var factory = new OidcApiFactory();
+
+        var provider = factory.Services.GetRequiredService<IAuthenticationSchemeProvider>();
+        var scheme = await provider.GetDefaultAuthenticateSchemeAsync();
+
+        scheme?.Name.ShouldBe("CmsifyCompositeBearer");
     }
 
     [Fact]
