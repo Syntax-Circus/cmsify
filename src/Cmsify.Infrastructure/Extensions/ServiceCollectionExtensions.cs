@@ -80,6 +80,8 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<IWebhookSocketConnector>(),
                 TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds)));
         services.AddScoped<WebhookDeliveryProcessor>();
+        services.AddScoped<WebhookSecretRotationProcessor>();
+        services.AddScoped<IWebhookSecretRotationProcessor>(provider => provider.GetRequiredService<WebhookSecretRotationProcessor>());
         services.AddScoped<IWebhookOutbox, EfWebhookOutbox>();
         services.AddScoped<IScheduledPublishingDispatcher, ScheduledPublishingDispatcher>();
         services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new ScheduledPublishingService(
@@ -94,6 +96,10 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
             provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookRetryService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookSecretRotationService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecretProtectionOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookSecretRotationService>>()));
 
         return services;
     }

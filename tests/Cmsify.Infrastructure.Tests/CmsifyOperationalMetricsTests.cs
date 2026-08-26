@@ -71,4 +71,56 @@ public sealed class CmsifyOperationalMetricsTests
             Assert.Equal("unknown", tag.Value);
         });
     }
+
+    [Fact]
+    public void SecretRotationMetrics_UseOnlyBoundedConfiguredKeyAndOutcomeLabels()
+    {
+        using var listener = new MeterListener();
+        var measurements = new List<(string Name, List<KeyValuePair<string, object?>> Tags)>();
+        var doubleMeasurements = new List<(string Name, int TagCount)>();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
+        {
+            var capturedTags = new List<KeyValuePair<string, object?>>();
+            foreach (var tag in tags)
+            {
+                capturedTags.Add(tag);
+            }
+
+            measurements.Add((instrument.Name, capturedTags));
+        });
+        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, _) => doubleMeasurements.Add((instrument.Name, tags.Length)));
+        listener.Start();
+
+        CmsifyOperationalMetrics.RecordSecretDecryptFailure("v2", "attacker-controlled-key", "arbitrary failure", ["key_current"]);
+        CmsifyOperationalMetrics.RecordSecretRotationRows(new SecretRotationBatchResult(null, 3, 1, 1, 1, true));
+        CmsifyOperationalMetrics.RecordSecretRotationCycle("unexpected exception");
+        CmsifyOperationalMetrics.RecordSecretRotationDuration(TimeSpan.FromSeconds(2));
+        CmsifyOperationalMetrics.ReportSecretRotationRemaining([new SecretCiphertextCount("v2", "attacker-controlled-key", 3)], ["key_current"]);
+        listener.RecordObservableInstruments();
+
+        AssertMetric(measurements, "cmsify.webhook.secret.decrypt_failures", ["version", "key_id", "reason"], ["v2", "unknown", "unknown"]);
+        AssertMetric(measurements, "cmsify.webhook.secret.rotation.rows", ["outcome"], ["rotated"]);
+        AssertMetric(measurements, "cmsify.webhook.secret.rotation.rows", ["outcome"], ["skipped"]);
+        AssertMetric(measurements, "cmsify.webhook.secret.rotation.rows", ["outcome"], ["failed"]);
+        AssertMetric(measurements, "cmsify.webhook.secret.rotation.cycles", ["outcome"], ["failed"]);
+        Assert.Contains(doubleMeasurements, measurement => measurement.Name == "cmsify.webhook.secret.rotation.duration" && measurement.TagCount == 0);
+        AssertMetric(measurements, "cmsify.webhook.secret.rotation.remaining", ["version", "key_id"], ["v2", "unknown"]);
+        Assert.DoesNotContain(measurements.SelectMany(measurement => measurement.Tags), tag => tag.Key is "endpoint" or "workspace" or "ciphertext");
+    }
+
+    private static void AssertMetric(
+        IEnumerable<(string Name, List<KeyValuePair<string, object?>> Tags)> measurements,
+        string name,
+        IReadOnlyList<string> expectedKeys,
+        IReadOnlyList<string> expectedValues) =>
+        Assert.Contains(measurements, measurement => measurement.Name == name
+            && measurement.Tags.Select(tag => tag.Key).SequenceEqual(expectedKeys)
+            && measurement.Tags.Select(tag => tag.Value).SequenceEqual(expectedValues.Cast<object?>()));
 }

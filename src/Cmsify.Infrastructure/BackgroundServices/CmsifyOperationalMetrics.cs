@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using System.Collections.Immutable;
 
 namespace Cmsify.Infrastructure.BackgroundServices;
 
@@ -9,6 +10,7 @@ public static class CmsifyOperationalMetrics
     private static long pendingOutbox;
     private static long dueDeliveries;
     private static long dueScheduled;
+    private static SecretRotationRemainingSnapshot secretRotationRemaining = SecretRotationRemainingSnapshot.Empty;
 
     private static readonly Counter<long> OutboxClaimed = Meter.CreateCounter<long>("cmsify.webhook.outbox.claimed");
     private static readonly Counter<long> OutboxReclaimed = Meter.CreateCounter<long>("cmsify.webhook.outbox.reclaimed");
@@ -27,12 +29,17 @@ public static class CmsifyOperationalMetrics
     private static readonly Counter<long> ScheduledFailures = Meter.CreateCounter<long>("cmsify.schedule.failures");
     private static readonly Counter<long> CleanupOutbox = Meter.CreateCounter<long>("cmsify.cleanup.outbox_deleted");
     private static readonly Counter<long> CleanupDeliveries = Meter.CreateCounter<long>("cmsify.cleanup.deliveries_deleted");
+    private static readonly Counter<long> SecretDecryptFailures = Meter.CreateCounter<long>("cmsify.webhook.secret.decrypt_failures");
+    private static readonly Counter<long> SecretRotationRows = Meter.CreateCounter<long>("cmsify.webhook.secret.rotation.rows");
+    private static readonly Counter<long> SecretRotationCycles = Meter.CreateCounter<long>("cmsify.webhook.secret.rotation.cycles");
+    private static readonly Histogram<double> SecretRotationDuration = Meter.CreateHistogram<double>("cmsify.webhook.secret.rotation.duration", unit: "s");
 
     static CmsifyOperationalMetrics()
     {
         Meter.CreateObservableGauge("cmsify.webhook.outbox.pending", () => Volatile.Read(ref pendingOutbox));
         Meter.CreateObservableGauge("cmsify.webhook.delivery.due", () => Volatile.Read(ref dueDeliveries));
         Meter.CreateObservableGauge("cmsify.schedule.due", () => Volatile.Read(ref dueScheduled));
+        Meter.CreateObservableGauge("cmsify.webhook.secret.rotation.remaining", ObserveSecretRotationRemaining);
     }
 
     public static void ReportOutboxDepth(long value) => Interlocked.Exchange(ref pendingOutbox, value);
@@ -51,6 +58,29 @@ public static class CmsifyOperationalMetrics
     public static void RecordScheduledPublished() => ScheduledPublished.Add(1);
     public static void RecordScheduledFailure() => ScheduledFailures.Add(1);
     public static void RecordCleanup(int outbox, int deliveries) { if (outbox > 0) CleanupOutbox.Add(outbox); if (deliveries > 0) CleanupDeliveries.Add(deliveries); }
+    public static void RecordSecretDecryptFailure(string version, string keyId, string reason, IEnumerable<string> configuredKeyIds) =>
+        SecretDecryptFailures.Add(1,
+            new KeyValuePair<string, object?>("version", NormalizeSecretVersion(version)),
+            new KeyValuePair<string, object?>("key_id", NormalizeSecretKeyId(keyId, configuredKeyIds)),
+            new KeyValuePair<string, object?>("reason", NormalizeSecretDecryptReason(reason)));
+    public static void RecordSecretRotationRows(SecretRotationBatchResult result)
+    {
+        if (result.Rotated > 0) SecretRotationRows.Add(result.Rotated, new KeyValuePair<string, object?>("outcome", "rotated"));
+        if (result.Skipped > 0) SecretRotationRows.Add(result.Skipped, new KeyValuePair<string, object?>("outcome", "skipped"));
+        if (result.Failed > 0) SecretRotationRows.Add(result.Failed, new KeyValuePair<string, object?>("outcome", "failed"));
+    }
+    public static void RecordSecretRotationCycle(string outcome) => SecretRotationCycles.Add(1, new KeyValuePair<string, object?>("outcome", NormalizeSecretRotationCycleOutcome(outcome)));
+    public static void RecordSecretRotationDuration(TimeSpan duration) => SecretRotationDuration.Record(duration.TotalSeconds);
+    public static void ReportSecretRotationRemaining(IEnumerable<SecretCiphertextCount> counts, IEnumerable<string> configuredKeyIds)
+    {
+        var configured = configuredKeyIds.ToHashSet(StringComparer.Ordinal);
+        var normalized = counts.Select(count => new SecretCiphertextCount(
+                NormalizeSecretVersion(count.Version),
+                NormalizeSecretKeyId(count.KeyId, configured),
+                Math.Max(0, count.Count)))
+            .ToImmutableArray();
+        Volatile.Write(ref secretRotationRemaining, new SecretRotationRemainingSnapshot(normalized));
+    }
 
     private static string NormalizeDestinationRejectionReason(string reason) => reason switch
     {
@@ -65,4 +95,44 @@ public static class CmsifyOperationalMetrics
         "connection" => "connection",
         _ => "unknown"
     };
+
+    private static IEnumerable<Measurement<long>> ObserveSecretRotationRemaining()
+    {
+        var snapshot = Volatile.Read(ref secretRotationRemaining);
+        return snapshot.Counts.Select(count => new Measurement<long>(count.Count,
+            new KeyValuePair<string, object?>("version", count.Version),
+            new KeyValuePair<string, object?>("key_id", count.KeyId)));
+    }
+
+    private static string NormalizeSecretVersion(string version) => version switch
+    {
+        "v1" => "v1",
+        "v2" => "v2",
+        _ => "unknown"
+    };
+
+    private static string NormalizeSecretKeyId(string keyId, IEnumerable<string> configuredKeyIds) =>
+        configuredKeyIds.Contains(keyId, StringComparer.Ordinal) ? keyId : "unknown";
+
+    private static string NormalizeSecretDecryptReason(string reason) => reason switch
+    {
+        "configuration" => "configuration",
+        "unknown_version" => "unknown_version",
+        "unknown_key" => "unknown_key",
+        "malformed_ciphertext" => "malformed_ciphertext",
+        "authentication" => "authentication",
+        _ => "unknown"
+    };
+
+    private static string NormalizeSecretRotationCycleOutcome(string outcome) => outcome switch
+    {
+        "succeeded" => "succeeded",
+        "failed" => "failed",
+        _ => "failed"
+    };
+
+    private sealed record SecretRotationRemainingSnapshot(ImmutableArray<SecretCiphertextCount> Counts)
+    {
+        public static SecretRotationRemainingSnapshot Empty { get; } = new([]);
+    }
 }

@@ -17,10 +17,17 @@ public sealed record SecretRotationBatchResult(
 
 public sealed record SecretCiphertextCount(string Version, string KeyId, long Count);
 
+public interface IWebhookSecretRotationProcessor
+{
+    Task<SecretRotationBatchResult> RotateBatchAsync(Guid? afterId, CancellationToken ct = default);
+
+    Task<IReadOnlyList<SecretCiphertextCount>> CountRemainingAsync(CancellationToken ct = default);
+}
+
 public sealed class WebhookSecretRotationProcessor(
     CmsifyDbContext dbContext,
     ISecretProtector secretProtector,
-    IOptions<SecretProtectionOptions> options)
+    IOptions<SecretProtectionOptions> options) : IWebhookSecretRotationProcessor
 {
     private const int MaximumBatchSize = 500;
     private readonly SecretProtectionOptions options = options.Value;
@@ -69,10 +76,12 @@ public sealed class WebhookSecretRotationProcessor(
             }
             catch (CryptographicException)
             {
+                RecordDecryptFailure(originalCiphertext, "authentication");
                 failed++;
             }
             catch (ArgumentException)
             {
+                RecordDecryptFailure(originalCiphertext, "malformed_ciphertext");
                 failed++;
             }
         }
@@ -112,4 +121,12 @@ public sealed class WebhookSecretRotationProcessor(
     private static int ValidateBatchSize(int batchSize) => batchSize is >= 1 and <= MaximumBatchSize
         ? batchSize
         : throw new ArgumentOutOfRangeException(nameof(batchSize));
+
+    private void RecordDecryptFailure(string ciphertext, string reason)
+    {
+        var segments = ciphertext.Split('.', StringSplitOptions.None);
+        var version = segments.Length > 0 ? segments[0] : "unknown";
+        var keyId = segments.Length > 1 && string.Equals(version, "v2", StringComparison.Ordinal) ? segments[1] : "unknown";
+        CmsifyOperationalMetrics.RecordSecretDecryptFailure(version, keyId, reason, options.EncryptionKeys.Keys);
+    }
 }
