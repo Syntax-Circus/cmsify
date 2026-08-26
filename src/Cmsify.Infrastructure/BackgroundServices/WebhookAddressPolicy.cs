@@ -55,11 +55,17 @@ public static class WebhookAddressPolicy
     private static bool IsGlobalIpv4(IPAddress address) =>
         GlobalIpv4Exceptions.Contains(address) || !NonGlobalIpv4.Any(prefix => prefix.Contains(address));
 
-    private static bool IsGlobalIpv6(IPAddress address) =>
-        GlobalIpv6Exceptions.Contains(address)
-        || GlobalIpv6ExceptionPrefixes.Any(prefix => prefix.Contains(address))
-        || (!NonGlobalIpv6.Any(prefix => prefix.Contains(address))
-            && (GlobalIpv6Unicast.Contains(address) || GlobalIpv6Translation.Contains(address)));
+    private static bool IsGlobalIpv6(IPAddress address)
+    {
+        if (GlobalIpv6Translation.Contains(address))
+        {
+            return IsGlobalIpv4(new IPAddress(address.GetAddressBytes()[^4..]));
+        }
+
+        return GlobalIpv6Exceptions.Contains(address)
+            || GlobalIpv6ExceptionPrefixes.Any(prefix => prefix.Contains(address))
+            || (!NonGlobalIpv6.Any(prefix => prefix.Contains(address)) && GlobalIpv6Unicast.Contains(address));
+    }
 
     private static IpPrefix Prefix(string value)
     {

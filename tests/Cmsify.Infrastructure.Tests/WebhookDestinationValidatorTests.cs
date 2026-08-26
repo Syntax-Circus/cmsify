@@ -200,6 +200,15 @@ public sealed class WebhookDestinationValidatorTests
     public void IsGlobal_AcceptsIpv6PermittedAddressesAndExceptions(string prefix, string value) =>
         Assert.True(WebhookAddressPolicy.IsGlobal(IPAddress.Parse(value)), prefix);
 
+    [Theory]
+    [MemberData(nameof(Nat64WithNonGlobalEmbeddedIpv4Addresses))]
+    public void IsGlobal_RejectsNat64WithNonGlobalEmbeddedIpv4(string category, string value) =>
+        Assert.False(WebhookAddressPolicy.IsGlobal(IPAddress.Parse(value)), category);
+
+    [Fact]
+    public void IsGlobal_AcceptsNat64WithGlobalEmbeddedIpv4() =>
+        Assert.True(WebhookAddressPolicy.IsGlobal(IPAddress.Parse("64:ff9b::808:808")));
+
     public static IEnumerable<object[]> Ipv4NonGlobalPrefixBoundaries()
     {
         foreach (var (prefix, value) in new[]
@@ -222,6 +231,19 @@ public sealed class WebhookDestinationValidatorTests
         })
         {
             yield return [prefix, value];
+        }
+    }
+
+    public static IEnumerable<object[]> Nat64WithNonGlobalEmbeddedIpv4Addresses()
+    {
+        foreach (var (category, value) in new[]
+        {
+            ("private", "64:ff9b::a00:1"), ("loopback", "64:ff9b::7f00:1"),
+            ("shared address space", "64:ff9b::6440:1"), ("documentation", "64:ff9b::c000:201"),
+            ("reserved", "64:ff9b::f000:1"), ("limited broadcast", "64:ff9b::ffff:ffff")
+        })
+        {
+            yield return [category, value];
         }
     }
 
