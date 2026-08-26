@@ -43,8 +43,10 @@ public sealed class WebhookDeliveryProcessor
         try
         {
             var destination = await destinationValidator.ValidateAsync(delivery.Url, ct);
-            if (!destination.IsValid)
+            var destinationUri = destination.DestinationUri;
+            if (!destination.IsValid || destinationUri is null)
             {
+                CmsifyOperationalMetrics.RecordDestinationRejection(GetDestinationRejectionReason(destination.Error));
                 return (false, null, destination.Error ?? "Webhook destination validation failed.");
             }
 
@@ -52,10 +54,11 @@ public sealed class WebhookDeliveryProcessor
             using var content = new ByteArrayContent(payloadBytes);
             content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, destination.NormalizedUrl)
+            using var request = new HttpRequestMessage(HttpMethod.Post, destinationUri)
             {
                 Content = content
             };
+            request.Options.Set(PinnedWebhookTransport.DestinationKey, destination);
             request.Headers.Add("X-Cmsify-Signature", WebhookSigner.Sign(delivery.Secret, payloadBytes));
             request.Headers.Add("X-Cmsify-Event-Id", delivery.WebhookEventId.ToString("D"));
 
@@ -70,7 +73,22 @@ public sealed class WebhookDeliveryProcessor
         }
         catch (Exception ex)
         {
+            CmsifyOperationalMetrics.RecordPinnedConnectionFailure(GetPinnedConnectionFailureReason(ex));
             return (false, null, ex.Message);
         }
     }
+
+    private static string GetDestinationRejectionReason(string? error) => error switch
+    {
+        "Webhook URLs must use HTTPS and target a public host." => "url_policy",
+        "Webhook host could not be resolved." => "resolution",
+        "Webhook URLs must not resolve to private, loopback, or reserved addresses." => "address_policy",
+        _ => "unknown"
+    };
+
+    private static string GetPinnedConnectionFailureReason(Exception exception) => exception switch
+    {
+        HttpRequestException => "connection",
+        _ => "unknown"
+    };
 }

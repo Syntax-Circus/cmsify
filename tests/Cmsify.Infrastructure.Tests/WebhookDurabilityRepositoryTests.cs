@@ -325,6 +325,94 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeliveryProcessor_PinsTheSingleValidatedResolutionForTheAttempt()
+    {
+        var attemptedAt = DateTimeOffset.Parse("2026-08-26T06:30:00Z");
+        await using var setup = await CreateContextAsync();
+        var workspace = new Workspace { Name = "Pinned resolution", Slug = "pinned-resolution" };
+        var user = new User { Email = "pinned-resolution@example.test", DisplayName = "Pinned resolution", PasswordHash = "hash", Role = UserRole.Admin };
+        var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Active", Url = "https://hooks.example.test/rebinding", Secret = "secret", CreatedByUserId = user.Id };
+        var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = attemptedAt };
+        setup.AddRange(workspace, user, endpoint, intent);
+        await setup.SaveChangesAsync();
+
+        var resolver = Substitute.For<IWebhookDnsResolver>();
+        resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>()).Returns(
+            [IPAddress.Parse("8.8.8.8")],
+            [IPAddress.Parse("10.0.0.1")]);
+        var connector = new CapturingConnector();
+        using var pinnedHandler = PinnedWebhookTransport.CreateHandler(connector, TimeSpan.FromSeconds(1));
+        using var client = new HttpClient(pinnedHandler);
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(client);
+        await using var worker = await CreateContextAsync();
+        var claim = Assert.Single(await CreateRepository(worker).ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1));
+
+        await new WebhookDeliveryProcessor(factory, CreateRepository(worker), new WebhookDestinationValidator(resolver, new ConfigurationBuilder().Build()), new MutableTimeProvider(attemptedAt))
+            .DeliverRetryAsync(claim, 2, CancellationToken.None);
+
+        await resolver.Received(1).ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>());
+        Assert.Equal([IPAddress.Parse("8.8.8.8")], Assert.Single(connector.AddressSets));
+    }
+
+    [Fact]
+    public async Task DeliveryProcessor_RevalidatesAndPinsEachDurableRetryAttempt()
+    {
+        var firstAttemptAt = DateTimeOffset.Parse("2026-08-26T06:45:00Z");
+        var secondAttemptAt = firstAttemptAt.AddSeconds(30);
+        await using var setup = await CreateContextAsync();
+        var workspace = new Workspace { Name = "Retry pins", Slug = "retry-pins" };
+        var user = new User { Email = "retry-pins@example.test", DisplayName = "Retry pins", PasswordHash = "hash", Role = UserRole.Admin };
+        var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Active", Url = "https://hooks.example.test/retry", Secret = "secret", CreatedByUserId = user.Id };
+        var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = firstAttemptAt };
+        setup.AddRange(workspace, user, endpoint, intent);
+        await setup.SaveChangesAsync();
+
+        var firstDestination = WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("8.8.8.8")]);
+        var secondDestination = WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("1.1.1.1")]);
+        var validator = Substitute.For<IWebhookDestinationValidator>();
+        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(firstDestination, secondDestination);
+        var handler = new CapturingHandler(HttpStatusCode.ServiceUnavailable, HttpStatusCode.NoContent);
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(handler));
+        var clock = new MutableTimeProvider(firstAttemptAt);
+
+        await using var firstWorker = await CreateContextAsync();
+        var firstClaim = Assert.Single(await CreateRepository(firstWorker).ClaimPendingDeliveryLogsAsync("worker-a", firstAttemptAt, TimeSpan.FromMinutes(1), 1));
+        await new WebhookDeliveryProcessor(factory, CreateRepository(firstWorker), validator, clock).DeliverRetryAsync(firstClaim, 2, CancellationToken.None);
+
+        await using var retryWorker = await CreateContextAsync();
+        var secondClaim = Assert.Single(await CreateRepository(retryWorker).ClaimPendingDeliveryLogsAsync("worker-b", secondAttemptAt, TimeSpan.FromMinutes(1), 1));
+        clock.UtcNow = secondAttemptAt;
+        await new WebhookDeliveryProcessor(factory, CreateRepository(retryWorker), validator, clock).DeliverRetryAsync(secondClaim, 2, CancellationToken.None);
+
+        _ = validator.Received(2).ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>());
+        Assert.Same(firstDestination, handler.Destinations[0]);
+        Assert.Same(secondDestination, handler.Destinations[1]);
+    }
+
+    [Fact]
+    public async Task DeliveryProcessor_DoesNotCreateAClientWhenDestinationValidationFails()
+    {
+        var attemptedAt = DateTimeOffset.Parse("2026-08-26T06:50:00Z");
+        await using var setup = await CreateContextAsync();
+        var workspace = new Workspace { Name = "Rejected destination", Slug = "rejected-destination" };
+        var user = new User { Email = "rejected-destination@example.test", DisplayName = "Rejected destination", PasswordHash = "hash", Role = UserRole.Admin };
+        var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Active", Url = "https://hooks.example.test/rejected", Secret = "secret", CreatedByUserId = user.Id };
+        var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = attemptedAt };
+        setup.AddRange(workspace, user, endpoint, intent);
+        await setup.SaveChangesAsync();
+
+        var validator = Substitute.For<IWebhookDestinationValidator>();
+        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Invalid("blocked"));
+        await using var worker = await CreateContextAsync();
+        var claim = Assert.Single(await CreateRepository(worker).ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1));
+
+        await new WebhookDeliveryProcessor(new ThrowingHttpClientFactory(), CreateRepository(worker), validator, new MutableTimeProvider(attemptedAt))
+            .DeliverRetryAsync(claim, 2, CancellationToken.None);
+    }
+
+    [Fact]
     public async Task DeliveryProcessor_FailedHttpUsesCompletionTimeForDurableRetrySchedule()
     {
         var startedAt = DateTimeOffset.Parse("2026-08-26T07:30:00Z");
@@ -816,13 +904,32 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
 
         public List<string> Signatures { get; } = [];
 
+        public List<WebhookDestinationValidationResult?> Destinations { get; } = [];
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             EventIds.Add(request.Headers.GetValues("X-Cmsify-Event-Id").Single());
             Payloads.Add(await request.Content!.ReadAsByteArrayAsync(cancellationToken));
             Signatures.Add(request.Headers.GetValues("X-Cmsify-Signature").Single());
+            Destinations.Add(request.Options.TryGetValue(PinnedWebhookTransport.DestinationKey, out var destination) ? destination : null);
             return new HttpResponseMessage(this.statuses.Dequeue());
         }
+    }
+
+    private sealed class CapturingConnector : IWebhookSocketConnector
+    {
+        public List<IReadOnlyList<IPAddress>> AddressSets { get; } = [];
+
+        public ValueTask<Stream> ConnectAsync(IReadOnlyList<IPAddress> addresses, int port, CancellationToken ct)
+        {
+            AddressSets.Add(addresses.ToArray());
+            return ValueTask.FromException<Stream>(new HttpRequestException("test connection refused"));
+        }
+    }
+
+    private sealed class ThrowingHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => throw new InvalidOperationException("A rejected destination must not create an HTTP client.");
     }
 
     private sealed class AdvancingHandler(MutableTimeProvider clock, DateTimeOffset completedAt, HttpStatusCode status = HttpStatusCode.NoContent) : HttpMessageHandler

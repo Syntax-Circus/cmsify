@@ -19,6 +19,8 @@ public static class CmsifyOperationalMetrics
     private static readonly Counter<long> DeliverySucceeded = Meter.CreateCounter<long>("cmsify.webhook.delivery.succeeded");
     private static readonly Counter<long> DeliveryRetried = Meter.CreateCounter<long>("cmsify.webhook.delivery.retried");
     private static readonly Counter<long> DeliveryDeadLettered = Meter.CreateCounter<long>("cmsify.webhook.delivery.dead_lettered");
+    private static readonly Counter<long> DestinationRejected = Meter.CreateCounter<long>("cmsify.webhook.destination.rejected");
+    private static readonly Counter<long> PinnedConnectionFailed = Meter.CreateCounter<long>("cmsify.webhook.connection.failed");
     private static readonly Counter<long> ScheduledClaimed = Meter.CreateCounter<long>("cmsify.schedule.claimed");
     private static readonly Counter<long> ScheduledReclaimed = Meter.CreateCounter<long>("cmsify.schedule.reclaimed");
     private static readonly Counter<long> ScheduledPublished = Meter.CreateCounter<long>("cmsify.schedule.published");
@@ -43,8 +45,24 @@ public static class CmsifyOperationalMetrics
     public static void RecordDeliverySucceeded() => DeliverySucceeded.Add(1);
     public static void RecordDeliveryRetried() => DeliveryRetried.Add(1);
     public static void RecordDeliveryDeadLettered() => DeliveryDeadLettered.Add(1);
+    public static void RecordDestinationRejection(string reason) => DestinationRejected.Add(1, new KeyValuePair<string, object?>("reason", NormalizeDestinationRejectionReason(reason)));
+    public static void RecordPinnedConnectionFailure(string reason) => PinnedConnectionFailed.Add(1, new KeyValuePair<string, object?>("reason", NormalizePinnedConnectionFailureReason(reason)));
     public static void RecordScheduledClaim(bool reclaimed) { ScheduledClaimed.Add(1); if (reclaimed) ScheduledReclaimed.Add(1); }
     public static void RecordScheduledPublished() => ScheduledPublished.Add(1);
     public static void RecordScheduledFailure() => ScheduledFailures.Add(1);
     public static void RecordCleanup(int outbox, int deliveries) { if (outbox > 0) CleanupOutbox.Add(outbox); if (deliveries > 0) CleanupDeliveries.Add(deliveries); }
+
+    private static string NormalizeDestinationRejectionReason(string reason) => reason switch
+    {
+        "url_policy" => "url_policy",
+        "resolution" => "resolution",
+        "address_policy" => "address_policy",
+        _ => "unknown"
+    };
+
+    private static string NormalizePinnedConnectionFailureReason(string reason) => reason switch
+    {
+        "connection" => "connection",
+        _ => "unknown"
+    };
 }
