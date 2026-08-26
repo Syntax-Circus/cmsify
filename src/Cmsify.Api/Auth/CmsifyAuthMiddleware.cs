@@ -39,7 +39,7 @@ public sealed class CmsifyAuthMiddleware
         var workspaceId = Guid.TryParse(workspaceValue, out var parsedWorkspaceId) ? parsedWorkspaceId : (Guid?)null;
         var userId = Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var parsedUserId) ? parsedUserId : (Guid?)null;
         var apiClientId = Guid.TryParse(principal.FindFirstValue(CmsifyOpaqueBearerClaims.ApiClientId), out var parsedApiClientId) ? parsedApiClientId : (Guid?)null;
-        var isSuperAdmin = !isOpaque || string.Equals(principal.FindFirstValue(CmsifyOpaqueBearerClaims.SuperAdmin), "true", StringComparison.OrdinalIgnoreCase);
+        var isSuperAdmin = isOpaque && string.Equals(principal.FindFirstValue(CmsifyOpaqueBearerClaims.SuperAdmin), "true", StringComparison.OrdinalIgnoreCase);
         return new CurrentActorInfo(userId, apiClientId, role, workspaceId, true, isSuperAdmin);
     }
 }

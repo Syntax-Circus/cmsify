@@ -70,6 +70,24 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
         actor.WorkspaceId.ShouldBe(Guid.Parse("11111111-1111-1111-1111-111111111111"));
     }
 
+    [Fact]
+    public async Task AdminOidcJwt_IsNotHostSuperAdminAndCannotCreateAWorkspace()
+    {
+        await using var factory = new OidcApiFactory();
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(Issuer, Audience, "Admin", null));
+
+        using var meResponse = await client.GetAsync("/api/v1/auth/me");
+        using var createResponse = await client.PostAsJsonAsync(
+            "/api/v1/workspaces",
+            new WorkspaceRequest("OIDC Admin Workspace", $"oidc-admin-{Guid.NewGuid():N}", null));
+
+        meResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var actor = await meResponse.Content.ReadFromJsonAsync<ActorResponse>();
+        actor!.IsSuperAdmin.ShouldBeFalse();
+        createResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
     [Theory]
     [InlineData("https://wrong-issuer.test", Audience)]
     [InlineData(Issuer, "wrong-audience")]
