@@ -90,6 +90,36 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RotateBatch_RewrapsMaximumLegacyCiphertextWith64CharacterActiveKeyAndDoesNotStarveLaterRows()
+    {
+        var activeKeyId = new string('a', 64);
+        var protector = CreateProtector(activeKeyId);
+        var maximumLegacyPlaintext = new string('x', 714);
+        var maximumLegacyCiphertext = CreateLegacyCiphertext(maximumLegacyPlaintext);
+        Assert.Equal(997, maximumLegacyCiphertext.Length);
+        var firstId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var secondId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        await using (var setup = await CreateContextAsync())
+        {
+            await SeedEndpointsAsync(
+                setup,
+                ("maximum", maximumLegacyCiphertext, false, firstId),
+                ("later", CreateLegacyCiphertext("later"), false, secondId));
+        }
+
+        await using var workerContext = await CreateContextAsync();
+        var worker = CreateProcessor(workerContext, protector, batchSize: 1, activeKeyId: activeKeyId);
+        var first = await worker.RotateBatchAsync(null, CancellationToken.None);
+        var second = await worker.RotateBatchAsync(first.NextCursor, CancellationToken.None);
+
+        Assert.Equal(1, first.Rotated);
+        Assert.Equal(1, second.Rotated);
+        await using var verification = await CreateContextAsync();
+        var values = await verification.WebhookEndpoints.OrderBy(endpoint => endpoint.Id).Select(endpoint => endpoint.Secret).ToListAsync();
+        Assert.Equal([maximumLegacyPlaintext, "later"], values.Select(protector.Unprotect).ToArray());
+    }
+
+    [Fact]
     public async Task ConcurrentProcessors_ClaimDisjointLockedRows()
     {
         var pause = new PauseAfterRotationSelectionInterceptor();
@@ -110,13 +140,21 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         var first = CreateProcessor(firstContext, protectorForWorkers, batchSize: 2);
         var second = CreateProcessor(secondContext, protectorForWorkers, batchSize: 2);
         var firstTask = first.RotateBatchAsync(null, CancellationToken.None);
-        await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var secondResult = await second.RotateBatchAsync(null, CancellationToken.None);
-        pause.Release.TrySetResult();
-        var firstResult = await firstTask;
+        SecretRotationBatchResult? firstResult = null;
+        SecretRotationBatchResult? secondResult = null;
+        try
+        {
+            await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            secondResult = await second.RotateBatchAsync(null, CancellationToken.None);
+        }
+        finally
+        {
+            pause.Release.TrySetResult();
+            firstResult = await firstTask;
+        }
 
-        Assert.Equal(2, firstResult.Selected);
-        Assert.Equal(2, secondResult.Selected);
+        Assert.Equal(2, firstResult!.Selected);
+        Assert.Equal(2, secondResult!.Selected);
         Assert.Equal(4, firstResult.Rotated + secondResult.Rotated);
     }
 
@@ -304,28 +342,22 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         return context;
     }
 
-    private static WebhookSecretRotationProcessor CreateProcessor(CmsifyDbContext context, ISecretProtector protector, int batchSize, bool includeLegacyKey = true) =>
+    private static WebhookSecretRotationProcessor CreateProcessor(CmsifyDbContext context, ISecretProtector protector, int batchSize, bool includeLegacyKey = true, string activeKeyId = "key_current") =>
         new(context, protector, Options.Create(new SecretProtectionOptions
         {
-            ActiveKeyId = "key_current",
+            ActiveKeyId = activeKeyId,
             EncryptionKey = includeLegacyKey ? LegacyKey : null,
-            EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["key_old"] = OldKey,
-                ["key_current"] = CurrentKey
-            },
+            EncryptionKeys = CreateEncryptionKeys(activeKeyId),
             Rotation = new SecretRotationOptions { BatchSize = batchSize, DelaySeconds = 5 }
         }));
 
-    private static AesSecretProtector CreateProtector(bool includeLegacyKey = true) => new(Options.Create(new SecretProtectionOptions
+    private static AesSecretProtector CreateProtector(bool includeLegacyKey = true) => CreateProtector("key_current", includeLegacyKey);
+
+    private static AesSecretProtector CreateProtector(string activeKeyId, bool includeLegacyKey = true) => new(Options.Create(new SecretProtectionOptions
     {
-        ActiveKeyId = "key_current",
+        ActiveKeyId = activeKeyId,
         EncryptionKey = includeLegacyKey ? LegacyKey : null,
-        EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["key_old"] = OldKey,
-            ["key_current"] = CurrentKey
-        }
+        EncryptionKeys = CreateEncryptionKeys(activeKeyId)
     }));
 
     private static async Task<IReadOnlyList<WebhookEndpoint>> SeedEndpointsAsync(
@@ -362,11 +394,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         {
             ActiveKeyId = "key_old",
             EncryptionKey = LegacyKey,
-            EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["key_old"] = OldKey,
-                ["key_current"] = CurrentKey
-            }
+            EncryptionKeys = CreateEncryptionKeys("key_old")
         }));
         return old.Protect(secret);
     }
@@ -456,8 +484,19 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
     }
 
     private const string LegacyKey = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=";
-    private const string OldKey = "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A=";
-    private const string CurrentKey = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A=";
+    private static readonly string OldKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+    private static readonly string CurrentKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+
+    private static Dictionary<string, string> CreateEncryptionKeys(string activeKeyId)
+    {
+        var keys = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["key_old"] = OldKey,
+            ["key_current"] = CurrentKey
+        };
+        if (!keys.ContainsKey(activeKeyId)) keys.Add(activeKeyId, Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        return keys;
+    }
 
     private sealed class PauseAfterRotationSelectionInterceptor : DbCommandInterceptor
     {

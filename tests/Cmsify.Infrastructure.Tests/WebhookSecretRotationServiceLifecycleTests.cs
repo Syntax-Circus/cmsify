@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Diagnostics.Metrics;
+using System.Security.Cryptography;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Security;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,7 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class WebhookSecretRotationServiceLifecycleTests
 {
+    private static readonly string CurrentKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     [Fact]
     public async Task ExecuteAsync_WhenRotationIsDisabled_DoesNotCreateAScope()
     {
@@ -143,6 +145,33 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
         Assert.DoesNotContain("endpoint=untrusted", logger.Messages[0], StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WhenEndOfPassCountRefreshFails_RecordsOnlyAFailedCycleAndKeepsThePreviousRemainingSnapshot()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var processor = Substitute.For<IWebhookSecretRotationProcessor>();
+        processor.RotateBatchAsync(null, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new SecretRotationBatchResult(null, 0, 0, 0, 0, true)));
+        processor.CountRemainingAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<IReadOnlyList<SecretCiphertextCount>>(new InvalidOperationException("count failed")));
+        var service = CreateService(ScopeFactoryFor(processor), enabled: true, new CancellingDelayTimeProvider(cancellation));
+        using var listener = new MeterListener();
+        var cycleOutcomes = new List<string>();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Name == "cmsify.webhook.secret.rotation.cycles") meterListener.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            foreach (var tag in tags) if (tag.Key == "outcome") cycleOutcomes.Add(tag.Value?.ToString() ?? string.Empty);
+        });
+        listener.Start();
+
+        await ExecuteAsync(service, cancellation.Token);
+
+        Assert.Equal(["failed"], cycleOutcomes);
+    }
+
     private static WebhookSecretRotationService CreateService(
         IServiceScopeFactory scopeFactory,
         bool enabled,
@@ -153,7 +182,7 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
             ActiveKeyId = "key_current",
             EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["key_current"] = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A="
+                ["key_current"] = CurrentKey
             },
             Rotation = new SecretRotationOptions { Enabled = enabled, DelaySeconds = 7 }
         }), logger ?? new CapturingLogger(), timeProvider);

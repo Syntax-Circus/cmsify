@@ -6,6 +6,22 @@ namespace Cmsify.Infrastructure.Tests;
 public sealed class CmsifyOperationalMetricsTests
 {
     [Fact]
+    public void SecretRotationRemaining_ReportsExplicitBoundedZerosAfterASuccessfulEmptyRefresh()
+    {
+        var (listener, measurements) = CreateListener();
+        using (listener)
+        {
+            CmsifyOperationalMetrics.ReportSecretRotationRemaining([], ["key_current"]);
+            listener.RecordObservableInstruments();
+
+            AssertMetric(measurements, "cmsify.webhook.secret.rotation.remaining", ["version", "key_id"], ["v1", "legacy"]);
+            AssertMetric(measurements, "cmsify.webhook.secret.rotation.remaining", ["version", "key_id"], ["v2", "key_current"]);
+            AssertMetric(measurements, "cmsify.webhook.secret.rotation.remaining", ["version", "key_id"], ["v2", "unknown"]);
+            AssertMetric(measurements, "cmsify.webhook.secret.rotation.remaining", ["version", "key_id"], ["unknown", "unknown"]);
+        }
+    }
+
+    [Fact]
     public void DeliveryAndClaimMetrics_AreLowCardinalityAndObservable()
     {
         using var listener = new MeterListener();
@@ -123,4 +139,28 @@ public sealed class CmsifyOperationalMetricsTests
         Assert.Contains(measurements, measurement => measurement.Name == name
             && measurement.Tags.Select(tag => tag.Key).SequenceEqual(expectedKeys)
             && measurement.Tags.Select(tag => tag.Value).SequenceEqual(expectedValues.Cast<object?>()));
+
+    private static (MeterListener Listener, List<(string Name, List<KeyValuePair<string, object?>> Tags)> Measurements) CreateListener()
+    {
+        var measurements = new List<(string Name, List<KeyValuePair<string, object?>> Tags)>();
+        var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
+        {
+            var capturedTags = new List<KeyValuePair<string, object?>>();
+            foreach (var tag in tags)
+            {
+                capturedTags.Add(tag);
+            }
+            measurements.Add((instrument.Name, capturedTags));
+        });
+        listener.Start();
+        return (listener, measurements);
+    }
 }

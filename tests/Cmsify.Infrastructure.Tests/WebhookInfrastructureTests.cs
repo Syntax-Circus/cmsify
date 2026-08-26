@@ -9,6 +9,9 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class WebhookInfrastructureTests
 {
+    private static readonly string DefaultKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+    private static readonly string OldKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+    private static readonly string CurrentKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     [Fact]
     public void WebhookSigner_ReturnsExpectedHmacSha256Signature()
     {
@@ -56,6 +59,19 @@ public sealed class WebhookInfrastructureTests
         Assert.False(validator.Validate(null, missingEntry).Succeeded);
     }
 
+    [Fact]
+    public void SecretProtectionOptionsValidator_RejectsInvalidRetainedKeyIdWithoutLeakingConfiguredValues()
+    {
+        var options = CreateOptions();
+        var retainedValue = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        options.EncryptionKeys["invalid.key"] = retainedValue;
+
+        var result = new SecretProtectionOptionsValidator(Environments.Development).Validate(null, options);
+
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain(retainedValue, string.Join(' ', result.Failures ?? []));
+    }
+
     [Theory]
     [InlineData("not-base64")]
     [InlineData("AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA")]
@@ -89,6 +105,16 @@ public sealed class WebhookInfrastructureTests
 
         Assert.False(result.Succeeded);
         Assert.DoesNotContain(developmentKey, string.Join(' ', result.Failures ?? []));
+    }
+
+    [Theory]
+    [MemberData(nameof(CheckedInNonProductionKeyFixtures))]
+    public void SecretProtectionOptionsValidator_RejectsEveryCheckedInNonProductionV2KeyFixtureInProduction(string key)
+    {
+        var result = new SecretProtectionOptionsValidator(Environments.Production).Validate(null, CreateOptions(key));
+
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain(key, string.Join(' ', result.Failures ?? []));
     }
 
     [Theory]
@@ -215,6 +241,25 @@ public sealed class WebhookInfrastructureTests
         Assert.ThrowsAny<CryptographicException>(() => protector.Unprotect(string.Join('.', emptyCiphertext)));
     }
 
+    [Theory]
+    [InlineData(4)]
+    [InlineData(6)]
+    public void AesSecretProtector_RejectsV2PayloadsWithAnySegmentCountOtherThanFive(int segmentCount)
+    {
+        var protector = CreateProtector();
+        var parts = protector.Protect("webhook-secret").Split('.').ToList();
+        if (segmentCount == 4)
+        {
+            parts.RemoveAt(4);
+        }
+        else
+        {
+            parts.Add("extra");
+        }
+
+        Assert.ThrowsAny<CryptographicException>(() => protector.Unprotect(string.Join('.', parts)));
+    }
+
     public static IEnumerable<object[]> WeakProductionKeys()
     {
         yield return [Enumerable.Range(0, 15).Select(value => (byte)value).Concat(Enumerable.Repeat((byte)0, 17)).ToArray()];
@@ -222,12 +267,17 @@ public sealed class WebhookInfrastructureTests
         yield return [Enumerable.Range(0, 16).Select(value => (byte)value).Concat(Enumerable.Repeat((byte)0, 15)).Append((byte)1).ToArray()];
     }
 
+    public static IEnumerable<object[]> CheckedInNonProductionKeyFixtures()
+    {
+        yield return [Convert.ToBase64String(Encoding.UTF8.GetBytes("cmsify-development-key-32-bytes!"))];
+    }
+
     private static SecretProtectionOptions CreateOptions(string? key = null)
     {
         var options = new SecretProtectionOptions { ActiveKeyId = "key_2026_08" };
-        options.EncryptionKeys[options.ActiveKeyId] = key ?? "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=";
-        options.EncryptionKeys["key_old"] = "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A=";
-        options.EncryptionKeys["key_current"] = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A=";
+        options.EncryptionKeys[options.ActiveKeyId] = key ?? DefaultKey;
+        options.EncryptionKeys["key_old"] = OldKey;
+        options.EncryptionKeys["key_current"] = CurrentKey;
         return options;
     }
 

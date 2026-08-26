@@ -49,7 +49,6 @@ public sealed class WebhookSecretRotationService : BackgroundService
                 var processor = scope.ServiceProvider.GetRequiredService<IWebhookSecretRotationProcessor>();
                 var result = await processor.RotateBatchAsync(cursor, stoppingToken);
                 CmsifyOperationalMetrics.RecordSecretRotationRows(result);
-                CmsifyOperationalMetrics.RecordSecretRotationCycle("succeeded");
                 cursor = result.NextCursor;
                 if (result.ReachedEnd)
                 {
@@ -58,6 +57,7 @@ public sealed class WebhookSecretRotationService : BackgroundService
                         configuredKeyIds);
                     resetCursorAfterDelay = true;
                 }
+                CmsifyOperationalMetrics.RecordSecretRotationCycle("succeeded");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

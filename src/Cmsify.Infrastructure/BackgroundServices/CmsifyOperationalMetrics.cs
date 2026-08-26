@@ -73,12 +73,31 @@ public static class CmsifyOperationalMetrics
     public static void RecordSecretRotationDuration(TimeSpan duration) => SecretRotationDuration.Record(duration.TotalSeconds);
     public static void ReportSecretRotationRemaining(IEnumerable<SecretCiphertextCount> counts, IEnumerable<string> configuredKeyIds)
     {
-        var configured = configuredKeyIds.ToHashSet(StringComparer.Ordinal);
-        var normalized = counts.Select(count => new SecretCiphertextCount(
-                NormalizeSecretVersion(count.Version),
-                NormalizeSecretKeyId(count.KeyId, configured),
-                Math.Max(0, count.Count)))
-            .ToImmutableArray();
+        var configured = configuredKeyIds.Distinct(StringComparer.Ordinal).ToArray();
+        var normalized = new Dictionary<(string Version, string KeyId), long>
+        {
+            [("v1", "legacy")] = 0,
+            [("v2", "unknown")] = 0,
+            [("unknown", "unknown")] = 0
+        };
+        foreach (var keyId in configured)
+        {
+            normalized[("v2", keyId)] = 0;
+        }
+
+        foreach (var count in counts)
+        {
+            var version = NormalizeSecretVersion(count.Version);
+            var keyId = version switch
+            {
+                "v1" => "legacy",
+                "v2" => NormalizeSecretKeyId(count.KeyId, configured),
+                _ => "unknown"
+            };
+            var category = (version, keyId);
+            normalized[category] = normalized.GetValueOrDefault(category) + Math.Max(0, count.Count);
+        }
+
         Volatile.Write(ref secretRotationRemaining, new SecretRotationRemainingSnapshot(normalized));
     }
 
@@ -133,6 +152,11 @@ public static class CmsifyOperationalMetrics
 
     private sealed record SecretRotationRemainingSnapshot(ImmutableArray<SecretCiphertextCount> Counts)
     {
-        public static SecretRotationRemainingSnapshot Empty { get; } = new([]);
+        public static SecretRotationRemainingSnapshot Empty { get; } = new(ImmutableArray<SecretCiphertextCount>.Empty);
+
+        public SecretRotationRemainingSnapshot(Dictionary<(string Version, string KeyId), long> counts)
+            : this(counts.Select(count => new SecretCiphertextCount(count.Key.Version, count.Key.KeyId, count.Value)).ToImmutableArray())
+        {
+        }
     }
 }

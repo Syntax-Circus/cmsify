@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
@@ -16,6 +17,7 @@ namespace Cmsify.Api.Integration.Tests;
 public sealed class WebhookAuditApiTests : IAsyncLifetime
 {
     private const string ApiToken = "cmsify_webhook_audit_api_test_token";
+    private static readonly string IntegrationEncryptionKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("cmsify")
@@ -32,7 +34,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Name", "Default");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
         Environment.SetEnvironmentVariable("Secrets__ActiveKeyId", "integration");
-        Environment.SetEnvironmentVariable("Secrets__EncryptionKeys__integration", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=");
+        Environment.SetEnvironmentVariable("Secrets__EncryptionKeys__integration", IntegrationEncryptionKey);
     }
 
     public async Task DisposeAsync()

@@ -28,6 +28,6 @@ public sealed class WebhookEndpointConfiguration : IEntityTypeConfiguration<Webh
 
         builder.Property(endpoint => endpoint.Name).HasMaxLength(200).IsRequired();
         builder.Property(endpoint => endpoint.Url).HasMaxLength(2_000).IsRequired();
-        builder.Property(endpoint => endpoint.Secret).HasMaxLength(1_000).IsRequired();
+        builder.Property(endpoint => endpoint.Secret).HasColumnType("text").IsRequired();
     }
 }
