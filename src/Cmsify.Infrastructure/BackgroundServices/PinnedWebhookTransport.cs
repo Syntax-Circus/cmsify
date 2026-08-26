@@ -90,7 +90,7 @@ public static class PinnedWebhookTransport
             throw new HttpRequestException("Webhook request is missing a validated destination.");
         }
 
-        if (!string.Equals(destination.DestinationUri.DnsSafeHost, context.DnsEndPoint.Host, StringComparison.OrdinalIgnoreCase)
+        if (!string.Equals(destination.DestinationUri.IdnHost, context.DnsEndPoint.Host, StringComparison.OrdinalIgnoreCase)
             || destination.DestinationUri.Port != context.DnsEndPoint.Port)
         {
             throw new HttpRequestException("Webhook request authority does not match its validated destination.");

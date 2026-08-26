@@ -39,6 +39,21 @@ public sealed class PinnedWebhookTransportTests
     }
 
     [Fact]
+    public async Task SendAsync_AcceptsIdnAuthorityThatMatchesTheValidatedDestination()
+    {
+        var uri = new Uri("https://täst.de:8443/hook");
+        var connector = new RecordingConnector(new HttpRequestException("simulated candidate failure"));
+        using var handler = PinnedWebhookTransport.CreateHandler(connector, TimeSpan.FromSeconds(1));
+        using var client = new HttpClient(handler);
+        using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Parse("192.0.2.10")));
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request));
+
+        Assert.Equal(1, connector.CallCount);
+        Assert.Equal("xn--tst-qla.de", uri.IdnHost);
+    }
+
+    [Fact]
     public async Task SendAsync_ProvidesOnlyValidatedCandidates_WhenConnectionFails()
     {
         var approved = new[] { IPAddress.Parse("192.0.2.10"), IPAddress.Parse("2001:db8::10") };
@@ -88,7 +103,7 @@ public sealed class PinnedWebhookTransportTests
     {
         using var listener = StartListener();
         var uri = new Uri($"http://hooks.example.test:{GetPort(listener)}/hook");
-        var server = ServeHttpResponsesAsync(listener, 2, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        var server = ServeFreshConnectionTestAsync(listener);
         var connector = new RecordingConnector(connect: (addresses, port, ct) => new SocketWebhookConnector().ConnectAsync(addresses, port, ct));
         using var handler = PinnedWebhookTransport.CreateHandler(connector, TimeSpan.FromSeconds(1));
         using var client = new HttpClient(handler);
@@ -105,7 +120,7 @@ public sealed class PinnedWebhookTransportTests
             Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
         }
 
-        await server;
+        Assert.False(await server);
         Assert.Equal(2, connector.CallCount);
     }
 
@@ -228,6 +243,38 @@ public sealed class PinnedWebhookTransportTests
         }
     }
 
+    private static async Task<bool> ServeFreshConnectionTestAsync(TcpListener listener)
+    {
+        using var firstSocket = await listener.AcceptTcpClientAsync();
+        await using var firstStream = firstSocket.GetStream();
+        await ReadHeadersAsync(firstStream);
+        await firstStream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"));
+
+        var reusedFirstConnection = ReadHeadersAsync(firstStream);
+        var secondConnection = listener.AcceptTcpClientAsync();
+        if (await Task.WhenAny(reusedFirstConnection, secondConnection) == reusedFirstConnection
+            && await reusedFirstConnection)
+        {
+            await firstStream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+            listener.Stop();
+            try
+            {
+                await secondConnection;
+            }
+            catch (SocketException)
+            {
+            }
+
+            return true;
+        }
+
+        using var secondSocket = await secondConnection;
+        await using var secondStream = secondSocket.GetStream();
+        await ReadHeadersAsync(secondStream);
+        await secondStream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+        return false;
+    }
+
     private static async Task ServeTlsResponseAsync(TcpListener listener, X509Certificate2 certificate, TaskCompletionSource<string?> observedServerName, string response)
     {
         try
@@ -254,7 +301,7 @@ public sealed class PinnedWebhookTransportTests
         }
     }
 
-    private static async Task ReadHeadersAsync(Stream stream)
+    private static async Task<bool> ReadHeadersAsync(Stream stream)
     {
         var received = new List<byte>();
         var buffer = new byte[1];
@@ -263,13 +310,13 @@ public sealed class PinnedWebhookTransportTests
             var read = await stream.ReadAsync(buffer);
             if (read == 0)
             {
-                return;
+                return false;
             }
 
             received.Add(buffer[0]);
             if (received.Count >= 4 && received[^4] == '\r' && received[^3] == '\n' && received[^2] == '\r' && received[^1] == '\n')
             {
-                return;
+                return true;
             }
         }
 
