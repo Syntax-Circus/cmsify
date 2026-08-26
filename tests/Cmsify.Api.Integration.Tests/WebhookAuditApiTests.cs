@@ -31,7 +31,8 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Seed__Admin__Password", "change-this-temporary-password");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Name", "Default");
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
-        Environment.SetEnvironmentVariable("Secrets__EncryptionKey", "integration-test-secret-key-with-enough-length");
+        Environment.SetEnvironmentVariable("Secrets__ActiveKeyId", "integration");
+        Environment.SetEnvironmentVariable("Secrets__EncryptionKeys__integration", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=");
     }
 
     public async Task DisposeAsync()
@@ -590,7 +591,8 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             "Seed__Admin__Password",
             "Seed__DefaultWorkspace__Name",
             "Seed__DefaultWorkspace__Slug",
-            "Secrets__EncryptionKey"
+            "Secrets__ActiveKeyId",
+            "Secrets__EncryptionKeys__integration"
         })
         {
             Environment.SetEnvironmentVariable(key, null);

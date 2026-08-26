@@ -43,6 +43,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IContentPublishingService, ContentPublishingService>();
         services.AddScoped<IContentSearchVectorBuilder, ContentSearchVectorBuilder>();
         services.AddScoped<IWorkspaceAuthorizationService, WorkspaceAuthorizationService>();
+        services.AddOptions<SecretProtectionOptions>()
+            .Bind(configuration.GetSection(SecretProtectionOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<SecretProtectionOptions>, SecretProtectionOptionsValidator>();
         services.AddSingleton<ISecretProtector, AesSecretProtector>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();
