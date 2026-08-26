@@ -132,23 +132,34 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
 
         await using var rotationContext = await CreateContextAsync(pause);
         await using var updateContext = await CreateContextAsync();
+        await using var observerContext = await CreateContextAsync();
         var worker = CreateProcessor(rotationContext, protector, batchSize: 1);
         var rotating = worker.RotateBatchAsync(null, CancellationToken.None);
         await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var updateStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await updateContext.Database.OpenConnectionAsync();
+        var updaterBackendPid = await updateContext.Database.SqlQuery<int>($"SELECT pg_backend_pid() AS \"Value\"").SingleAsync();
         var update = Task.Run(async () =>
         {
-            updateStarted.TrySetResult();
             await updateContext.Database.ExecuteSqlInterpolatedAsync($"""
                 UPDATE webhook_endpoints
                 SET secret = {protector.Protect("new-secret")}, updated_at = CURRENT_TIMESTAMP
                 WHERE id = {endpointId}
                 """);
         });
-        await updateStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        pause.Release.TrySetResult();
-        await rotating;
+        try
+        {
+            await WaitForLockWaitAsync(observerContext, updaterBackendPid, update);
+            Assert.False(update.IsCompleted);
+        }
+        finally
+        {
+            pause.Release.TrySetResult();
+        }
+
+        var rotation = await rotating;
         await update;
+
+        Assert.Equal(new SecretRotationBatchResult(endpointId, 1, 1, 0, 0, false), rotation);
 
         await using var verification = await CreateContextAsync();
         var ciphertext = await verification.WebhookEndpoints.Where(endpoint => endpoint.Id == endpointId).Select(endpoint => endpoint.Secret).SingleAsync();
@@ -289,6 +300,33 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
             }
         }));
         return old.Protect(secret);
+    }
+
+    private static async Task WaitForLockWaitAsync(CmsifyDbContext observerContext, int backendPid, Task updater)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!timeout.IsCancellationRequested)
+        {
+            var isWaitingOnLock = await observerContext.Database.SqlQuery<bool>($"""
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_stat_activity
+                    WHERE pid = {backendPid} AND state = 'active' AND wait_event_type = 'Lock'
+                ) AS "Value"
+                """).SingleAsync(timeout.Token);
+            if (isWaitingOnLock)
+            {
+                return;
+            }
+
+            if (updater.IsCompleted)
+            {
+                throw new Xunit.Sdk.XunitException("The signing-secret update completed before it waited on the rotation row lock.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25), timeout.Token);
+        }
+
+        throw new TimeoutException("The signing-secret update did not reach a PostgreSQL row-lock wait.");
     }
 
     private static string CreateLegacyCiphertext(string secret)
