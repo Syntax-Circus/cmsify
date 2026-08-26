@@ -137,6 +137,8 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         var rotating = worker.RotateBatchAsync(null, CancellationToken.None);
         await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Task update = Task.CompletedTask;
+        Exception? primaryFailure = null;
+        SecretRotationBatchResult? rotation = null;
         try
         {
             await updateContext.Database.OpenConnectionAsync();
@@ -152,13 +154,15 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
             await WaitForLockWaitAsync(observerContext, updaterBackendPid, update);
             Assert.False(update.IsCompleted);
         }
+        catch (Exception exception)
+        {
+            primaryFailure = exception;
+            throw;
+        }
         finally
         {
-            pause.Release.TrySetResult();
+            rotation = await ReleaseAndObserveAsync(pause, rotating, update, primaryFailure);
         }
-
-        var rotation = await rotating;
-        await update;
 
         Assert.Equal(new SecretRotationBatchResult(endpointId, 1, 1, 0, 0, false), rotation);
 
@@ -328,6 +332,52 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         }
 
         throw new TimeoutException("The signing-secret update did not reach a PostgreSQL row-lock wait.");
+    }
+
+    private static async Task<SecretRotationBatchResult?> ReleaseAndObserveAsync(
+        PauseAfterRotationSelectionInterceptor pause,
+        Task<SecretRotationBatchResult> rotating,
+        Task updater,
+        Exception? primaryFailure)
+    {
+        pause.Release.TrySetResult();
+        SecretRotationBatchResult? rotation = null;
+        Exception? rotationFailure = null;
+        Exception? updateFailure = null;
+        try
+        {
+            rotation = await rotating;
+        }
+        catch (Exception exception)
+        {
+            rotationFailure = exception;
+        }
+
+        try
+        {
+            await updater;
+        }
+        catch (Exception exception)
+        {
+            updateFailure = exception;
+        }
+
+        if (primaryFailure is not null)
+        {
+            return rotation;
+        }
+
+        if (rotationFailure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(rotationFailure).Throw();
+        }
+
+        if (updateFailure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(updateFailure).Throw();
+        }
+
+        return rotation;
     }
 
     private static string CreateLegacyCiphertext(string secret)
