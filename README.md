@@ -94,7 +94,12 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Seed__Admin__DisplayName` | `Cmsify Admin` | Display name for the first admin user. |
 | `Seed__Admin__Password` | replace before use | Plaintext password for the first admin; use this or `PasswordHash`, never commit either. |
 | `Seed__Admin__PasswordHash` | empty | Precomputed BCrypt hash alternative to `Password` for the first admin. |
-| `Secrets__EncryptionKey` | replace before production | Secret used to encrypt webhook signing secrets. Use at least 32 random bytes and keep it in a secret manager. |
+| `Secrets__ActiveKeyId` | `development` locally | ID of the sole key used for new signing-secret writes. Production requires it to name a configured key. |
+| `Secrets__EncryptionKeys__<keyId>` | development fixture locally | Canonical Base64 for exactly 32 bytes. Retain entries for every `v2` ciphertext that may still exist; use a secret manager in production. |
+| `Secrets__EncryptionKey` | migration input only | Legacy `v1` read key. Configure only while existing `v1` ciphertext remains; it is never used for new writes. |
+| `Secrets__Rotation__Enabled` | `false` | Enables the opt-in, bounded PostgreSQL signing-secret re-encryption worker. Start disabled and enable only for an observed window. |
+| `Secrets__Rotation__BatchSize` | `100` | Maximum endpoint rows claimed per key-rotation cycle (1–500). |
+| `Secrets__Rotation__DelaySeconds` | `5` | Delay between key-rotation cycles (1–3600 seconds). |
 
 ### API: media and background processing
 
@@ -146,7 +151,7 @@ On the production host, copy the environment template and replace every placehol
 
 ```bash
 cp docker-compose.prod.env.example .env.prod
-# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, encryption key, and CORS origin.
+# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, active key ID/key, and CORS origin.
 # Pull the exact published CMSIFY_VERSION from Docker Hub (or the configured registry).
 docker compose --env-file .env.prod -f docker-compose.prod.yml pull
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
@@ -157,6 +162,8 @@ When using locally built images, run `./Build-CmsifyDocker.ps1 -ImageTag local`,
 The Compose sample binds the Admin and API ports to `127.0.0.1` (`5001` and `5000` by default). Put a TLS-terminating reverse proxy such as Caddy or Nginx on the host in front of those ports; configure its public Admin origin as `CORS_ALLOWED_ORIGIN`. To expose the containers directly instead, remove `127.0.0.1:` from the two `ports` mappings and provide TLS outside this sample. Do not expose the PostgreSQL service publicly.
 
 The template defaults to the named local-media volume. Set `Storage__Provider=s3` and its `Storage__S3__*` values to use S3-compatible object storage instead. To upgrade, set `CMSIFY_VERSION` to the next published version, back up PostgreSQL and the media volume, then rerun `pull` and `up -d`. The API applies database migrations at startup. Check `/health/live` for process health and `/health/ready` for database and storage readiness.
+
+The production Compose template requires `Secrets__ActiveKeyId` and `Secrets__ActiveKey` through environment substitution, and derives the active `Secrets__EncryptionKeys__<keyId>` entry from that ID. Before a key-ID change, retain any older `Secrets__EncryptionKeys__<keyId>` entries required to read existing `v2` ciphertext. Do not place key material in the repository.
 
 ## Documentation
 

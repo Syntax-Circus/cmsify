@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
@@ -65,12 +66,16 @@ function sameFilesystemTarget(left, right) {
 
 function exportLiveDocument(output) {
   mkdirSync(dirname(output), { recursive: true });
+  const exportKeyId = "openapi_export";
+  const exportKey = randomBytes(32).toString("base64");
   run("dotnet", ["build", apiProject, "--configuration", "Release", "--nologo"]);
   run("dotnet", ["tool", "restore"]);
   run("dotnet", ["tool", "run", "swagger", "tofile", "--output", output, apiAssembly, "v1"], {
     ASPNETCORE_ENVIRONMENT: "Production",
     ASPNETCORE_CONTENTROOT: dirname(apiProject),
     Api__OpenApiExport: "true",
+    Secrets__ActiveKeyId: exportKeyId,
+    [`Secrets__EncryptionKeys__${exportKeyId}`]: exportKey,
     TrustedProxy__RequireTrustedProxiesInProduction: "false",
   });
 }

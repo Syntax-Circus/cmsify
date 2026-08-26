@@ -67,6 +67,26 @@ Workers claim bounded outbox, delivery, and scheduled-publication batches with o
 
 The shared `Cmsify.Operational` meter provides low-cardinality counters and gauges without event, workspace, or endpoint labels: `cmsify.webhook.outbox.pending`, `cmsify.webhook.outbox.claimed`, `cmsify.webhook.outbox.reclaimed`, `cmsify.webhook.outbox.materialized`, `cmsify.webhook.outbox.failures`, `cmsify.webhook.delivery.due`, `cmsify.webhook.delivery.claimed`, `cmsify.webhook.delivery.reclaimed`, `cmsify.webhook.delivery.succeeded`, `cmsify.webhook.delivery.retried`, `cmsify.webhook.delivery.dead_lettered`, `cmsify.webhook.destination.rejected`, `cmsify.webhook.connection.failed`, `cmsify.schedule.due`, `cmsify.schedule.claimed`, `cmsify.schedule.reclaimed`, `cmsify.schedule.published`, `cmsify.schedule.failures`, `cmsify.cleanup.outbox_deleted`, and `cmsify.cleanup.deliveries_deleted`.
 
+### Webhook signing-secret key rotation
+
+New signing-secret ciphertext is `v2` and records its key ID. Configure `Secrets__ActiveKeyId` and a canonical Base64 `Secrets__EncryptionKeys__<keyId>` value that decodes to exactly 32 bytes. The active ID selects new writes; retain every previous `EncryptionKeys` entry while any stored `v2` ciphertext references it. `Secrets__EncryptionKey` is a legacy `v1` migration input only and is never eligible for new writes. Production rejects the checked-in development fixture and obvious weak key material before readiness.
+
+Generate a production key with a CSPRNG, store it only in the deployment secret manager, and assign it a stable operational ID:
+
+```powershell
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+```
+
+Use this enable-observe-disable runbook:
+
+1. Deploy the v2-capable reader/writer first with the new active key, all retained `v2` keys, and any required legacy `v1` key. Keep `Secrets__Rotation__Enabled=false`.
+2. Confirm readiness and normal webhook delivery. Monitor decrypt failures by version/key ID, rows rotated/skipped/failed, rotation-cycle duration, and the database-derived remaining ciphertext count by version/key ID.
+3. Enable rotation for one bounded deployment window. Investigate every decrypt or row failure; do not remove a key while any row can reference it.
+4. Wait for the remaining count to reach zero, then require zero again on an independent subsequent pass. Disable rotation after that verification.
+5. Retire old keys only in a later, explicit configuration change after the independent zero result. Do not combine key retirement with a binary rollback.
+
+After any `v2` write, a rollback requires a v2-capable binary and every key that can be referenced by stored ciphertext. A pre-v2 reader cannot safely decrypt the database. Keep rotation disabled while rolling back, restore a matched database backup when required, and investigate configuration errors before attempting another rotation window.
+
 For example, a healthy readiness response contains the existing dependency results plus deployment metadata:
 
 ```json

@@ -127,6 +127,8 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
             builder.UseSetting("Auth:Oidc:Enabled", "true");
             builder.UseSetting("Auth:Oidc:Authority", Issuer);
             builder.UseSetting("Auth:Oidc:Audiences:0", Audience);
+            builder.UseSetting("Secrets:ActiveKeyId", "integration");
+            builder.UseSetting("Secrets:EncryptionKeys:integration", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=");
             builder.UseSetting("TrustedProxy:RequireTrustedProxiesInProduction", "false");
             builder.ConfigureTestServices(services =>
             {

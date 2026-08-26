@@ -19,24 +19,28 @@ services:
     ports:
       - "127.0.0.1:${CMSIFY_API_PORT:-5000}:8080"
     environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Cmsify: Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
-      Seed__Admin__Email: ${SEED_ADMIN_EMAIL:-admin@example.com}
-      Seed__Admin__DisplayName: ${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
-      Seed__Admin__Password: ${Seed__Admin__Password:?Seed__Admin__Password is required}
-      Secrets__EncryptionKey: ${Secrets__EncryptionKey:?Secrets__EncryptionKey is required}
-      Storage__Provider: ${Storage__Provider:-local}
-      Storage__Local__BasePath: /var/cmsify/media
-      Storage__Local__RootPath: /var/cmsify/media
-      Storage__S3__BucketName: ${Storage__S3__BucketName:-}
-      Storage__S3__Region: ${Storage__S3__Region:-us-east-1}
-      Storage__S3__AccessKey: ${Storage__S3__AccessKey:-}
-      Storage__S3__SecretKey: ${Storage__S3__SecretKey:-}
-      Storage__S3__ServiceUrl: ${Storage__S3__ServiceUrl:-}
-      Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
-      TrustedProxy__RequireTrustedProxiesInProduction: ${TrustedProxy__RequireTrustedProxiesInProduction:-false}
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__Cmsify=Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
+      - Seed__Admin__Email=${SEED_ADMIN_EMAIL:-admin@example.com}
+      - Seed__Admin__DisplayName=${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
+      - Seed__Admin__Password=${Seed__Admin__Password:?Seed__Admin__Password is required}
+      - Secrets__ActiveKeyId=${Secrets__ActiveKeyId:?Secrets__ActiveKeyId is required}
+      - Secrets__EncryptionKeys__${Secrets__ActiveKeyId:?Secrets__ActiveKeyId is required}=${Secrets__ActiveKey:?Secrets__ActiveKey is required}
+      - Secrets__Rotation__Enabled=${Secrets__Rotation__Enabled:-false}
+      - Secrets__Rotation__BatchSize=${Secrets__Rotation__BatchSize:-100}
+      - Secrets__Rotation__DelaySeconds=${Secrets__Rotation__DelaySeconds:-5}
+      - Storage__Provider=${Storage__Provider:-local}
+      - Storage__Local__BasePath=/var/cmsify/media
+      - Storage__Local__RootPath=/var/cmsify/media
+      - Storage__S3__BucketName=${Storage__S3__BucketName:-}
+      - Storage__S3__Region=${Storage__S3__Region:-us-east-1}
+      - Storage__S3__AccessKey=${Storage__S3__AccessKey:-}
+      - Storage__S3__SecretKey=${Storage__S3__SecretKey:-}
+      - Storage__S3__ServiceUrl=${Storage__S3__ServiceUrl:-}
+      - Api__SwaggerEnabled=${Api__SwaggerEnabled:-false}
+      - TrustedProxy__RequireTrustedProxiesInProduction=${TrustedProxy__RequireTrustedProxiesInProduction:-false}
     depends_on:
       postgres:
         condition: service_healthy
