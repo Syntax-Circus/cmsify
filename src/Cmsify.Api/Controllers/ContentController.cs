@@ -33,9 +33,9 @@ public sealed class ContentController : ControllerBase
     private readonly IContentPublishingService publishingService;
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
-    private readonly IWebhookQueue webhookQueue;
+    private readonly IWebhookOutbox webhookOutbox;
 
-    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookQueue webhookQueue)
+    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox)
     {
         this.dbContext = dbContext;
         this.contentValidator = contentValidator;
@@ -44,7 +44,7 @@ public sealed class ContentController : ControllerBase
         this.publishingService = publishingService;
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
-        this.webhookQueue = webhookQueue;
+        this.webhookOutbox = webhookOutbox;
     }
 
     [HttpGet]
@@ -194,8 +194,8 @@ public sealed class ContentController : ControllerBase
         content.SearchVector = searchVectorBuilder.Build(content, version);
         await ApplyTagsAsync(content, workspaceId, request.Tags, ct);
         dbContext.ContentItems.Add(content);
+        EnqueueContentEvent("content.created", content);
         await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.created", content, ct);
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
         return CreatedAtAction(nameof(Get), new { workspaceId, id = content.Id }, await ToDetailResponseAsync(content.Id, ct: ct));
     }
@@ -278,6 +278,7 @@ public sealed class ContentController : ControllerBase
         content.LocaleCode = request.LocaleCode;
         content.TranslationGroupId = request.TranslationGroupId;
         content.PublishAt = request.PublishAt;
+        ClearScheduledPublishLease(content);
         content.UpdatedAt = DateTimeOffset.UtcNow;
         content.UpdatedByUserId = currentActor.UserId;
         if (!FieldValuesMatch(content.FieldValues, request.Fields))
@@ -309,6 +310,7 @@ public sealed class ContentController : ControllerBase
         content.SearchVector = searchVectorBuilder.Build(content, version!);
         try
         {
+            EnqueueContentEvent("content.updated", content);
             await dbContext.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
@@ -316,7 +318,6 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
         }
 
-        await EnqueueContentEventAsync("content.updated", content, ct);
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
     }
@@ -348,8 +349,8 @@ public sealed class ContentController : ControllerBase
         }
 
         SoftDelete(content);
+        EnqueueContentEvent("content.deleted", content);
         await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.deleted", content, ct);
         return NoContent();
     }
 
@@ -388,6 +389,7 @@ public sealed class ContentController : ControllerBase
         }
 
         content.SearchVector = searchVectorBuilder.Build(content, target);
+        ClearScheduledPublishLease(content);
         content.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
@@ -442,6 +444,7 @@ public sealed class ContentController : ControllerBase
             content.PublishAt = request.PublishAt;
             content.PendingEffectiveStartAt = effectiveRange.StartAt;
             content.PendingEffectiveEndAt = effectiveRange.EndAt;
+            ClearScheduledPublishLease(content);
             content.UpdatedAt = DateTimeOffset.UtcNow;
             await dbContext.SaveChangesAsync(ct);
             return Ok(new PublishContentResponse(await ToDetailResponseAsync(content.Id, ct: ct), []));
@@ -456,10 +459,11 @@ public sealed class ContentController : ControllerBase
         content.PublishAt = null;
         content.PendingEffectiveStartAt = null;
         content.PendingEffectiveEndAt = null;
+        ClearScheduledPublishLease(content);
         var publishResult = await publishingService.PublishSnapshotAsync(content, effectiveRange, actorUserId: currentActor.UserId, ct: ct);
+        EnqueueContentEvent("content.status_changed", content);
+        EnqueueContentEvent("content.published", content);
         await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.status_changed", content, ct);
-        await EnqueueContentEventAsync("content.published", content, ct);
 
         return Ok(new PublishContentResponse(await ToDetailResponseAsync(content.Id, ct: ct), publishResult.Warnings));
     }
@@ -491,6 +495,8 @@ public sealed class ContentController : ControllerBase
         var groupId = source.TranslationGroupId ?? target.TranslationGroupId ?? Guid.CreateVersion7();
         source.TranslationGroupId = groupId;
         target.TranslationGroupId = groupId;
+        ClearScheduledPublishLease(source);
+        ClearScheduledPublishLease(target);
         await dbContext.SaveChangesAsync(ct);
         var translations = await BaseContentQuery(workspaceId).AsNoTracking()
             .Where(content => content.TranslationGroupId == groupId)
@@ -573,15 +579,20 @@ public sealed class ContentController : ControllerBase
             content.PublishAt = null;
             content.PendingEffectiveStartAt = null;
             content.PendingEffectiveEndAt = null;
+            ClearScheduledPublishLease(content);
             await publishingService.PublishSnapshotAsync(content, new ContentEffectiveRange(null, null), actorUserId: currentActor.UserId, ct: ct);
         }
+        else if (targetStatus == ContentStatus.Archived)
+        {
+            ClearScheduledPublishLease(content);
+        }
 
-        await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.status_changed", content, ct);
+        EnqueueContentEvent("content.status_changed", content);
         if (targetStatus is ContentStatus.Published or ContentStatus.Archived)
         {
-            await EnqueueContentEventAsync(targetStatus == ContentStatus.Published ? "content.published" : "content.archived", content, ct);
+            EnqueueContentEvent(targetStatus == ContentStatus.Published ? "content.published" : "content.archived", content);
         }
+        await dbContext.SaveChangesAsync(ct);
 
         _ = reason;
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
@@ -718,6 +729,7 @@ public sealed class ContentController : ControllerBase
         content.PublishAt = null;
         content.PendingEffectiveStartAt = null;
         content.PendingEffectiveEndAt = null;
+        ClearScheduledPublishLease(content);
         content.ArchivedAt = null;
 
         var snapshot = await publishingService.PublishSnapshotAsync(
@@ -726,7 +738,6 @@ public sealed class ContentController : ControllerBase
             target.VersionNumber,
             currentActor.UserId,
             ct);
-        await dbContext.SaveChangesAsync(ct);
 
         var payload = JsonSerializer.SerializeToElement(new
         {
@@ -736,8 +747,9 @@ public sealed class ContentController : ControllerBase
             toVersionNumber = target.VersionNumber,
             newVersionNumber = snapshot.Version.VersionNumber
         });
-        await webhookQueue.EnqueueAsync(new WebhookEvent("content.rolled_back", content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow), ct);
-        await EnqueueContentEventAsync("content.published", content, ct);
+        webhookOutbox.Enqueue("content.rolled_back", content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow);
+        EnqueueContentEvent("content.published", content);
+        await dbContext.SaveChangesAsync(ct);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
     }
 
@@ -1260,12 +1272,20 @@ public sealed class ContentController : ControllerBase
         content.DeletedAt = DateTimeOffset.UtcNow;
         content.DeletedByUserId = currentActor.UserId;
         content.UpdatedAt = DateTimeOffset.UtcNow;
+        ClearScheduledPublishLease(content);
     }
 
-    private async Task EnqueueContentEventAsync(string eventType, ContentItem content, CancellationToken ct)
+    private static void ClearScheduledPublishLease(ContentItem content)
+    {
+        content.PublishLeaseOwner = null;
+        content.PublishLeaseToken = null;
+        content.PublishLeaseExpiresAt = null;
+    }
+
+    private void EnqueueContentEvent(string eventType, ContentItem content)
     {
         var payload = JsonSerializer.SerializeToElement(new { contentItemId = content.Id, workspaceId = content.WorkspaceId, templateVersionId = content.TemplateVersionId, status = content.Status.ToString() });
-        await webhookQueue.EnqueueAsync(new WebhookEvent(eventType, content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow), ct);
+        webhookOutbox.Enqueue(eventType, content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow);
     }
 
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();

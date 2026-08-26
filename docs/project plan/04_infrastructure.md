@@ -122,44 +122,22 @@ public class AuditInterceptor : SaveChangesInterceptor
 
 ## Background Hosted Services
 
-All implemented as `BackgroundService` subclasses registered in `IHostedService`. **Scale-out seams:** each service depends on an abstraction (`IWebhookQueue`, `IScheduledPublishingDispatcher`) so the single-instance polling/in-memory-channel impls used in MVP can be swapped for outbox-table + leader-election impls without touching call sites.
+All implemented as `BackgroundService` subclasses registered in `IHostedService`. Durable work is claimed from PostgreSQL with bounded owner/token leases so replicas can process independent rows and recover expired claims.
 
 ### ScheduledPublishingService
 - Polls every 60 seconds (configurable via `Scheduler:PublishingIntervalSeconds`)
-- Delegates the actual work to `IScheduledPublishingDispatcher.RunOnceAsync()`
-- The MVP impl (`InProcessScheduledPublishingDispatcher`) calls `ContentItemRepository.GetPendingScheduledPublishAsync()` and transitions each
-- Fires `content.published` webhook event after each successful transition
+- Claims due approved content through `IScheduledPublishingDispatcher`, then conditionally completes the claim in a transaction.
+- Completion writes the immutable snapshot and durable `content.published` outbox event together.
 
 ### WebhookDispatchService
-- Reads from `IWebhookQueue.DequeueAllAsync()`
-- The MVP impl (`InProcessWebhookQueue`) is a bounded `Channel<WebhookEvent>` (capacity configurable via `Webhook:QueueCapacity`, default 1024)
-- Domain services publish events by calling `IWebhookQueue.EnqueueAsync(...)`
-- Dispatcher `POST`s to each subscribed endpoint
-- Signs payload with HMAC-SHA256 using the endpoint's secret: header `X-Cmsify-Signature: sha256={hex}`
-- On non-2xx response or exception: writes/updates `WebhookDeliveryLog` with `AttemptCount++`, sets `NextRetryAt` using exponential backoff (base 30s, max 24h)
+- Claims durable outbox events with PostgreSQL `FOR UPDATE SKIP LOCKED` and materializes one idempotent delivery intent per subscribed endpoint.
+- Never sends HTTP; the retry worker sends only already-persisted, claimed intents.
 
 ### WebhookRetryService
 - Polls every 30 seconds (configurable)
 - Fetches `WebhookDeliveryLog` records where `IsDelivered = false`, `IsFailed = false`, `NextRetryAt <= UtcNow`
-- Re-queues via `IWebhookQueue.EnqueueAsync(...)`
-- After `MaxAttempts` (configurable, default 10): sets `IsFailed = true`
-
-### Post-MVP scale-out path
-- Replace `InProcessWebhookQueue` with `OutboxWebhookQueue` backed by a `WebhookOutbox` table; dispatcher claims rows via `FOR UPDATE SKIP LOCKED`
-- Replace `InProcessScheduledPublishingDispatcher` with a leader-elected version that uses a PostgreSQL advisory lock so only one instance polls at a time
-- No domain-service or API-controller changes required
-
-### WebhookEvent (in-process model)
-```csharp
-public record WebhookEvent(
-    string EventType,        // e.g. "content.published"
-    Guid WorkspaceId,
-    Guid EntityId,
-    string EntityType,
-    DateTimeOffset OccurredAt,
-    object Payload           // serialized to JSON in dispatcher
-);
-```
+- Claims due delivery intents with leases, signs the exact payload bytes, and includes stable `X-Cmsify-Event-Id` for consumer deduplication.
+- Uses exponential backoff; after `MaxAttempts` (default 10), preserves a terminal dead-letter diagnostic until manual retry.
 
 ---
 
@@ -183,8 +161,8 @@ public static IServiceCollection AddCmsifyInfrastructure(
     services.AddScoped<IWebhookRepository, WebhookRepository>();
     services.AddScoped<IAuditLogRepository, AuditLogRepository>();
     services.AddStorageProvider(configuration);
-    services.AddSingleton<IWebhookQueue, InProcessWebhookQueue>();
-    services.AddSingleton<IScheduledPublishingDispatcher, InProcessScheduledPublishingDispatcher>();
+    services.AddScoped<IWebhookOutbox, EfWebhookOutbox>();
+    services.AddScoped<IScheduledPublishingDispatcher, ScheduledPublishingDispatcher>();
     services.AddHostedService<ScheduledPublishingService>();
     services.AddHostedService<WebhookDispatchService>();
     services.AddHostedService<WebhookRetryService>();

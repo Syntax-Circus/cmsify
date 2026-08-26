@@ -538,6 +538,19 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("pending_effective_start_at");
 
+                    b.Property<DateTimeOffset?>("PublishLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("publish_lease_expires_at");
+
+                    b.Property<string>("PublishLeaseOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("publish_lease_owner");
+
+                    b.Property<Guid?>("PublishLeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("publish_lease_token");
+
                     b.Property<DateTimeOffset?>("PublishAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("publish_at");
@@ -606,6 +619,9 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Status", "PublishAt")
                         .HasDatabaseName("ix_content_items_status_publish_at");
+
+                    b.HasIndex("Status", "PublishAt", "PublishLeaseExpiresAt")
+                        .HasDatabaseName("ix_content_items_status_publish_at_publish_lease_expires_at");
 
                     b.HasIndex("WorkspaceId", "TemplateVersionId", "Slug")
                         .IsUnique()
@@ -1701,6 +1717,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<DateTimeOffset?>("DeadLetteredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dead_lettered_at");
+
                     b.Property<string>("EventType")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -1715,6 +1735,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_failed");
 
+                    b.Property<bool>("IsDeadLetter")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_dead_letter");
+
                     b.Property<DateTimeOffset?>("LastAttemptAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_attempt_at");
@@ -1722,6 +1746,20 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("LeaseExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("last_error");
 
                     b.Property<DateTimeOffset?>("NextRetryAt")
                         .HasColumnType("timestamp with time zone")
@@ -1739,11 +1777,20 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("webhook_endpoint_id");
 
+                    b.Property<Guid>("WebhookEventId")
+                        .IsRequired()
+                        .HasColumnType("uuid")
+                        .HasColumnName("webhook_event_id");
+
                     b.HasKey("Id")
                         .HasName("pk_webhook_delivery_logs");
 
                     b.HasIndex("WebhookEndpointId")
                         .HasDatabaseName("ix_webhook_delivery_logs_webhook_endpoint_id");
+
+                    b.HasIndex("WebhookEventId", "WebhookEndpointId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_webhook_delivery_logs_webhook_event_id_webhook_endpoint_id");
 
                     b.HasIndex("IsDelivered", "IsFailed", "NextRetryAt", "LeaseExpiresAt")
                         .HasDatabaseName("ix_webhook_delivery_logs_is_delivered_is_failed_next_retry_at_");
@@ -1829,6 +1876,69 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("webhook_endpoints", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.WebhookOutboxEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("entity_id");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("event_type");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<JsonElement>("Payload")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<DateTimeOffset?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<Guid?>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_webhook_outbox_events");
+
+                    b.HasIndex("EventType", "WorkspaceId", "OccurredAt")
+                        .HasDatabaseName("ix_webhook_outbox_events_event_type_workspace_id_occurred_at");
+
+                    b.HasIndex("ProcessedAt", "LeaseExpiresAt")
+                        .HasDatabaseName("ix_webhook_outbox_events_processed_at_lease_expires_at");
+
+                    b.ToTable("webhook_outbox_events", (string)null);
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.WebhookSubscription", b =>

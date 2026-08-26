@@ -237,7 +237,7 @@ public sealed class WebhooksController : ControllerBase
         var items = await query.OrderByDescending(log => log.CreatedAt)
             .Skip(offset)
             .Take(pagination.PageSize)
-            .Select(log => new WebhookDeliveryResponse(log.Id, log.WebhookEndpointId, log.EventType, log.Payload, log.AttemptCount, log.LastAttemptAt, log.NextRetryAt, log.StatusCode, log.IsDelivered, log.IsFailed, log.CreatedAt))
+            .Select(log => new WebhookDeliveryResponse(log.Id, log.WebhookEndpointId, log.WebhookEventId, log.EventType, log.Payload, log.AttemptCount, log.LastAttemptAt, log.NextRetryAt, log.StatusCode, log.IsDelivered, log.IsFailed, log.LastError, log.IsDeadLetter, log.DeadLetteredAt, log.CreatedAt))
             .ToListAsync(ct);
         return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookDeliveryResponse>(items, total, pagination.Page, pagination.PageSize));
     }
@@ -262,7 +262,17 @@ public sealed class WebhooksController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Delivered webhook deliveries cannot be retried");
         }
 
+        if (!delivery.IsFailed)
+        {
+            return this.Error(StatusCodes.Status409Conflict, "conflict", "Only terminal failed webhook deliveries can be retried");
+        }
+
         delivery.IsFailed = false;
+        delivery.IsDeadLetter = false;
+        delivery.DeadLetteredAt = null;
+        delivery.LeaseOwner = null;
+        delivery.LeaseToken = null;
+        delivery.LeaseExpiresAt = null;
         delivery.NextRetryAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
         return Accepted();

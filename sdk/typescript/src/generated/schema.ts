@@ -4571,6 +4571,8 @@ export interface components {
             id: string;
             /** Format: uuid */
             webhookEndpointId: string;
+            /** Format: uuid */
+            eventId?: string | null;
             eventType: string;
             payload: unknown;
             /** Format: int32 */
@@ -4583,6 +4585,10 @@ export interface components {
             statusCode?: number | null;
             isDelivered: boolean;
             isFailed: boolean;
+            lastError?: string | null;
+            isDeadLetter: boolean;
+            /** Format: date-time */
+            deadLetteredAt?: string | null;
             /** Format: date-time */
             createdAt: string;
         };

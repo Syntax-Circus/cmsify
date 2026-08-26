@@ -57,6 +57,14 @@ API clients use `Authorization: Bearer cmsify_...`. Keep those tokens server-sid
 
 Use `/health/live` and `/health/ready` for container orchestration and monitoring. A failed readiness check should remove the instance from traffic while leaving the process available for diagnosis. Use the dashboard only for a human operator investigating a deployment or incident; it always renders the current report and is not a probe target.
 
+## Durable webhooks and scheduled publication
+
+Webhook-producing mutations write a durable outbox record in the same database transaction. Delivery is **at least once**: consumers must deduplicate attempts by `X-Cmsify-Event-Id`, which remains stable across retries. Cmsify signs the exact transmitted JSON bytes with the endpoint secret in `X-Cmsify-Signature`; validate the HMAC against those bytes, not a reserialized payload. The endpoint destination is revalidated on every attempt.
+
+Workers claim bounded outbox, delivery, and scheduled-publication batches with owner/token leases. A live lease cannot be stolen; an expired lease is recovered by a new worker, so API replicas can safely process work concurrently. Delivery failures use exponential backoff. At `Webhook__MaxAttempts`, the delivery becomes a retained dead letter with its error, attempt, event, and terminal timestamp; operators can explicitly requeue terminal rows through the existing retry route. Retention deletes only old processed outbox rows and successfully delivered logs in bounded batches. Pending, retrying, and dead-letter rows are never deleted automatically.
+
+The shared `Cmsify.Operational` meter provides low-cardinality counters and gauges without event, workspace, or endpoint labels: `cmsify.webhook.outbox.pending`, `cmsify.webhook.outbox.claimed`, `cmsify.webhook.outbox.reclaimed`, `cmsify.webhook.outbox.materialized`, `cmsify.webhook.outbox.failures`, `cmsify.webhook.delivery.due`, `cmsify.webhook.delivery.claimed`, `cmsify.webhook.delivery.reclaimed`, `cmsify.webhook.delivery.succeeded`, `cmsify.webhook.delivery.retried`, `cmsify.webhook.delivery.dead_lettered`, `cmsify.schedule.due`, `cmsify.schedule.claimed`, `cmsify.schedule.reclaimed`, `cmsify.schedule.published`, `cmsify.schedule.failures`, `cmsify.cleanup.outbox_deleted`, and `cmsify.cleanup.deliveries_deleted`.
+
 For example, a healthy readiness response contains the existing dependency results plus deployment metadata:
 
 ```json

@@ -509,17 +509,11 @@ public interface IContentSearchVectorBuilder
     string Build(ContentItem item, TemplateVersion version);
 }
 
-// Scale-out seam: abstracts in-process channel today, outbox table tomorrow
-public interface IWebhookQueue
-{
-    ValueTask EnqueueAsync(WebhookEvent evt, CancellationToken ct = default);
-    IAsyncEnumerable<WebhookEvent> DequeueAllAsync(CancellationToken ct = default);
-}
-
-// Scale-out seam: abstracts single-instance polling today, leader-elected dispatch tomorrow
+// Durable scheduled publication claim/complete boundary
 public interface IScheduledPublishingDispatcher
 {
-    Task RunOnceAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<ScheduledContentClaimDto>> ClaimDueAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default);
+    Task<bool> CompleteClaimAsync(ScheduledContentClaimDto claim, DateTimeOffset now, CancellationToken ct = default);
 }
 ```
 

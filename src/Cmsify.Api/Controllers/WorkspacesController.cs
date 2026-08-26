@@ -6,6 +6,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Core.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
+using Cmsify.Infrastructure.Persistence;
 using SyntaxCircus.Cmsify.Contracts;
 using ContractWorkspaceDto = SyntaxCircus.Cmsify.Contracts.WorkspaceDto;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
@@ -21,14 +22,16 @@ public sealed class WorkspacesController : ControllerBase
     private readonly IWorkspaceRepository workspaceRepository;
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
-    private readonly IWebhookQueue webhookQueue;
+    private readonly IWebhookOutbox webhookOutbox;
+    private readonly CmsifyDbContext dbContext;
 
-    public WorkspacesController(IWorkspaceRepository workspaceRepository, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookQueue webhookQueue)
+    public WorkspacesController(IWorkspaceRepository workspaceRepository, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox, CmsifyDbContext dbContext)
     {
         this.workspaceRepository = workspaceRepository;
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
-        this.webhookQueue = webhookQueue;
+        this.webhookOutbox = webhookOutbox;
+        this.dbContext = dbContext;
     }
 
     [HttpGet]
@@ -107,8 +110,12 @@ public sealed class WorkspacesController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid workspace", SlugRules.ValidationMessage);
         }
 
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
         var workspace = await workspaceRepository.UpdateAsync(new UpdateWorkspaceCommand(id, request.Name, request.Slug, request.Description), ct);
-        await webhookQueue.EnqueueAsync(new WebhookEvent("workspace.updated", id, id, JsonSerializer.SerializeToElement(new { workspaceId = id, workspace.Name, workspace.Slug }), DateTimeOffset.UtcNow), ct);
+        var occurredAt = DateTimeOffset.UtcNow;
+        webhookOutbox.Enqueue("workspace.updated", id, id, JsonSerializer.SerializeToElement(new { workspaceId = id, workspace.Name, workspace.Slug }), occurredAt);
+        await dbContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         Response.Headers.ETag = ToETag(workspace);
         return Ok(await WithCapabilitiesAsync(workspace, ct));
     }

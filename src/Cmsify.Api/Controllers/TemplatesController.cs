@@ -26,15 +26,15 @@ public sealed class TemplatesController : ControllerBase
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IFieldConfigValidator fieldConfigValidator;
-    private readonly IWebhookQueue webhookQueue;
+    private readonly IWebhookOutbox webhookOutbox;
 
-    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IFieldConfigValidator fieldConfigValidator, IWebhookQueue webhookQueue)
+    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IFieldConfigValidator fieldConfigValidator, IWebhookOutbox webhookOutbox)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
         this.fieldConfigValidator = fieldConfigValidator;
-        this.webhookQueue = webhookQueue;
+        this.webhookOutbox = webhookOutbox;
     }
 
     [HttpGet]
@@ -281,6 +281,7 @@ public sealed class TemplatesController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Only draft versions can be published");
         }
 
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
         await dbContext.TemplateVersions
             .Where(candidate => candidate.TemplateId == id && candidate.Status == TemplateVersionStatus.Published)
             .ExecuteUpdateAsync(updates => updates.SetProperty(candidate => candidate.Status, TemplateVersionStatus.Archived), ct);
@@ -291,14 +292,14 @@ public sealed class TemplatesController : ControllerBase
         var template = await dbContext.Templates.FirstAsync(template => template.Id == id, ct);
         template.CurrentVersionId = version.Id;
         template.UpdatedAt = DateTimeOffset.UtcNow;
-        await dbContext.SaveChangesAsync(ct);
-        await webhookQueue.EnqueueAsync(new WebhookEvent(
+        webhookOutbox.Enqueue(
             "template.version_published",
             workspaceId,
             version.Id,
             JsonSerializer.SerializeToElement(new { templateId = id, templateVersionId = version.Id, versionNumber = version.VersionNumber, workspaceId }),
-            DateTimeOffset.UtcNow),
-            ct);
+            DateTimeOffset.UtcNow);
+        await dbContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return Ok(ToVersionResponse(version));
     }
 

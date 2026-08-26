@@ -8437,6 +8437,7 @@
           "createdAt",
           "eventType",
           "id",
+          "isDeadLetter",
           "isDelivered",
           "isFailed",
           "payload",
@@ -8451,6 +8452,11 @@
           "webhookEndpointId": {
             "type": "string",
             "format": "uuid"
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "eventType": {
             "type": "string"
@@ -8480,6 +8486,18 @@
           },
           "isFailed": {
             "type": "boolean"
+          },
+          "lastError": {
+            "type": "string",
+            "nullable": true
+          },
+          "isDeadLetter": {
+            "type": "boolean"
+          },
+          "deadLetteredAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "createdAt": {
             "type": "string",

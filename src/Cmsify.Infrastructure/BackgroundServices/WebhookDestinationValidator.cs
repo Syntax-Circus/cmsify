@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
 using Cmsify.Core.Interfaces.Services;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Cmsify.Infrastructure.BackgroundServices;
 
@@ -9,9 +11,15 @@ public sealed class WebhookDestinationValidator : IWebhookDestinationValidator
 {
     private readonly bool allowHttp;
 
-    public WebhookDestinationValidator(IConfiguration configuration)
+    [ActivatorUtilitiesConstructor]
+    public WebhookDestinationValidator(IOptions<WebhookOperationalOptions> options)
     {
-        allowHttp = configuration.GetValue("Webhook:AllowHttp", false);
+        allowHttp = options.Value.AllowHttp;
+    }
+
+    public WebhookDestinationValidator(IConfiguration configuration)
+        : this(Options.Create(OperationalOptions.ReadWebhook(configuration)))
+    {
     }
 
     public async Task<WebhookDestinationValidationResult> ValidateAsync(string url, CancellationToken ct = default)

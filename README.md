@@ -110,12 +110,21 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Storage__S3__ServiceUrl` | empty | Optional S3-compatible endpoint URL. |
 | `Media__MaxFileSizeMb` | `50` | Maximum uploaded media-file size in MiB. |
 | `Media__AllowedMimeTypes` | documented default list | Comma-separated MIME types or prefixes allowed for uploads. |
-| `Webhook__QueueCapacity` | `1024` | Capacity of the in-process webhook event queue. |
+| `Webhook__OutboxPollIntervalSeconds` | `30` | Durable outbox polling interval (1–3600 seconds). |
+| `Webhook__OutboxLeaseDurationSeconds` | `300` | Outbox claim lease (1–1800 seconds). |
+| `Webhook__OutboxBatchSize` | `100` | Maximum outbox rows claimed per cycle (1–500). |
 | `Webhook__RetryIntervalSeconds` | `30` | Interval for polling webhook deliveries due for retry. |
+| `Webhook__DeliveryLeaseDurationSeconds` | `300` | Delivery claim lease (1–1800 seconds). |
+| `Webhook__DeliveryBatchSize` | `100` | Maximum due delivery rows claimed per cycle (1–500). |
 | `Webhook__MaxAttempts` | `10` | Maximum webhook delivery attempts before failure. |
-| `Webhook__RequestTimeoutSeconds` | `15` | Outbound webhook HTTP timeout, clamped to 1–120 seconds. |
+| `Webhook__RequestTimeoutSeconds` | `15` | Outbound webhook HTTP timeout (1–120 seconds). |
 | `Webhook__AllowHttp` | `false` | Allows non-TLS webhook endpoints. Keep `false` outside controlled development. |
+| `Webhook__RetentionDays` | `30` | Retention for processed outbox rows and successful delivery logs; retry and dead-letter diagnostics are retained. |
+| `Webhook__CleanupBatchSize` | `100` | Per-table retention deletion limit per cleanup cycle (1–500). |
+| `Webhook__CleanupIntervalSeconds` | `3600` | Durable-worker cleanup cadence (1–86400 seconds). |
 | `Scheduler__PublishingIntervalSeconds` | `60` | Interval for processing scheduled content publication. |
+| `Scheduler__PublishingLeaseDurationSeconds` | `300` | Durable scheduled-publication lease (1–1800 seconds). |
+| `Scheduler__PublishingBatchSize` | `100` | Maximum due scheduled rows claimed per cycle (1–500). |
 
 ### Admin
 

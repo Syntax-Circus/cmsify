@@ -35,6 +35,10 @@ The workspace slug is useful for discovery and configuration, but requests to wo
 - Respect `429` responses and `Retry-After`; the published client handles this automatically.
 - Send and store timestamps as UTC/ISO 8601 values.
 
+## Webhook consumers
+
+Webhook delivery is at least once. Persist `X-Cmsify-Event-Id` and deduplicate by that stable event identity; retries reuse it. Verify `X-Cmsify-Signature` against the exact received request bytes using the endpoint secret. Non-success responses and transport failures are retried with exponential backoff until the configured maximum, then remain available to operators as dead letters. Cmsify revalidates the configured destination before every attempt.
+
 ## TypeScript client
 
 The repository contains `@cmsify/client`, generated from the API OpenAPI document and wrapped with typed helpers for workspaces, content, templates, media, health, and authentication. Its npm publication is pending; use the package from `sdk/typescript` during repository development. See [`sdk/typescript/README.md`](../sdk/typescript/README.md) for installation, examples, retries, ETags, and regeneration.

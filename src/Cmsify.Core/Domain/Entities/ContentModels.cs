@@ -27,6 +27,12 @@ public sealed class ContentItem : SoftDeletableEntity
 
     public DateTimeOffset? ArchivedAt { get; set; }
 
+    public string? PublishLeaseOwner { get; set; }
+
+    public Guid? PublishLeaseToken { get; set; }
+
+    public DateTimeOffset? PublishLeaseExpiresAt { get; set; }
+
     public string? SearchVector { get; set; }
 
     public Guid? CreatedByUserId { get; set; }

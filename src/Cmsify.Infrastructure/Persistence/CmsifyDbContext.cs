@@ -54,6 +54,8 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<WebhookDeliveryLog> WebhookDeliveryLogs => Set<WebhookDeliveryLog>();
 
+    public DbSet<WebhookOutboxEvent> WebhookOutboxEvents => Set<WebhookOutboxEvent>();
+
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     public DbSet<PickList> PickLists => Set<PickList>();

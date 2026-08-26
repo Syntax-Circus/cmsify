@@ -11,6 +11,7 @@ using Cmsify.Infrastructure.Persistence.Repositories;
 using Cmsify.Infrastructure.Security;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Extensions;
@@ -52,18 +53,37 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IApiClientRepository, ApiClientRepository>();
         services.AddScoped<IWebhookRepository, WebhookRepository>();
+        services.AddScoped<IScheduledPublishingRepository, ScheduledPublishingRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddStorageProvider(configuration);
-        services.AddSingleton<IWebhookDestinationValidator, WebhookDestinationValidator>();
-        services.AddHttpClient(nameof(WebhookDeliveryProcessor), client =>
-            client.Timeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Webhook:RequestTimeoutSeconds", 15), 1, 120)))
+        services.AddOptions<WebhookOperationalOptions>()
+            .Bind(configuration.GetSection(WebhookOperationalOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<WebhookOperationalOptions>, WebhookOperationalOptionsValidator>();
+        services.AddOptions<SchedulerOperationalOptions>()
+            .Bind(configuration.GetSection(SchedulerOperationalOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<SchedulerOperationalOptions>, SchedulerOperationalOptionsValidator>();
+        services.AddSingleton<IWebhookDestinationValidator>(provider =>
+            new WebhookDestinationValidator(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>()));
+        services.AddHttpClient(nameof(WebhookDeliveryProcessor), (provider, client) =>
+            client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<WebhookDeliveryProcessor>();
-        services.AddSingleton<IWebhookQueue, InProcessWebhookQueue>();
-        services.AddScoped<IScheduledPublishingDispatcher, InProcessScheduledPublishingDispatcher>();
-        services.AddHostedService<ScheduledPublishingService>();
-        services.AddHostedService<WebhookDispatchService>();
-        services.AddHostedService<WebhookRetryService>();
+        services.AddScoped<IWebhookOutbox, EfWebhookOutbox>();
+        services.AddScoped<IScheduledPublishingDispatcher, ScheduledPublishingDispatcher>();
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new ScheduledPublishingService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SchedulerOperationalOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ScheduledPublishingService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookDispatchService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookDispatchService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookRetryService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookRetryService>>()));
 
         return services;
     }

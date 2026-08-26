@@ -139,7 +139,7 @@ public sealed record UpdateWebhookEndpointRequest(string Name, string Url, bool 
 
 public sealed record CreateWebhookEndpointResponse(WebhookEndpointResponse Endpoint, string Secret);
 
-public sealed record WebhookDeliveryResponse(Guid Id, Guid WebhookEndpointId, string EventType, JsonElement Payload, int AttemptCount, DateTimeOffset? LastAttemptAt, DateTimeOffset? NextRetryAt, int? StatusCode, bool IsDelivered, bool IsFailed, DateTimeOffset CreatedAt);
+public sealed record WebhookDeliveryResponse(Guid Id, Guid WebhookEndpointId, Guid? EventId, string EventType, JsonElement Payload, int AttemptCount, DateTimeOffset? LastAttemptAt, DateTimeOffset? NextRetryAt, int? StatusCode, bool IsDelivered, bool IsFailed, string? LastError, bool IsDeadLetter, DateTimeOffset? DeadLetteredAt, DateTimeOffset CreatedAt);
 
 public sealed record AuditActorResponse(string Type, Guid Id, string? DisplayName);
 
