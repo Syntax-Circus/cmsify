@@ -41,6 +41,10 @@ public sealed class WebhookDestinationValidator : IWebhookDestinationValidator
                 ? [address]
                 : (await dnsResolver.ResolveAsync(uri.DnsSafeHost, ct)).ToArray();
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception)
         {
             return WebhookDestinationValidationResult.Invalid("Webhook host could not be resolved.");

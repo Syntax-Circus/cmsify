@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Diagnostics.Metrics;
+using System.Text.Json;
+using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Infrastructure.BackgroundServices;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
@@ -108,18 +111,59 @@ public sealed class WebhookDestinationValidatorTests
     }
 
     [Fact]
-    public async Task ValidateAsync_RejectsCancelledResolution_AndForwardsCancellationToken()
+    public async Task ValidateAsync_RethrowsCallerRequestedCancellation_AndForwardsCancellationToken()
     {
         var resolver = Substitute.For<IWebhookDnsResolver>();
         using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
         resolver.ResolveAsync("hooks.example.test", cancellation.Token)
             .Returns<Task<IPAddress[]>>(_ => throw new OperationCanceledException(cancellation.Token));
 
-        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a", cancellation.Token);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a", cancellation.Token));
 
-        Assert.False(result.IsValid);
-        Assert.Equal("Webhook host could not be resolved.", result.Error);
         await resolver.Received(1).ResolveAsync("hooks.example.test", cancellation.Token);
+    }
+
+    [Fact]
+    public async Task DeliverRetryAsync_RethrowsCallerRequestedDnsCancellationWithoutSideEffects()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var resolver = Substitute.For<IWebhookDnsResolver>();
+        resolver.ResolveAsync("hooks.example.test", cancellation.Token)
+            .Returns<Task<IPAddress[]>>(_ => throw new OperationCanceledException(cancellation.Token));
+        var factory = Substitute.For<IHttpClientFactory>();
+        var repository = Substitute.For<IWebhookRepository>();
+        using var listener = new MeterListener();
+        var securityMeasurements = new List<string>();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
+        {
+            if (instrument.Name is "cmsify.webhook.destination.rejected" or "cmsify.webhook.connection.failed")
+            {
+                securityMeasurements.Add(instrument.Name);
+            }
+        });
+        listener.Start();
+        using var payload = JsonDocument.Parse("{}");
+        var delivery = new PendingWebhookDeliveryDto(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "workspace.updated",
+            "https://hooks.example.test/cancelled", "secret", payload.RootElement.Clone(), 0,
+            DateTimeOffset.UtcNow, "worker", Guid.NewGuid());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new WebhookDeliveryProcessor(factory, repository, CreateValidator(resolver))
+            .DeliverRetryAsync(delivery, 2, cancellation.Token));
+
+        factory.DidNotReceive().CreateClient(Arg.Any<string>());
+        _ = repository.DidNotReceive().CompleteDeliverySucceededAsync(Arg.Any<WebhookDeliveryCompletionDto>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        _ = repository.DidNotReceive().CompleteDeliveryFailedAsync(Arg.Any<WebhookDeliveryCompletionDto>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        Assert.Empty(securityMeasurements);
     }
 
     [Fact]
