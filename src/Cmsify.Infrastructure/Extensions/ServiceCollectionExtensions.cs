@@ -69,9 +69,12 @@ public static class ServiceCollectionExtensions
             new WebhookDestinationValidator(
                 provider.GetRequiredService<IWebhookDnsResolver>(),
                 provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>()));
+        services.AddSingleton<IWebhookSocketConnector, SocketWebhookConnector>();
         services.AddHttpClient(nameof(WebhookDeliveryProcessor), (provider, client) =>
             client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds))
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+            .ConfigurePrimaryHttpMessageHandler(provider => PinnedWebhookTransport.CreateHandler(
+                provider.GetRequiredService<IWebhookSocketConnector>(),
+                TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds)));
         services.AddScoped<WebhookDeliveryProcessor>();
         services.AddScoped<IWebhookOutbox, EfWebhookOutbox>();
         services.AddScoped<IScheduledPublishingDispatcher, ScheduledPublishingDispatcher>();
