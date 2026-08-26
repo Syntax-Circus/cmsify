@@ -118,7 +118,7 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Webhook__DeliveryBatchSize` | `100` | Maximum due delivery rows claimed per cycle (1–500). |
 | `Webhook__MaxAttempts` | `10` | Maximum webhook delivery attempts before failure. |
 | `Webhook__RequestTimeoutSeconds` | `15` | Outbound webhook HTTP timeout (1–120 seconds). |
-| `Webhook__AllowHttp` | `false` | Allows non-TLS webhook endpoints. Keep `false` outside controlled development. |
+| `Webhook__AllowHttp` | `false` | Allows non-TLS webhook endpoints. Keep `false`; opt in only for controlled development. Webhook egress remains direct-only and does not provide a proxy mode. |
 | `Webhook__RetentionDays` | `30` | Retention for processed outbox rows and successful delivery logs; retry and dead-letter diagnostics are retained. |
 | `Webhook__CleanupBatchSize` | `100` | Per-table retention deletion limit per cleanup cycle (1–500). |
 | `Webhook__CleanupIntervalSeconds` | `3600` | Durable-worker cleanup cadence (1–86400 seconds). |
