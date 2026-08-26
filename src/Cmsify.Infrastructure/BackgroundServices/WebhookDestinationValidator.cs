@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Sockets;
 using Cmsify.Core.Interfaces.Services;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Configuration;
@@ -10,15 +9,17 @@ namespace Cmsify.Infrastructure.BackgroundServices;
 public sealed class WebhookDestinationValidator : IWebhookDestinationValidator
 {
     private readonly bool allowHttp;
+    private readonly IWebhookDnsResolver dnsResolver;
 
     [ActivatorUtilitiesConstructor]
-    public WebhookDestinationValidator(IOptions<WebhookOperationalOptions> options)
+    public WebhookDestinationValidator(IWebhookDnsResolver dnsResolver, IOptions<WebhookOperationalOptions> options)
     {
+        this.dnsResolver = dnsResolver;
         allowHttp = options.Value.AllowHttp;
     }
 
-    public WebhookDestinationValidator(IConfiguration configuration)
-        : this(Options.Create(OperationalOptions.ReadWebhook(configuration)))
+    public WebhookDestinationValidator(IWebhookDnsResolver dnsResolver, IConfiguration configuration)
+        : this(dnsResolver, Options.Create(OperationalOptions.ReadWebhook(configuration)))
     {
     }
 
@@ -38,43 +39,18 @@ public sealed class WebhookDestinationValidator : IWebhookDestinationValidator
         {
             addresses = IPAddress.TryParse(uri.DnsSafeHost, out var address)
                 ? [address]
-                : await Dns.GetHostAddressesAsync(uri.DnsSafeHost, ct);
+                : (await dnsResolver.ResolveAsync(uri.DnsSafeHost, ct)).ToArray();
         }
-        catch (Exception ex) when (ex is SocketException or OperationCanceledException)
+        catch (Exception)
         {
             return WebhookDestinationValidationResult.Invalid("Webhook host could not be resolved.");
         }
 
-        if (addresses.Length == 0 || addresses.Any(IsNonPublic))
+        if (addresses.Length == 0 || addresses.Any(address => !WebhookAddressPolicy.IsGlobal(address)))
         {
             return WebhookDestinationValidationResult.Invalid("Webhook URLs must not resolve to private, loopback, or reserved addresses.");
         }
 
-        return WebhookDestinationValidationResult.Valid(uri.AbsoluteUri);
-    }
-
-    private static bool IsNonPublic(IPAddress address)
-    {
-        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.None) || address.Equals(IPAddress.IPv6Any) || address.Equals(IPAddress.IPv6None) || address.IsIPv6LinkLocal || address.IsIPv6Multicast || address.IsIPv6SiteLocal)
-        {
-            return true;
-        }
-
-        var bytes = address.GetAddressBytes();
-        if (address.AddressFamily == AddressFamily.InterNetwork)
-        {
-            return bytes[0] == 0
-                || bytes[0] == 10
-                || bytes[0] == 127
-                || bytes[0] >= 224
-                || (bytes[0] == 100 && bytes[1] is >= 64 and <= 127)
-                || (bytes[0] == 169 && bytes[1] == 254)
-                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
-                || (bytes[0] == 192 && bytes[1] == 168)
-                || (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19));
-        }
-
-        return address.AddressFamily != AddressFamily.InterNetworkV6
-            || (bytes[0] & 0xfe) == 0xfc;
+        return WebhookDestinationValidationResult.Valid(uri, addresses);
     }
 }

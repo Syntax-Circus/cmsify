@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
@@ -95,11 +96,15 @@ public interface IWebhookDestinationValidator
     Task<WebhookDestinationValidationResult> ValidateAsync(string url, CancellationToken ct = default);
 }
 
-public sealed record WebhookDestinationValidationResult(bool IsValid, string? NormalizedUrl, string? Error)
+public sealed record WebhookDestinationValidationResult(
+    bool IsValid, Uri? DestinationUri, IReadOnlyList<IPAddress> Addresses, string? Error)
 {
-    public static WebhookDestinationValidationResult Valid(string normalizedUrl) => new(true, normalizedUrl, null);
+    public string? NormalizedUrl => DestinationUri?.AbsoluteUri;
 
-    public static WebhookDestinationValidationResult Invalid(string error) => new(false, null, error);
+    public static WebhookDestinationValidationResult Valid(Uri uri, IReadOnlyList<IPAddress> addresses) =>
+        new(true, uri, addresses.ToArray(), null);
+
+    public static WebhookDestinationValidationResult Invalid(string error) => new(false, null, [], error);
 }
 
 public interface IScheduledPublishingDispatcher

@@ -64,8 +64,11 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(SchedulerOperationalOptions.SectionName))
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<SchedulerOperationalOptions>, SchedulerOperationalOptionsValidator>();
+        services.AddSingleton<IWebhookDnsResolver, SystemWebhookDnsResolver>();
         services.AddSingleton<IWebhookDestinationValidator>(provider =>
-            new WebhookDestinationValidator(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>()));
+            new WebhookDestinationValidator(
+                provider.GetRequiredService<IWebhookDnsResolver>(),
+                provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>()));
         services.AddHttpClient(nameof(WebhookDeliveryProcessor), (provider, client) =>
             client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });

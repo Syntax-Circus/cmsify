@@ -200,7 +200,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(handler));
         var validator = Substitute.For<IWebhookDestinationValidator>();
-        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(endpoint.Url));
+        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("8.8.8.8")]));
         await using var workerContext = await CreateContextAsync();
         var worker = CreateRepository(workerContext);
         var claim = Assert.Single(await worker.ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1));
@@ -292,7 +292,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var clientFactory = Substitute.For<IHttpClientFactory>();
         clientFactory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(handler));
         var validator = Substitute.For<IWebhookDestinationValidator>();
-        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(endpoint.Url));
+        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("8.8.8.8")]));
         var timeProvider = new MutableTimeProvider(firstAttemptAt);
         await using var firstWorkerContext = await CreateContextAsync();
         var firstWorker = CreateRepository(firstWorkerContext);
@@ -344,7 +344,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(new AdvancingHandler(clock, completedAt, HttpStatusCode.ServiceUnavailable)));
         var validator = Substitute.For<IWebhookDestinationValidator>();
-        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(endpoint.Url));
+        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("8.8.8.8")]));
 
         await new WebhookDeliveryProcessor(factory, repository, validator, clock).DeliverRetryAsync(claim, 3, CancellationToken.None);
 
@@ -402,7 +402,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var clientFactory = Substitute.For<IHttpClientFactory>();
         clientFactory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(handler));
         var validator = Substitute.For<IWebhookDestinationValidator>();
-        validator.ValidateAsync("https://example.test/hook", Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid("https://example.test/hook"));
+        validator.ValidateAsync("https://example.test/hook", Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(new Uri("https://example.test/hook"), [IPAddress.Parse("8.8.8.8")]));
         var claim = Assert.Single(await CreateRepository(context).ClaimPendingDeliveryLogsAsync("legacy-worker", now, TimeSpan.FromMinutes(1), 1));
 
         await new WebhookDeliveryProcessor(clientFactory, CreateRepository(context), validator, new MutableTimeProvider(now))
@@ -682,7 +682,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(new AdvancingHandler(clock, now.AddSeconds(2))));
         var validator = Substitute.For<IWebhookDestinationValidator>();
-        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(endpoint.Url));
+        validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("8.8.8.8")]));
 
         await new WebhookDeliveryProcessor(factory, repository, validator, clock).DeliverRetryAsync(claim, 2, CancellationToken.None);
 
