@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Diagnostics.Metrics;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Security;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,33 +23,59 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_AdvancesCursorThenRefreshesCountsBeforeDelayingAndResetting()
+    public async Task ExecuteAsync_RefreshesThenDelaysAndResetsTheCursorBeforeTheNextBatch()
     {
         using var cancellation = new CancellationTokenSource();
         var firstCursor = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var secondCursor = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var events = new List<string>();
         var processor = Substitute.For<IWebhookSecretRotationProcessor>();
         processor.RotateBatchAsync(null, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new SecretRotationBatchResult(firstCursor, 1, 1, 0, 0, false)));
+            .Returns(
+                _ =>
+                {
+                    events.Add("batch:null:first");
+                    return Task.FromResult(new SecretRotationBatchResult(firstCursor, 1, 1, 0, 0, false));
+                },
+                _ =>
+                {
+                    events.Add("batch:null:after-reset");
+                    return Task.FromResult(new SecretRotationBatchResult(null, 0, 0, 0, 0, true));
+                });
         processor.RotateBatchAsync(firstCursor, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new SecretRotationBatchResult(secondCursor, 1, 0, 1, 0, true)));
+            .Returns(_ =>
+            {
+                events.Add("batch:first-cursor");
+                return Task.FromResult(new SecretRotationBatchResult(secondCursor, 1, 0, 1, 0, true));
+            });
         processor.CountRemainingAsync(Arg.Any<CancellationToken>())
             .Returns(_ =>
             {
-                cancellation.Cancel();
+                events.Add("count");
                 return Task.FromResult<IReadOnlyList<SecretCiphertextCount>>([new("v2", "key_current", 3)]);
             });
         var scopeFactory = ScopeFactoryFor(processor);
-        var delay = new CancellingDelayTimeProvider(cancellation, cancelOnDelay: 2);
+        var delay = new CancellingDelayTimeProvider(cancellation, events, cancelOnDelay: 3);
         var service = CreateService(scopeFactory, enabled: true, delay);
 
         await ExecuteAsync(service, cancellation.Token);
 
-        await processor.Received(1).RotateBatchAsync(null, Arg.Any<CancellationToken>());
+        await processor.Received(2).RotateBatchAsync(null, Arg.Any<CancellationToken>());
         await processor.Received(1).RotateBatchAsync(firstCursor, Arg.Any<CancellationToken>());
-        await processor.Received(1).CountRemainingAsync(Arg.Any<CancellationToken>());
-        scopeFactory.Received(2).CreateScope();
+        await processor.Received(2).CountRemainingAsync(Arg.Any<CancellationToken>());
+        scopeFactory.Received(3).CreateScope();
         Assert.Equal(TimeSpan.FromSeconds(7), delay.LastDueTime);
+        Assert.Equal(
+        [
+            "batch:null:first",
+            "delay",
+            "batch:first-cursor",
+            "count",
+            "delay",
+            "batch:null:after-reset",
+            "count",
+            "delay"
+        ], events);
     }
 
     [Fact]
@@ -66,9 +93,35 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
         var delay = new CancellingDelayTimeProvider(cancellation);
         var service = CreateService(scopeFactory, enabled: true, delay);
 
+        using var listener = new MeterListener();
+        var cycleOutcomes = new List<string>();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
+        {
+            if (instrument.Name == "cmsify.webhook.secret.rotation.cycles")
+            {
+                foreach (var tag in tags)
+                {
+                    if (tag.Key == "outcome")
+                    {
+                        cycleOutcomes.Add(tag.Value?.ToString() ?? string.Empty);
+                    }
+                }
+            }
+        });
+        listener.Start();
+
         await ExecuteAsync(service, cancellation.Token);
 
         Assert.Null(delay.LastDueTime);
+        Assert.DoesNotContain("failed", cycleOutcomes);
+        Assert.Empty(cycleOutcomes);
     }
 
     [Fact]
@@ -121,7 +174,7 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
             .GetMethod("ExecuteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(service, [cancellationToken])!;
 
-    private sealed class CancellingDelayTimeProvider(CancellationTokenSource cancellation, int cancelOnDelay = 1) : TimeProvider
+    private sealed class CancellingDelayTimeProvider(CancellationTokenSource cancellation, List<string>? events = null, int cancelOnDelay = 1) : TimeProvider
     {
         private int delayCount;
         public TimeSpan? LastDueTime { get; private set; }
@@ -130,6 +183,7 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
         {
             LastDueTime = dueTime;
             var delayNumber = Interlocked.Increment(ref delayCount);
+            events?.Add("delay");
             callback(state);
             if (delayNumber >= cancelOnDelay)
             {

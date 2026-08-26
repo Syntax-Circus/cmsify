@@ -74,6 +74,11 @@ public sealed class WebhookSecretRotationProcessor(
                     skipped++;
                 }
             }
+            catch (SecretDecryptFailureException exception)
+            {
+                RecordDecryptFailure(originalCiphertext, ToMetricReason(exception.Reason));
+                failed++;
+            }
             catch (CryptographicException)
             {
                 RecordDecryptFailure(originalCiphertext, "authentication");
@@ -129,4 +134,14 @@ public sealed class WebhookSecretRotationProcessor(
         var keyId = segments.Length > 1 && string.Equals(version, "v2", StringComparison.Ordinal) ? segments[1] : "unknown";
         CmsifyOperationalMetrics.RecordSecretDecryptFailure(version, keyId, reason, options.EncryptionKeys.Keys);
     }
+
+    private static string ToMetricReason(SecretDecryptFailureReason reason) => reason switch
+    {
+        SecretDecryptFailureReason.UnknownVersion => "unknown_version",
+        SecretDecryptFailureReason.UnknownKey => "unknown_key",
+        SecretDecryptFailureReason.Configuration => "configuration",
+        SecretDecryptFailureReason.MalformedCiphertext => "malformed_ciphertext",
+        SecretDecryptFailureReason.Authentication => "authentication",
+        _ => "unknown"
+    };
 }

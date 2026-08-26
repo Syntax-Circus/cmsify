@@ -48,24 +48,33 @@ public sealed class AesSecretProtector : ISecretProtector
 
     public string Unprotect(string protectedSecret)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(protectedSecret);
         try
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(protectedSecret);
             var parts = protectedSecret.Split('.', StringSplitOptions.None);
+            if (parts[0] is not "v1" and not "v2")
+            {
+                throw new SecretDecryptFailureException(SecretDecryptFailureReason.UnknownVersion);
+            }
+
             return parts switch
             {
                 ["v1", var nonce, var tag, var ciphertext] => DecryptV1(nonce, tag, ciphertext),
                 ["v2", var keyId, var nonce, var tag, var ciphertext] => DecryptV2(keyId, nonce, tag, ciphertext),
-                _ => throw new CryptographicException("Webhook secret is not in a supported encrypted format."),
+                _ => throw new SecretDecryptFailureException(SecretDecryptFailureReason.MalformedCiphertext),
             };
+        }
+        catch (SecretDecryptFailureException)
+        {
+            throw;
         }
         catch (FormatException exception)
         {
-            throw new CryptographicException("Webhook secret is malformed.", exception);
+            throw new SecretDecryptFailureException(SecretDecryptFailureReason.MalformedCiphertext, exception);
         }
         catch (ArgumentException exception) when (exception is not ArgumentNullException)
         {
-            throw new CryptographicException("Webhook secret is malformed.", exception);
+            throw new SecretDecryptFailureException(SecretDecryptFailureReason.MalformedCiphertext, exception);
         }
     }
 
@@ -73,15 +82,22 @@ public sealed class AesSecretProtector : ISecretProtector
     {
         if (string.IsNullOrWhiteSpace(legacyEncryptionKey))
         {
-            throw new CryptographicException("Webhook secret cannot be decrypted with the configured keys.");
+            throw new SecretDecryptFailureException(SecretDecryptFailureReason.Configuration);
         }
 
         var nonce = DecodeSegment(nonceValue, NonceLength);
         var tag = DecodeSegment(tagValue, TagLength);
         var ciphertext = DecodeSegment(ciphertextValue, minimumLength: 1);
         var plaintext = new byte[ciphertext.Length];
-        using var aes = new AesGcm(DeriveLegacyKey(legacyEncryptionKey), tag.Length);
-        aes.Decrypt(nonce, ciphertext, tag, plaintext);
+        try
+        {
+            using var aes = new AesGcm(DeriveLegacyKey(legacyEncryptionKey), tag.Length);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext);
+        }
+        catch (CryptographicException exception)
+        {
+            throw new SecretDecryptFailureException(SecretDecryptFailureReason.Authentication, exception);
+        }
         return Encoding.UTF8.GetString(plaintext);
     }
 
@@ -89,7 +105,7 @@ public sealed class AesSecretProtector : ISecretProtector
     {
         if (!IsKeyId(keyId) || !encryptionKeys.TryGetValue(keyId, out var key))
         {
-            throw new CryptographicException("Webhook secret cannot be decrypted with the configured keys.");
+            throw new SecretDecryptFailureException(SecretDecryptFailureReason.UnknownKey);
         }
 
         var nonce = DecodeSegment(nonceValue, NonceLength);
@@ -97,8 +113,15 @@ public sealed class AesSecretProtector : ISecretProtector
         var ciphertext = DecodeSegment(ciphertextValue, minimumLength: 1);
         var plaintext = new byte[ciphertext.Length];
 
-        using var aes = new AesGcm(key, tag.Length);
-        aes.Decrypt(nonce, ciphertext, tag, plaintext, AssociatedData(keyId));
+        try
+        {
+            using var aes = new AesGcm(key, tag.Length);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext, AssociatedData(keyId));
+        }
+        catch (CryptographicException exception)
+        {
+            throw new SecretDecryptFailureException(SecretDecryptFailureReason.Authentication, exception);
+        }
         return Encoding.UTF8.GetString(plaintext);
     }
 
@@ -129,7 +152,7 @@ public sealed class AesSecretProtector : ISecretProtector
             || (exactLength.HasValue && decoded.Length != exactLength.Value)
             || (minimumLength.HasValue && decoded.Length < minimumLength.Value))
         {
-            throw new CryptographicException("Webhook secret is malformed.");
+            throw new SecretDecryptFailureException(SecretDecryptFailureReason.MalformedCiphertext);
         }
 
         return decoded;

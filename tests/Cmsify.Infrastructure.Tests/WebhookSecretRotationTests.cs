@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics.Metrics;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
@@ -225,6 +226,69 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         Assert.DoesNotContain(counts, count => count.KeyId == "key_current");
     }
 
+    [Fact]
+    public async Task RotateBatch_ReportsTypedBoundedDecryptFailureReasons()
+    {
+        var missingLegacyProtector = CreateProtector(includeLegacyKey: false);
+        await using (var setup = await CreateContextAsync())
+        {
+            var authenticatedCiphertext = CreateOldCiphertext("authenticated");
+            var parts = authenticatedCiphertext.Split('.', StringSplitOptions.None);
+            var tag = Convert.FromBase64String(parts[3]);
+            tag[0] ^= 1;
+            parts[3] = Convert.ToBase64String(tag);
+            await SeedEndpointsAsync(
+                setup,
+                ("unknown-version", "v3.key_old.AQIDBAUGBwgJCgsM.AQIDBAUGBwgJCgsMDQ4PEA==.AQ==", false),
+                ("unknown-key", "v2.removed_key.AQIDBAUGBwgJCgsM.AQIDBAUGBwgJCgsMDQ4PEA==.AQ==", false),
+                ("configuration", "v1.AQIDBAUGBwgJCgsM.AQIDBAUGBwgJCgsMDQ4PEA==.AQ==", false),
+                ("malformed", "v2.key_old.bad.AQIDBAUGBwgJCgsMDQ4PEA==.AQ==", false),
+                ("authentication", string.Join('.', parts), false));
+        }
+
+        using var listener = new MeterListener();
+        var failures = new List<(string Version, string KeyId, string Reason)>();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
+        {
+            if (instrument.Name == "cmsify.webhook.secret.decrypt_failures")
+            {
+                var version = string.Empty;
+                var keyId = string.Empty;
+                var reason = string.Empty;
+                foreach (var tag in tags)
+                {
+                    switch (tag.Key)
+                    {
+                        case "version": version = tag.Value?.ToString() ?? string.Empty; break;
+                        case "key_id": keyId = tag.Value?.ToString() ?? string.Empty; break;
+                        case "reason": reason = tag.Value?.ToString() ?? string.Empty; break;
+                    }
+                }
+
+                failures.Add((version, keyId, reason));
+            }
+        });
+        listener.Start();
+
+        await using var workerContext = await CreateContextAsync();
+        var result = await CreateProcessor(workerContext, missingLegacyProtector, batchSize: 5, includeLegacyKey: false).RotateBatchAsync(null, CancellationToken.None);
+
+        Assert.Equal(5, result.Failed);
+        Assert.Equal(
+            ["authentication", "configuration", "malformed_ciphertext", "unknown_key", "unknown_version"],
+            failures.Select(failure => failure.Reason).OrderBy(reason => reason).ToArray());
+        Assert.All(failures, failure => Assert.True(failure.Version is "v1" or "v2" or "unknown"));
+        Assert.All(failures, failure => Assert.True(failure.KeyId is "key_old" or "unknown"));
+        Assert.DoesNotContain(failures, failure => failure.KeyId == "removed_key");
+    }
+
     private async Task<CmsifyDbContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var builder = new DbContextOptionsBuilder<CmsifyDbContext>()
@@ -240,11 +304,11 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         return context;
     }
 
-    private static WebhookSecretRotationProcessor CreateProcessor(CmsifyDbContext context, ISecretProtector protector, int batchSize) =>
+    private static WebhookSecretRotationProcessor CreateProcessor(CmsifyDbContext context, ISecretProtector protector, int batchSize, bool includeLegacyKey = true) =>
         new(context, protector, Options.Create(new SecretProtectionOptions
         {
             ActiveKeyId = "key_current",
-            EncryptionKey = LegacyKey,
+            EncryptionKey = includeLegacyKey ? LegacyKey : null,
             EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["key_old"] = OldKey,
@@ -253,10 +317,10 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
             Rotation = new SecretRotationOptions { BatchSize = batchSize, DelaySeconds = 5 }
         }));
 
-    private static AesSecretProtector CreateProtector() => new(Options.Create(new SecretProtectionOptions
+    private static AesSecretProtector CreateProtector(bool includeLegacyKey = true) => new(Options.Create(new SecretProtectionOptions
     {
         ActiveKeyId = "key_current",
-        EncryptionKey = LegacyKey,
+        EncryptionKey = includeLegacyKey ? LegacyKey : null,
         EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["key_old"] = OldKey,
