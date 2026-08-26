@@ -2,7 +2,9 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.BackgroundServices;
+using Cmsify.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
 
@@ -14,12 +16,14 @@ public sealed class WebhookRepository : IWebhookRepository
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
     private readonly ISecretProtector secretProtector;
+    private readonly string[] configuredKeyIds;
 
-    public WebhookRepository(CmsifyDbContext dbContext, ICurrentActor currentActor, ISecretProtector secretProtector)
+    public WebhookRepository(CmsifyDbContext dbContext, ICurrentActor currentActor, ISecretProtector secretProtector, IOptions<SecretProtectionOptions> options)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
         this.secretProtector = secretProtector;
+        configuredKeyIds = options.Value.EncryptionKeys.Keys.ToArray();
     }
 
     public async Task<WebhookEndpointDto?> GetEndpointAsync(Guid id, CancellationToken ct = default) =>
@@ -112,7 +116,7 @@ public sealed class WebhookRepository : IWebhookRepository
             .Where(endpoint => endpoint.Subscriptions.Any(subscription => subscription.EventType == eventType))
             .Select(endpoint => new WebhookDispatchTargetDto(endpoint.Id, endpoint.WorkspaceId, endpoint.Url, endpoint.Secret))
             .ToListAsync(ct);
-        return targets.Select(target => target with { Secret = secretProtector.Unprotect(target.Secret) }).ToArray();
+        return targets.Select(target => target with { Secret = UnprotectAndRecord(target.Secret) }).ToArray();
     }
 
     public async Task<IReadOnlyList<PendingWebhookDeliveryDto>> ClaimPendingDeliveryLogsAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default)
@@ -156,7 +160,7 @@ public sealed class WebhookRepository : IWebhookRepository
             .Select(log =>
             {
                 var endpoint = endpoints[log.WebhookEndpointId];
-                return new PendingWebhookDeliveryDto(log.Id, log.WebhookEndpointId, log.WebhookEventId, endpoint.WorkspaceId, log.EventType, endpoint.Url, secretProtector.Unprotect(endpoint.Secret), log.Payload, log.AttemptCount, log.NextRetryAt, log.LeaseOwner!, log.LeaseToken!.Value, reclaimed[log.Id]);
+                return new PendingWebhookDeliveryDto(log.Id, log.WebhookEndpointId, log.WebhookEventId, endpoint.WorkspaceId, log.EventType, endpoint.Url, UnprotectAndRecord(endpoint.Secret), log.Payload, log.AttemptCount, log.NextRetryAt, log.LeaseOwner!, log.LeaseToken!.Value, reclaimed[log.Id]);
             })
             .ToArray();
         foreach (var claim in claims)
@@ -165,6 +169,20 @@ public sealed class WebhookRepository : IWebhookRepository
         }
         CmsifyOperationalMetrics.ReportDueDeliveryDepth(await dbContext.WebhookDeliveryLogs.CountAsync(log => !log.IsDelivered && !log.IsFailed && log.NextRetryAt <= now, ct));
         return claims;
+    }
+
+    private string UnprotectAndRecord(string ciphertext)
+    {
+        try
+        {
+            return secretProtector.Unprotect(ciphertext);
+        }
+        catch (SecretDecryptFailureException exception)
+        {
+            var diagnostic = WebhookSecretDecryptDiagnostic.FromTypedFailure(ciphertext, exception, configuredKeyIds);
+            CmsifyOperationalMetrics.RecordSecretDecryptFailure(diagnostic.Version, diagnostic.KeyId, diagnostic.Reason, configuredKeyIds);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<ClaimedWebhookOutboxEventDto>> ClaimOutboxEventsAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default)

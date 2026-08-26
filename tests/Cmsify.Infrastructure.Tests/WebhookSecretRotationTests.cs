@@ -9,6 +9,8 @@ using Cmsify.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Testcontainers.PostgreSql;
 
@@ -239,6 +241,43 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RotateBatch_WhenASecretCannotBeDecrypted_LogsEndpointAndBoundedDiagnosticWithoutCiphertext()
+    {
+        const string unconfiguredKeyId = "unconfigured-sensitive-key";
+        var endpointId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var ciphertext = $"v2.{unconfiguredKeyId}.AQIDBAUGBwgJCgsM.AQIDBAUGBwgJCgsMDQ4PEA==.AQ==";
+        await using (var setup = await CreateContextAsync())
+        {
+            await SeedEndpointsAsync(setup, ("invalid", ciphertext, false, endpointId));
+        }
+
+        var logger = new CapturingRotationLogger();
+        await using var workerContext = await CreateContextAsync();
+        var worker = new WebhookSecretRotationProcessor(
+            workerContext,
+            CreateProtector(),
+            Options.Create(new SecretProtectionOptions
+            {
+                ActiveKeyId = "key_current",
+                EncryptionKey = LegacyKey,
+                EncryptionKeys = CreateEncryptionKeys("key_current"),
+                Rotation = new SecretRotationOptions { BatchSize = 1, DelaySeconds = 5 }
+            }),
+            logger);
+
+        var result = await worker.RotateBatchAsync(null, CancellationToken.None);
+
+        Assert.Equal(1, result.Failed);
+        var state = Assert.Single(logger.States);
+        Assert.Contains(state, item => item.Key == "EndpointId" && Equals(item.Value, endpointId));
+        Assert.Contains(state, item => item.Key == "Version" && Equals(item.Value, "v2"));
+        Assert.Contains(state, item => item.Key == "KeyId" && Equals(item.Value, "unknown"));
+        Assert.Contains(state, item => item.Key == "Reason" && Equals(item.Value, "unknown_key"));
+        Assert.DoesNotContain(state, item => item.Value?.ToString()?.Contains(unconfiguredKeyId, StringComparison.Ordinal) == true);
+        Assert.DoesNotContain(state, item => item.Value?.ToString()?.Contains(ciphertext, StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
     public async Task CountRemaining_GroupsConfiguredKeysAndBoundsLegacyAndUnknownVersions()
     {
         var protector = CreateProtector();
@@ -349,7 +388,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
             EncryptionKey = includeLegacyKey ? LegacyKey : null,
             EncryptionKeys = CreateEncryptionKeys(activeKeyId),
             Rotation = new SecretRotationOptions { BatchSize = batchSize, DelaySeconds = 5 }
-        }));
+        }), NullLogger<WebhookSecretRotationProcessor>.Instance);
 
     private static AesSecretProtector CreateProtector(bool includeLegacyKey = true) => CreateProtector("key_current", includeLegacyKey);
 
@@ -517,6 +556,17 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
             }
 
             return result;
+        }
+    }
+
+    private sealed class CapturingRotationLogger : ILogger<WebhookSecretRotationProcessor>
+    {
+        public List<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            States.Add(state as IReadOnlyList<KeyValuePair<string, object?>> ?? []);
         }
     }
 }

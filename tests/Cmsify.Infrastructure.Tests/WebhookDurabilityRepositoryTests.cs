@@ -5,6 +5,7 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Persistence.Repositories;
+using Cmsify.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -12,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Testcontainers.PostgreSql;
@@ -34,6 +36,105 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
     public async Task DisposeAsync() => await postgres.DisposeAsync();
 
     [Fact]
+    public async Task GetActiveEndpointsForEvent_WhenStoredSecretUsesAnUnconfiguredKey_RecordsOneBoundedDecryptFailureAndRethrows()
+    {
+        const string unconfiguredKeyId = "attacker-controlled-key";
+        var configuredKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        await using (var setup = await CreateContextAsync())
+        {
+            var workspace = new Workspace { Name = "Telemetry", Slug = "telemetry" };
+            var user = new User { Email = "telemetry@example.test", DisplayName = "Telemetry", PasswordHash = "hash", Role = UserRole.Admin };
+            var endpoint = new WebhookEndpoint
+            {
+                WorkspaceId = workspace.Id,
+                Name = "Telemetry endpoint",
+                Url = "https://example.test/hook",
+                Secret = $"v2.{unconfiguredKeyId}.AQIDBAUGBwgJCgsM.AQIDBAUGBwgJCgsMDQ4PEA==.AQ==",
+                CreatedByUserId = user.Id
+            };
+            endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
+            setup.AddRange(workspace, user, endpoint);
+            await setup.SaveChangesAsync();
+        }
+
+        var options = Options.Create(new SecretProtectionOptions
+        {
+            ActiveKeyId = "key_current",
+            EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal) { ["key_current"] = configuredKey }
+        });
+        var protector = new AesSecretProtector(options);
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        var failures = new List<List<KeyValuePair<string, object?>>>();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName && instrument.Name == "cmsify.webhook.secret.decrypt_failures") meterListener.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            var capturedTags = new List<KeyValuePair<string, object?>>();
+            foreach (var tag in tags) capturedTags.Add(tag);
+            failures.Add(capturedTags);
+        });
+        listener.Start();
+
+        await using var worker = await CreateContextAsync();
+        var repository = new WebhookRepository(worker, CurrentActorInfo.Anonymous, protector, options);
+
+        await Assert.ThrowsAnyAsync<System.Security.Cryptography.CryptographicException>(() => repository.GetActiveEndpointsForEventAsync("workspace.updated", null));
+
+        var tags = Assert.Single(failures);
+        Assert.Equal(["version", "key_id", "reason"], tags.Select(tag => tag.Key));
+        Assert.Equal(["v2", "unknown", "unknown_key"], tags.Select(tag => tag.Value));
+        Assert.DoesNotContain(tags, tag => tag.Key is "endpoint" or "workspace" or "ciphertext" or "url");
+        Assert.DoesNotContain(tags, tag => Equals(tag.Value, unconfiguredKeyId));
+    }
+
+    [Fact]
+    public async Task DeliveryClaim_WhenStoredSecretHasAnUnknownVersion_RecordsOneBoundedDecryptFailureAndRethrows()
+    {
+        const string ciphertext = "unrecognized.secret.material";
+        var configuredKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var now = DateTimeOffset.Parse("2026-08-26T00:01:00Z");
+        await using (var setup = await CreateContextAsync())
+        {
+            var workspace = new Workspace { Name = "Claim telemetry", Slug = "claim-telemetry" };
+            var user = new User { Email = "claim-telemetry@example.test", DisplayName = "Claim telemetry", PasswordHash = "hash", Role = UserRole.Admin };
+            var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Claim telemetry endpoint", Url = "https://example.test/hook", Secret = ciphertext, CreatedByUserId = user.Id };
+            setup.AddRange(workspace, user, endpoint);
+            setup.WebhookDeliveryLogs.Add(new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = now });
+            await setup.SaveChangesAsync();
+        }
+
+        var options = Options.Create(new SecretProtectionOptions
+        {
+            ActiveKeyId = "key_current",
+            EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal) { ["key_current"] = configuredKey }
+        });
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        var failures = new List<List<KeyValuePair<string, object?>>>();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName && instrument.Name == "cmsify.webhook.secret.decrypt_failures") meterListener.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            var capturedTags = new List<KeyValuePair<string, object?>>();
+            foreach (var tag in tags) capturedTags.Add(tag);
+            failures.Add(capturedTags);
+        });
+        listener.Start();
+
+        await using var worker = await CreateContextAsync();
+        var repository = new WebhookRepository(worker, CurrentActorInfo.Anonymous, new AesSecretProtector(options), options);
+
+        await Assert.ThrowsAnyAsync<System.Security.Cryptography.CryptographicException>(() => repository.ClaimPendingDeliveryLogsAsync("worker", now, TimeSpan.FromMinutes(1), 1));
+
+        var tags = Assert.Single(failures);
+        Assert.Equal(["unknown", "unknown", "unknown_version"], tags.Select(tag => tag.Value));
+        Assert.DoesNotContain(tags, tag => tag.Key is "endpoint" or "workspace" or "ciphertext" or "url");
+    }
+
+    [Fact]
     public async Task DeliveryClaim_PersistsWorkerOwnerAndLeaseTokenForTheClaimedIntent()
     {
         await using var setup = await CreateContextAsync();
@@ -54,7 +155,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         await using var workerContext = await CreateContextAsync();
         var protector = Substitute.For<ISecretProtector>();
         protector.Unprotect(Arg.Any<string>()).Returns(call => call.Arg<string>());
-        var repository = new WebhookRepository(workerContext, CurrentActorInfo.Anonymous, protector);
+        var repository = new WebhookRepository(workerContext, CurrentActorInfo.Anonymous, protector, SecretProtectionOptions());
         var claims = await repository.ClaimPendingDeliveryLogsAsync("worker-a", DateTimeOffset.Parse("2026-08-26T00:01:00Z"), TimeSpan.FromMinutes(5), 10);
 
         Assert.Single(claims);
@@ -853,8 +954,17 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
     {
         var protector = Substitute.For<ISecretProtector>();
         protector.Unprotect(Arg.Any<string>()).Returns(call => call.Arg<string>());
-        return new WebhookRepository(context, CurrentActorInfo.Anonymous, protector);
+        return new WebhookRepository(context, CurrentActorInfo.Anonymous, protector, SecretProtectionOptions());
     }
+
+    private static IOptions<SecretProtectionOptions> SecretProtectionOptions() => Options.Create(new SecretProtectionOptions
+    {
+        ActiveKeyId = "key_current",
+        EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["key_current"] = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+        }
+    });
 
     private (ServiceProvider Services, WebhookDispatchService Service) CreateDispatchService(DateTimeOffset now, string workerId)
     {

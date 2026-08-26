@@ -81,8 +81,8 @@ Generate a production key with a CSPRNG, store it only in the deployment secret 
 
 Use this enable-observe-disable runbook:
 
-1. Deploy the v2-capable reader/writer first with the new active key, all retained `v2` keys, and any required legacy `v1` key. Keep `Secrets__Rotation__Enabled=false`.
-2. Confirm readiness and normal webhook delivery. Monitor decrypt failures by version/key ID, rows rotated/skipped/failed, rotation-cycle duration, and the database-derived remaining ciphertext count by version/key ID.
+1. Deploy the v2-capable reader/writer first with the new active key, all retained `v2` keys, and any required legacy `v1` key. Keep `Secrets__Rotation__Enabled=false`. While disabled, Cmsify performs one non-mutating inventory preflight: it counts remaining ciphertext, publishes the complete bounded `remaining` snapshot (including zero categories), and exits without claiming or updating a row. A transient database/count failure is retried after the configured delay until one refresh succeeds; until then, an absent gauge means no successful preflight and an existing gauge is the prior snapshot, not a fresh result.
+2. Confirm readiness and normal webhook delivery. Monitor decrypt failures by version/key ID, rows rotated/skipped/failed, rotation-cycle duration, and the database-derived remaining ciphertext count by version/key ID. Decrypt failures also cover normal webhook dispatch reads, not only the rotation worker.
 3. Enable rotation for one bounded deployment window. Investigate every decrypt or row failure; do not remove a key while any row can reference it.
 4. Wait for the remaining count to reach zero, then require zero again on an independent subsequent pass. Disable rotation after that verification.
 5. Retire old keys only in a later, explicit configuration change after the independent zero result. Do not combine key retirement with a binary rollback.
@@ -97,7 +97,7 @@ Export these exact `Cmsify.Operational` instruments for the rotation window. All
 | `cmsify.webhook.secret.rotation.duration` | histogram, seconds (`s`) | none | Duration of each rotation cycle. |
 | `cmsify.webhook.secret.rotation.remaining` | observable gauge | `version`, `key_id` | Database-derived count of ciphertext that is not active-key `v2` material. |
 
-Treat every decrypt failure and every `failed` row as an investigation item before continuing. Completion is not an idle worker: require the `remaining` gauge to be zero for every version/key ID, then confirm zero again on an independent later pass before disabling rotation and considering retirement.
+Treat every decrypt failure and every `failed` row as an investigation item before continuing. Rotation logs each failed row as a secret-safe structured warning with `endpoint_id`, normalized ciphertext version, configured-or-`unknown` key ID, and bounded reason; it never includes plaintext, ciphertext, URLs, or key material. Completion is not an idle worker: require the `remaining` gauge to be zero for every version/key ID, then confirm zero again on an independent later pass before disabling rotation and considering retirement.
 
 After any `v2` write, a rollback requires a v2-capable binary and every key that can be referenced by stored ciphertext. A pre-v2 reader cannot safely decrypt the database. Keep rotation disabled while rolling back, restore a matched database backup when required, and investigate configuration errors before attempting another rotation window.
 

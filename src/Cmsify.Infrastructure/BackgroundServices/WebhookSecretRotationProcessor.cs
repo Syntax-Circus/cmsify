@@ -4,6 +4,7 @@ using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace Cmsify.Infrastructure.BackgroundServices;
 
@@ -27,7 +28,8 @@ public interface IWebhookSecretRotationProcessor
 public sealed class WebhookSecretRotationProcessor(
     CmsifyDbContext dbContext,
     ISecretProtector secretProtector,
-    IOptions<SecretProtectionOptions> options) : IWebhookSecretRotationProcessor
+    IOptions<SecretProtectionOptions> options,
+    ILogger<WebhookSecretRotationProcessor> logger) : IWebhookSecretRotationProcessor
 {
     private const int MaximumBatchSize = 500;
     private readonly SecretProtectionOptions options = options.Value;
@@ -76,17 +78,17 @@ public sealed class WebhookSecretRotationProcessor(
             }
             catch (SecretDecryptFailureException exception)
             {
-                RecordDecryptFailure(originalCiphertext, ToMetricReason(exception.Reason));
+                RecordDecryptFailure(endpoint.Id, WebhookSecretDecryptDiagnostic.FromTypedFailure(originalCiphertext, exception, options.EncryptionKeys.Keys));
                 failed++;
             }
             catch (CryptographicException)
             {
-                RecordDecryptFailure(originalCiphertext, "authentication");
+                RecordDecryptFailure(endpoint.Id, WebhookSecretDecryptDiagnostic.Create(originalCiphertext, "authentication", options.EncryptionKeys.Keys));
                 failed++;
             }
             catch (ArgumentException)
             {
-                RecordDecryptFailure(originalCiphertext, "malformed_ciphertext");
+                RecordDecryptFailure(endpoint.Id, WebhookSecretDecryptDiagnostic.Create(originalCiphertext, "malformed_ciphertext", options.EncryptionKeys.Keys));
                 failed++;
             }
         }
@@ -127,21 +129,9 @@ public sealed class WebhookSecretRotationProcessor(
         ? batchSize
         : throw new ArgumentOutOfRangeException(nameof(batchSize));
 
-    private void RecordDecryptFailure(string ciphertext, string reason)
+    private void RecordDecryptFailure(Guid endpointId, WebhookSecretDecryptDiagnostic diagnostic)
     {
-        var segments = ciphertext.Split('.', StringSplitOptions.None);
-        var version = segments.Length > 0 ? segments[0] : "unknown";
-        var keyId = segments.Length > 1 && string.Equals(version, "v2", StringComparison.Ordinal) ? segments[1] : "unknown";
-        CmsifyOperationalMetrics.RecordSecretDecryptFailure(version, keyId, reason, options.EncryptionKeys.Keys);
+        CmsifyOperationalMetrics.RecordSecretDecryptFailure(diagnostic.Version, diagnostic.KeyId, diagnostic.Reason, options.EncryptionKeys.Keys);
+        logger.LogWarning("Webhook secret rotation could not decrypt endpoint {EndpointId}; version {Version}, key ID {KeyId}, reason {Reason}.", endpointId, diagnostic.Version, diagnostic.KeyId, diagnostic.Reason);
     }
-
-    private static string ToMetricReason(SecretDecryptFailureReason reason) => reason switch
-    {
-        SecretDecryptFailureReason.UnknownVersion => "unknown_version",
-        SecretDecryptFailureReason.UnknownKey => "unknown_key",
-        SecretDecryptFailureReason.Configuration => "configuration",
-        SecretDecryptFailureReason.MalformedCiphertext => "malformed_ciphertext",
-        SecretDecryptFailureReason.Authentication => "authentication",
-        _ => "unknown"
-    };
 }

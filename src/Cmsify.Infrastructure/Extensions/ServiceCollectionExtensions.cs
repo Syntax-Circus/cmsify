@@ -100,6 +100,10 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
             provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecretProtectionOptions>>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookSecretRotationService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookSecretRotationInventoryPreflightService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecretProtectionOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookSecretRotationInventoryPreflightService>>()));
 
         return services;
     }

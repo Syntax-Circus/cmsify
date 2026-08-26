@@ -25,6 +25,71 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
     }
 
     [Fact]
+    public async Task InventoryPreflight_WhenRotationIsDisabled_RefreshesRemainingWithoutRotatingThenExits()
+    {
+        var processor = Substitute.For<IWebhookSecretRotationProcessor>();
+        processor.CountRemainingAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<SecretCiphertextCount>>([new("v1", "legacy", 2)]));
+        var scopeFactory = ScopeFactoryFor(processor);
+        var service = CreateInventoryPreflight(scopeFactory, enabled: false);
+
+        await ExecuteAsync(service, CancellationToken.None);
+
+        await processor.Received(1).CountRemainingAsync(Arg.Any<CancellationToken>());
+        await processor.DidNotReceive().RotateBatchAsync(Arg.Any<Guid?>(), Arg.Any<CancellationToken>());
+        scopeFactory.Received(1).CreateScope();
+    }
+
+    [Fact]
+    public async Task InventoryPreflight_WhenRotationIsEnabled_DoesNotCreateAScope()
+    {
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var service = CreateInventoryPreflight(scopeFactory, enabled: true);
+
+        await ExecuteAsync(service, CancellationToken.None);
+
+        scopeFactory.DidNotReceive().CreateScope();
+    }
+
+    [Fact]
+    public async Task InventoryPreflight_WhenCountFails_DelaysThenRetriesWithoutMutating()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var processor = Substitute.For<IWebhookSecretRotationProcessor>();
+        processor.CountRemainingAsync(Arg.Any<CancellationToken>()).Returns(
+            Task.FromException<IReadOnlyList<SecretCiphertextCount>>(new InvalidOperationException("database unavailable")),
+            Task.FromResult<IReadOnlyList<SecretCiphertextCount>>([new("v2", "key_current", 0)]));
+        var delay = new CancellingDelayTimeProvider(cancellation, cancelOnDelay: 2);
+        var service = CreateInventoryPreflight(ScopeFactoryFor(processor), enabled: false, delay);
+
+        await ExecuteAsync(service, cancellation.Token);
+
+        await processor.Received(2).CountRemainingAsync(Arg.Any<CancellationToken>());
+        await processor.DidNotReceive().RotateBatchAsync(Arg.Any<Guid?>(), Arg.Any<CancellationToken>());
+        Assert.Equal(TimeSpan.FromSeconds(7), delay.LastDueTime);
+    }
+
+    [Fact]
+    public async Task InventoryPreflight_WhenCancelledDuringCount_StopsPromptlyWithoutMutating()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var processor = Substitute.For<IWebhookSecretRotationProcessor>();
+        processor.CountRemainingAsync(Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled<IReadOnlyList<SecretCiphertextCount>>(cancellation.Token);
+        });
+        var delay = new CancellingDelayTimeProvider(cancellation);
+        var service = CreateInventoryPreflight(ScopeFactoryFor(processor), enabled: false, delay);
+
+        await ExecuteAsync(service, cancellation.Token);
+
+        await processor.Received(1).CountRemainingAsync(Arg.Any<CancellationToken>());
+        await processor.DidNotReceive().RotateBatchAsync(Arg.Any<Guid?>(), Arg.Any<CancellationToken>());
+        Assert.Null(delay.LastDueTime);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RefreshesThenDelaysAndResetsTheCursorBeforeTheNextBatch()
     {
         using var cancellation = new CancellationTokenSource();
@@ -187,6 +252,20 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
             Rotation = new SecretRotationOptions { Enabled = enabled, DelaySeconds = 7 }
         }), logger ?? new CapturingLogger(), timeProvider);
 
+    private static WebhookSecretRotationInventoryPreflightService CreateInventoryPreflight(
+        IServiceScopeFactory scopeFactory,
+        bool enabled,
+        TimeProvider? timeProvider = null) =>
+        new(scopeFactory, Options.Create(new SecretProtectionOptions
+        {
+            ActiveKeyId = "key_current",
+            EncryptionKeys = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["key_current"] = CurrentKey
+            },
+            Rotation = new SecretRotationOptions { Enabled = enabled, DelaySeconds = 7 }
+        }), new CapturingInventoryLogger(), timeProvider);
+
     private static IServiceScopeFactory ScopeFactoryFor(IWebhookSecretRotationProcessor processor)
     {
         var provider = Substitute.For<IServiceProvider>();
@@ -200,6 +279,11 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
 
     private static Task ExecuteAsync(WebhookSecretRotationService service, CancellationToken cancellationToken) =>
         (Task)typeof(WebhookSecretRotationService)
+            .GetMethod("ExecuteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(service, [cancellationToken])!;
+
+    private static Task ExecuteAsync(WebhookSecretRotationInventoryPreflightService service, CancellationToken cancellationToken) =>
+        (Task)typeof(WebhookSecretRotationInventoryPreflightService)
             .GetMethod("ExecuteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(service, [cancellationToken])!;
 
@@ -235,5 +319,12 @@ public sealed class WebhookSecretRotationServiceLifecycleTests
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
+    private sealed class CapturingInventoryLogger : ILogger<WebhookSecretRotationInventoryPreflightService>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
     }
 }
