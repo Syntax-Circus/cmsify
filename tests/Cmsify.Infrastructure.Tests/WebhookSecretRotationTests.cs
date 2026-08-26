@@ -136,18 +136,19 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         var worker = CreateProcessor(rotationContext, protector, batchSize: 1);
         var rotating = worker.RotateBatchAsync(null, CancellationToken.None);
         await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await updateContext.Database.OpenConnectionAsync();
-        var updaterBackendPid = await updateContext.Database.SqlQuery<int>($"SELECT pg_backend_pid() AS \"Value\"").SingleAsync();
-        var update = Task.Run(async () =>
-        {
-            await updateContext.Database.ExecuteSqlInterpolatedAsync($"""
-                UPDATE webhook_endpoints
-                SET secret = {protector.Protect("new-secret")}, updated_at = CURRENT_TIMESTAMP
-                WHERE id = {endpointId}
-                """);
-        });
+        Task update = Task.CompletedTask;
         try
         {
+            await updateContext.Database.OpenConnectionAsync();
+            var updaterBackendPid = await updateContext.Database.SqlQuery<int>($"SELECT pg_backend_pid() AS \"Value\"").SingleAsync();
+            update = Task.Run(async () =>
+            {
+                await updateContext.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE webhook_endpoints
+                    SET secret = {protector.Protect("new-secret")}, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = {endpointId}
+                    """);
+            });
             await WaitForLockWaitAsync(observerContext, updaterBackendPid, update);
             Assert.False(update.IsCompleted);
         }
