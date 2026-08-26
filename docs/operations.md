@@ -71,6 +71,8 @@ The shared `Cmsify.Operational` meter provides low-cardinality counters and gaug
 
 New signing-secret ciphertext is `v2` and records its key ID. Configure `Secrets__ActiveKeyId` and a canonical Base64 `Secrets__EncryptionKeys__<keyId>` value that decodes to exactly 32 bytes. The active ID selects new writes; retain every previous `EncryptionKeys` entry while any stored `v2` ciphertext references it. `Secrets__EncryptionKey` is a legacy `v1` migration input only and is never eligible for new writes. Production rejects the checked-in development fixture and obvious weak key material before readiness.
 
+For the production Compose template, copy [`docker-compose.prod.keyring.env.example`](../docker-compose.prod.keyring.env.example) to an untracked deployment-only keyring file, replace the active-key placeholder, and set `CMSIFY_API_KEYRING_ENV_FILE` in the private Compose environment file to that path. Compose supplies that keyring file only to the API service and does not wholesale-pass the main interpolation file; only explicitly listed API settings cross that boundary. Add a `Secrets__EncryptionKeys__<oldId>` line for every retained `v2` key and leave the legacy line commented unless `v1` ciphertext still exists. A missing file, placeholder, invalid Base64, wrong key length, or missing active ID/key fails API startup before readiness. Never commit the deployment keyring file.
+
 Generate a production key with a CSPRNG, store it only in the deployment secret manager, and assign it a stable operational ID:
 
 ```powershell
@@ -84,6 +86,18 @@ Use this enable-observe-disable runbook:
 3. Enable rotation for one bounded deployment window. Investigate every decrypt or row failure; do not remove a key while any row can reference it.
 4. Wait for the remaining count to reach zero, then require zero again on an independent subsequent pass. Disable rotation after that verification.
 5. Retire old keys only in a later, explicit configuration change after the independent zero result. Do not combine key retirement with a binary rollback.
+
+Export these exact `Cmsify.Operational` instruments for the rotation window. All labels are bounded: configured key IDs remain themselves and unknown values become `unknown`.
+
+| Instrument | Type and unit | Labels | Meaning |
+| --- | --- | --- | --- |
+| `cmsify.webhook.secret.decrypt_failures` | counter | `version`, `key_id`, `reason` | Failed attempts to decrypt a stored secret. Versions are `v1`, `v2`, or `unknown`; reasons are `configuration`, `unknown_version`, `unknown_key`, `malformed_ciphertext`, `authentication`, or `unknown`. |
+| `cmsify.webhook.secret.rotation.rows` | counter | `outcome` | Rows handled during a cycle: `rotated`, `skipped`, or `failed`. |
+| `cmsify.webhook.secret.rotation.cycles` | counter | `outcome` | Completed worker cycles: `succeeded` or `failed`. |
+| `cmsify.webhook.secret.rotation.duration` | histogram, seconds (`s`) | none | Duration of each rotation cycle. |
+| `cmsify.webhook.secret.rotation.remaining` | observable gauge | `version`, `key_id` | Database-derived count of ciphertext that is not active-key `v2` material. |
+
+Treat every decrypt failure and every `failed` row as an investigation item before continuing. Completion is not an idle worker: require the `remaining` gauge to be zero for every version/key ID, then confirm zero again on an independent later pass before disabling rotation and considering retirement.
 
 After any `v2` write, a rollback requires a v2-capable binary and every key that can be referenced by stored ciphertext. A pre-v2 reader cannot safely decrypt the database. Keep rotation disabled while rolling back, restore a matched database backup when required, and investigate configuration errors before attempting another rotation window.
 

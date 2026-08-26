@@ -151,7 +151,9 @@ On the production host, copy the environment template and replace every placehol
 
 ```bash
 cp docker-compose.prod.env.example .env.prod
-# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, active key ID/key, and CORS origin.
+cp docker-compose.prod.keyring.env.example .env.prod.keyring
+# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, keyring-file path (`./.env.prod.keyring` after copying), and CORS origin.
+# Edit the untracked keyring file: set its active key and retain every referenced older v2 key.
 # Pull the exact published CMSIFY_VERSION from Docker Hub (or the configured registry).
 docker compose --env-file .env.prod -f docker-compose.prod.yml pull
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
@@ -163,7 +165,7 @@ The Compose sample binds the Admin and API ports to `127.0.0.1` (`5001` and `500
 
 The template defaults to the named local-media volume. Set `Storage__Provider=s3` and its `Storage__S3__*` values to use S3-compatible object storage instead. To upgrade, set `CMSIFY_VERSION` to the next published version, back up PostgreSQL and the media volume, then rerun `pull` and `up -d`. The API applies database migrations at startup. Check `/health/live` for process health and `/health/ready` for database and storage readiness.
 
-The production Compose template requires `Secrets__ActiveKeyId` and `Secrets__ActiveKey` through environment substitution, and derives the active `Secrets__EncryptionKeys__<keyId>` entry from that ID. Before a key-ID change, retain any older `Secrets__EncryptionKeys__<keyId>` entries required to read existing `v2` ciphertext. Do not place key material in the repository.
+The production Compose template reads signing-secret configuration only into the API container from `CMSIFY_API_KEYRING_ENV_FILE`; it does not pass the main Compose interpolation file through to the container. Copy [`docker-compose.prod.keyring.env.example`](docker-compose.prod.keyring.env.example) to an untracked deployment-only file, set `CMSIFY_API_KEYRING_ENV_FILE` to that path, and replace its active-key placeholder with a stable ID and canonical Base64 32-byte CSPRNG key. Add and retain every older `Secrets__EncryptionKeys__<keyId>` entry that may still be referenced by `v2` ciphertext. Missing, malformed, or placeholder keyring configuration fails API startup; never commit the deployment keyring file.
 
 ## Documentation
 
