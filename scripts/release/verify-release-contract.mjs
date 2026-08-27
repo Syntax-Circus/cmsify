@@ -102,6 +102,9 @@ for (const requiredPath of [
   "tests/upgrade/**",
   "**/Dockerfile",
   "**/compose*.yml",
+  "**/compose*.yaml",
+  "**/docker-compose*.yml",
+  "**/docker-compose*.yaml",
   ".github/workflows/publish-cmsify.yml",
   ".github/workflows/upgrade-rollback.yml",
 ]) {
@@ -158,23 +161,62 @@ function jobBody(name) {
   return nextJob === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + nextJob);
 }
 
+function normalizedCondition(value) {
+  return value.trim()
+    .replace(/^(["'])|(["'])$/g, "")
+    .replace(/^\$\{\{\s*/, "")
+    .replace(/\s*\}\}$/, "")
+    .trim();
+}
+
+function jobConditionRequiresSuccess(job) {
+  const steps = job.search(/^    steps:/m);
+  const preamble = steps === -1 ? job : job.slice(0, steps);
+  const condition = preamble.match(/^    if:\s*(.+?)\s*$/m)?.[1];
+  return condition === undefined || normalizedCondition(condition) === "success()";
+}
+
+function stepConditions(job) {
+  return [...job.matchAll(/^(?:      - |        )if:\s*(.+?)\s*$/gm)].map((match) => normalizedCondition(match[1]));
+}
+
+function continueOnErrorIsDisabled(job) {
+  return [...job.matchAll(/^\s+(?:-\s+)?continue-on-error:\s*(.+?)\s*$/gm)]
+    .every((match) => normalizedCondition(match[1]) === "false");
+}
+
 const releaseUpgrade = jobBody("upgrade-rollback");
 expect(/needs:\s*\[resolve, build\]/.test(releaseUpgrade), "Release upgrade job must consume resolve and build outputs.");
 expect(/actions\/download-artifact@[0-9a-f]{40}[\s\S]*name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/s.test(releaseUpgrade), "Release upgrade job must download the single exact build candidate artifact.");
 expect(/docker load --input artifacts\/oci\/cmsify-api\.oci\.tar/.test(releaseUpgrade), "Release upgrade job must load the exact built OCI archive.");
 expect(/verify-release-baseline --fixture tests\/upgrade\/fixtures\/v0\.1\.3 --candidate-version "\$VERSION" --github-token-env GITHUB_TOKEN/.test(releaseUpgrade), "Release upgrade job must enforce the moving baseline before rehearsal.");
+expect(/CANDIDATE_IMAGE:\s*syntaxcircus\/cmsify-api:\$\{\{ needs\.resolve\.outputs\.version \}\}/.test(releaseUpgrade), "Release upgrade job must bind CANDIDATE_IMAGE to the exact versioned image loaded from the OCI archive.");
+expect(/cli\.mjs rehearse[^\n]*--candidate-image "\$CANDIDATE_IMAGE"[^\n]*--candidate-version "\$VERSION"[^\n]*--candidate-source-sha "\$SOURCE_SHA"/.test(releaseUpgrade), "Release upgrade rehearsal must use the exact loaded candidate through $CANDIDATE_IMAGE.");
 const releaseLoad = releaseUpgrade.indexOf("docker load --input artifacts/oci/cmsify-api.oci.tar");
 const releaseBaseline = releaseUpgrade.indexOf("verify-release-baseline");
 const releaseFixture = releaseUpgrade.indexOf("verify-fixture");
 const releaseRehearsal = releaseUpgrade.indexOf("cli.mjs rehearse");
 expect(releaseLoad >= 0 && releaseBaseline > releaseLoad && releaseFixture > releaseBaseline && releaseRehearsal > releaseFixture, "Release upgrade job must load the exact image, verify the moving baseline and fixture, then rehearse that image.");
+const loadedCandidateWindow = releaseLoad >= 0 && releaseRehearsal > releaseLoad ? releaseUpgrade.slice(releaseLoad, releaseRehearsal) : "";
+expect(!/^\s*docker\s+(?:image\s+)?pull\b/im.test(loadedCandidateWindow), "Release upgrade job must not pull between exact archive load and rehearsal.");
+expect(!/^\s*docker\s+(?:image\s+)?tag\b/im.test(loadedCandidateWindow), "Release upgrade job must not re-tag between exact archive load and rehearsal.");
 expect(!/\b(docker buildx build|docker build|dotnet pack|npm pack)\b/i.test(releaseUpgrade), "Release upgrade job must not rebuild the candidate.");
+expect(jobConditionRequiresSuccess(releaseUpgrade), "The upgrade-rollback job condition must require successful dependencies so the release gate fails closed.");
+expect(continueOnErrorIsDisabled(releaseUpgrade), "The upgrade-rollback job and steps must not enable continue-on-error; the gate must fail closed.");
+const releaseUpgradeStepConditions = stepConditions(releaseUpgrade);
+expect(releaseUpgradeStepConditions.filter((condition) => condition === "failure()").length === 1 && releaseUpgradeStepConditions.every((condition) => condition === "success()" || condition === "failure()"), "Upgrade-rollback step conditions must be limited to normal success or the one failure diagnostics upload.");
 expect(/if:\s*failure\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*path:\s*artifacts\/upgrade-tests\/\*\*/s.test(releaseUpgrade), "Release upgrade job must upload sanitized diagnostics on failure.");
 
 const certification = jobBody("certify");
 expect(/needs:\s*\[[^\]]*upgrade-rollback[^\]]*\]/.test(certification), "The certify job must depend on upgrade-rollback.");
+expect(jobConditionRequiresSuccess(certification), "The certify job condition must require success of the upgrade gate.");
+expect(continueOnErrorIsDisabled(certification), "The certify job and steps must not enable continue-on-error; certification must fail closed.");
+expect(stepConditions(certification).every((condition) => condition === "success()"), "Certify step conditions must require normal success after the upgrade gate.");
 const promotion = jobBody("promote");
 expect(/needs:\s*\[[^\]]*certify[^\]]*\]/.test(promotion), "Promotion must depend on certify so the upgrade gate cannot be bypassed.");
+expect(jobConditionRequiresSuccess(promotion), "The promotion job condition must require success of certify.");
+expect(continueOnErrorIsDisabled(promotion), "The promotion job and steps must not enable continue-on-error; publication must fail closed.");
+expect(stepConditions(promotion).every((condition) => condition === "success()"), "Promotion step conditions must require normal success after certify.");
 expect(!/\b(dotnet pack|npm pack|npm run build|docker buildx build|docker build)\b/i.test(promotion), "Promotion must not rebuild mutable artifacts.");
 expect(!/--skip-duplicate|NUGET_API_KEY\s*:\s*\$\{\{\s*secrets\./i.test(promotion), "NuGet promotion must use the short-lived OIDC key and reject pre-existing package versions.");
 expect(/id-token:\s*write[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org[\s\S]*npm@11\.11\.0[\s\S]*--provenance[\s\S]*--tag "\$NPM_CHANNEL"/s.test(promotion), "npm trusted publishing must have OIDC, registry configuration, supported npm, provenance, and a prerelease-safe tag.");

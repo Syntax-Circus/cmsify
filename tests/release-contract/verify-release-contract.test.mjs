@@ -68,6 +68,17 @@ function mutateWorkflow(root, mutate) {
   writeFileSync(path, mutate(readFileSync(path, "utf8")));
 }
 
+function mutateReleaseJob(root, jobName, mutate) {
+  mutateWorkflow(root, (workflow) => {
+    const start = workflow.search(new RegExp(`^  ${jobName}:`, "m"));
+    assert.notEqual(start, -1, `missing ${jobName} job in test fixture`);
+    const following = workflow.slice(start + 1);
+    const nextJob = following.search(/^  [A-Za-z0-9_-]+:/m);
+    const end = nextJob === -1 ? workflow.length : start + 1 + nextJob;
+    return `${workflow.slice(0, start)}${mutate(workflow.slice(start, end))}${workflow.slice(end)}`;
+  });
+}
+
 function mutateUpgradeWorkflow(root, mutate) {
   const path = resolve(root, ".github/workflows/upgrade-rollback.yml");
   writeFileSync(path, mutate(readFileSync(path, "utf8")));
@@ -111,6 +122,15 @@ test("rejects a mutable action reference in the dedicated workflow", () => expec
 
 test("rejects missing upgrade-relevant path triggers", () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replaceAll('      - "eng/upgrade-tests/**"\n', "")), /path triggers.*eng\/upgrade-tests/i));
 
+for (const composePath of [
+  "**/compose*.yml",
+  "**/compose*.yaml",
+  "**/docker-compose*.yml",
+  "**/docker-compose*.yaml",
+]) {
+  test(`rejects missing recursive ${composePath} path triggers`, () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replaceAll(`      - "${composePath}"\n`, "")), new RegExp(`path triggers.*${composePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")));
+}
+
 test("rejects a dedicated workflow without fast fixture verification", () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replace(/\s*- name: Verify the checked-in fixture\n\s*run: node eng\/upgrade-tests\/cli\.mjs verify-fixture[^\n]*\n/, "\n")), /dedicated.*verify.*fixture/i));
 
 test("rejects rehearsal without a preceding deterministic fixture check", () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replace(/\s*- name: Check deterministic fixture regeneration\n\s*run: node eng\/upgrade-tests\/cli\.mjs generate-fixture[^\n]*--check\n/, "\n")), /deterministic fixture.*before.*rehearsal/i));
@@ -123,6 +143,16 @@ test("rejects a release rehearsal without failure diagnostics upload", () => exp
 
 test("rejects promotion that is reachable without certification and the upgrade gate", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("promote:\n    needs: [resolve, certify]", "promote:\n    needs: [resolve, build]")), /promotion.*certify.*upgrade.*gate/i));
 
+test("rejects upgrade-rollback job error continuation", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("    runs-on: ubuntu-latest", "    runs-on: ubuntu-latest\n    continue-on-error: true")), /upgrade-rollback.*continue-on-error.*fail closed/i));
+test("rejects upgrade-rollback verification step error continuation", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("      - name: Load and verify the exact release candidate\n        run:", "      - name: Load and verify the exact release candidate\n        continue-on-error: true\n        run:")), /upgrade-rollback.*continue-on-error.*fail closed/i));
+test("rejects upgrade-rollback verification step bypass conditions", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("      - name: Load and verify the exact release candidate\n        run:", "      - name: Load and verify the exact release candidate\n        if: always()\n        run:")), /upgrade-rollback.*step conditions.*failure diagnostics/i));
+test("rejects certify job bypass conditions", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("    runs-on: ubuntu-latest", "    runs-on: ubuntu-latest\n    if: always()")), /certify.*condition.*success.*upgrade.*gate/i));
+test("rejects certify step error continuation", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("      - run: sha256sum --check artifacts/SHA256SUMS", "      - continue-on-error: true\n        run: sha256sum --check artifacts/SHA256SUMS")), /certify.*continue-on-error.*fail closed/i));
+test("rejects certify first-key step bypass conditions", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("      - uses: actions/attest-build-provenance", "      - if: always()\n        uses: actions/attest-build-provenance")), /certify.*step condition.*success.*upgrade.*gate/i));
+test("rejects promote job bypass conditions", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace("    runs-on: ubuntu-latest", "    runs-on: ubuntu-latest\n    if: ${{ always() }}")), /promotion.*condition.*success.*certify/i));
+test("rejects promotion step error continuation", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace("      - name: Copy certified OCI descriptors and compare remote digests\n        shell: bash", "      - name: Copy certified OCI descriptors and compare remote digests\n        continue-on-error: true\n        shell: bash")), /promotion.*continue-on-error.*fail closed/i));
+test("rejects promotion step bypass conditions", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace("      - name: Copy certified OCI descriptors and compare remote digests\n        shell: bash", "      - name: Copy certified OCI descriptors and compare remote digests\n        if: always()\n        shell: bash")), /promotion.*step condition.*success.*certify/i));
+
 test("rejects a release gate that does not load the exact built OCI archive", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => {
   const marker = "docker load --input artifacts/oci/cmsify-api.oci.tar";
   const index = workflow.lastIndexOf(marker);
@@ -130,6 +160,10 @@ test("rejects a release gate that does not load the exact built OCI archive", ()
 }), /release upgrade.*exact.*OCI archive/i));
 
 test("rejects a release gate without moving-baseline verification", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node eng\/upgrade-tests\/cli\.mjs verify-release-baseline[^\n]*/, "")), /release upgrade.*moving baseline/i));
+
+test("rejects release rehearsal candidate-variable drift", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace('--candidate-image "$CANDIDATE_IMAGE"', '--candidate-image "syntaxcircus/cmsify-api:latest"')), /release upgrade.*exact loaded candidate.*CANDIDATE_IMAGE/i));
+test("rejects a pull between exact archive load and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("          docker load --input artifacts/oci/cmsify-api.oci.tar", "          docker load --input artifacts/oci/cmsify-api.oci.tar\n          docker image pull \"$CANDIDATE_IMAGE\"")), /release upgrade.*pull.*between.*load.*rehearsal/i));
+test("rejects a re-tag between exact archive load and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("          node eng/upgrade-tests/cli.mjs verify-fixture", "          docker image tag syntaxcircus/cmsify-api:other \"$CANDIDATE_IMAGE\"\n          node eng/upgrade-tests/cli.mjs verify-fixture")), /release upgrade.*re-tag.*between.*load.*rehearsal/i));
 
 test("rejects combined ORAS boolean and path flags", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api", "oras manifest fetch --descriptor --oci-layout --oci-layout-path artifacts/oci/api")), /ORAS.*combined.*--oci-layout/i));
 test("rejects combined ORAS copy boolean and path flags", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras cp --from-oci-layout-path artifacts/oci/api", "oras cp --from-oci-layout --from-oci-layout-path artifacts/oci/api")), /ORAS.*combined.*--from-oci-layout/i));
