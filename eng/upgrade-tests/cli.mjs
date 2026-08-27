@@ -7,31 +7,69 @@ import { verifyFixtureChecksums } from "./checksums.mjs";
 import { loadExpectedData } from "./expected.mjs";
 import { compareFixtureTrees, generateFixture, runWithCleanup } from "./fixture.mjs";
 import { loadFixtureManifest } from "./manifest.mjs";
+import { rehearse, validateCandidateInput } from "./rehearsal.mjs";
+
+const USAGE = [
+  "Usage:",
+  "  <verify-fixture|generate-fixture> --fixture <fixture-directory> [--check]",
+  "  rehearse --fixture <fixture-directory> --candidate-image <ref> --candidate-version <semver> --candidate-source-sha <40hex>",
+].join("\n");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function parseArguments(arguments_) {
-  const usage = "Usage: <verify-fixture|generate-fixture> --fixture <fixture-directory> [--check].";
-  assert(arguments_.length >= 3 && ["verify-fixture", "generate-fixture"].includes(arguments_[0]), usage);
-  assert(arguments_[1] === "--fixture" && arguments_[2].length > 0, usage);
+function parseArguments(arguments_, cwd = process.cwd()) {
+  assert(Array.isArray(arguments_) && arguments_.length >= 1, USAGE);
+  if (arguments_[0] === "rehearse") {
+    assert(arguments_.length === 9, USAGE);
+    const values = new Map();
+    for (let index = 1; index < arguments_.length; index += 2) {
+      const name = arguments_[index];
+      const value = arguments_[index + 1];
+      assert(["--fixture", "--candidate-image", "--candidate-version", "--candidate-source-sha"].includes(name) && !values.has(name), USAGE);
+      assert(typeof value === "string" && value.length > 0 && !/[\r\n\0]/.test(value), USAGE);
+      values.set(name, value);
+    }
+    assert(values.size === 4, USAGE);
+    const candidateImage = values.get("--candidate-image");
+    const candidateVersion = values.get("--candidate-version");
+    const candidateSourceSha = values.get("--candidate-source-sha");
+    validateCandidateInput({ candidateImage, candidateVersion, candidateSourceSha });
+    return {
+      command: "rehearse",
+      fixtureDirectory: resolve(cwd, values.get("--fixture")),
+      candidateImage,
+      candidateVersion,
+      candidateSourceSha,
+    };
+  }
+
+  assert(arguments_.length >= 3 && ["verify-fixture", "generate-fixture"].includes(arguments_[0]), USAGE);
+  assert(arguments_[1] === "--fixture" && arguments_[2].length > 0, USAGE);
   const options = new Set(arguments_.slice(3));
-  assert([...options].every((option) => option === "--check"), usage);
-  assert(arguments_.slice(3).length === options.size, usage);
-  assert(arguments_[0] === "generate-fixture" || options.size === 0, usage);
-  return { command: arguments_[0], fixtureDirectory: resolve(arguments_[2]), check: options.has("--check") };
+  assert([...options].every((option) => option === "--check"), USAGE);
+  assert(arguments_.slice(3).length === options.size, USAGE);
+  assert(arguments_[0] === "generate-fixture" || options.size === 0, USAGE);
+  return { command: arguments_[0], fixtureDirectory: resolve(cwd, arguments_[2]), check: options.has("--check") };
 }
 
-function sanitize(error, fixtureDirectory) {
+function sanitize(error, paths) {
   const message = error instanceof Error ? error.message : "Fixture verification failed.";
-  const escapedDirectory = fixtureDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return message
+  let sanitized = message;
+  for (const [path, replacement] of paths) {
+    if (typeof path !== "string" || path.length === 0) continue;
+    const escapedDirectory = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    sanitized = sanitized.replace(new RegExp(escapedDirectory, "gi"), replacement);
+  }
+  return sanitized
     .split(/\r?\n/)
     .filter(Boolean)
-    .map((line) => line.replace(new RegExp(escapedDirectory, "gi"), "<fixture>"))
     .map((line) => line.replace(/[\r\n]/g, " "))
-    .join("\n");
+    .join("\n")
+    .replace(/cmsify_[a-z0-9._-]{12,}/gi, "<redacted>")
+    .replace(/(password|secret|token|encryption[_-]?key)\s*[=:]\s*[^\s,;]+/gi, "$1=<redacted>")
+    .slice(0, 4_096);
 }
 
 export async function prepareGenerationDirectory(repositoryRoot, fixtureDirectory, prefix, { remove = rm } = {}) {
@@ -131,22 +169,53 @@ async function generateCommand(repositoryRoot, fixtureDirectory, check) {
  * @param {string[]} arguments_
  * @returns {Promise<number>}
  */
-export async function main(arguments_) {
+export async function main(arguments_, runtime = {}) {
   let fixtureDirectory;
+  const cwd = resolve(runtime.cwd ?? process.cwd());
+  const stdout = runtime.stdout ?? process.stdout;
+  const stderr = runtime.stderr ?? process.stderr;
   try {
-    const parsed = parseArguments(arguments_);
+    const parsed = parseArguments(arguments_, cwd);
     fixtureDirectory = parsed.fixtureDirectory;
+    if (parsed.command === "rehearse") {
+      const rehearseCommand = runtime.rehearse ?? rehearse;
+      const controller = runtime.signal === undefined ? new AbortController() : undefined;
+      const signal = runtime.signal ?? controller.signal;
+      assert(signal instanceof AbortSignal, "Rehearsal cancellation signal must be an AbortSignal.");
+      const cancel = () => controller.abort();
+      if (controller) {
+        process.once("SIGINT", cancel);
+        process.once("SIGTERM", cancel);
+      }
+      try {
+        const report = await rehearseCommand({
+          repositoryRoot: cwd,
+          fixtureDirectory,
+          candidateImage: parsed.candidateImage,
+          candidateVersion: parsed.candidateVersion,
+          candidateSourceSha: parsed.candidateSourceSha,
+          signal,
+        });
+        stdout.write(`Rehearsal passed for ${parsed.candidateVersion} (${report.runId}). Report: artifacts/upgrade-tests/${report.runId}/report.json.\n`);
+        return 0;
+      } finally {
+        if (controller) {
+          process.removeListener("SIGINT", cancel);
+          process.removeListener("SIGTERM", cancel);
+        }
+      }
+    }
     if (parsed.command === "generate-fixture") {
-      await generateCommand(resolve(process.cwd()), fixtureDirectory, parsed.check);
+      await generateCommand(cwd, fixtureDirectory, parsed.check);
       return 0;
     }
     const manifest = loadFixtureManifest(fixtureDirectory);
     await loadExpectedData(fixtureDirectory, manifest);
     await verifyFixtureChecksums(fixtureDirectory, manifest);
-    process.stdout.write(`Fixture verified for ${manifest.baseline.version}.\n`);
+    stdout.write(`Fixture verified for ${manifest.baseline.version}.\n`);
     return 0;
   } catch (error) {
-    process.stderr.write(`${sanitize(error, fixtureDirectory ?? process.cwd())}\n`);
+    stderr.write(`${sanitize(error, [[fixtureDirectory, "<fixture>"], [cwd, "<repository>"]])}\n`);
     return 1;
   }
 }

@@ -8,6 +8,9 @@ const COMPOSE_FILE = "tests/upgrade/compose.yml";
 const SERVICE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 const MAX_DOCKER_LOG_TIMEOUT_MS = 30_000;
 const MAX_DOCKER_TIMEOUT_MS = 120_000;
+const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
+const SOURCE_SHA = /^[0-9a-f]{40}$/;
+const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -19,6 +22,12 @@ function assertService(service) {
 
 function assertStringArray(values, name) {
   assert(Array.isArray(values) && values.every((value) => typeof value === "string"), `${name} must be an array of strings.`);
+}
+
+function assertLifecycleOptions(options) {
+  assert(options && typeof options === "object" && !Array.isArray(options), "Docker lifecycle options must be an object.");
+  assert(options.signal === undefined || options.signal instanceof AbortSignal, "Docker lifecycle signal must be an AbortSignal.");
+  assert(options.redact === undefined || (Array.isArray(options.redact) && options.redact.every((value) => typeof value === "string")), "Docker lifecycle redactions must be strings.");
 }
 
 function lines(stdout) {
@@ -101,6 +110,28 @@ export function createDockerHarness(scope, executor = runProcess) {
     }
   }
 
+  async function writeEnvironment(values) {
+    assert(values && typeof values === "object" && !Array.isArray(values), "Docker run environment values must be an object.");
+    const reserved = new Set(["CMSIFY_UPGRADE_RUN_ID", "CMSIFY_UPGRADE_TEST_LABEL"]);
+    const entries = Object.entries(values);
+    for (const [name, value] of entries) {
+      assert(ENVIRONMENT_NAME.test(name) && !reserved.has(name), "Docker run environment names must be canonical and must not replace ownership values.");
+      assert(typeof value === "string" && !/[\r\n\0]/.test(value), `Docker run environment value ${name} must be a single-line string.`);
+    }
+    assertSafeEnvironmentFile();
+    await Promise.all([
+      mkdir(scope.diagnosticsDirectory, { recursive: true }),
+      mkdir(environmentDirectory, { recursive: true }),
+    ]);
+    const linesToWrite = [
+      `CMSIFY_UPGRADE_RUN_ID=${scope.runId}`,
+      "CMSIFY_UPGRADE_TEST_LABEL=true",
+      ...entries.map(([name, value]) => `${name}=${value}`),
+      "",
+    ];
+    await writeFile(environmentFile, linesToWrite.join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
+  }
+
   async function execute(command, args, phase, timeoutMs = MAX_DOCKER_TIMEOUT_MS, options = {}) {
     return executor(command, args, {
       cwd: scope.repositoryRoot,
@@ -118,12 +149,21 @@ export function createDockerHarness(scope, executor = runProcess) {
     return execute("docker", [...composePrefix, ...args], phase, timeoutMs, options);
   }
 
-  async function inspectLabels(resourceType, resourceId) {
+  async function inspectDockerImage(reference, phase, options = {}) {
+    const result = await execute("docker", ["image", "inspect", "--format", "{{json .}}", reference], phase, undefined, options);
+    try {
+      return JSON.parse(result.stdout.trim());
+    } catch {
+      throw new Error(`Docker image inspection did not return JSON for ${reference}.`);
+    }
+  }
+
+  async function inspectLabels(resourceType, resourceId, options = {}) {
     const inspectArgs = resourceType === "container"
       ? ["container", "inspect", "--format", "{{json .Config.Labels}}", resourceId]
       : [resourceType, "inspect", "--format", "{{json .Labels}}", resourceId];
     try {
-      const result = await execute("docker", inspectArgs, "docker-cleanup-inspect");
+      const result = await execute("docker", inspectArgs, "docker-cleanup-inspect", undefined, options);
       const parsed = JSON.parse(result.stdout.trim());
       assert(parsed && typeof parsed === "object" && !Array.isArray(parsed), `Discovered Docker resource ${resourceId} did not return labels.`);
       assert(parsed[OWNERSHIP_LABELS.upgradeTest] === "true" && parsed[OWNERSHIP_LABELS.upgradeRun] === scope.runId, `Discovered Docker resource ${resourceId} lacks the required ownership labels.`);
@@ -140,11 +180,11 @@ export function createDockerHarness(scope, executor = runProcess) {
     return lines(result.stdout);
   }
 
-  async function removeResources(ids, resourceType, removeArgs, phase) {
+  async function removeResources(ids, resourceType, removeArgs, phase, options = {}) {
     for (const resourceId of ids) {
-      if (!await inspectLabels(resourceType, resourceId)) continue;
+      if (!await inspectLabels(resourceType, resourceId, options)) continue;
       try {
-        await execute("docker", [...removeArgs, resourceId], phase);
+        await execute("docker", [...removeArgs, resourceId], phase, undefined, options);
       } catch (error) {
         if (!resourceWasAlreadyRemoved(error)) throw error;
       }
@@ -161,20 +201,25 @@ export function createDockerHarness(scope, executor = runProcess) {
   return Object.freeze({
     environmentFile,
 
-    async up(services) {
+    writeEnvironment,
+
+    async up(services, options = {}) {
       assertStringArray(services, "Docker services");
       services.forEach(assertService);
-      return compose(["up", "--detach", ...services], "docker-compose-up");
+      assertLifecycleOptions(options);
+      return compose(["up", "--detach", ...services], "docker-compose-up", undefined, options);
     },
 
-    async stop(service) {
+    async stop(service, options = {}) {
       assertService(service);
-      return compose(["stop", service], "docker-compose-stop");
+      assertLifecycleOptions(options);
+      return compose(["stop", service], "docker-compose-stop", undefined, options);
     },
 
-    async start(service) {
+    async start(service, options = {}) {
       assertService(service);
-      return compose(["start", service], "docker-compose-start");
+      assertLifecycleOptions(options);
+      return compose(["start", service], "docker-compose-start", undefined, options);
     },
 
     async exec(service, args, options = {}) {
@@ -191,31 +236,68 @@ export function createDockerHarness(scope, executor = runProcess) {
 
     logs,
 
-    async inspectImage(image) {
+    async inspectImage(image, options = {}) {
+      assertLifecycleOptions(options);
       const reference = imageReference(image);
-      const result = await execute("docker", ["image", "inspect", "--format", "{{json .}}", reference], "docker-image-inspect");
-      let inspected;
-      try {
-        inspected = JSON.parse(result.stdout.trim());
-      } catch {
-        throw new Error(`Docker image inspection did not return JSON for ${image.repository}.`);
-      }
+      const inspected = await inspectDockerImage(reference, "docker-image-inspect", options);
       assert(inspected?.Os === "linux" && inspected?.Architecture === "amd64", `Docker image ${image.repository} is not linux/amd64.`);
       const canonicalReference = canonicalDockerHubReference(reference);
       assert(Array.isArray(inspected.RepoDigests) && inspected.RepoDigests.some((value) => canonicalDockerHubReference(value) === canonicalReference), `Docker image ${image.repository} does not contain the required repository digest.`);
       return inspected;
     },
 
-    async copyFrom(service, source, destination) {
-      assertService(service);
-      assert(typeof source === "string" && source.length > 0 && typeof destination === "string" && destination.length > 0, "Docker copy paths must be non-empty strings.");
-      return compose(["cp", `${service}:${source}`, destination], "docker-compose-copy-from");
+    async inspectCandidateImage(reference, expected, options = {}) {
+      assert(typeof reference === "string" && reference.length > 0 && !/[\r\n\0]/.test(reference), "Candidate image reference must be a non-empty single-line value.");
+      assert(expected && typeof expected === "object" && !Array.isArray(expected), "Expected candidate identity is required.");
+      assert(typeof expected.version === "string" && expected.version.length > 0 && !/[\r\n\0]/.test(expected.version), "Candidate version must be a non-empty single-line value.");
+      assert(typeof expected.sourceSha === "string" && SOURCE_SHA.test(expected.sourceSha), "Candidate source SHA must be a full lowercase commit.");
+      assertLifecycleOptions(options);
+      const inspected = await inspectDockerImage(reference, "docker-candidate-image-inspect", options);
+      assert(inspected?.Os === "linux" && inspected?.Architecture === "amd64", "Candidate image is not linux/amd64.");
+      assert(typeof inspected.Id === "string" && IMAGE_ID.test(inspected.Id), "Candidate image ID is not a stable local SHA-256 identity.");
+      const labels = inspected.Config?.Labels;
+      assert(labels && typeof labels === "object" && !Array.isArray(labels), "Candidate image does not contain OCI labels.");
+      assert(labels["org.opencontainers.image.version"] === expected.version, "Candidate OCI version label mismatch.");
+      assert(labels["org.opencontainers.image.revision"] === expected.sourceSha, "Candidate OCI revision label mismatch.");
+      return Object.freeze({
+        reference,
+        imageId: inspected.Id,
+        platform: "linux/amd64",
+        version: expected.version,
+        sourceSha: expected.sourceSha,
+        informationalVersion: `${expected.version}+${expected.sourceSha}`,
+        labels: Object.freeze({
+          "org.opencontainers.image.version": labels["org.opencontainers.image.version"],
+          "org.opencontainers.image.revision": labels["org.opencontainers.image.revision"],
+        }),
+      });
     },
 
-    async copyTo(service, source, destination) {
+    async copyFrom(service, source, destination, options = {}) {
       assertService(service);
       assert(typeof source === "string" && source.length > 0 && typeof destination === "string" && destination.length > 0, "Docker copy paths must be non-empty strings.");
-      return compose(["cp", source, `${service}:${destination}`], "docker-compose-copy-to");
+      assertLifecycleOptions(options);
+      return compose(["cp", `${service}:${source}`, destination], "docker-compose-copy-from", undefined, options);
+    },
+
+    async copyTo(service, source, destination, options = {}) {
+      assertService(service);
+      assert(typeof source === "string" && source.length > 0 && typeof destination === "string" && destination.length > 0, "Docker copy paths must be non-empty strings.");
+      assertLifecycleOptions(options);
+      return compose(["cp", source, `${service}:${destination}`], "docker-compose-copy-to", undefined, options);
+    },
+
+    async discardDataVolumes(options = {}) {
+      assertLifecycleOptions(options);
+      const result = await compose(["ps", "--all", "--quiet", "postgres", "minio"], "docker-discard-state-discover-containers", undefined, options);
+      await removeResources(lines(result.stdout), "container", ["rm", "--force"], "docker-discard-state-remove-container", options);
+      await removeResources(
+        [`${scope.projectName}_postgres-data`, `${scope.projectName}_minio-data`],
+        "volume",
+        ["volume", "rm"],
+        "docker-discard-state-remove-volume",
+        options,
+      );
     },
 
     async cleanup() {

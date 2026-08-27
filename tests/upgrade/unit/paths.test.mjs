@@ -128,6 +128,25 @@ test("Docker exec forwards bounded cancellation and redaction options without ch
   assert.equal(calls[0].options.stdoutEncoding, "buffer");
 });
 
+test("Docker lifecycle commands forward the rehearsal cancellation boundary", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-015");
+  const calls = [];
+  const controller = new AbortController();
+  const executor = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.up(["postgres", "minio"], { signal: controller.signal, redact: ["fixture-secret"] });
+  await harness.stop("postgres", { signal: controller.signal });
+  await harness.copyTo("postgres", "fixture.sql", "/tmp/fixture.sql", { signal: controller.signal });
+
+  assert.equal(calls.length, 3);
+  assert.equal(calls.every(({ options }) => options.signal === controller.signal), true);
+  assert.deepEqual(calls[0].options.redact, ["fixture-secret"]);
+});
+
 test("Docker exec opts into an interactive stdin pipe only when input is supplied", async () => {
   const scope = createRunScope(repositoryRoot, "safe-run-011");
   const calls = [];
@@ -155,6 +174,95 @@ test("accepts Docker Hub's canonical repository spelling for an immutable digest
   const harness = createDockerHarness(scope, executor);
 
   await harness.inspectImage({ repository: "docker.io/syntaxcircus/cmsify-api", digest, platform: "linux/amd64" });
+});
+
+test("inspects the candidate once and binds its stable ID, platform, and exact OCI identity", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-012");
+  const sourceSha = "0123456789abcdef0123456789abcdef01234567";
+  const imageId = `sha256:${"a".repeat(64)}`;
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({
+        Id: imageId,
+        Os: "linux",
+        Architecture: "amd64",
+        Config: {
+          Labels: {
+            "org.opencontainers.image.version": "1.0.0",
+            "org.opencontainers.image.revision": sourceSha,
+          },
+        },
+      }),
+      stderr: "",
+      durationMs: 0,
+    };
+  };
+
+  const identity = await createDockerHarness(scope, executor).inspectCandidateImage("cmsify-candidate:test", {
+    version: "1.0.0",
+    sourceSha,
+  });
+
+  assert.deepEqual(identity, {
+    reference: "cmsify-candidate:test",
+    imageId,
+    platform: "linux/amd64",
+    version: "1.0.0",
+    sourceSha,
+    informationalVersion: `1.0.0+${sourceSha}`,
+    labels: {
+      "org.opencontainers.image.version": "1.0.0",
+      "org.opencontainers.image.revision": sourceSha,
+    },
+  });
+  assert.deepEqual(calls, [{ command: "docker", args: ["image", "inspect", "--format", "{{json .}}", "cmsify-candidate:test"] }]);
+});
+
+test("writes both candidate reference and inspected ID into the run-owned environment", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-013");
+  const harness = createDockerHarness(scope, async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }));
+  const imageId = `sha256:${"b".repeat(64)}`;
+
+  await harness.writeEnvironment({
+    CANDIDATE_API_IMAGE: imageId,
+    CANDIDATE_API_IMAGE_REFERENCE: "cmsify-candidate:test",
+    CANDIDATE_API_IMAGE_ID: imageId,
+  });
+
+  assert.equal(readFileSync(harness.environmentFile, "utf8"), [
+    `CMSIFY_UPGRADE_RUN_ID=${scope.runId}`,
+    "CMSIFY_UPGRADE_TEST_LABEL=true",
+    `CANDIDATE_API_IMAGE=${imageId}`,
+    "CANDIDATE_API_IMAGE_REFERENCE=cmsify-candidate:test",
+    `CANDIDATE_API_IMAGE_ID=${imageId}`,
+    "",
+  ].join("\n"));
+});
+
+test("discarding upgraded state label-verifies exact data containers and volumes before removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-014");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    if (args[0] === "compose" && args.includes("ps")) {
+      return { exitCode: 0, stdout: "postgres-container\nminio-container\n", stderr: "", durationMs: 0 };
+    }
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(scope.labels), stderr: "", durationMs: 0 };
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await createDockerHarness(scope, executor).discardDataVolumes();
+
+  const removedContainers = calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1));
+  const removedVolumes = calls.filter(({ args }) => args[0] === "volume" && args[1] === "rm").map(({ args }) => args.at(-1));
+  assert.deepEqual(removedContainers, ["postgres-container", "minio-container"]);
+  assert.deepEqual(removedVolumes, [`${scope.projectName}_postgres-data`, `${scope.projectName}_minio-data`]);
+  const firstVolumeRemoval = calls.findIndex(({ args }) => args[0] === "volume" && args[1] === "rm");
+  assert.ok(firstVolumeRemoval > calls.findLastIndex(({ args }) => args[0] === "rm"));
+  assert.equal(calls.some(({ args }) => args.includes("prune") || args.includes("--volumes") || args.includes("down")), false);
 });
 
 test("captures logs before explicitly removing label-verified resources", async () => {
