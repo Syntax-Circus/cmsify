@@ -65,6 +65,16 @@ function imageReference(image) {
   return `${image.repository}@${image.digest}`;
 }
 
+function verifiedFixtureDigest(checksums) {
+  assert(checksums instanceof Map && checksums.size > 0, "Verified fixture checksums are required.");
+  const entries = [...checksums.entries()].sort(([left], [right]) => Buffer.from(left).compare(Buffer.from(right)));
+  for (const [file, digest] of entries) {
+    assert(typeof file === "string" && file.length > 0 && typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest), "Verified fixture checksum entry is invalid.");
+  }
+  const inventory = entries.map(([file, digest]) => `${digest}  ${file}\n`).join("");
+  return createHash("sha256").update(inventory).digest("hex");
+}
+
 function throwIfCancelled(signal) {
   if (signal?.aborted) throw new Error("Upgrade rehearsal was cancelled.");
 }
@@ -230,7 +240,8 @@ function createDefaultOperations(context, dependencies = {}) {
       throwIfCancelled(context.signal);
       context.manifest = loadManifest(context.fixtureDirectory);
       context.expected = await loadExpected(context.fixtureDirectory, context.manifest);
-      await verifyChecksums(context.fixtureDirectory, context.manifest);
+      const fixtureChecksums = await verifyChecksums(context.fixtureDirectory, context.manifest);
+      context.fixtureDigest = verifiedFixtureDigest(fixtureChecksums);
       context.redactions = [
         ...Object.values(FIXTURE_ENVIRONMENT),
         context.expected.authentication.readerToken,
@@ -264,7 +275,12 @@ function createDefaultOperations(context, dependencies = {}) {
         baselineVersion: context.manifest.baseline.version,
         baselineSourceSha: context.manifest.baseline.sourceSha,
       };
-      return { ...context.candidateIdentity, prerequisites };
+      return {
+        ...context.candidateIdentity,
+        prerequisites,
+        fixtureDigest: context.fixtureDigest,
+        baselineImage: context.manifest.baseline.apiImage,
+      };
     },
 
     async restoreFixture() {
@@ -664,8 +680,11 @@ function createReport(scope, options, now) {
     schemaVersion: 1,
     runId: scope.runId,
     status: "running",
+    result: "failed",
     startedAt: now(),
     completedAt: null,
+    fixtureDigest: null,
+    baselineImage: null,
     candidate: {
       reference: null,
       version: null,
@@ -813,6 +832,14 @@ export async function rehearse(options) {
     }
     await transition(phaseName, "passed", undefined, value, (next) => {
       if (phaseName === "preflight" && value) {
+        assert(typeof value.fixtureDigest === "string" && /^[0-9a-f]{64}$/.test(value.fixtureDigest), "Preflight did not return the verified fixture digest.");
+        assert(value.baselineImage && typeof value.baselineImage === "object"
+          && typeof value.baselineImage.repository === "string" && value.baselineImage.repository.length > 0
+          && typeof value.baselineImage.tag === "string" && value.baselineImage.tag.length > 0
+          && typeof value.baselineImage.digest === "string" && /^sha256:[0-9a-f]{64}$/.test(value.baselineImage.digest)
+          && value.baselineImage.platform === "linux/amd64", "Preflight did not return the exact baseline image identity.");
+        next.fixtureDigest = value.fixtureDigest;
+        next.baselineImage = structuredClone(value.baselineImage);
         next.candidate = {
           reference: options.candidateImage,
           version: value.version ?? options.candidateVersion,
@@ -849,6 +876,7 @@ export async function rehearse(options) {
       if (cleanupPhase.status === "running") {
         await transition("cleanup", cleanupFailure === undefined ? "passed" : "failed", cleanupFailure, undefined, (next) => {
           next.status = primaryFailure === undefined && startFailure === undefined && cleanupFailure === undefined ? "passed" : "failed";
+          next.result = next.status;
           next.completedAt = now();
         }, cleanupFailure === undefined ? undefined : "cleanup");
       } else if (cleanupPhase.status === "pending") {
@@ -861,6 +889,7 @@ export async function rehearse(options) {
           phase.error = summary.message;
           phase.errorCode = summary.code;
           next.status = "failed";
+          next.result = "failed";
           next.completedAt = now();
         });
       }
@@ -942,6 +971,6 @@ export async function rehearse(options) {
       phase: primaryPhase,
     });
   }
-  assert(report.status === "passed" && report.phases.every(({ status }) => status === "passed"), "Rehearsal cannot pass unless every mandatory phase and cleanup passed.");
+  assert(report.status === "passed" && report.result === "passed" && report.phases.every(({ status }) => status === "passed"), "Rehearsal cannot pass unless every mandatory phase and cleanup passed.");
   return report;
 }

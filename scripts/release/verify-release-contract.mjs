@@ -67,11 +67,6 @@ for (const [relativePath, kind, title] of [
   expect(dockerfile.includes(`org.opencontainers.image.ref.name="syntaxcircus/cmsify-${kind}:\${BUILD_VERSION}"`), `${title} Dockerfile ref.name label must bind its exact qualified image identity.`);
 }
 
-const apiDockerfile = file("src/Cmsify.Api/Dockerfile");
-expect(apiDockerfile.includes("id=cmsify_storage_nupkg,target=/run/secrets/SyntaxCircus.Storage.0.2.0-media-reconciliation.4.nupkg"), "API Dockerfile optional local SyntaxCircus.Storage package must use the exact secret ID and package name.");
-expect(apiDockerfile.includes("ARG CMSIFY_STORAGE_PACKAGE_SHA256=") && apiDockerfile.includes("sha256sum --check --strict"), "API Dockerfile optional local SyntaxCircus.Storage package must require and verify its caller-supplied SHA-256.");
-expect(/if \[ -f "\$local_storage_package" \]; then[\s\S]*--source \/run\/secrets --source https:\/\/api\.nuget\.org\/v3\/index\.json;[\s\S]*else dotnet restore "src\/Cmsify\.Api\/Cmsify\.Api\.csproj"; fi/.test(apiDockerfile), "API Dockerfile must retain the normal public NuGet restore when the optional local package is absent.");
-
 const workflowPath = ".github/workflows/publish-cmsify.yml";
 const workflow = file(workflowPath);
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");

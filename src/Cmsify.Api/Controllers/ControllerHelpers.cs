@@ -20,7 +20,7 @@ internal static class ControllerHelpers
 
     public static int Limit(int pageSize) => pageSize;
 
-    public static string ETag(DateTimeOffset updatedAt) => $"\"{updatedAt.UtcTicks}\"";
+    public static string ETag(DateTimeOffset updatedAt) => $"\"{updatedAt.UtcTicks / TimeSpan.TicksPerMicrosecond}\"";
 
     public static bool IfMatchMatches(this ControllerBase controller, DateTimeOffset updatedAt)
     {

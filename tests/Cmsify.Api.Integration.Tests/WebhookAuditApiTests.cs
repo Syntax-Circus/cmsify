@@ -124,6 +124,30 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ContentCreateEtag_AuthorizesImmediateConditionalUpdate()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedApiClientAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+        var templateVersionId = await SeedPublishedTemplateVersionAsync(factory, seed.WorkspaceId, "content-create-etag");
+
+        var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new { templateVersionId, slug = "create-etag", tags = Array.Empty<string>(), fields = Array.Empty<object>() });
+        create.EnsureSuccessStatusCode();
+        var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        Assert.NotNull(create.Headers.ETag);
+        using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
+        {
+            Content = JsonContent.Create(new { slug = "create-etag-updated", tags = Array.Empty<string>(), fields = Array.Empty<object>() })
+        };
+        updateRequest.Headers.TryAddWithoutValidation("If-Match", create.Headers.ETag.ToString());
+
+        var update = await client.SendAsync(updateRequest);
+
+        update.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
     public async Task TemplatePublish_PersistsTheEventWithThePublishedState()
     {
         await using var factory = CreateFactory();

@@ -12,6 +12,14 @@ import { createDockerHarness } from "../../../eng/upgrade-tests/docker.mjs";
 import { createRunScope } from "../../../eng/upgrade-tests/paths.mjs";
 
 const candidateSourceSha = "0123456789abcdef0123456789abcdef01234567";
+const fixtureDigest = "9".repeat(64);
+const baselineImage = Object.freeze({
+  repository: "docker.io/syntaxcircus/cmsify-api",
+  tag: "0.1.3",
+  digest: `sha256:${"8".repeat(64)}`,
+  platform: "linux/amd64",
+});
+const verifiedChecksums = () => new Map([["manifest.json", "7".repeat(64)]]);
 const node = process.execPath;
 const repositoryRootForProcess = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -24,6 +32,8 @@ function successfulOperations(events, failure) {
   return {
     preflight: operation("preflight", {
       imageId: `sha256:${"a".repeat(64)}`,
+      fixtureDigest,
+      baselineImage,
       labels: {
         "org.opencontainers.image.version": "1.0.0",
         "org.opencontainers.image.revision": candidateSourceSha,
@@ -69,6 +79,22 @@ test("never destroys upgraded state before re-verifying the matched backup", asy
   const { events } = await runWithFakes();
 
   assert.ok(events.indexOf("backup:verify-again") < events.indexOf("upgraded-volumes:remove"));
+});
+
+test("successful report binds the verified fixture and exact baseline and candidate images", async () => {
+  const { report } = await runWithFakes();
+
+  assert.equal(report.result, "passed");
+  assert.equal(report.fixtureDigest, fixtureDigest);
+  assert.deepEqual(report.baselineImage, baselineImage);
+  assert.deepEqual(report.candidate, {
+    reference: "cmsify-candidate:test",
+    version: "1.0.0",
+    sourceSha: candidateSourceSha,
+    imageId: `sha256:${"a".repeat(64)}`,
+    platform: null,
+    informationalVersion: null,
+  });
 });
 
 test("candidate failure still captures logs and cleans owned resources", async () => {
@@ -256,7 +282,10 @@ test("default preflight validates fixture and every image before the first resou
           events.push("expected:validate");
           return { authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-admin-password" } };
         },
-        verifyFixtureChecksums: async () => events.push("checksums:verify"),
+        verifyFixtureChecksums: async () => {
+          events.push("checksums:verify");
+          return verifiedChecksums();
+        },
       },
     }), /restore-fixture phase failed/i);
 
@@ -322,7 +351,7 @@ test("default preflight failure for a missing tool cannot write the run env or s
         createDockerHarness: () => harness,
         loadFixtureManifest: () => manifest,
         loadExpectedData: async () => ({ authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-password" } }),
-        verifyFixtureChecksums: async () => undefined,
+        verifyFixtureChecksums: async () => verifiedChecksums(),
       },
     }), /prerequisite/i);
 
@@ -395,7 +424,7 @@ test("default preflight reports an aborted immutable-image tool probe as cancell
         createDockerHarness: (scope) => createDockerHarness(scope, executor),
         loadFixtureManifest: () => manifest,
         loadExpectedData: async () => ({ authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-password" } }),
-        verifyFixtureChecksums: async () => undefined,
+        verifyFixtureChecksums: async () => verifiedChecksums(),
       },
     }), (error) => {
       assert.equal(error.phase, "preflight");
@@ -477,7 +506,7 @@ test("default operations pass the candidate canary through isolated backup rollb
         createDockerHarness: () => harness,
         loadFixtureManifest: () => manifest,
         loadExpectedData: async () => expected,
-        verifyFixtureChecksums: async () => undefined,
+        verifyFixtureChecksums: async () => verifiedChecksums(),
         captureWebhookWorkerState: async (docker) => {
           events.push("webhook:snapshot");
           await docker.exec("postgres", ["assertion-probe"]);
