@@ -734,7 +734,7 @@ export async function rehearse(options) {
     Object.assign(report, next);
   };
 
-  const transition = async (phaseName, status, error, evidence, reportMutation) => {
+  const transition = async (phaseName, status, error, evidence, reportMutation, failureKind) => {
     const phaseIndex = REHEARSAL_PHASES.indexOf(phaseName);
     await commit(phaseName, status, (next) => {
       const phase = next.phases[phaseIndex];
@@ -753,7 +753,7 @@ export async function rehearse(options) {
         const allowedEvidence = safeEvidence(evidence);
         if (allowedEvidence) phase.evidence = allowedEvidence;
         if (error !== undefined) {
-          const summary = failureSummary(error, phaseName);
+          const summary = failureSummary(error, phaseName, failureKind);
           phase.error = summary.message.slice(0, 256);
           phase.errorCode = summary.code;
         }
@@ -762,7 +762,7 @@ export async function rehearse(options) {
     });
   };
 
-  const terminalizeFailedPhase = async (phaseName, error) => {
+  const terminalizeFailedPhase = async (phaseName, error, failureKind) => {
     const phaseIndex = REHEARSAL_PHASES.indexOf(phaseName);
     await commit(phaseName, "failed", (next) => {
       const phase = next.phases[phaseIndex];
@@ -770,7 +770,7 @@ export async function rehearse(options) {
       if (phase.status !== "passed") {
         phase.status = "failed";
         phase.completedAt = now();
-        const summary = failureSummary(error, phaseName);
+        const summary = failureSummary(error, phaseName, failureKind);
         phase.error = summary.message.slice(0, 256);
         phase.errorCode = summary.code;
         const allowedEvidence = safeEvidence(error?.safeEvidence);
@@ -850,14 +850,14 @@ export async function rehearse(options) {
         await transition("cleanup", cleanupFailure === undefined ? "passed" : "failed", cleanupFailure, undefined, (next) => {
           next.status = primaryFailure === undefined && startFailure === undefined && cleanupFailure === undefined ? "passed" : "failed";
           next.completedAt = now();
-        });
+        }, cleanupFailure === undefined ? undefined : "cleanup");
       } else if (cleanupPhase.status === "pending") {
         await commit("cleanup", "failed", (next) => {
           const phase = next.phases.at(-1);
           phase.status = "failed";
           phase.startedAt = now();
           phase.completedAt = now();
-          const summary = failureSummary(startFailure ?? cleanupFailure, "cleanup");
+          const summary = failureSummary(startFailure ?? cleanupFailure, "cleanup", startFailure === undefined ? "cleanup" : undefined);
           phase.error = summary.message;
           phase.errorCode = summary.code;
           next.status = "failed";
@@ -916,7 +916,7 @@ export async function rehearse(options) {
       const boundary = records[0];
       if (report.phases.at(-1).status === "running") {
         try {
-          await terminalizeFailedPhase("cleanup", boundary.error);
+          await terminalizeFailedPhase("cleanup", boundary.error, boundary.kind);
         } catch (reportFailure) {
           secondaryFailures.push({ error: reportFailure, phase: "cleanup" });
         }

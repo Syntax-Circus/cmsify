@@ -690,6 +690,7 @@ test("timeout stops mandatory phases but diagnostics and cleanup still run", asy
 test("cleanup failure never replaces the primary rehearsal failure", async () => {
   const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-cleanup-"));
   const events = [];
+  const snapshots = [];
   const operations = successfulOperations(events, "candidate");
   operations.cleanup = async () => {
     events.push("owned-resources:cleanup");
@@ -705,14 +706,61 @@ test("cleanup failure never replaces the primary rehearsal failure", async () =>
       candidateSourceSha,
       runId: "cleanup-test-001",
       operations,
+      reportWriter: async (report) => snapshots.push(structuredClone(report)),
     }), (error) => {
       assert.match(error.message, /candidate phase invariant failed/i);
       assert.equal(error.message.includes("cleanup-only-secret"), false);
       assert.ok(error.cause instanceof AggregateError);
       assert.match(error.cause.errors[0].message, /candidate phase invariant failed/i);
+      assert.equal(error.cause.errors[0].phase, "candidate");
       assert.equal(error.cause.errors[1].message, "Owned-resource cleanup failed; diagnostic detail withheld.");
+      assert.equal(error.cause.errors[1].code, "cleanup-failed");
+      assert.equal(error.cause.errors[1].phase, "cleanup");
       return true;
     });
+
+    const cleanup = snapshots.at(-1).phases.at(-1);
+    assert.equal(cleanup.status, "failed");
+    assert.equal(cleanup.errorCode, "cleanup-failed");
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("cleanup-only failure agrees across persisted evidence and the public failure", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-cleanup-only-"));
+  const snapshots = [];
+  const operations = successfulOperations([]);
+  operations.cleanup = async () => {
+    throw new Error("cleanup password=hunter2 SELECT * FROM private_rows");
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "cleanup-only-001",
+      operations,
+      reportWriter: async (report) => snapshots.push(structuredClone(report)),
+    }), (error) => {
+      assert.equal(error.phase, "cleanup");
+      assert.equal(error.message, "Owned-resource cleanup failed; diagnostic detail withheld.");
+      assert.equal(error.cause.code, "cleanup-failed");
+      assert.equal(error.cause.phase, "cleanup");
+      assert.equal(error.message.includes("hunter2"), false);
+      return true;
+    });
+
+    const finalReport = snapshots.at(-1);
+    const cleanup = finalReport.phases.at(-1);
+    assert.equal(finalReport.status, "failed");
+    assert.equal(cleanup.status, "failed");
+    assert.equal(cleanup.errorCode, "cleanup-failed");
+    assert.equal(cleanup.error, "Owned-resource cleanup failed; diagnostic detail withheld.");
+    assert.equal(JSON.stringify(finalReport).includes("hunter2"), false);
   } finally {
     rmSync(repositoryRoot, { force: true, recursive: true });
   }
