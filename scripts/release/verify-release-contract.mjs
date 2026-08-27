@@ -69,6 +69,8 @@ for (const [relativePath, kind, title] of [
 
 const workflowPath = ".github/workflows/publish-cmsify.yml";
 const workflow = file(workflowPath);
+const upgradeWorkflowPath = ".github/workflows/upgrade-rollback.yml";
+const upgradeWorkflow = file(upgradeWorkflowPath);
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
 expect(/\bpush:\s*\n\s+tags:/m.test(workflow) && !/\bbranches:/m.test(workflow), "Release workflow must be tag-only; branch builds never publish or tag.");
 expect(/node scripts\/release\/validate-release-tag\.mjs\s+"?\$\{\{\s*github\.ref_name\s*\}\}"?/i.test(workflow) || /validate-release-tag\.mjs/i.test(workflow), "Release workflow must validate the vX.Y.Z or vX.Y.Z-prerelease tag.");
@@ -83,10 +85,40 @@ expect(nugetPackCommands.length === 3 && nugetPackCommands.every((command) => co
 for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Release action must be pinned by immutable SHA: ${match[1]}`);
 }
+for (const match of upgradeWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
+  expect(/@[0-9a-f]{40}$/i.test(match[1]), `Upgrade workflow action must be pinned by immutable SHA: ${match[1]}`);
+}
 
-for (const job of ["resolve", "build", "certify", "promote"]) {
+for (const job of ["resolve", "build", "upgrade-rollback", "certify", "promote"]) {
   expect(new RegExp(`^\\s{2}${job}:`, "m").test(workflow), `Release workflow must include the ${job} job.`);
 }
+
+expect(/workflow_dispatch:/i.test(upgradeWorkflow) && /push:\s*\n\s+branches:\s*\[main\]/i.test(upgradeWorkflow) && /pull_request:/i.test(upgradeWorkflow), "Dedicated upgrade workflow must run on manual dispatch, main pushes, and pull requests.");
+for (const requiredPath of [
+  "src/Cmsify.Infrastructure/**",
+  "src/Cmsify.Api/**",
+  "src/Cmsify.Core/**/Media*.cs",
+  "eng/upgrade-tests/**",
+  "tests/upgrade/**",
+  "**/Dockerfile",
+  "**/compose*.yml",
+  ".github/workflows/publish-cmsify.yml",
+  ".github/workflows/upgrade-rollback.yml",
+]) {
+  const occurrences = upgradeWorkflow.split(`\"${requiredPath}\"`).length - 1;
+  expect(occurrences >= 2, `Upgrade workflow path triggers must include ${requiredPath} for main pushes and pull requests.`);
+}
+expect(/actions\/setup-node@[0-9a-f]{40}[\s\S]*node-version:\s*"22"/s.test(upgradeWorkflow), "Dedicated upgrade workflow must use SHA-pinned Node 22 setup.");
+expect(/docker\/setup-buildx-action@[0-9a-f]{40}[\s\S]*driver:\s*docker-container/s.test(upgradeWorkflow), "Dedicated upgrade workflow must use a SHA-pinned docker-container Buildx builder.");
+const dedicatedBuildCommands = [...upgradeWorkflow.matchAll(/docker buildx build[^\n]+/g)].map((match) => match[0]);
+expect(dedicatedBuildCommands.length === 1 && /--platform linux\/amd64/.test(dedicatedBuildCommands[0]) && /--provenance=false/.test(dedicatedBuildCommands[0]) && /--cache-from type=gha/.test(dedicatedBuildCommands[0]) && /--cache-to type=gha,mode=max/.test(dedicatedBuildCommands[0]) && /--file src\/Cmsify\.Api\/Dockerfile/.test(dedicatedBuildCommands[0]) && /--load/.test(dedicatedBuildCommands[0]), "Dedicated upgrade workflow must build and load one cached linux/amd64 candidate from the production API Dockerfile.");
+expect(/CANDIDATE_VERSION:\s*1\.0\.0-ci\.\$\{\{ github\.run_number \}\}/.test(upgradeWorkflow) && /SOURCE_SHA:\s*\$\{\{ github\.sha \}\}/.test(upgradeWorkflow), "Dedicated upgrade candidate must bind version 1.0.0-ci.<run_number> and the source SHA.");
+expect(/BUILD_VERSION=\$CANDIDATE_VERSION[\s\S]*BUILD_INFORMATIONAL_VERSION=\$CANDIDATE_VERSION\+\$SOURCE_SHA[\s\S]*BUILD_SOURCE_REVISION=\$SOURCE_SHA/s.test(upgradeWorkflow), "Dedicated upgrade candidate labels must bind version and source SHA.");
+expect(/node eng\/upgrade-tests\/cli\.mjs verify-fixture --fixture tests\/upgrade\/fixtures\/v0\.1\.3/.test(upgradeWorkflow), "Dedicated upgrade workflow must verify the checked-in fixture.");
+const deterministicFixtureCheck = upgradeWorkflow.indexOf("node eng/upgrade-tests/cli.mjs generate-fixture --fixture tests/upgrade/fixtures/v0.1.3 --check");
+const dedicatedRehearsal = upgradeWorkflow.indexOf("node --test tests/upgrade/integration/rehearsal.test.mjs");
+expect(deterministicFixtureCheck >= 0 && dedicatedRehearsal > deterministicFixtureCheck && /CMSIFY_UPGRADE_TEST:\s*"1"/.test(upgradeWorkflow), "Deterministic fixture checking must complete before the opt-in full rehearsal.");
+expect(/if:\s*failure\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*path:\s*artifacts\/upgrade-tests\/\*\*/s.test(upgradeWorkflow), "Dedicated upgrade workflow must upload sanitized diagnostics on failure.");
 
 expect(/build:[\s\S]*dotnet pack[\s\S]*npm pack[\s\S]*docker buildx build[\s\S]*verify-release-artifacts\.mjs[\s\S]*upload-artifact/s.test(workflow), "The build job must build candidate NuGet, npm, and OCI artifacts once, verify them, and upload one candidate artifact.");
 const ociBuildCommands = [...workflow.matchAll(/docker buildx build[^\n]+/g)].map((match) => match[0]);
@@ -126,7 +158,23 @@ function jobBody(name) {
   return nextJob === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + nextJob);
 }
 
+const releaseUpgrade = jobBody("upgrade-rollback");
+expect(/needs:\s*\[resolve, build\]/.test(releaseUpgrade), "Release upgrade job must consume resolve and build outputs.");
+expect(/actions\/download-artifact@[0-9a-f]{40}[\s\S]*name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/s.test(releaseUpgrade), "Release upgrade job must download the single exact build candidate artifact.");
+expect(/docker load --input artifacts\/oci\/cmsify-api\.oci\.tar/.test(releaseUpgrade), "Release upgrade job must load the exact built OCI archive.");
+expect(/verify-release-baseline --fixture tests\/upgrade\/fixtures\/v0\.1\.3 --candidate-version "\$VERSION" --github-token-env GITHUB_TOKEN/.test(releaseUpgrade), "Release upgrade job must enforce the moving baseline before rehearsal.");
+const releaseLoad = releaseUpgrade.indexOf("docker load --input artifacts/oci/cmsify-api.oci.tar");
+const releaseBaseline = releaseUpgrade.indexOf("verify-release-baseline");
+const releaseFixture = releaseUpgrade.indexOf("verify-fixture");
+const releaseRehearsal = releaseUpgrade.indexOf("cli.mjs rehearse");
+expect(releaseLoad >= 0 && releaseBaseline > releaseLoad && releaseFixture > releaseBaseline && releaseRehearsal > releaseFixture, "Release upgrade job must load the exact image, verify the moving baseline and fixture, then rehearse that image.");
+expect(!/\b(docker buildx build|docker build|dotnet pack|npm pack)\b/i.test(releaseUpgrade), "Release upgrade job must not rebuild the candidate.");
+expect(/if:\s*failure\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*path:\s*artifacts\/upgrade-tests\/\*\*/s.test(releaseUpgrade), "Release upgrade job must upload sanitized diagnostics on failure.");
+
+const certification = jobBody("certify");
+expect(/needs:\s*\[[^\]]*upgrade-rollback[^\]]*\]/.test(certification), "The certify job must depend on upgrade-rollback.");
 const promotion = jobBody("promote");
+expect(/needs:\s*\[[^\]]*certify[^\]]*\]/.test(promotion), "Promotion must depend on certify so the upgrade gate cannot be bypassed.");
 expect(!/\b(dotnet pack|npm pack|npm run build|docker buildx build|docker build)\b/i.test(promotion), "Promotion must not rebuild mutable artifacts.");
 expect(!/--skip-duplicate|NUGET_API_KEY\s*:\s*\$\{\{\s*secrets\./i.test(promotion), "NuGet promotion must use the short-lived OIDC key and reject pre-existing package versions.");
 expect(/id-token:\s*write[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org[\s\S]*npm@11\.11\.0[\s\S]*--provenance[\s\S]*--tag "\$NPM_CHANNEL"/s.test(promotion), "npm trusted publishing must have OIDC, registry configuration, supported npm, provenance, and a prerelease-safe tag.");
@@ -151,7 +199,9 @@ expect(/sudo install|GITHUB_PATH/.test(promotion), "Pinned ORAS installation mus
 
 const branchWorkflow = file(".github/workflows/dotnet-test.yml");
 expect(/pull_request:/i.test(branchWorkflow) && /verify-release-contract\.mjs/i.test(branchWorkflow) && /tests\/release-contract/i.test(branchWorkflow), "Branch/PR validation must execute the release-contract verifier and tests.");
-expect(/tests\/release-contract\/finalize-spdx\.test\.mjs/i.test(branchWorkflow), "Branch validation must execute SPDX finalizer roundtrip and negative tests.");
+expect(/node --test tests\/upgrade\/unit\/\*\.test\.mjs tests\/release-contract\/\*\.test\.mjs/.test(branchWorkflow), "Branch validation must execute fast upgrade unit tests and all release-contract tests.");
+expect(/node eng\/upgrade-tests\/cli\.mjs verify-fixture --fixture tests\/upgrade\/fixtures\/v0\.1\.3/.test(branchWorkflow), "Branch validation must verify the checked-in upgrade fixture.");
+expect(!/generate-fixture/.test(branchWorkflow), "Branch validation must not regenerate the Docker-backed fixture.");
 
 if (errors.length > 0) {
   process.stderr.write(`${errors.join("\n")}\n`);

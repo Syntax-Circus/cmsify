@@ -22,10 +22,10 @@ test("accepts stable and prerelease v1 SemVer tags", () => {
   }
 });
 
-test("fails closed for a later 0.x tag without its checked-in upgrade fixture manifest", () => {
+test("accepts a syntactically valid later 0.1.x tag before moving-baseline verification", () => {
   const result = validate("v0.1.4");
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /upgrade fixture manifest/i);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "0.1.4");
 });
 
 test("does not require a future-fixture manifest for the current published 0.1.3 baseline", () => {

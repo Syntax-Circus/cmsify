@@ -15,13 +15,6 @@ if (!/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za
 }
 if (!/^[0-9a-f]{40}$/i.test(sourceSha ?? "")) throw new Error("Release source SHA must be a full immutable Git commit SHA.");
 
-const [major, minor, patch] = tag.slice(1).split(/[.-]/, 3).map(Number);
-const exceedsPublishedUpgradeBaseline = major === 0 && (minor > 1 || (minor === 1 && patch > 3));
-
-if (exceedsPublishedUpgradeBaseline && !existsSync(resolve(repositoryRoot, "tests", "upgrade", "fixtures", `${tag.slice(1)}.json`))) {
-  throw new Error(`Refusing ${tag}: a matching checked-in upgrade fixture manifest is required before any later 0.x promotion.`);
-}
-
 if (requireChangelog) {
   const changelogPath = resolve(repositoryRoot, "CHANGELOG.md");
   const version = tag.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

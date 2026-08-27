@@ -23,6 +23,7 @@ const contractFiles = [
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj",
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj",
   ".github/workflows/dotnet-test.yml",
+  ".github/workflows/upgrade-rollback.yml",
   workflowPath,
 ];
 
@@ -67,6 +68,11 @@ function mutateWorkflow(root, mutate) {
   writeFileSync(path, mutate(readFileSync(path, "utf8")));
 }
 
+function mutateUpgradeWorkflow(root, mutate) {
+  const path = resolve(root, ".github/workflows/upgrade-rollback.yml");
+  writeFileSync(path, mutate(readFileSync(path, "utf8")));
+}
+
 function verify(root) {
   return spawnSync(process.execPath, [verifier, "--root", root], { encoding: "utf8" });
 }
@@ -97,6 +103,34 @@ test("rejects the legacy npm lockfile repository owner identity", () => expectIn
 test("rejects an unpinned release action", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@v4")), /pinned/i));
 test("rejects a promotion rebuild", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('REMOTE_SHA="${PEELED_SHA:-$LIGHTWEIGHT_SHA}";', 'docker buildx build --push .\n          REMOTE_SHA="${PEELED_SHA:-$LIGHTWEIGHT_SHA}";')), /Promotion must not rebuild/i));
 
+test("rejects a missing dedicated upgrade and rollback workflow", () => expectInvalid((root) => {
+  rmSync(resolve(root, ".github/workflows/upgrade-rollback.yml"), { force: true });
+}, /dedicated upgrade.*workflow|required release file.*upgrade-rollback/i));
+
+test("rejects a mutable action reference in the dedicated workflow", () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@v4")), /upgrade.*action.*pinned/i));
+
+test("rejects missing upgrade-relevant path triggers", () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replaceAll('      - "eng/upgrade-tests/**"\n', "")), /path triggers.*eng\/upgrade-tests/i));
+
+test("rejects a dedicated workflow without fast fixture verification", () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replace(/\s*- name: Verify the checked-in fixture\n\s*run: node eng\/upgrade-tests\/cli\.mjs verify-fixture[^\n]*\n/, "\n")), /dedicated.*verify.*fixture/i));
+
+test("rejects rehearsal without a preceding deterministic fixture check", () => expectInvalid((root) => mutateUpgradeWorkflow(root, (workflow) => workflow.replace(/\s*- name: Check deterministic fixture regeneration\n\s*run: node eng\/upgrade-tests\/cli\.mjs generate-fixture[^\n]*--check\n/, "\n")), /deterministic fixture.*before.*rehearsal/i));
+
+test("rejects a release rehearsal that rebuilds the candidate", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("          sha256sum --check artifacts/SHA256SUMS", "          docker build --tag replacement .\n          sha256sum --check artifacts/SHA256SUMS")), /release upgrade.*must not rebuild/i));
+
+test("rejects certification that does not depend on upgrade-rollback", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("needs: [resolve, build, dotnet-consumer, node-consumer, upgrade-rollback]", "needs: [resolve, build, dotnet-consumer, node-consumer]")), /certify.*depend.*upgrade-rollback/i));
+
+test("rejects a release rehearsal without failure diagnostics upload", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("path: artifacts/upgrade-tests/**", "path: artifacts/not-upgrade-tests/**")), /release upgrade.*diagnostics.*failure/i));
+
+test("rejects promotion that is reachable without certification and the upgrade gate", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("promote:\n    needs: [resolve, certify]", "promote:\n    needs: [resolve, build]")), /promotion.*certify.*upgrade.*gate/i));
+
+test("rejects a release gate that does not load the exact built OCI archive", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => {
+  const marker = "docker load --input artifacts/oci/cmsify-api.oci.tar";
+  const index = workflow.lastIndexOf(marker);
+  return `${workflow.slice(0, index)}docker pull syntaxcircus/cmsify-api:$VERSION${workflow.slice(index + marker.length)}`;
+}), /release upgrade.*exact.*OCI archive/i));
+
+test("rejects a release gate without moving-baseline verification", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node eng\/upgrade-tests\/cli\.mjs verify-release-baseline[^\n]*/, "")), /release upgrade.*moving baseline/i));
+
 test("rejects combined ORAS boolean and path flags", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api", "oras manifest fetch --descriptor --oci-layout --oci-layout-path artifacts/oci/api")), /ORAS.*combined.*--oci-layout/i));
 test("rejects combined ORAS copy boolean and path flags", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras cp --from-oci-layout-path artifacts/oci/api", "oras cp --from-oci-layout --from-oci-layout-path artifacts/oci/api")), /ORAS.*combined.*--from-oci-layout/i));
 test("rejects Docker Hub preflight without a scoped Bearer token", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("https://auth.docker.io/token?service=registry.docker.io&scope=repository:$image:pull,push", "https://registry-1.docker.io/v2/token")), /Docker Hub.*scoped Bearer token/i));
@@ -124,4 +158,6 @@ for (const container of ["cmsify-postgres-smoke", "cmsify-api-smoke", "cmsify-ad
 
 test("rejects smoke cleanup that removes containers before collecting failure logs", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("docker logs cmsify-api-smoke 2>/dev/null || true", "docker rm -f cmsify-api-smoke 2>/dev/null || true\n              docker logs cmsify-api-smoke 2>/dev/null || true")), /smoke failure.*logs.*before.*remove/i));
 test("rejects an Admin smoke probe that accepts arbitrary HTTP success", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" | grep -Fq '<title>Cmsify Admin</title>'", " >/dev/null")), /Admin.*Cmsify-specific content/i));
-test("rejects branch validation that omits SPDX finalizer roundtrip tests", () => expectInvalid((root) => { const path = resolve(root, ".github/workflows/dotnet-test.yml"); writeFileSync(path, readFileSync(path, "utf8").replace(" tests/release-contract/finalize-spdx.test.mjs", "")); }, /branch.*SPDX finalizer.*tests/i));
+test("rejects branch validation that omits the complete release-contract suite", () => expectInvalid((root) => { const path = resolve(root, ".github/workflows/dotnet-test.yml"); writeFileSync(path, readFileSync(path, "utf8").replace("tests/release-contract/*.test.mjs", "tests/release-contract/validate-release-tag.test.mjs")); }, /branch.*all release-contract tests/i));
+test("rejects branch validation that omits fast upgrade unit tests", () => expectInvalid((root) => { const path = resolve(root, ".github/workflows/dotnet-test.yml"); writeFileSync(path, readFileSync(path, "utf8").replace("tests/upgrade/unit/*.test.mjs ", "")); }, /branch.*upgrade unit tests/i));
+test("rejects branch validation that omits fixture verification", () => expectInvalid((root) => { const path = resolve(root, ".github/workflows/dotnet-test.yml"); writeFileSync(path, readFileSync(path, "utf8").replace(/\n\s*node eng\/upgrade-tests\/cli\.mjs verify-fixture[^\n]*/, "")); }, /branch.*verify.*fixture/i));

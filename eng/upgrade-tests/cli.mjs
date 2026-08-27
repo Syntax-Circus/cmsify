@@ -8,11 +8,19 @@ import { loadExpectedData } from "./expected.mjs";
 import { compareFixtureTrees, generateFixture, runWithCleanup } from "./fixture.mjs";
 import { loadFixtureManifest } from "./manifest.mjs";
 import { rehearse, validateCandidateInput } from "./rehearsal.mjs";
+import {
+  fetchDockerLinuxAmd64Descriptor,
+  fetchPublishedStable01Releases,
+  selectLatestPublishedStable01,
+  validateReleaseCandidateVersion,
+  verifyReleaseBaseline,
+} from "./release-baseline.mjs";
 
 const USAGE = [
   "Usage:",
   "  <verify-fixture|generate-fixture> --fixture <fixture-directory> [--check]",
   "  rehearse --fixture <fixture-directory> --candidate-image <ref> --candidate-version <semver> --candidate-source-sha <40hex>",
+  "  verify-release-baseline --fixture <fixture-directory> --candidate-version <semver> [--github-token-env GITHUB_TOKEN]",
 ].join("\n");
 
 function assert(condition, message) {
@@ -42,6 +50,28 @@ function parseArguments(arguments_, cwd = process.cwd()) {
       candidateImage,
       candidateVersion,
       candidateSourceSha,
+    };
+  }
+
+  if (arguments_[0] === "verify-release-baseline") {
+    assert(arguments_.length === 5 || arguments_.length === 7, USAGE);
+    const values = new Map();
+    for (let index = 1; index < arguments_.length; index += 2) {
+      const name = arguments_[index];
+      const value = arguments_[index + 1];
+      assert(["--fixture", "--candidate-version", "--github-token-env"].includes(name) && !values.has(name), USAGE);
+      assert(typeof value === "string" && value.length > 0 && !/[\r\n\0]/.test(value), USAGE);
+      values.set(name, value);
+    }
+    assert(values.has("--fixture") && values.has("--candidate-version"), USAGE);
+    const githubTokenEnvironment = values.get("--github-token-env");
+    assert(githubTokenEnvironment === undefined || /^[A-Za-z_][A-Za-z0-9_]*$/.test(githubTokenEnvironment), USAGE);
+    const candidateVersion = validateReleaseCandidateVersion(values.get("--candidate-version"));
+    return {
+      command: "verify-release-baseline",
+      fixtureDirectory: resolve(cwd, values.get("--fixture")),
+      candidateVersion,
+      githubTokenEnvironment,
     };
   }
 
@@ -187,6 +217,29 @@ export async function main(arguments_, runtime = {}) {
   try {
     const parsed = parseArguments(arguments_, cwd);
     fixtureDirectory = parsed.fixtureDirectory;
+    if (parsed.command === "verify-release-baseline") {
+      const environment = runtime.env ?? process.env;
+      const githubToken = parsed.githubTokenEnvironment === undefined ? undefined : environment[parsed.githubTokenEnvironment];
+      assert(parsed.githubTokenEnvironment === undefined || (typeof githubToken === "string" && githubToken.length > 0), `GitHub token environment variable ${parsed.githubTokenEnvironment} is not set.`);
+      const manifest = loadFixtureManifest(fixtureDirectory);
+      const fetchReleases = runtime.fetchPublishedStable01Releases ?? fetchPublishedStable01Releases;
+      const fetchDescriptor = runtime.fetchDockerLinuxAmd64Descriptor ?? fetchDockerLinuxAmd64Descriptor;
+      const releases = await fetchReleases({ githubToken, fetchImpl: runtime.fetchImpl });
+      const latest = selectLatestPublishedStable01(releases, parsed.candidateVersion);
+      const dockerDescriptor = await fetchDescriptor({
+        repository: manifest.baseline.apiImage.repository,
+        tag: latest.version,
+        fetchImpl: runtime.fetchImpl,
+      });
+      const result = verifyReleaseBaseline({
+        candidateVersion: parsed.candidateVersion,
+        fixtureManifest: manifest,
+        githubReleases: releases,
+        dockerDescriptor,
+      });
+      stdout.write(`Release baseline verified for ${result.baselineVersion} (${result.sourceSha}, ${result.apiDigest}).\n`);
+      return 0;
+    }
     if (parsed.command === "rehearse") {
       const rehearseCommand = runtime.rehearse ?? rehearse;
       const controller = runtime.signal === undefined ? new AbortController() : undefined;

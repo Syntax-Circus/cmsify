@@ -27,5 +27,6 @@ jobs:
           node-version: "22"
       - name: Verify branch release contract (validation only)
         run: |
-          node --test tests/release-contract/verify-release-contract.test.mjs tests/release-contract/verify-release-artifacts.test.mjs tests/release-contract/validate-release-tag.test.mjs tests/release-contract/finalize-spdx.test.mjs
+          node --test tests/upgrade/unit/*.test.mjs tests/release-contract/*.test.mjs
+          node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v0.1.3
           node scripts/release/verify-release-contract.mjs
