@@ -108,3 +108,20 @@ Before implementation on the new computer:
 - Do not push, merge, tag, publish, or release without explicit user approval.
 
 When resuming, tell Codex: “Read `AGENTS.md` and `docs/v1-release-remediation-handoff.md`, then continue with Task 8. Do not redo Tasks 1–7.”
+
+## Task 8 continuation result
+
+Task 8 / F-09 is implemented and independently approved in Cmsify commit `415a6a7` (`Complete durable media reconciliation`). The reusable shared-storage work is committed in the sibling `SyntaxCircus.Storage` repository through `4df2ac3` on `feature/media-reconciliation`.
+
+Final local evidence at the Task 8 commit:
+
+- `SyntaxCircus.Storage`: Release build 0 warnings/errors, 91/91 tests, pack succeeded.
+- Cmsify: Core 66/66; Infrastructure 292/292 with PostgreSQL and MinIO; API integration 69/69; Admin integration 29/29; .NET client 38/38.
+- TypeScript: OpenAPI generation check, typecheck, 40/40 tests, and build passed with no generated drift.
+- EF reported no pending model changes; development and production Compose configuration rendered successfully.
+- Full solution test passed. The clean Release build succeeded with 45 existing Admin nullability warnings assigned to Task 11.
+- Independent Task 8 review finished with no Critical, Important, or Minor findings.
+
+The exact locally consumed package is `SyntaxCircus.Storage` `0.2.0-media-reconciliation.4`, SHA-256 `62E063B5A6AB112C563FBB00443E87C9A624D169E597122BB79F2BC0F0A98215`. Publication and replacement with the exact approved released version remain explicit-approval gates. No push, merge, tag, publication, or release was performed.
+
+Resume with Task 9 in `docs/superpowers/plans/2026-08-24-v1-remediation.md`; do not redo Tasks 1–8.
