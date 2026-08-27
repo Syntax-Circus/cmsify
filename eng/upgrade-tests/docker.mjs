@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { OWNERSHIP_LABELS } from "./paths.mjs";
+import { assertTrustedRunScope, OWNERSHIP_LABELS } from "./paths.mjs";
 import { ProcessFailure, runProcess } from "./process.mjs";
 
 const COMPOSE_FILE = "tests/upgrade/compose.yml";
@@ -42,6 +42,11 @@ function imageReference(image) {
   return `${image.repository}@${image.digest}`;
 }
 
+function isContainedBy(parent, candidate) {
+  const pathFromParent = relative(parent, candidate);
+  return pathFromParent === "" || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== ".." && !isAbsolute(pathFromParent));
+}
+
 /**
  * @typedef {import("./paths.mjs").RunScope} RunScope
  */
@@ -52,12 +57,11 @@ function imageReference(image) {
  * @param {typeof runProcess} [executor]
  */
 export function createDockerHarness(scope, executor = runProcess) {
-  assert(scope && typeof scope === "object", "A run scope is required.");
-  assert(typeof scope.runId === "string" && typeof scope.projectName === "string" && typeof scope.repositoryRoot === "string" && typeof scope.diagnosticsDirectory === "string", "The run scope is incomplete.");
-  assert(scope.labels?.[OWNERSHIP_LABELS.upgradeTest] === "true" && scope.labels?.[OWNERSHIP_LABELS.upgradeRun] === scope.runId, "The run scope must contain both exact ownership labels.");
+  assertTrustedRunScope(scope);
   assert(typeof executor === "function", "A process executor is required.");
 
-  const environmentFile = resolve(scope.repositoryRoot, "tests", "upgrade", ".runs", `${scope.runId}.env`);
+  const environmentDirectory = resolve(scope.repositoryRoot, "tests", "upgrade", ".runs");
+  const environmentFile = resolve(environmentDirectory, `${scope.runId}.env`);
   const composePrefix = [
     "compose",
     "--project-name", scope.projectName,
@@ -65,10 +69,18 @@ export function createDockerHarness(scope, executor = runProcess) {
     "--env-file", environmentFile,
   ];
 
+  function assertSafeEnvironmentFile() {
+    assertTrustedRunScope(scope);
+    const ownedDirectory = resolve(scope.repositoryRoot, "tests", "upgrade", ".runs");
+    const ownedFile = resolve(ownedDirectory, `${scope.runId}.env`);
+    assert(environmentDirectory === ownedDirectory && environmentFile === ownedFile && isContainedBy(ownedDirectory, ownedFile), "A trusted safe run scope has an unowned environment file path.");
+  }
+
   async function ensureRunFiles() {
+    assertSafeEnvironmentFile();
     await Promise.all([
       mkdir(scope.diagnosticsDirectory, { recursive: true }),
-      mkdir(resolve(scope.repositoryRoot, "tests", "upgrade", ".runs"), { recursive: true }),
+      mkdir(environmentDirectory, { recursive: true }),
     ]);
     try {
       await writeFile(environmentFile, [
@@ -188,18 +200,34 @@ export function createDockerHarness(scope, executor = runProcess) {
     },
 
     async cleanup() {
+      const failures = [];
+      const collectFailure = async (operation) => {
+        try {
+          return await operation();
+        } catch (error) {
+          failures.push(error);
+          return undefined;
+        }
+      };
       try {
-        await logs();
-        const [containers, networks, volumes] = await Promise.all([
-          discover(["ps", "--all", "--quiet"], "docker-cleanup-discover-containers"),
-          discover(["network", "ls", "--quiet"], "docker-cleanup-discover-networks"),
-          discover(["volume", "ls", "--quiet"], "docker-cleanup-discover-volumes"),
+        await collectFailure(logs);
+        const [containers = [], networks = [], volumes = []] = await Promise.all([
+          collectFailure(() => discover(["ps", "--all", "--quiet"], "docker-cleanup-discover-containers")),
+          collectFailure(() => discover(["network", "ls", "--quiet"], "docker-cleanup-discover-networks")),
+          collectFailure(() => discover(["volume", "ls", "--quiet"], "docker-cleanup-discover-volumes")),
         ]);
-        await removeResources(containers, "container", ["rm", "--force"], "docker-cleanup-remove-container");
-        await removeResources(networks, "network", ["network", "rm"], "docker-cleanup-remove-network");
-        await removeResources(volumes, "volume", ["volume", "rm"], "docker-cleanup-remove-volume");
+        await collectFailure(() => removeResources(containers, "container", ["rm", "--force"], "docker-cleanup-remove-container"));
+        await collectFailure(() => removeResources(networks, "network", ["network", "rm"], "docker-cleanup-remove-network"));
+        await collectFailure(() => removeResources(volumes, "volume", ["volume", "rm"], "docker-cleanup-remove-volume"));
       } finally {
-        await rm(environmentFile, { force: true });
+        await collectFailure(async () => {
+          assertSafeEnvironmentFile();
+          await rm(environmentFile, { force: true });
+        });
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) {
+        throw new AggregateError(failures, "Docker cleanup failed.");
       }
     },
   });

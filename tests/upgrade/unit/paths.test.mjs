@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 import test from "node:test";
@@ -32,6 +32,23 @@ test("generates a safe lower-case run id", () => {
 
 test("rejects diagnostics outside the repository-owned upgrade run root", () => {
   assert.throws(() => createRunScope(repositoryRoot, "..\\outside"), /safe run id/i);
+});
+
+test("rejects forged run scopes before they can create or delete an unowned env file", () => {
+  const trusted = createRunScope(repositoryRoot, "safe-run-006");
+  const outsideEnvironmentFile = resolve(repositoryRoot, "..", "unowned-upgrade.env");
+  const forged = {
+    ...trusted,
+    runId: "..\\..\\unowned-upgrade",
+    diagnosticsDirectory: resolve(repositoryRoot, "..", "unowned-diagnostics"),
+    labels: {
+      "io.syntaxcircus.cmsify.upgrade-test": "true",
+      "io.syntaxcircus.cmsify.upgrade-run": "..\\..\\unowned-upgrade",
+    },
+  };
+
+  assert.throws(() => createDockerHarness(forged), /trusted safe run scope/i);
+  assert.equal(existsSync(outsideEnvironmentFile), false);
 });
 
 test("cleanup discovers resources using both exact ownership labels", async () => {
@@ -118,4 +135,44 @@ test("preserves a run environment file supplied by later orchestration", async (
   await harness.start("postgres");
 
   assert.equal(readFileSync(harness.environmentFile, "utf8"), "CMSIFY_FIXTURE_TOKEN=fixture-only-value\n");
+});
+
+test("continues owned cleanup when log collection fails", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-007");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    if (args[0] === "compose" && args.includes("logs")) throw new Error("log collection failed");
+    if (args[0] === "ps") return { exitCode: 0, stdout: "container-id\n", stderr: "", durationMs: 0 };
+    if (args[0] === "network" && args[1] === "ls") return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(scope.labels), stderr: "", durationMs: 0 };
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(createDockerHarness(scope, executor).cleanup(), /log collection failed/);
+
+  assert.ok(calls.some(({ args }) => args[0] === "ps"));
+  assert.ok(calls.some(({ args }) => args[0] === "rm" && args.includes("container-id")));
+});
+
+test("refuses to remove a discovered resource without both ownership labels", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-008");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    if (args[0] === "ps") return { exitCode: 0, stdout: "container-id\n", stderr: "", durationMs: 0 };
+    if (args[0] === "network" || args[0] === "volume") return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return {
+      exitCode: 0,
+      stdout: JSON.stringify({ "io.syntaxcircus.cmsify.upgrade-test": "true" }),
+      stderr: "",
+      durationMs: 0,
+    };
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(createDockerHarness(scope, executor).cleanup(), /lacks the required ownership labels/i);
+
+  assert.equal(calls.some(({ args }) => args[0] === "rm" && args.includes("container-id")), false);
 });

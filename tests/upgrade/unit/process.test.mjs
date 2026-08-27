@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import { ProcessFailure, runProcess } from "../../../eng/upgrade-tests/process.mjs";
@@ -6,6 +9,16 @@ import { ProcessFailure, runProcess } from "../../../eng/upgrade-tests/process.m
 const node = process.execPath;
 const timeoutMs = 5_000;
 const evalScript = (script, ...args) => ["--eval", script, ...args];
+const temporaryDirectory = mkdtempSync(resolve(tmpdir(), "cmsify-upgrade-process-"));
+
+test.after(() => rmSync(temporaryDirectory, { force: true, recursive: true }));
+
+const wait = (milliseconds) => new Promise((resolve_) => setTimeout(resolve_, milliseconds));
+
+function processWithDelayedDescendant(marker) {
+  const childScript = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "survived"), 400)`;
+  return evalScript(`require("node:child_process").spawn(process.execPath, ["--eval", ${JSON.stringify(childScript)}], { stdio: "ignore" }); setTimeout(() => {}, 30_000)`);
+}
 
 test("passes metacharacters as one literal argument", async () => {
   const result = await runProcess(node, evalScript("process.stdout.write(JSON.stringify(process.argv.slice(1)))", "x; Write-Output compromised"), { timeoutMs });
@@ -14,15 +27,19 @@ test("passes metacharacters as one literal argument", async () => {
 });
 
 test("terminates a timed-out process", async () => {
+  const marker = resolve(temporaryDirectory, "timeout-descendant-marker");
   await assert.rejects(
-    runProcess(node, evalScript("setTimeout(() => {}, 30_000)"), { timeoutMs: 50, phase: "timeout-test" }),
+    runProcess(node, processWithDelayedDescendant(marker), { timeoutMs: 50, phase: "timeout-test" }),
     (error) => error instanceof ProcessFailure && error.phase === "timeout-test: timeout" && error.durationMs < 5_000,
   );
+  await wait(700);
+  assert.equal(existsSync(marker), false, "timeout must terminate descendants as well as the direct child");
 });
 
 test("terminates a process when its abort signal fires", async () => {
   const controller = new AbortController();
-  const pending = runProcess(node, evalScript("setTimeout(() => {}, 30_000)"), {
+  const marker = resolve(temporaryDirectory, "abort-descendant-marker");
+  const pending = runProcess(node, processWithDelayedDescendant(marker), {
     timeoutMs,
     signal: controller.signal,
     phase: "abort-test",
@@ -33,6 +50,8 @@ test("terminates a process when its abort signal fires", async () => {
     pending,
     (error) => error instanceof ProcessFailure && error.phase === "abort-test: aborted" && error.durationMs < 5_000,
   );
+  await wait(700);
+  assert.equal(existsSync(marker), false, "abort must terminate descendants as well as the direct child");
 });
 
 test("caps captured stdout and stderr at one MiB each", async () => {
@@ -40,6 +59,16 @@ test("caps captured stdout and stderr at one MiB each", async () => {
 
   assert.ok(Buffer.byteLength(result.stdout) <= 1024 * 1024);
   assert.ok(Buffer.byteLength(result.stderr) <= 1024 * 1024);
+});
+
+test("caps output after redaction expands short secrets", async () => {
+  const result = await runProcess(node, evalScript("process.stdout.write(process.env.CMSIFY_FIXTURE_TOKEN.repeat(1024 * 1024))"), {
+    timeoutMs,
+    env: { CMSIFY_FIXTURE_TOKEN: "x" },
+  });
+
+  assert.ok(Buffer.byteLength(result.stdout) <= 1024 * 1024);
+  assert.equal(result.stdout.includes("x"), false);
 });
 
 test("reports a nonzero exit with a sanitized diagnostic tail", async () => {

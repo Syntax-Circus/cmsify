@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 const RUN_ID = /^[a-z0-9][a-z0-9-]{7,47}$/;
 const UPGRADE_TEST_LABEL = "io.syntaxcircus.cmsify.upgrade-test";
 const UPGRADE_RUN_LABEL = "io.syntaxcircus.cmsify.upgrade-run";
+const RUN_SCOPES = new WeakSet();
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -12,6 +13,10 @@ function assert(condition, message) {
 function isContainedBy(parent, candidate) {
   const pathFromParent = relative(parent, candidate);
   return pathFromParent === "" || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== ".." && !isAbsolute(pathFromParent));
+}
+
+function assertSafeRunId(runId) {
+  assert(typeof runId === "string" && RUN_ID.test(runId), "A safe run id must contain 8-48 lowercase letters, digits, or hyphens.");
 }
 
 function createRunId() {
@@ -39,14 +44,14 @@ export function createRunScope(repositoryRoot, requestedId) {
   assert(requestedId === undefined || typeof requestedId === "string", "A safe run id must be a string.");
 
   const runId = requestedId ?? createRunId();
-  assert(RUN_ID.test(runId), "A safe run id must contain 8-48 lowercase letters, digits, or hyphens.");
+  assertSafeRunId(runId);
 
   const resolvedRepositoryRoot = resolve(repositoryRoot);
   const diagnosticsRoot = resolve(resolvedRepositoryRoot, "artifacts", "upgrade-tests");
   const diagnosticsDirectory = resolve(diagnosticsRoot, runId);
   assert(isContainedBy(diagnosticsRoot, diagnosticsDirectory), "A safe run id must resolve below the repository-owned upgrade run root.");
 
-  return Object.freeze({
+  const scope = Object.freeze({
     runId,
     projectName: runId,
     repositoryRoot: resolvedRepositoryRoot,
@@ -56,6 +61,26 @@ export function createRunScope(repositoryRoot, requestedId) {
       [UPGRADE_RUN_LABEL]: runId,
     }),
   });
+  RUN_SCOPES.add(scope);
+  return scope;
+}
+
+/**
+ * Ensures a scope was created in this process and still represents only its repository-owned paths.
+ * @param {unknown} scope
+ * @returns {asserts scope is RunScope}
+ */
+export function assertTrustedRunScope(scope) {
+  assert(scope !== null && typeof scope === "object" && RUN_SCOPES.has(scope), "A trusted safe run scope created by createRunScope is required.");
+  assertSafeRunId(scope.runId);
+  assert(scope.projectName === scope.runId, "A trusted safe run scope must use its run id as the project name.");
+  assert(typeof scope.repositoryRoot === "string" && typeof scope.diagnosticsDirectory === "string", "A trusted safe run scope is incomplete.");
+
+  const repositoryRoot = resolve(scope.repositoryRoot);
+  const diagnosticsRoot = resolve(repositoryRoot, "artifacts", "upgrade-tests");
+  const diagnosticsDirectory = resolve(diagnosticsRoot, scope.runId);
+  assert(scope.repositoryRoot === repositoryRoot && scope.diagnosticsDirectory === diagnosticsDirectory && isContainedBy(diagnosticsRoot, diagnosticsDirectory), "A trusted safe run scope has unowned diagnostics paths.");
+  assert(scope.labels?.[UPGRADE_TEST_LABEL] === "true" && scope.labels?.[UPGRADE_RUN_LABEL] === scope.runId, "A trusted safe run scope has invalid ownership labels.");
 }
 
 export const OWNERSHIP_LABELS = Object.freeze({

@@ -38,6 +38,18 @@ function redact(value, redactions) {
   return sanitized;
 }
 
+function capCapturedText(value) {
+  if (Buffer.byteLength(value, "utf8") <= MAX_CAPTURED_BYTES) return value;
+  const bytes = Buffer.from(value, "utf8");
+  let end = MAX_CAPTURED_BYTES;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+function redactAndCap(value, redactions) {
+  return capCapturedText(redact(value, redactions));
+}
+
 function sanitizedTail(stdout, stderr, redactions) {
   const combined = redact(`${stderr}\n${stdout}`, redactions).replace(/[\r\n]+/g, " ").trim();
   return combined.slice(-2048) || "no diagnostic output";
@@ -98,8 +110,8 @@ export class ProcessFailure extends Error {
     this.command = details.command;
     this.phase = details.phase;
     this.exitCode = details.exitCode;
-    this.stdout = redact(details.stdout, details.redactions);
-    this.stderr = redact(details.stderr, details.redactions);
+    this.stdout = redactAndCap(details.stdout, details.redactions);
+    this.stderr = redactAndCap(details.stderr, details.redactions);
     this.durationMs = details.durationMs;
   }
 }
@@ -202,8 +214,8 @@ export function runProcess(command, args, options) {
         cleanup();
         resolve({
           exitCode,
-          stdout: redact(output.stdout, redactions),
-          stderr: redact(output.stderr, redactions),
+          stdout: redactAndCap(output.stdout, redactions),
+          stderr: redactAndCap(output.stderr, redactions),
           durationMs: durationMs(),
         });
       }
