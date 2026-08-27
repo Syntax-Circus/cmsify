@@ -52,7 +52,7 @@ function canonicalFixturePath(file, fixtureDirectory, name) {
   assert(typeof file === "string" && file.length > 0, `${name} must be a non-empty string.`);
   assert(!file.includes("\\"), `${name} must use forward slashes.`);
   assert(!isAbsolute(file), `${name} must be fixture-relative.`);
-  assert(!file.split("/").includes("..") && !file.split("/").includes("."), `${name} must not contain traversal segments.`);
+  assert(file.split("/").every((part) => part.length > 0 && part !== "." && part !== ".."), `${name} must use canonical path segments.`);
 
   const resolved = resolve(fixtureDirectory, file);
   const fixtureRelative = relative(fixtureDirectory, resolved);

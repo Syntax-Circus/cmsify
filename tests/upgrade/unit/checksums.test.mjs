@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -59,6 +59,10 @@ function temporaryFixture() {
   return root;
 }
 
+function linkedDirectory(target, link) {
+  symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+}
+
 test("verifies every fixture payload against its SHA256SUMS entry", async () => {
   const root = temporaryFixture();
   const manifest = await materializeFixture(root);
@@ -105,6 +109,24 @@ test("writes ordinal forward-slash SHA256SUMS", async () => {
   assert.deepEqual(text.split("\n").filter(Boolean).map((line) => line.slice(66)), ["database.sql", "media/a.txt", "media/z.txt"]);
 });
 
+test("refuses to hash a payload through a linked parent directory", async () => {
+  const root = temporaryFixture();
+  const outside = temporaryFixture();
+  writeFileSync(resolve(outside, "payload.txt"), "outside fixture");
+  linkedDirectory(outside, resolve(root, "media"));
+
+  await assert.rejects(() => writeFixtureChecksums(root, ["media/payload.txt"]), /symbolic link/i);
+});
+
+test("refuses a linked SHA256SUMS output target", async () => {
+  const root = temporaryFixture();
+  const outside = temporaryFixture();
+  writeFileSync(resolve(root, "database.sql"), "database");
+  linkedDirectory(outside, resolve(root, "SHA256SUMS"));
+
+  await assert.rejects(() => writeFixtureChecksums(root, ["database.sql"]), /symbolic link/i);
+});
+
 test("verify-fixture reports success for a complete temporary fixture", async () => {
   const root = temporaryFixture();
   await materializeFixture(root);
@@ -127,4 +149,17 @@ test("verify-fixture rejects incomplete scenario coverage without leaking the fi
   assert.equal(result.status, 1);
   assert.match(result.stderr, /expected\.json.*scenario/i);
   assert.doesNotMatch(result.stderr, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+});
+
+test("verify-fixture redacts malformed checksum paths without inventory noise", async () => {
+  const root = temporaryFixture();
+  await materializeFixture(root);
+  writeFileSync(resolve(root, "SHA256SUMS"), `${"0".repeat(64)}  C:\\leaked\\secret\n`);
+
+  const result = spawnSync(process.execPath, [CLI, "verify-fixture", "--fixture", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /SHA256SUMS.*invalid.*path/i);
+  assert.doesNotMatch(result.stderr, /C:\\leaked\\secret/i);
+  assert.doesNotMatch(result.stderr, /SHA256SUMS (omits|contains extra)/i);
 });

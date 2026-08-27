@@ -71,6 +71,11 @@ function unknownSchema(manifest) {
   return manifest;
 }
 
+function repeatedSeparator(manifest) {
+  manifest.requiredFiles[3] = "media//sample.txt";
+  return manifest;
+}
+
 test("accepts the immutable v0.1.3 fixture contract", () => {
   const manifest = validateFixtureManifest(validManifest(), fixtureDirectory);
 
@@ -82,7 +87,7 @@ test("accepts the immutable v0.1.3 fixture contract", () => {
   assert.deepEqual(new Set(manifest.requiredScenarios), REQUIRED_SCENARIOS);
 });
 
-for (const mutate of [absoluteFile, escapingFile, tagDigestMismatch, missingScenario, duplicateFile, unknownSchema]) {
+for (const mutate of [absoluteFile, escapingFile, tagDigestMismatch, missingScenario, duplicateFile, unknownSchema, repeatedSeparator]) {
   test(`rejects ${mutate.name}`, () => {
     assert.throws(() => validateFixtureManifest(mutate(validManifest()), fixtureDirectory));
   });

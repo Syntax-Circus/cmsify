@@ -16,7 +16,7 @@ function normalizeRelativePath(value) {
 function safeFixturePath(fixtureDirectory, file, name = "fixture path") {
   if (typeof file !== "string" || file.length === 0) fail(`${name} must be a non-empty fixture-relative path.`);
   if (file.includes("\\") || isAbsolute(file) || file.split("/").some((part) => part === "." || part === ".." || part.length === 0)) {
-    fail(`${name} must be a canonical fixture-relative path: ${file}.`);
+    fail(`${name} must be a canonical fixture-relative path.`);
   }
   const resolved = resolve(fixtureDirectory, file);
   const fixtureRelative = relative(fixtureDirectory, resolved);
@@ -26,8 +26,38 @@ function safeFixturePath(fixtureDirectory, file, name = "fixture path") {
   return { file, resolved };
 }
 
+async function assertFixturePathComponents(fixtureDirectory, file, { allowMissingFinal = false, outputTarget = false } = {}) {
+  const fixtureRoot = resolve(fixtureDirectory);
+  let rootStat;
+  try {
+    rootStat = await lstat(fixtureRoot);
+  } catch {
+    fail("Fixture directory cannot be read.");
+  }
+  if (rootStat.isSymbolicLink()) fail("Fixture directory must not be a symbolic link.");
+  if (!rootStat.isDirectory()) fail("Fixture directory must be a directory.");
+
+  const parts = file.split("/");
+  let candidate = fixtureRoot;
+  for (let index = 0; index < parts.length; index += 1) {
+    candidate = resolve(candidate, parts[index]);
+    let stat;
+    try {
+      stat = await lstat(candidate);
+    } catch {
+      if (allowMissingFinal && index === parts.length - 1) return candidate;
+      fail(`Missing fixture payload: ${file}.`);
+    }
+    if (stat.isSymbolicLink()) fail(`Fixture path must not traverse a symbolic link: ${file}.`);
+    if (index < parts.length - 1 && !stat.isDirectory()) fail(`Fixture path has a non-directory parent: ${file}.`);
+    if (index === parts.length - 1 && outputTarget && stat.isDirectory()) fail("SHA256SUMS output target must not be a directory.");
+  }
+  return candidate;
+}
+
 async function regularFile(fixtureDirectory, file) {
-  const { resolved } = safeFixturePath(fixtureDirectory, file);
+  safeFixturePath(fixtureDirectory, file);
+  const resolved = await assertFixturePathComponents(fixtureDirectory, file);
   let stat;
   try {
     stat = await lstat(resolved);
@@ -40,6 +70,15 @@ async function regularFile(fixtureDirectory, file) {
 }
 
 async function walkFixtureFiles(fixtureDirectory, directory = fixtureDirectory) {
+  let directoryStat;
+  try {
+    directoryStat = await lstat(directory);
+  } catch {
+    fail("Fixture directory cannot be read.");
+  }
+  if (directoryStat.isSymbolicLink()) fail("Fixture must not contain symbolic links.");
+  if (!directoryStat.isDirectory()) fail("Fixture directory must be a directory.");
+
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -71,9 +110,13 @@ function parseChecksums(text, fixtureDirectory) {
 
   for (const line of lines) {
     const match = CHECKSUM_LINE.exec(line);
-    if (!match) fail(`SHA256SUMS entry must use lowercase SHA-256 and exactly two spaces: ${line}.`);
+    if (!match) fail("SHA256SUMS contains an invalid entry.");
     const [, digest, file] = match;
-    safeFixturePath(fixtureDirectory, file, "SHA256SUMS entry");
+    try {
+      safeFixturePath(fixtureDirectory, file, "SHA256SUMS entry");
+    } catch {
+      fail("SHA256SUMS contains an invalid fixture-relative path.");
+    }
     if (file === CHECKSUM_FILE) fail("SHA256SUMS must not checksum itself.");
     if (checksums.has(file)) fail(`SHA256SUMS contains duplicate entry: ${file}.`);
     checksums.set(file, digest);
@@ -98,6 +141,8 @@ export async function writeFixtureChecksums(fixtureDirectory, relativeFiles) {
     .filter((file) => file !== CHECKSUM_FILE)
     .sort();
   if (files.length !== relativeFiles.filter((file) => file !== CHECKSUM_FILE).length) fail("relativeFiles must be unique.");
+
+  await assertFixturePathComponents(fixtureDirectory, CHECKSUM_FILE, { allowMissingFinal: true, outputTarget: true });
 
   const lines = [];
   for (const file of files) {
@@ -133,14 +178,17 @@ export async function verifyFixtureChecksums(fixtureDirectory, manifest) {
   }
 
   let declared = new Map();
+  let checksumParseFailed = false;
   if (checksumText !== undefined) {
     try {
       declared = parseChecksums(checksumText, fixtureDirectory);
     } catch (error) {
       errors.push(error.message);
+      checksumParseFailed = true;
     }
   }
 
+  if (checksumParseFailed) fail(errors.join("\n"));
   for (const file of actualFiles) if (!declared.has(file)) errors.push(`SHA256SUMS omits fixture payload: ${file}.`);
   for (const file of declared.keys()) if (!actualFiles.has(file)) errors.push(`SHA256SUMS contains extra entry: ${file}.`);
   if (errors.length > 0) fail(errors.join("\n"));
