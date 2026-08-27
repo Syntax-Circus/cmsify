@@ -12,16 +12,44 @@ function assert(condition, message) {
 }
 
 function requestIdentity(request) {
-  const method = typeof request?.method === "string" && request.method.length > 0
-    ? request.method.toUpperCase()
+  let suppliedMethod;
+  let suppliedUrl;
+  try {
+    suppliedMethod = request?.method;
+    suppliedUrl = request?.url;
+  } catch {
+    return { method: "GET", path: "/" };
+  }
+  const method = typeof suppliedMethod === "string" && suppliedMethod.length > 0
+    ? suppliedMethod.toUpperCase()
     : "GET";
   let path = "/";
   try {
-    path = new URL(request?.url).pathname;
+    path = new URL(suppliedUrl).pathname;
   } catch {
     // Never reflect an invalid URL because it may contain credentials or query secrets.
   }
   return { method, path };
+}
+
+function snapshotRequest(request, { includeFetch = false } = {}) {
+  try {
+    assert(request && typeof request === "object", "An HTTP request is required.");
+    const snapshot = {
+      url: request.url,
+      method: request.method,
+      headers: request.headers,
+      token: request.token,
+      body: request.body,
+      expectedStatuses: request.expectedStatuses,
+      signalFactory: request.signalFactory,
+      signal: request.signal,
+    };
+    if (includeFetch) snapshot.fetchImpl = request.fetchImpl;
+    return Object.freeze(snapshot);
+  } catch {
+    throw requestPreparationError();
+  }
 }
 
 function expectedStatusSet(value) {
@@ -133,14 +161,8 @@ async function readBounded(response, maximumBytes, request, limitLabel) {
 }
 
 async function send(request, maximumBytes, limitLabel) {
-  assert(request && typeof request === "object", "An HTTP request is required.");
+  request = snapshotRequest(request, { includeFetch: true });
   let url;
-  try {
-    url = new URL(request.url);
-  } catch {
-    throw transportError(request);
-  }
-  assert(url.protocol === "http:" || url.protocol === "https:", "HTTP request URL must use http or https.");
   let expectedStatuses;
   let method;
   let headers;
@@ -148,6 +170,8 @@ async function send(request, maximumBytes, limitLabel) {
   let fetchImpl;
   let boundedSignal;
   try {
+    url = new URL(request.url);
+    assert(url.protocol === "http:" || url.protocol === "https:", "HTTP request URL must use http or https.");
     expectedStatuses = expectedStatusSet(request.expectedStatuses);
     method = requestIdentity(request).method;
     headers = new Headers(request.headers);
@@ -165,7 +189,6 @@ async function send(request, maximumBytes, limitLabel) {
     assert(typeof fetchImpl === "function", "A fetch implementation is required.");
     boundedSignal = makeSignal(request);
   } catch (error) {
-    if (error instanceof HttpDiagnosticError) throw error;
     throw requestPreparationError(request);
   }
   try {
@@ -193,7 +216,7 @@ async function send(request, maximumBytes, limitLabel) {
     if (!expectedStatuses.has(response.status)) {
       throw diagnosticError(request, response.status, response.headers, streamed.bytes);
     }
-    return { response, streamed };
+    return { response, streamed, request };
   } finally {
     boundedSignal.dispose();
   }
@@ -205,13 +228,13 @@ async function send(request, maximumBytes, limitLabel) {
  * @returns {Promise<{status:number,headers:Headers,body:unknown}>}
  */
 export async function requestJson(request) {
-  const { response, streamed } = await send(request, MAX_JSON_BYTES, "1 MiB");
+  const { response, streamed, request: preparedRequest } = await send(request, MAX_JSON_BYTES, "1 MiB");
   let body;
   if (streamed.byteLength > 0) {
     try {
       body = decodeJson(streamed.bytes);
     } catch {
-      throw diagnosticError(request, response.status, response.headers, Buffer.alloc(0), "invalid JSON response");
+      throw diagnosticError(preparedRequest, response.status, response.headers, Buffer.alloc(0), "invalid JSON response");
     }
   }
   return Object.freeze({ status: response.status, headers: response.headers, body });
@@ -239,15 +262,10 @@ function parseCurlHeaders(value) {
 }
 
 function dockerRequestPreparation(request, maximumBytes) {
-  assert(request && typeof request === "object", "An HTTP request is required.");
-  let url;
+  request = snapshotRequest(request);
   try {
-    url = new URL(request.url);
-  } catch {
-    throw transportError(request);
-  }
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw requestPreparationError(request);
-  try {
+    const url = new URL(request.url);
+    assert(["http:", "https:"].includes(url.protocol) && !url.username && !url.password, "Docker HTTP URL is not allowed.");
     const expectedStatuses = expectedStatusSet(request.expectedStatuses);
     const method = requestIdentity(request).method;
     const headers = new Headers(request.headers);
@@ -277,8 +295,7 @@ function dockerRequestPreparation(request, maximumBytes) {
       bodyPath: `/tmp/cmsify-http-${identity}.body`,
       headersPath: `/tmp/cmsify-http-${identity}.headers`,
     });
-  } catch (error) {
-    if (error instanceof HttpDiagnosticError) throw error;
+  } catch {
     throw requestPreparationError(request);
   }
 }
@@ -330,32 +347,32 @@ export function createDockerHttpAdapter(docker, service) {
     try {
       const curl = await execute(prepared, curlArgs);
       const statusText = typeof curl.stdout === "string" ? curl.stdout.trim() : "";
-      if (!/^\d{3}$/.test(statusText)) throw transportError(request);
+      if (!/^\d{3}$/.test(statusText)) throw transportError(prepared);
       const status = Number(statusText);
       const [bodyLength, headerLength] = await Promise.all([
         responseSize(prepared, prepared.bodyPath),
         responseSize(prepared, prepared.headersPath),
       ]);
-      if (headerLength > 64 * 1024) throw transportError(request);
+      if (headerLength > 64 * 1024) throw transportError(prepared);
       const headerResult = await execute(prepared, ["cat", prepared.headersPath]);
-      if (typeof headerResult.stdout !== "string") throw transportError(request);
+      if (typeof headerResult.stdout !== "string") throw transportError(prepared);
       let headers;
       try {
         headers = parseCurlHeaders(headerResult.stdout);
       } catch {
-        throw transportError(request);
+        throw transportError(prepared);
       }
-      if (bodyLength > maximumBytes) throw responseTooLargeError(request, status, headers, Buffer.alloc(0), limitLabel);
+      if (bodyLength > maximumBytes) throw responseTooLargeError(prepared, status, headers, Buffer.alloc(0), limitLabel);
 
       let bytes = Buffer.alloc(0);
       if (kind === "json" || !prepared.expectedStatuses.has(status)) {
         if (bodyLength <= MAX_JSON_BYTES) {
           const bodyResult = await execute(prepared, ["cat", prepared.bodyPath], { stdoutEncoding: "buffer" });
-          if (!Buffer.isBuffer(bodyResult.stdout) || bodyResult.stdout.length !== bodyLength) throw transportError(request);
+          if (!Buffer.isBuffer(bodyResult.stdout) || bodyResult.stdout.length !== bodyLength) throw transportError(prepared);
           bytes = bodyResult.stdout;
         }
       }
-      if (!prepared.expectedStatuses.has(status)) throw diagnosticError(request, status, headers, bytes);
+      if (!prepared.expectedStatuses.has(status)) throw diagnosticError(prepared, status, headers, bytes);
 
       if (kind === "json") {
         let body;
@@ -363,7 +380,7 @@ export function createDockerHttpAdapter(docker, service) {
           try {
             body = decodeJson(bytes);
           } catch {
-            throw diagnosticError(request, status, headers, Buffer.alloc(0), "invalid JSON response");
+            throw diagnosticError(prepared, status, headers, Buffer.alloc(0), "invalid JSON response");
           }
         }
         return Object.freeze({ status, headers, body });
@@ -371,17 +388,19 @@ export function createDockerHttpAdapter(docker, service) {
 
       const digest = await execute(prepared, ["sha256sum", prepared.bodyPath]);
       const sha256 = typeof digest.stdout === "string" ? digest.stdout.trim().split(/\s+/, 1)[0] : "";
-      if (!/^[0-9a-f]{64}$/.test(sha256)) throw transportError(request);
+      if (!/^[0-9a-f]{64}$/.test(sha256)) throw transportError(prepared);
       return Object.freeze({ status, headers, bytes: Buffer.alloc(0), byteLength: bodyLength, sha256 });
     } finally {
-      prepared.boundedSignal.dispose();
       try {
         await docker.exec(service, ["rm", "--force", "--", prepared.bodyPath, prepared.headersPath], {
           timeoutMs: REQUEST_TIMEOUT_MS,
+          signal: prepared.boundedSignal.signal,
           redact: prepared.redactions,
         });
       } catch {
         // Containers are run-scoped and will be removed; primary HTTP evidence remains authoritative.
+      } finally {
+        prepared.boundedSignal.dispose();
       }
     }
   }

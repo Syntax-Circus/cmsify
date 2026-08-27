@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { createDockerHttpAdapter, HTTP_LIMITS } from "../../../eng/upgrade-tests/http.mjs";
+import { createDockerHttpAdapter, HTTP_LIMITS, requestJson } from "../../../eng/upgrade-tests/http.mjs";
 
-function dockerFixture({ status = 200, body = Buffer.from("{}"), headers, bodySize = body.length, onCurl } = {}) {
+function dockerFixture({ status = 200, body = Buffer.from("{}"), headers, bodySize = body.length, onCurl, onCleanup } = {}) {
   const responseHeaders = headers ?? `HTTP/1.1 ${status} Fixture\r\nContent-Type: application/json\r\n\r\n`;
   const calls = [];
   return {
@@ -27,11 +27,35 @@ function dockerFixture({ status = 200, body = Buffer.from("{}"), headers, bodySi
         if (args[0] === "sha256sum") {
           return { exitCode: 0, stdout: `${createHash("sha256").update(body).digest("hex")}  response\n`, stderr: "", durationMs: 0 };
         }
-        if (args[0] === "rm") return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+        if (args[0] === "rm") {
+          if (onCleanup) return onCleanup(options);
+          return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+        }
         throw new Error(`unexpected Docker fixture command ${args[0]}`);
       },
     },
   };
+}
+
+function requestWithThrowingGetter(field, marker) {
+  const request = {
+    url: "https://cmsify.test/api/v1/content?secret=query-secret",
+    method: "POST",
+    headers: { "x-fixture": "fixture-header" },
+    token: "cmsify_fixture-token",
+    body: { title: "Fixture" },
+    expectedStatuses: new Set([200]),
+    fetchImpl: async () => new Response("{}", { status: 200 }),
+    signalFactory: () => new AbortController().signal,
+    signal: new AbortController().signal,
+  };
+  Object.defineProperty(request, field, {
+    enumerable: true,
+    get() {
+      throw new Error(marker);
+    },
+  });
+  return request;
 }
 
 test("Docker JSON requests disable ambient curl behavior and preserve sanitized strict-status diagnostics", async () => {
@@ -116,6 +140,86 @@ test("Docker JSON requests preserve caller cancellation and sanitize execution f
     assert.doesNotMatch(error.message, new RegExp(executionSecret));
     return true;
   });
+});
+
+test("Docker request cleanup stays inside the caller cancellation boundary without masking the primary failure", async () => {
+  const controller = new AbortController();
+  const primarySecret = "docker-primary-failure-secret";
+  const cleanupSecret = "docker-cleanup-failure-secret";
+  let curlSignal;
+  let cleanupOptions;
+  let cleanupStartedResolve;
+  const cleanupStarted = new Promise((resolve) => { cleanupStartedResolve = resolve; });
+  const fixture = dockerFixture({
+    onCurl(options) {
+      curlSignal = options.signal;
+      throw new Error(primarySecret);
+    },
+    onCleanup(options) {
+      cleanupOptions = options;
+      cleanupStartedResolve();
+      return new Promise((_resolve, reject) => {
+        if (options.signal?.aborted) reject(new Error(cleanupSecret));
+        else options.signal?.addEventListener("abort", () => reject(new Error(cleanupSecret)), { once: true });
+      });
+    },
+  });
+  const pending = createDockerHttpAdapter(fixture.harness, "baseline-api").requestJson({
+    url: "http://localhost:8080/cleanup",
+    expectedStatuses: new Set([200]),
+    signal: controller.signal,
+  });
+  await cleanupStarted;
+  controller.abort(new Error(cleanupSecret));
+
+  let timeout;
+  const outcome = await Promise.race([
+    pending.then(
+      () => ({ status: "resolved" }),
+      (error) => ({ status: "rejected", error }),
+    ),
+    new Promise((resolve) => { timeout = setTimeout(() => resolve({ status: "stalled" }), 100); }),
+  ]);
+  clearTimeout(timeout);
+
+  assert.equal(outcome.status, "rejected", "caller cancellation must interrupt best-effort cleanup");
+  assert.match(outcome.error.message, /GET \/cleanup.*transport error/);
+  assert.doesNotMatch(outcome.error.message, new RegExp(`${primarySecret}|${cleanupSecret}`));
+  assert.equal(cleanupOptions.signal, curlSignal, "cleanup must use the exchange's shared signal");
+  assert.equal(cleanupOptions.signal.aborted, true);
+});
+
+test("fetch request preparation sanitizes every throwing request-field getter", async () => {
+  const fields = ["url", "method", "headers", "token", "body", "expectedStatuses", "fetchImpl", "signalFactory", "signal"];
+  for (const field of fields) {
+    const marker = `fetch-${field}-getter-secret`;
+    await assert.rejects(
+      () => requestJson(requestWithThrowingGetter(field, marker)),
+      (error) => {
+        assert.match(error.message, /request preparation error/);
+        assert.doesNotMatch(error.message, new RegExp(marker));
+        return true;
+      },
+      `throwing ${field} getter must be sanitized`,
+    );
+  }
+});
+
+test("Docker request preparation sanitizes every throwing request-field getter", async () => {
+  const fields = ["url", "method", "headers", "token", "body", "expectedStatuses", "signalFactory", "signal"];
+  for (const field of fields) {
+    const marker = `docker-${field}-getter-secret`;
+    const fixture = dockerFixture();
+    await assert.rejects(
+      () => createDockerHttpAdapter(fixture.harness, "baseline-api").requestJson(requestWithThrowingGetter(field, marker)),
+      (error) => {
+        assert.match(error.message, /request preparation error/);
+        assert.doesNotMatch(error.message, new RegExp(marker));
+        return true;
+      },
+      `throwing ${field} getter must be sanitized`,
+    );
+  }
 });
 
 test("Docker JSON requests reject malformed UTF-8 without exposing response bytes", async () => {
