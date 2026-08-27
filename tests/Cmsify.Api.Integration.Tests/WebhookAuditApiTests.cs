@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -131,14 +132,54 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         var seed = await SeedApiClientAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
         var templateVersionId = await SeedPublishedTemplateVersionAsync(factory, seed.WorkspaceId, "content-create-etag");
+        var fieldId = Guid.CreateVersion7();
+        using (var setupScope = factory.Services.CreateScope())
+        {
+            var setup = setupScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            setup.TemplateFields.Add(new TemplateField
+            {
+                Id = fieldId,
+                TemplateVersionId = templateVersionId,
+                Key = "title",
+                Label = "Title",
+                IsRequired = true,
+                MinOccurrences = 1,
+                MaxOccurrences = 1,
+                CompositionMode = CompositionMode.Inline,
+                PrimitiveType = PrimitiveType.Text
+            });
+            await setup.SaveChangesAsync();
+        }
 
-        var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new { templateVersionId, slug = "create-etag", tags = Array.Empty<string>(), fields = Array.Empty<object>() });
+        var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new
+        {
+            templateVersionId,
+            slug = "create-etag",
+            tags = Array.Empty<string>(),
+            fields = new[] { new { fieldId, order = 0, valueKind = "Text", textValue = "Created" } }
+        });
         create.EnsureSuccessStatusCode();
         var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         Assert.NotNull(create.Headers.ETag);
+        var updateBody = new
+        {
+            slug = "create-etag-updated",
+            tags = Array.Empty<string>(),
+            fields = new[] { new { fieldId, order = 0, valueKind = "Text", textValue = "Updated" } }
+        };
+        var missing = await client.PutAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}", updateBody);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, missing.StatusCode);
+        using (var staleRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
+        {
+            Content = JsonContent.Create(updateBody)
+        })
+        {
+            staleRequest.Headers.TryAddWithoutValidation("If-Match", "\"stale-etag\"");
+            Assert.Equal(HttpStatusCode.PreconditionFailed, (await client.SendAsync(staleRequest)).StatusCode);
+        }
         using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
         {
-            Content = JsonContent.Create(new { slug = "create-etag-updated", tags = Array.Empty<string>(), fields = Array.Empty<object>() })
+            Content = JsonContent.Create(updateBody)
         };
         updateRequest.Headers.TryAddWithoutValidation("If-Match", create.Headers.ETag.ToString());
 

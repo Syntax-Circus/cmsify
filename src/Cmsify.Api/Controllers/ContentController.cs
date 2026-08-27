@@ -281,12 +281,7 @@ public sealed class ContentController : ControllerBase
         ClearScheduledPublishLease(content);
         content.UpdatedAt = DateTimeOffset.UtcNow;
         content.UpdatedByUserId = currentActor.UserId;
-        if (!FieldValuesMatch(content.FieldValues, request.Fields))
-        {
-            dbContext.ContentFieldValues.RemoveRange(content.FieldValues);
-            content.FieldValues.Clear();
-            ApplyFieldValues(content, request.Fields);
-        }
+        ReconcileFieldValues(content, request.Fields);
 
         var existingTags = await GetTagNamesAsync(content.Id, ct);
         if (!TagsMatch(existingTags, request.Tags))
@@ -827,19 +822,9 @@ public sealed class ContentController : ControllerBase
     {
         foreach (var value in values)
         {
-            content.FieldValues.Add(new ContentFieldValue
-            {
-                ContentItemId = content.Id,
-                FieldId = value.FieldId,
-                Order = value.Order,
-                ValueKind = value.ValueKind.ToCore(),
-                TextValue = value.TextValue,
-                BoolValue = value.BoolValue,
-                MediaAssetId = value.MediaAssetId,
-                FileAssetId = value.FileAssetId,
-                ChildContentItemId = value.ChildContentItemId,
-                JsonValue = value.JsonValue.Clone()
-            });
+            var fieldValue = new ContentFieldValue { ContentItemId = content.Id };
+            ApplyFieldValue(fieldValue, value);
+            content.FieldValues.Add(fieldValue);
         }
     }
 
@@ -858,50 +843,49 @@ public sealed class ContentController : ControllerBase
         }
     }
 
-    private static bool FieldValuesMatch(IEnumerable<ContentFieldValue> existing, IEnumerable<ContentFieldValueRequest> requested)
+    private void ReconcileFieldValues(ContentItem content, IEnumerable<ContentFieldValueRequest> values)
     {
-        var existingValues = existing
-            .OrderBy(value => value.FieldId)
-            .ThenBy(value => value.Order)
-            .ToList();
-        var requestedValues = requested
-            .OrderBy(value => value.FieldId)
-            .ThenBy(value => value.Order)
-            .ToList();
-
-        if (existingValues.Count != requestedValues.Count)
+        var retained = new HashSet<Guid>();
+        foreach (var value in values)
         {
-            return false;
-        }
-
-        for (var index = 0; index < existingValues.Count; index++)
-        {
-            var current = existingValues[index];
-            var next = requestedValues[index];
-            if (current.FieldId != next.FieldId
-                || current.Order != next.Order
-                || current.ValueKind != next.ValueKind.ToCore()
-                || current.TextValue != next.TextValue
-                || current.BoolValue != next.BoolValue
-                || current.MediaAssetId != next.MediaAssetId
-                || current.FileAssetId != next.FileAssetId
-                || current.ChildContentItemId != next.ChildContentItemId
-                || !JsonValuesMatch(current.JsonValue, next.JsonValue))
+            var fieldValue = content.FieldValues.FirstOrDefault(candidate =>
+                candidate.FieldId == value.FieldId
+                && candidate.Order == value.Order
+                && !retained.Contains(candidate.Id));
+            if (fieldValue is null)
             {
-                return false;
+                fieldValue = new ContentFieldValue { ContentItemId = content.Id };
+                content.FieldValues.Add(fieldValue);
             }
+
+            ApplyFieldValue(fieldValue, value);
+            retained.Add(fieldValue.Id);
         }
 
-        return true;
+        var removed = content.FieldValues.Where(value => !retained.Contains(value.Id)).ToList();
+        dbContext.ContentFieldValues.RemoveRange(removed);
+        foreach (var value in removed)
+        {
+            content.FieldValues.Remove(value);
+        }
+    }
+
+    private static void ApplyFieldValue(ContentFieldValue fieldValue, ContentFieldValueRequest value)
+    {
+        fieldValue.FieldId = value.FieldId;
+        fieldValue.Order = value.Order;
+        fieldValue.ValueKind = value.ValueKind.ToCore();
+        fieldValue.TextValue = value.TextValue;
+        fieldValue.BoolValue = value.BoolValue;
+        fieldValue.MediaAssetId = value.MediaAssetId;
+        fieldValue.FileAssetId = value.FileAssetId;
+        fieldValue.ChildContentItemId = value.ChildContentItemId;
+        fieldValue.JsonValue = value.JsonValue.Clone();
     }
 
     private static bool TagsMatch(IEnumerable<string> existing, IEnumerable<string> requested) =>
         existing.Select(NormalizeTag).Where(tag => tag.Length > 0).Distinct().Order()
             .SequenceEqual(requested.Select(NormalizeTag).Where(tag => tag.Length > 0).Distinct().Order());
-
-    private static bool JsonValuesMatch(JsonElement? left, JsonElement? right) =>
-        left.HasValue == right.HasValue
-        && (!left.HasValue || left.Value.GetRawText() == right!.Value.GetRawText());
 
     private async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
     {
