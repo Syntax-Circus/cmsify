@@ -56,6 +56,26 @@ export function validateCandidateInput({ candidateImage, candidateVersion, candi
   return Object.freeze({ candidateImage, candidateVersion, candidateSourceSha });
 }
 
+function candidateIdentityIsComplete(identity, { candidateImage, candidateVersion, candidateSourceSha }) {
+  return identity && typeof identity === "object" && !Array.isArray(identity)
+    && identity.reference === candidateImage
+    && typeof identity.imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(identity.imageId)
+    && identity.platform === "linux/amd64"
+    && identity.version === candidateVersion
+    && identity.sourceSha === candidateSourceSha
+    && identity.informationalVersion === `${candidateVersion}+${candidateSourceSha}`;
+}
+
+function validateCandidateIdentity(identity, expected) {
+  assert(identity && typeof identity === "object" && !Array.isArray(identity), "Preflight did not return the inspected candidate identity.");
+  assert(identity.reference === expected.candidateImage, "Preflight did not return the exact candidate image reference.");
+  assert(typeof identity.imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(identity.imageId), "Preflight did not return an immutable candidate image ID.");
+  assert(identity.platform === "linux/amd64", "Preflight did not return the linux/amd64 candidate platform.");
+  assert(identity.version === expected.candidateVersion, "Preflight did not return the exact candidate version.");
+  assert(identity.sourceSha === expected.candidateSourceSha, "Preflight did not return the exact candidate source SHA.");
+  assert(identity.informationalVersion === `${expected.candidateVersion}+${expected.candidateSourceSha}`, "Preflight did not return the exact candidate informational version.");
+}
+
 function isContainedBy(parent, candidate) {
   const pathFromParent = relative(parent, candidate);
   return pathFromParent === "" || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== ".." && !isAbsolute(pathFromParent));
@@ -807,6 +827,7 @@ export async function rehearse(options) {
     try {
       if (phaseName === "preflight") validateCandidateInput(context);
       value = await operation(context);
+      if (phaseName === "preflight") validateCandidateIdentity(value, context);
       if (phaseName === "backup" && value) context.backup = value;
       if (phaseName === "candidate" && value?.canaryId) {
         assert(SAFE_CANARY_ID.test(value.canaryId), "Candidate assertions returned a malformed canary ID.");
@@ -842,11 +863,11 @@ export async function rehearse(options) {
         next.baselineImage = structuredClone(value.baselineImage);
         next.candidate = {
           reference: options.candidateImage,
-          version: value.version ?? options.candidateVersion,
-          sourceSha: value.sourceSha ?? options.candidateSourceSha,
-          imageId: typeof value.imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(value.imageId) ? value.imageId : null,
-          platform: value.platform === "linux/amd64" ? value.platform : null,
-          informationalVersion: value.informationalVersion === `${options.candidateVersion}+${options.candidateSourceSha}` ? value.informationalVersion : null,
+          version: value.version,
+          sourceSha: value.sourceSha,
+          imageId: value.imageId,
+          platform: value.platform,
+          informationalVersion: value.informationalVersion,
         };
         if (context.fixtureIdentity) next.fixture = structuredClone(context.fixtureIdentity);
       }
@@ -971,6 +992,8 @@ export async function rehearse(options) {
       phase: primaryPhase,
     });
   }
-  assert(report.status === "passed" && report.result === "passed" && report.phases.every(({ status }) => status === "passed"), "Rehearsal cannot pass unless every mandatory phase and cleanup passed.");
+  assert(report.status === "passed" && report.result === "passed"
+    && report.phases.every(({ status }) => status === "passed")
+    && candidateIdentityIsComplete(report.candidate, options), "Rehearsal cannot pass unless every mandatory phase, cleanup, and exact candidate identity passed.");
   return report;
 }

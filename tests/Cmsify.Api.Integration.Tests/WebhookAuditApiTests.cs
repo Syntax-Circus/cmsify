@@ -186,6 +186,11 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         var update = await client.SendAsync(updateRequest);
 
         update.EnsureSuccessStatusCode();
+        var updatedContent = await update.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("create-etag-updated", updatedContent.GetProperty("slug").GetString());
+        var updatedField = Assert.Single(updatedContent.GetProperty("fields").EnumerateArray());
+        Assert.Equal(fieldId, updatedField.GetProperty("fieldId").GetGuid());
+        Assert.Equal("Updated", updatedField.GetProperty("textValue").GetString());
     }
 
     [Fact]

@@ -31,7 +31,12 @@ function successfulOperations(events, failure) {
   };
   return {
     preflight: operation("preflight", {
+      reference: "cmsify-candidate:test",
       imageId: `sha256:${"a".repeat(64)}`,
+      platform: "linux/amd64",
+      version: "1.0.0",
+      sourceSha: candidateSourceSha,
+      informationalVersion: `1.0.0+${candidateSourceSha}`,
       fixtureDigest,
       baselineImage,
       labels: {
@@ -92,9 +97,50 @@ test("successful report binds the verified fixture and exact baseline and candid
     version: "1.0.0",
     sourceSha: candidateSourceSha,
     imageId: `sha256:${"a".repeat(64)}`,
-    platform: null,
-    informationalVersion: null,
+    platform: "linux/amd64",
+    informationalVersion: `1.0.0+${candidateSourceSha}`,
   });
+});
+
+test("incomplete inspected candidate identity cannot produce a passed rehearsal report", async () => {
+  const invalidIdentities = [
+    "imageId",
+    "platform",
+    "informationalVersion",
+  ];
+
+  for (const [caseIndex, field] of invalidIdentities.entries()) {
+    const repositoryRoot = mkdtempSync(resolve(tmpdir(), `cmsify-rehearsal-identity-${field}-`));
+    const snapshots = [];
+    const operations = successfulOperations([]);
+    const completeIdentity = await operations.preflight();
+    delete completeIdentity[field];
+    operations.preflight = async () => completeIdentity;
+
+    try {
+      await assert.rejects(() => rehearse({
+        repositoryRoot,
+        fixtureDirectory: resolve(repositoryRoot, "fixture"),
+        candidateImage: "cmsify-candidate:test",
+        candidateVersion: "1.0.0",
+        candidateSourceSha,
+        runId: `identity-test-00${caseIndex + 1}`,
+        operations,
+        reportWriter: async (report) => snapshots.push(structuredClone(report)),
+      }), (error) => {
+        assert.equal(error.phase, "preflight");
+        assert.equal(error.message, "The preflight phase failed; diagnostic detail withheld.");
+        return true;
+      });
+
+      const finalReport = snapshots.at(-1);
+      assert.equal(finalReport.status, "failed");
+      assert.equal(finalReport.result, "failed");
+      assert.equal(finalReport.phases[0].status, "failed");
+    } finally {
+      rmSync(repositoryRoot, { force: true, recursive: true });
+    }
+  }
 });
 
 test("candidate failure still captures logs and cleans owned resources", async () => {
