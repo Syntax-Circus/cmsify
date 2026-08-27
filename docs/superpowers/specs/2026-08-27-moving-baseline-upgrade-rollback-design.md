@@ -1,7 +1,7 @@
 # Moving-Baseline Upgrade and Rollback Design
 
 **Date:** 2026-08-27
-**Status:** Approved in chat; pending written-spec review
+**Status:** Approved
 **Remediation scope:** Task 9; finding F-04
 
 ## Summary
