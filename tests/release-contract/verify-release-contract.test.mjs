@@ -67,6 +67,11 @@ function mutateWorkflow(root, mutate) {
   writeFileSync(path, mutate(readFileSync(path, "utf8")));
 }
 
+function mutateApiDockerfile(root, mutate) {
+  const path = resolve(root, "src/Cmsify.Api/Dockerfile");
+  writeFileSync(path, mutate(readFileSync(path, "utf8")));
+}
+
 function verify(root) {
   return spawnSync(process.execPath, [verifier, "--root", root], { encoding: "utf8" });
 }
@@ -109,6 +114,9 @@ test("rejects release npm packing without the resolved source SHA", () => expect
 test("rejects NuGet packing without explicit source SHA binding", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replaceAll(' -p:RepositoryCommit="$SOURCE_SHA"', "")), /three NuGet candidates.*RepositoryCommit.*SOURCE_SHA/i));
 test("rejects OCI layouts whose platform descriptor can be obscured by inline Buildx provenance", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" --provenance=false", "")), /OCI candidate.*provenance=false.*single linux\/amd64 manifest/i));
 test("rejects an OCI Dockerfile with a wrong qualified image identity label", () => expectInvalid((root) => { const path = resolve(root, "src/Cmsify.Api/Dockerfile"); writeFileSync(path, readFileSync(path, "utf8").replace("syntaxcircus/cmsify-api:${BUILD_VERSION}", "syntaxcircus/cmsify-admin:${BUILD_VERSION}")); }, /API Dockerfile.*ref.name.*qualified image identity/i));
+test("rejects an API Dockerfile with the wrong local storage package secret identity", () => expectInvalid((root) => mutateApiDockerfile(root, (dockerfile) => dockerfile.replace("id=cmsify_storage_nupkg", "id=unscoped_nupkg").replace("SyntaxCircus.Storage.0.2.0-media-reconciliation.4.nupkg", "SyntaxCircus.Storage.mutable.nupkg")), /API Dockerfile.*local SyntaxCircus\.Storage package.*exact secret.*package/i));
+test("rejects an API Dockerfile that does not checksum the optional local storage package", () => expectInvalid((root) => mutateApiDockerfile(root, (dockerfile) => dockerfile.replace("sha256sum --check --strict", "true")), /API Dockerfile.*local SyntaxCircus\.Storage package.*SHA-256/i));
+test("rejects an API Dockerfile that loses the normal public NuGet restore fallback", () => expectInvalid((root) => mutateApiDockerfile(root, (dockerfile) => dockerfile.replace("else dotnet restore", "else false && dotnet restore")), /API Dockerfile.*normal public NuGet restore.*local package.*absent/i));
 test("rejects SBOM generation without stable identity finalization", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node scripts\/release\/finalize-spdx\.mjs[^\n]*/, "")), /four SPDX[\s\S]*stable[\s\S]*identit/i));
 test("rejects smoke resources created before cleanup registration", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("trap cleanup EXIT", "docker run -d --name leaked-resource busybox true\n          trap cleanup EXIT")), /smoke cleanup.*immediately after first resource/i));
 test("rejects unbounded PostgreSQL readiness", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("for attempt in {1..30}; do\n            if docker exec cmsify-postgres-smoke", "while true; do\n            if docker exec cmsify-postgres-smoke")), /PostgreSQL readiness.*bounded/i));
