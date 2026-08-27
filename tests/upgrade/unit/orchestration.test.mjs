@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { writeFixtureChecksums } from "../../../eng/upgrade-tests/checksums.mjs";
 import { installGeneratedFixture, prepareGenerationDirectory } from "../../../eng/upgrade-tests/cli.mjs";
-import { compareFixtureTrees, runWithCleanup } from "../../../eng/upgrade-tests/fixture.mjs";
+import { compareFixtureTrees, fixtureAssertionCleanupSql, runWithCleanup } from "../../../eng/upgrade-tests/fixture.mjs";
 import { validExpectedDocument, validManifestDocument } from "./fixture-documents.mjs";
 
 function temporaryDirectory(prefix = "cmsify-upgrade-orchestration-") {
@@ -26,6 +26,18 @@ async function materializeValidFixture(root) {
   writeFileSync(resolve(root, "media", "z.txt"), "z");
   await writeFixtureChecksums(root, manifest.requiredFiles);
 }
+
+test("fixture assertion cleanup removes generated auth audit rows but preserves the canonical audit", () => {
+  const sql = fixtureAssertionCleanupSql(
+    "22222222-2222-4222-8222-222222222221",
+    "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
+  );
+
+  assert.match(sql, /DELETE FROM user_sessions/);
+  assert.match(sql, /DELETE FROM audit_logs WHERE id <> 'cccccccc-cccc-4ccc-8ccc-ccccccccccc1'/);
+  assert.match(sql, /WHEN id = '22222222-2222-4222-8222-222222222221'/);
+  assert.doesNotMatch(sql, /DELETE FROM audit_logs;/);
+});
 
 test("removes a preparation directory when an initial fixture copy fails", async () => {
   const repositoryRoot = temporaryDirectory();

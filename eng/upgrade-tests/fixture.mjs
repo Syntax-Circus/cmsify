@@ -121,6 +121,20 @@ export async function runWithCleanup(work, cleanup) {
   return result;
 }
 
+export function fixtureAssertionCleanupSql(adminUserId, canonicalAuditId) {
+  assert(UUID_VALUE.test(adminUserId), "Fixture admin user ID must be a UUID.");
+  assert(UUID_VALUE.test(canonicalAuditId), "Canonical fixture audit ID must be a UUID.");
+  return `
+    DELETE FROM user_sessions;
+    DELETE FROM audit_logs WHERE id <> '${canonicalAuditId}';
+    UPDATE api_clients SET last_used_at = NULL;
+    UPDATE users SET last_login_at = CASE
+      WHEN id = '${adminUserId}' THEN '2026-08-20T12:00:30Z'::timestamptz
+      ELSE NULL
+    END;
+  `;
+}
+
 async function writeRunEnvironment(harness, scope, manifest) {
   await mkdir(resolve(scope.repositoryRoot, "tests", "upgrade", ".runs"), { recursive: true });
   const values = {
@@ -485,7 +499,7 @@ export async function generateFixture({ repositoryRoot, fixtureDirectory, keepDi
       await waitForBaseline(harness);
       const assertionResult = await assertBaselineFixture({ harness, expected, ids, webhookWorkerStateBeforeStart });
       await harness.stop("baseline-api");
-      await psql(harness, ["--command", "DELETE FROM user_sessions; UPDATE api_clients SET last_used_at = NULL;"]);
+      await psql(harness, ["--command", fixtureAssertionCleanupSql(observed.ids.adminUser, expected.ids.audit)]);
       await exportDatabase(harness, fixtureDirectory, observed, expected);
       await writeFixtureChecksums(fixtureDirectory, manifest.requiredFiles);
       return Object.freeze({

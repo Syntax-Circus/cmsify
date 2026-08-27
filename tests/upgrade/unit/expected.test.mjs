@@ -12,6 +12,8 @@ test("accepts the exact expected-data contract and manifest binding", () => {
 
   assert.equal(expected.content.currentEffectiveStartAt, "2026-08-19T12:00:00.000000Z");
   assert.equal(expected.media.image.lifecycle.candidateBlobState, "DeletePending");
+  assert.equal(expected.candidate.migrations.length, 14);
+  assert.equal(expected.timestamps.webhookDeliveryLastAttemptAt, "2026-08-20T12:15:00.000000Z");
   assert.equal(Object.isFrozen(expected.media.image.lifecycle), true);
 });
 
@@ -62,5 +64,25 @@ test("rejects media without the historical deleted-to-candidate boundary", () =>
   assert.throws(
     () => validateExpectedData(expected, validManifestDocument(), fixtureDirectory),
     /deleted media.*DeletePending/i,
+  );
+});
+
+test("rejects an incomplete candidate migration boundary", () => {
+  const expected = validExpectedDocument();
+  expected.candidate.migrations.pop();
+
+  assert.throws(
+    () => validateExpectedData(expected, validManifestDocument(), fixtureDirectory),
+    /candidate\.migrations.*exact.*14/i,
+  );
+});
+
+test("rejects malformed legacy webhook readability material", () => {
+  const expected = validExpectedDocument();
+  expected.candidate.legacyWebhookSecretSha256 = "not-a-digest";
+
+  assert.throws(
+    () => validateExpectedData(expected, validManifestDocument(), fixtureDirectory),
+    /legacyWebhookSecretSha256.*SHA-256/i,
   );
 });

@@ -30,15 +30,31 @@ export const BASELINE_MIGRATIONS = Object.freeze([
   "20260821005219_AddPackageProvenanceToReusableModels",
 ]);
 
-const EXPECTED_KEYS = ["schemaVersion", "fixtureClock", "ids", "relatedIds", "migrations", "authentication", "media", "content", "provenance", "scenarios"];
+export const CANDIDATE_MIGRATIONS = Object.freeze([
+  ...BASELINE_MIGRATIONS,
+  "20260826135220_AddWebhookOutbox",
+  "20260826215147_ExpandWebhookSecretCiphertext",
+  "20260827135736_AddMediaLifecycleReconciliation",
+]);
+
+const EXPECTED_KEYS = ["schemaVersion", "fixtureClock", "ids", "relatedIds", "migrations", "authentication", "media", "content", "provenance", "timestamps", "candidate", "scenarios"];
 const ID_KEYS = ["primaryWorkspace", "restrictedWorkspace", "adminUser", "editorUser", "readerClient", "template", "component", "choiceSet", "draftContent", "publishedContent", "scheduledContent", "expiredContent", "textMedia", "imageMedia", "webhook", "audit"];
 const RELATED_ID_KEYS = ["templateVersion", "titleField", "choiceField", "componentField", "componentVersion", "componentTextField", "componentChoiceField", "choiceRevisionOne", "choiceRevisionTwo", "publishedVersion", "expiredVersion", "webhookDelivery"];
-const AUTHENTICATION_KEYS = ["readerToken", "readerTokenIdentifier"];
+const AUTHENTICATION_KEYS = ["readerToken", "readerTokenIdentifier", "adminEmail", "adminPassword"];
 const MEDIA_KEYS = ["text", "image"];
 const MEDIA_ITEM_KEYS = ["storageKey", "fixturePath", "fileName", "contentType", "sizeBytes", "sha256", "lifecycle"];
 const LIFECYCLE_KEYS = ["historicalIsDeleted", "historicalDeletedAt", "historicalVisible", "candidateBlobState", "candidateDeletionIntentReason"];
 const CONTENT_KEYS = ["publishedChoiceValue", "publishedChoiceLabel", "currentChoiceLabel", "scheduledPublishAt", "currentEffectiveStartAt", "currentEffectiveEndAt", "expiredEffectiveStartAt", "expiredEffectiveEndAt"];
 const PROVENANCE_KEYS = ["baselineVersion", "sourceSha", "apiImageDigest", "packageNamespace", "packageId", "packageVersion"];
+const TIMESTAMP_KEYS = [
+  "workspaceCreatedAt", "workspaceUpdatedAt", "choiceRevisionOneCreatedAt", "choiceRevisionTwoCreatedAt",
+  "componentCreatedAt", "componentUpdatedAt", "templateCreatedAt", "templateUpdatedAt",
+  "draftContentCreatedAt", "publishedContentCreatedAt", "publishedContentUpdatedAt",
+  "scheduledContentCreatedAt", "scheduledContentUpdatedAt", "expiredContentCreatedAt", "expiredContentUpdatedAt",
+  "textMediaCreatedAt", "imageMediaCreatedAt", "imageMediaUpdatedAt", "readerClientCreatedAt",
+  "webhookCreatedAt", "webhookDeliveryCreatedAt", "webhookDeliveryLastAttemptAt", "auditTimestamp",
+];
+const CANDIDATE_KEYS = ["migrations", "storageProvider", "legacyWebhookKeyBase64", "legacyWebhookSecretSha256"];
 const SCENARIO_KEYS = ["id", "assertions"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -149,6 +165,8 @@ export function validateExpectedData(value, manifest, fixtureDirectory) {
   assertExactKeys(value.authentication, AUTHENTICATION_KEYS, "authentication");
   assert(typeof value.authentication.readerToken === "string" && value.authentication.readerToken.startsWith("cmsify_") && value.authentication.readerToken.length > 20, "authentication.readerToken must be a fixture API token.");
   assertNonEmptyString(value.authentication.readerTokenIdentifier, "authentication.readerTokenIdentifier");
+  assert(typeof value.authentication.adminEmail === "string" && /^[^@\s]+@example\.test$/.test(value.authentication.adminEmail), "authentication.adminEmail must be a synthetic example.test address.");
+  assert(typeof value.authentication.adminPassword === "string" && value.authentication.adminPassword.startsWith("Cmsify-fixture-") && value.authentication.adminPassword.length >= 20, "authentication.adminPassword must be an explicit fixture-only password.");
 
   assertExactKeys(value.media, MEDIA_KEYS, "media");
   validateMediaItem(value.media.text, fixtureDirectory, "media.text");
@@ -173,6 +191,21 @@ export function validateExpectedData(value, manifest, fixtureDirectory) {
   assert(value.provenance.sourceSha === manifest.baseline.sourceSha, "provenance.sourceSha must equal the manifest source SHA.");
   assert(value.provenance.apiImageDigest === manifest.baseline.apiImage.digest, "provenance.apiImageDigest must equal the manifest API image digest.");
   for (const key of ["packageNamespace", "packageId", "packageVersion"]) assertNonEmptyString(value.provenance[key], `provenance.${key}`);
+
+  assertExactKeys(value.timestamps, TIMESTAMP_KEYS, "timestamps");
+  for (const key of TIMESTAMP_KEYS) assertTimestamp(value.timestamps[key], `timestamps.${key}`);
+
+  assertExactKeys(value.candidate, CANDIDATE_KEYS, "candidate");
+  assertExactStringArray(value.candidate.migrations, CANDIDATE_MIGRATIONS, "candidate.migrations exact 14-migration boundary");
+  assert(value.candidate.storageProvider === "s3", "candidate.storageProvider must be canonical s3.");
+  let legacyKey;
+  try {
+    legacyKey = Buffer.from(value.candidate.legacyWebhookKeyBase64, "base64");
+  } catch {
+    legacyKey = Buffer.alloc(0);
+  }
+  assert(legacyKey.length === 32 && legacyKey.toString("base64") === value.candidate.legacyWebhookKeyBase64, "candidate.legacyWebhookKeyBase64 must be canonical Base64 for exactly 32 bytes.");
+  assert(typeof value.candidate.legacyWebhookSecretSha256 === "string" && SHA256.test(value.candidate.legacyWebhookSecretSha256), "candidate.legacyWebhookSecretSha256 must be a lowercase SHA-256 digest.");
   validateScenarios(value.scenarios, manifest);
 
   return deepFreeze(JSON.parse(JSON.stringify(value)));
