@@ -122,6 +122,19 @@ Final local evidence at the Task 8 commit:
 - Full solution test passed. The clean Release build succeeded with 45 existing Admin nullability warnings assigned to Task 11.
 - Independent Task 8 review finished with no Critical, Important, or Minor findings.
 
-The exact locally consumed package is `SyntaxCircus.Storage` `0.2.0-media-reconciliation.4`, SHA-256 `62E063B5A6AB112C563FBB00443E87C9A624D169E597122BB79F2BC0F0A98215`. Publication and replacement with the exact approved released version remain explicit-approval gates. No push, merge, tag, publication, or release was performed.
+The Task 8 continuation originally paused on the local prerelease package. The user later confirmed that stable `SyntaxCircus.Storage` `0.2.0` had been published; Task 9.6 replaced the prerelease with that stable public-feed dependency and proved the production Dockerfile could restore it normally. This records the user-confirmed publication state; it does not claim this Cmsify task published the package. No push, merge, tag, publication, or release was performed by the Task 9 work.
 
 Resume with Task 9 in `docs/superpowers/plans/2026-08-24-v1-remediation.md`; do not redo Tasks 1–8.
+
+## Task 9 moving-baseline implementation
+
+Task 9's upgrade/rollback contract is described by the [approved design](superpowers/specs/2026-08-27-moving-baseline-upgrade-rollback-design.md) and [implementation plan](superpowers/plans/2026-08-27-moving-baseline-upgrade-rollback.md). Its operator and evidence surfaces are:
+
+- fixture provenance and exact baseline identities: [`tests/upgrade/fixtures/v0.1.3/manifest.json`](../tests/upgrade/fixtures/v0.1.3/manifest.json);
+- canonical payload inventory: [`tests/upgrade/fixtures/v0.1.3/SHA256SUMS`](../tests/upgrade/fixtures/v0.1.3/SHA256SUMS);
+- local fixture, rehearsal, diagnostics, cleanup, and refresh commands: [`tests/upgrade/README.md`](../tests/upgrade/README.md);
+- production deployment/rollback sequence: [`docs/operations.md`](operations.md#v01x-to-v1-upgrade-and-rollback);
+- dedicated branch/PR/manual rehearsal: [`.github/workflows/upgrade-rollback.yml`](../.github/workflows/upgrade-rollback.yml);
+- tag certification and protected promotion dependency: [`.github/workflows/publish-cmsify.yml`](../.github/workflows/publish-cmsify.yml).
+
+The exact final candidate identity, two clean run IDs, pass counts, cleanup audit, and complete validation results are appended only after Task 9.8's fresh run passes. Until then, the implementation itself is not a certification claim.
