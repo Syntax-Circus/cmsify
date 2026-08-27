@@ -29,6 +29,7 @@
 
 **Produces:** Provider-neutral metadata and stable bounded listing while preserving existing store/read/exists/delete/access-URL behavior and disposal.
 
+- [ ] Repair the existing broken .NET 10 test baseline: make the test project an executable MTP application, use `xunit.v3.mtp-v2` `3.2.2`, remove the VSTest adapter dependency, and prove `dotnet test --solution SyntaxCircus.Storage.slnx --configuration Release --no-restore` runs the suite under the repository's existing MTP `global.json`.
 - [ ] Add failing contract/local tests for metadata of existing and missing keys; lexicographically ordered prefix listing; `afterKey` continuation; page-size bounds 1–1,000; empty pages; traversal/root containment; cancellation; and `StorageReadResult` disposal.
 - [ ] Add `StorageObjectMetadata(Key, SizeBytes, ContentType, LastModified)`, `ListStorageObjectsRequest(Prefix, AfterKey = null, PageSize = 100)`, and `StorageObjectPage(Items, NextAfterKey)`.
 - [ ] Add default `IStorageProvider.GetMetadataAsync` and `ListAsync` members that throw `NotSupportedException` for third-party implementations until adopted.
