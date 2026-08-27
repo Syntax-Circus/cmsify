@@ -117,8 +117,8 @@ export class ProcessFailure extends Error {
 }
 
 /**
- * @typedef {{cwd?:string,env?:Record<string,string>,timeoutMs:number,signal?:AbortSignal,phase?:string,redact?:string[]}} ProcessOptions
- * @typedef {{exitCode:number,stdout:string,stderr:string,durationMs:number}} ProcessResult
+ * @typedef {{cwd?:string,env?:Record<string,string>,timeoutMs:number,signal?:AbortSignal,phase?:string,redact?:string[],stdoutEncoding?:"utf8"|"buffer",stdin?:string}} ProcessOptions
+ * @typedef {{exitCode:number,stdout:string|Buffer,stderr:string,durationMs:number}} ProcessResult
  */
 
 /**
@@ -134,6 +134,8 @@ export function runProcess(command, args, options) {
   assert(options && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0, "A positive process timeout is required.");
   assert(options.env === undefined || (typeof options.env === "object" && Object.values(options.env).every((value) => typeof value === "string")), "Process environment values must be strings.");
   assert(options.redact === undefined || (Array.isArray(options.redact) && options.redact.every((value) => typeof value === "string")), "Additional process redactions must be strings.");
+  assert(options.stdoutEncoding === undefined || ["utf8", "buffer"].includes(options.stdoutEncoding), "Process stdoutEncoding must be utf8 or buffer.");
+  assert(options.stdin === undefined || (typeof options.stdin === "string" && Buffer.byteLength(options.stdin, "utf8") <= MAX_CAPTURED_BYTES), "Process stdin must be a string no larger than one MiB.");
 
   const environment = { ...process.env, ...options.env };
   const redactions = collectRedactions(environment, options.redact ?? []);
@@ -189,7 +191,7 @@ export function runProcess(command, args, options) {
         shell: false,
         windowsHide: true,
         detached: process.platform !== "win32",
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
     } catch (error) {
       fail(phase, null, error);
@@ -203,6 +205,10 @@ export function runProcess(command, args, options) {
       stderrBytes = appendBounded(stderrChunks, stderrBytes, chunk);
     });
     child.once("error", (error) => fail(phase, null, error));
+    if (options.stdin !== undefined) {
+      child.stdin.once("error", () => terminate("stdin error"));
+      child.stdin.end(options.stdin, "utf8");
+    }
     child.once("close", (exitCode) => {
       const output = capturedOutput();
       if (terminationPhase) {
@@ -214,7 +220,7 @@ export function runProcess(command, args, options) {
         cleanup();
         resolve({
           exitCode,
-          stdout: redactAndCap(output.stdout, redactions),
+          stdout: options.stdoutEncoding === "buffer" ? Buffer.concat(stdoutChunks) : redactAndCap(output.stdout, redactions),
           stderr: redactAndCap(output.stderr, redactions),
           durationMs: durationMs(),
         });

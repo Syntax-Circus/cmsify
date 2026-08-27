@@ -103,6 +103,46 @@ test("compose commands carry the run scope without wildcard cleanup", async () =
   }
 });
 
+test("Docker exec forwards bounded cancellation and redaction options without changing its command boundary", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-010");
+  const calls = [];
+  const controller = new AbortController();
+  const executor = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { exitCode: 0, stdout: Buffer.from("ok"), stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  const result = await harness.exec("baseline-api", ["curl", "--version"], {
+    timeoutMs: 5_000,
+    signal: controller.signal,
+    redact: ["fixture-secret"],
+    stdoutEncoding: "buffer",
+  });
+
+  assert.deepEqual(result.stdout, Buffer.from("ok"));
+  assert.deepEqual(calls[0].args.slice(-4), ["--no-TTY", "baseline-api", "curl", "--version"]);
+  assert.equal(calls[0].options.timeoutMs, 5_000);
+  assert.equal(calls[0].options.signal, controller.signal);
+  assert.deepEqual(calls[0].options.redact, ["fixture-secret"]);
+  assert.equal(calls[0].options.stdoutEncoding, "buffer");
+});
+
+test("Docker exec opts into an interactive stdin pipe only when input is supplied", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-011");
+  const calls = [];
+  const executor = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { exitCode: 0, stdout: "1\n", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.exec("postgres", ["psql", "--file=-"], { stdin: "SELECT 1;" });
+
+  assert.deepEqual(calls[0].args.slice(-5), ["--interactive", "--no-TTY", "postgres", "psql", "--file=-"]);
+  assert.equal(calls[0].options.stdin, "SELECT 1;");
+});
+
 test("accepts Docker Hub's canonical repository spelling for an immutable digest", async () => {
   const scope = createRunScope(repositoryRoot, "safe-run-009");
   const digest = "sha256:e28a7c884ed4cc4933fbb58608ba8d1dd97bf6a1e443ef234e0a0aa8b5c51931";

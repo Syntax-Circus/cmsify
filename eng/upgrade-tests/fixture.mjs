@@ -121,18 +121,27 @@ export async function runWithCleanup(work, cleanup) {
   return result;
 }
 
-export function fixtureAssertionCleanupSql(adminUserId, canonicalAuditId) {
+const FIXTURE_ASSERTION_CLEANUP_SQL = `
+  DELETE FROM user_sessions;
+  DELETE FROM audit_logs WHERE id <> :'canonical_audit_id';
+  UPDATE api_clients SET last_used_at = NULL;
+  UPDATE users SET last_login_at = CASE
+    WHEN id = :'admin_user_id' THEN '2026-08-20T12:00:30Z'::timestamptz
+    ELSE NULL
+  END;
+`;
+
+export function fixtureAssertionCleanupCommand(adminUserId, canonicalAuditId) {
   assert(UUID_VALUE.test(adminUserId), "Fixture admin user ID must be a UUID.");
   assert(UUID_VALUE.test(canonicalAuditId), "Canonical fixture audit ID must be a UUID.");
-  return `
-    DELETE FROM user_sessions;
-    DELETE FROM audit_logs WHERE id <> '${canonicalAuditId}';
-    UPDATE api_clients SET last_used_at = NULL;
-    UPDATE users SET last_login_at = CASE
-      WHEN id = '${adminUserId}' THEN '2026-08-20T12:00:30Z'::timestamptz
-      ELSE NULL
-    END;
-  `;
+  return Object.freeze({
+    args: Object.freeze([
+      "--set", `admin_user_id=${adminUserId}`,
+      "--set", `canonical_audit_id=${canonicalAuditId}`,
+      "--file=-",
+    ]),
+    stdin: FIXTURE_ASSERTION_CLEANUP_SQL,
+  });
 }
 
 async function writeRunEnvironment(harness, scope, manifest) {
@@ -353,8 +362,8 @@ async function seedThroughPublishedApi(harness, expected, mediaPaths) {
   };
 }
 
-async function psql(harness, args) {
-  return harness.exec("postgres", ["psql", "--username", "cmsify", "--dbname", "cmsify", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", ...args]);
+async function psql(harness, args, options = {}) {
+  return harness.exec("postgres", ["psql", "--username", "cmsify", "--dbname", "cmsify", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", ...args], options);
 }
 
 async function applyHistoricalSeed(harness, repositoryRoot, expected, observed) {
@@ -378,8 +387,9 @@ async function applyHistoricalSeed(harness, repositoryRoot, expected, observed) 
   };
   const variableArgs = Object.entries(variables).flatMap(([name, value]) => ["--set", `${name}=${value}`]);
   await psql(harness, [...variableArgs, "--file", "/tmp/cmsify-v0.1.3.sql"]);
-  observed.relatedIds.publishedVersion = (await psql(harness, ["--tuples-only", "--no-align", "--command", `SELECT id FROM content_versions WHERE content_item_id = '${observed.ids.publishedContent}' ORDER BY version_number LIMIT 1;`])).stdout.trim();
-  observed.relatedIds.expiredVersion = (await psql(harness, ["--tuples-only", "--no-align", "--command", `SELECT id FROM content_versions WHERE content_item_id = '${observed.ids.expiredContent}' ORDER BY version_number LIMIT 1;`])).stdout.trim();
+  const versionSql = "SELECT id FROM content_versions WHERE content_item_id = :'content_item_id' ORDER BY version_number LIMIT 1;";
+  observed.relatedIds.publishedVersion = (await psql(harness, ["--tuples-only", "--no-align", "--set", `content_item_id=${observed.ids.publishedContent}`, "--file=-"], { stdin: versionSql })).stdout.trim();
+  observed.relatedIds.expiredVersion = (await psql(harness, ["--tuples-only", "--no-align", "--set", `content_item_id=${observed.ids.expiredContent}`, "--file=-"], { stdin: versionSql })).stdout.trim();
   observed.relatedIds.webhookDelivery = expected.relatedIds.webhookDelivery;
   observed.ids.audit = expected.ids.audit;
 }
@@ -499,7 +509,8 @@ export async function generateFixture({ repositoryRoot, fixtureDirectory, keepDi
       await waitForBaseline(harness);
       const assertionResult = await assertBaselineFixture({ harness, expected, ids, webhookWorkerStateBeforeStart });
       await harness.stop("baseline-api");
-      await psql(harness, ["--command", fixtureAssertionCleanupSql(observed.ids.adminUser, expected.ids.audit)]);
+      const cleanupCommand = fixtureAssertionCleanupCommand(observed.ids.adminUser, expected.ids.audit);
+      await psql(harness, cleanupCommand.args, { stdin: cleanupCommand.stdin });
       await exportDatabase(harness, fixtureDirectory, observed, expected);
       await writeFixtureChecksums(fixtureDirectory, manifest.requiredFiles);
       return Object.freeze({

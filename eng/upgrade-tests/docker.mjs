@@ -101,17 +101,21 @@ export function createDockerHarness(scope, executor = runProcess) {
     }
   }
 
-  async function execute(command, args, phase, timeoutMs = MAX_DOCKER_TIMEOUT_MS) {
+  async function execute(command, args, phase, timeoutMs = MAX_DOCKER_TIMEOUT_MS, options = {}) {
     return executor(command, args, {
       cwd: scope.repositoryRoot,
-      timeoutMs,
+      timeoutMs: options.timeoutMs ?? timeoutMs,
       phase,
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.redact ? { redact: options.redact } : {}),
+      ...(options.stdoutEncoding ? { stdoutEncoding: options.stdoutEncoding } : {}),
+      ...(options.stdin !== undefined ? { stdin: options.stdin } : {}),
     });
   }
 
-  async function compose(args, phase, timeoutMs) {
+  async function compose(args, phase, timeoutMs, options) {
     await ensureRunFiles();
-    return execute("docker", [...composePrefix, ...args], phase, timeoutMs);
+    return execute("docker", [...composePrefix, ...args], phase, timeoutMs, options);
   }
 
   async function inspectLabels(resourceType, resourceId) {
@@ -173,10 +177,16 @@ export function createDockerHarness(scope, executor = runProcess) {
       return compose(["start", service], "docker-compose-start");
     },
 
-    async exec(service, args) {
+    async exec(service, args, options = {}) {
       assertService(service);
       assertStringArray(args, "Docker exec arguments");
-      return compose(["exec", "--no-TTY", service, ...args], "docker-compose-exec");
+      assert(options && typeof options === "object" && !Array.isArray(options), "Docker exec options must be an object.");
+      assert(options.timeoutMs === undefined || (Number.isFinite(options.timeoutMs) && options.timeoutMs > 0), "Docker exec timeout must be positive.");
+      assert(options.signal === undefined || options.signal instanceof AbortSignal, "Docker exec signal must be an AbortSignal.");
+      assert(options.redact === undefined || (Array.isArray(options.redact) && options.redact.every((value) => typeof value === "string")), "Docker exec redactions must be strings.");
+      assert(options.stdoutEncoding === undefined || ["utf8", "buffer"].includes(options.stdoutEncoding), "Docker exec stdoutEncoding must be utf8 or buffer.");
+      assert(options.stdin === undefined || typeof options.stdin === "string", "Docker exec stdin must be a string.");
+      return compose(["exec", ...(options.stdin === undefined ? [] : ["--interactive"]), "--no-TTY", service, ...args], "docker-compose-exec", undefined, options);
     },
 
     logs,

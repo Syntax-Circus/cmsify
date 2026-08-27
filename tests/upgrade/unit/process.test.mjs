@@ -26,6 +26,26 @@ test("passes metacharacters as one literal argument", async () => {
   assert.equal(JSON.parse(result.stdout)[0], "x; Write-Output compromised");
 });
 
+test("returns exact stdout bytes when the caller requests a binary result", async () => {
+  const result = await runProcess(node, evalScript("process.stdout.write(Buffer.from([0x7b, 0xff, 0x7d]))"), {
+    timeoutMs,
+    stdoutEncoding: "buffer",
+  });
+
+  assert.deepEqual(result.stdout, Buffer.from([0x7b, 0xff, 0x7d]));
+  assert.equal(typeof result.stderr, "string");
+});
+
+test("passes a constant input string through standard input without a shell", async () => {
+  const statement = "SELECT :'fixture_value';";
+  const result = await runProcess(node, evalScript("process.stdin.pipe(process.stdout)"), {
+    timeoutMs,
+    stdin: statement,
+  });
+
+  assert.equal(result.stdout, statement);
+});
+
 test("terminates a timed-out process", async () => {
   const marker = resolve(temporaryDirectory, "timeout-descendant-marker");
   await assert.rejects(

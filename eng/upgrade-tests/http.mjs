@@ -40,10 +40,14 @@ function correlationId(headers) {
   return safeDiagnosticValue(headers.get("x-correlation-id") ?? headers.get("x-correlationid"));
 }
 
+function decodeJson(bytes) {
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+}
+
 function traceIdFrom(bytes) {
   if (bytes.length === 0) return "unavailable";
   try {
-    const problem = JSON.parse(bytes.toString("utf8"));
+    const problem = decodeJson(bytes);
     return safeDiagnosticValue(problem?.traceId);
   } catch {
     return "unavailable";
@@ -60,6 +64,11 @@ function diagnosticError(request, status, headers, bytes, reason = "unexpected s
 function transportError(request) {
   const { method, path } = requestIdentity(request);
   return new HttpDiagnosticError(`HTTP ${method} ${path} failed (transport error); status unavailable; correlationId unavailable; traceId unavailable.`);
+}
+
+function requestPreparationError(request) {
+  const { method, path } = requestIdentity(request);
+  return new HttpDiagnosticError(`HTTP ${method} ${path} failed (request preparation error); status unavailable; correlationId unavailable; traceId unavailable.`);
 }
 
 function responseTooLargeError(request, status, headers, bytes, limitLabel) {
@@ -132,23 +141,33 @@ async function send(request, maximumBytes, limitLabel) {
     throw transportError(request);
   }
   assert(url.protocol === "http:" || url.protocol === "https:", "HTTP request URL must use http or https.");
-  const expectedStatuses = expectedStatusSet(request.expectedStatuses);
-  const method = requestIdentity(request).method;
-  const headers = new Headers(request.headers);
-  if (request.token !== undefined) {
-    assert(typeof request.token === "string" && request.token.length > 0, "HTTP token must be a non-empty string.");
-    headers.set("authorization", `Bearer ${request.token}`);
-  } else {
-    headers.delete("authorization");
-  }
+  let expectedStatuses;
+  let method;
+  let headers;
   let body;
-  if (request.body !== undefined) {
-    headers.set("content-type", "application/json");
-    body = JSON.stringify(request.body);
+  let fetchImpl;
+  let boundedSignal;
+  try {
+    expectedStatuses = expectedStatusSet(request.expectedStatuses);
+    method = requestIdentity(request).method;
+    headers = new Headers(request.headers);
+    if (request.token !== undefined) {
+      assert(typeof request.token === "string" && request.token.length > 0, "HTTP token must be a non-empty string.");
+      headers.set("authorization", `Bearer ${request.token}`);
+    } else {
+      headers.delete("authorization");
+    }
+    if (request.body !== undefined) {
+      headers.set("content-type", "application/json");
+      body = JSON.stringify(request.body);
+    }
+    fetchImpl = request.fetchImpl ?? globalThis.fetch;
+    assert(typeof fetchImpl === "function", "A fetch implementation is required.");
+    boundedSignal = makeSignal(request);
+  } catch (error) {
+    if (error instanceof HttpDiagnosticError) throw error;
+    throw requestPreparationError(request);
   }
-  const fetchImpl = request.fetchImpl ?? globalThis.fetch;
-  assert(typeof fetchImpl === "function", "A fetch implementation is required.");
-  const boundedSignal = makeSignal(request);
   try {
     let response;
     try {
@@ -190,7 +209,7 @@ export async function requestJson(request) {
   let body;
   if (streamed.byteLength > 0) {
     try {
-      body = JSON.parse(streamed.bytes.toString("utf8"));
+      body = decodeJson(streamed.bytes);
     } catch {
       throw diagnosticError(request, response.status, response.headers, Buffer.alloc(0), "invalid JSON response");
     }
@@ -206,6 +225,175 @@ export async function requestJson(request) {
 export async function requestBytes(request) {
   const { response, streamed } = await send(request, MAX_BYTE_RESPONSE_BYTES, "10 MiB");
   return Object.freeze({ status: response.status, headers: response.headers, ...streamed });
+}
+
+function parseCurlHeaders(value) {
+  const blocks = value.replaceAll("\r\n", "\n").split("\n\n").filter((block) => block.startsWith("HTTP/"));
+  assert(blocks.length > 0, "Docker HTTP response headers are malformed.");
+  const headers = new Headers();
+  for (const line of blocks.at(-1).split("\n").slice(1)) {
+    const colon = line.indexOf(":");
+    if (colon > 0) headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
+  }
+  return headers;
+}
+
+function dockerRequestPreparation(request, maximumBytes) {
+  assert(request && typeof request === "object", "An HTTP request is required.");
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    throw transportError(request);
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw requestPreparationError(request);
+  try {
+    const expectedStatuses = expectedStatusSet(request.expectedStatuses);
+    const method = requestIdentity(request).method;
+    const headers = new Headers(request.headers);
+    if (request.token !== undefined) {
+      assert(typeof request.token === "string" && request.token.length > 0, "HTTP token must be a non-empty string.");
+      headers.set("authorization", `Bearer ${request.token}`);
+    } else {
+      headers.delete("authorization");
+    }
+    let body;
+    if (request.body !== undefined) {
+      headers.set("content-type", "application/json");
+      body = JSON.stringify(request.body);
+    }
+    const boundedSignal = makeSignal(request);
+    const redactions = [...headers.values(), ...(body === undefined ? [] : [body])];
+    const identity = createHash("sha256").update(`${method}\n${url.toString()}`).digest("hex").slice(0, 24);
+    return Object.freeze({
+      url,
+      method,
+      headers,
+      body,
+      expectedStatuses,
+      boundedSignal,
+      redactions,
+      maximumBytes,
+      bodyPath: `/tmp/cmsify-http-${identity}.body`,
+      headersPath: `/tmp/cmsify-http-${identity}.headers`,
+    });
+  } catch (error) {
+    if (error instanceof HttpDiagnosticError) throw error;
+    throw requestPreparationError(request);
+  }
+}
+
+/**
+ * Creates the bounded HTTP adapter used from an isolated Docker service.
+ * @param {{exec:(service:string,args:string[],options?:object)=>Promise<object>}} docker
+ * @param {string} service
+ */
+export function createDockerHttpAdapter(docker, service) {
+  assert(docker && typeof docker.exec === "function", "A Docker HTTP adapter is required.");
+  assert(typeof service === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(service), "A canonical Docker service is required.");
+
+  async function execute(prepared, args, { stdoutEncoding } = {}) {
+    try {
+      return await docker.exec(service, args, {
+        timeoutMs: REQUEST_TIMEOUT_MS,
+        signal: prepared.boundedSignal.signal,
+        redact: prepared.redactions,
+        ...(stdoutEncoding ? { stdoutEncoding } : {}),
+      });
+    } catch {
+      throw transportError({ method: prepared.method, url: prepared.url.toString() });
+    }
+  }
+
+  async function responseSize(prepared, path) {
+    const result = await execute(prepared, ["wc", "-c", path]);
+    const value = typeof result.stdout === "string" ? result.stdout : "";
+    const match = /^\s*(\d+)\s+(\S+)\s*$/.exec(value);
+    if (!match || match[2] !== path) throw transportError({ method: prepared.method, url: prepared.url.toString() });
+    return Number(match[1]);
+  }
+
+  async function exchange(request, maximumBytes, limitLabel, kind) {
+    const prepared = dockerRequestPreparation(request, maximumBytes);
+    const curlArgs = [
+      "curl", "--disable", "--silent", "--show-error",
+      "--max-time", String(REQUEST_TIMEOUT_MS / 1_000),
+      "--max-redirs", "0", "--proto", "=http,https", "--noproxy", "*",
+      "--max-filesize", String(maximumBytes),
+      "--output", prepared.bodyPath, "--dump-header", prepared.headersPath,
+      "--write-out", "%{http_code}", "--request", prepared.method,
+    ];
+    for (const [name, value] of prepared.headers) curlArgs.push("--header", `${name}: ${value}`);
+    if (prepared.body !== undefined) curlArgs.push("--data-binary", prepared.body);
+    curlArgs.push(prepared.url.toString());
+
+    try {
+      const curl = await execute(prepared, curlArgs);
+      const statusText = typeof curl.stdout === "string" ? curl.stdout.trim() : "";
+      if (!/^\d{3}$/.test(statusText)) throw transportError(request);
+      const status = Number(statusText);
+      const [bodyLength, headerLength] = await Promise.all([
+        responseSize(prepared, prepared.bodyPath),
+        responseSize(prepared, prepared.headersPath),
+      ]);
+      if (headerLength > 64 * 1024) throw transportError(request);
+      const headerResult = await execute(prepared, ["cat", prepared.headersPath]);
+      if (typeof headerResult.stdout !== "string") throw transportError(request);
+      let headers;
+      try {
+        headers = parseCurlHeaders(headerResult.stdout);
+      } catch {
+        throw transportError(request);
+      }
+      if (bodyLength > maximumBytes) throw responseTooLargeError(request, status, headers, Buffer.alloc(0), limitLabel);
+
+      let bytes = Buffer.alloc(0);
+      if (kind === "json" || !prepared.expectedStatuses.has(status)) {
+        if (bodyLength <= MAX_JSON_BYTES) {
+          const bodyResult = await execute(prepared, ["cat", prepared.bodyPath], { stdoutEncoding: "buffer" });
+          if (!Buffer.isBuffer(bodyResult.stdout) || bodyResult.stdout.length !== bodyLength) throw transportError(request);
+          bytes = bodyResult.stdout;
+        }
+      }
+      if (!prepared.expectedStatuses.has(status)) throw diagnosticError(request, status, headers, bytes);
+
+      if (kind === "json") {
+        let body;
+        if (bytes.length > 0) {
+          try {
+            body = decodeJson(bytes);
+          } catch {
+            throw diagnosticError(request, status, headers, Buffer.alloc(0), "invalid JSON response");
+          }
+        }
+        return Object.freeze({ status, headers, body });
+      }
+
+      const digest = await execute(prepared, ["sha256sum", prepared.bodyPath]);
+      const sha256 = typeof digest.stdout === "string" ? digest.stdout.trim().split(/\s+/, 1)[0] : "";
+      if (!/^[0-9a-f]{64}$/.test(sha256)) throw transportError(request);
+      return Object.freeze({ status, headers, bytes: Buffer.alloc(0), byteLength: bodyLength, sha256 });
+    } finally {
+      prepared.boundedSignal.dispose();
+      try {
+        await docker.exec(service, ["rm", "--force", "--", prepared.bodyPath, prepared.headersPath], {
+          timeoutMs: REQUEST_TIMEOUT_MS,
+          redact: prepared.redactions,
+        });
+      } catch {
+        // Containers are run-scoped and will be removed; primary HTTP evidence remains authoritative.
+      }
+    }
+  }
+
+  return Object.freeze({
+    requestJson(request) {
+      return exchange(request, MAX_JSON_BYTES, "1 MiB", "json");
+    },
+    requestBytes(request) {
+      return exchange(request, MAX_BYTE_RESPONSE_BYTES, "10 MiB", "bytes");
+    },
+  });
 }
 
 export const HTTP_LIMITS = Object.freeze({

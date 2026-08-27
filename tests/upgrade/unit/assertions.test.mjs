@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   assertionCatalog,
   assertionNames,
+  createDockerSqlAdapter,
   runNamedAssertion,
 } from "../../../eng/upgrade-tests/assertions.mjs";
 import { requestBytes, requestJson } from "../../../eng/upgrade-tests/http.mjs";
@@ -52,6 +53,34 @@ function context(overrides = {}) {
     ...overrides,
   };
 }
+
+test("Docker SQL adapter passes values as psql variables and withholds failed query material", async () => {
+  const calls = [];
+  const secretValue = "fixture-sql-value-secret";
+  const harness = {
+    async exec(service, args, options) {
+      calls.push({ service, args, options });
+      if (calls.length === 1) return { exitCode: 0, stdout: "1\n", stderr: "", durationMs: 0 };
+      throw new Error(`database leaked ${secretValue}`);
+    },
+  };
+  const adapter = createDockerSqlAdapter(harness);
+
+  assert.equal(await adapter.scalar("SELECT :'fixture_value';", { fixture_value: secretValue }), "1");
+  assert.equal(calls[0].service, "postgres");
+  assert.ok(calls[0].args.includes(`fixture_value=${secretValue}`));
+  assert.equal(calls[0].args.includes("--command"), false);
+  assert.equal(calls[0].args.at(-1), "--file=-");
+  assert.equal(calls[0].options.stdin, "SELECT :'fixture_value';");
+  await assert.rejects(
+    () => adapter.scalar("SELECT :'fixture_value';", { fixture_value: secretValue }),
+    (error) => {
+      assert.match(error.message, /query failed.*withheld/i);
+      assert.doesNotMatch(error.message, new RegExp(secretValue));
+      return true;
+    },
+  );
+});
 
 test("every required scenario and expected category has a baseline assertion", () => {
   const catalog = assertionCatalog("baseline");
@@ -161,6 +190,26 @@ test("effective range assertions compare equivalent UTC instants", async () => {
   await runNamedAssertion("expired-effective-range", context({ http: fakeHttp, sql: fakeSql }));
 });
 
+test("candidate readiness uses the build informational version, not the OCI base version", async () => {
+  const sourceSha = "a".repeat(40);
+  const version = "1.0.0-task9";
+  const fakeHttp = {
+    async requestJson() {
+      return {
+        status: 200,
+        headers: new Headers(),
+        body: { status: "Healthy", metadata: { version: `${version}+${sourceSha}` } },
+      };
+    },
+  };
+
+  await runNamedAssertion("health-ready", context({
+    phase: "candidate",
+    candidate: { version, sourceSha },
+    http: fakeHttp,
+  }));
+});
+
 test("package provenance assertion preserves the fixture's exact populated and null columns", async () => {
   const statements = [];
   const fakeSql = {
@@ -177,6 +226,50 @@ test("package provenance assertion preserves the fixture's exact populated and n
 
   await runNamedAssertion("package-provenance", context({ sql: fakeSql }));
   assert.equal(statements.length, 1);
+});
+
+test("editor relationship uses bound SQL values and requires an active Editor actor", async () => {
+  const calls = [];
+  const fakeSql = {
+    async scalar(statement, parameters) {
+      calls.push({ statement, parameters });
+      return "1";
+    },
+  };
+
+  await runNamedAssertion("editor-primary-write-grant", context({ sql: fakeSql }));
+
+  assert.equal(calls.length, 1);
+  assert.doesNotMatch(calls[0].statement, new RegExp(expected.ids.editorUser));
+  assert.match(calls[0].statement, /actor\.role = 'Editor'/);
+  assert.match(calls[0].statement, /actor\.is_active/);
+  assert.deepEqual(calls[0].parameters, {
+    editor_user_id: expected.ids.editorUser,
+    primary_workspace_id: expected.ids.primaryWorkspace,
+  });
+});
+
+test("hidden media SQL binds the asset to its primary workspace", async () => {
+  const calls = [];
+  const fakeHttp = {
+    async requestJson() { return { status: 404, headers: new Headers(), body: { title: "Not Found" } }; },
+    async requestBytes() { return { status: 404, headers: new Headers(), bytes: Buffer.alloc(0), byteLength: 0, sha256: createHash("sha256").digest("hex") }; },
+  };
+  const fakeSql = {
+    async scalar(statement, parameters) {
+      calls.push({ statement, parameters });
+      return "1";
+    },
+  };
+  const fakeStorage = { async sha256() { return expected.media.image.sha256; } };
+
+  await runNamedAssertion("historical-deleted-media-hidden", context({ http: fakeHttp, sql: fakeSql, storage: fakeStorage }));
+
+  assert.equal(calls.length, 1);
+  assert.doesNotMatch(calls[0].statement, new RegExp(expected.ids.imageMedia));
+  assert.match(calls[0].statement, /JOIN workspaces workspace ON workspace\.id = asset\.workspace_id/);
+  assert.deepEqual(calls[0].parameters.image_media_id, expected.ids.imageMedia);
+  assert.deepEqual(calls[0].parameters.primary_workspace_id, expected.ids.primaryWorkspace);
 });
 
 test("media mismatch names the asset and digests without logging payload bytes", async () => {
@@ -291,6 +384,55 @@ test("unexpected JSON status reports only sanitized ProblemDetails diagnostics",
   );
 });
 
+test("JSON responses reject malformed UTF-8 with sanitized diagnostics", async () => {
+  const malformed = Buffer.concat([
+    Buffer.from('{"traceId":"trace-fixture-utf8","value":"', "utf8"),
+    Buffer.from([0xff]),
+    Buffer.from('"}', "utf8"),
+  ]);
+
+  await assert.rejects(
+    () => requestJson({
+      url: "https://cmsify.test/api/v1/malformed",
+      method: "GET",
+      expectedStatuses: new Set([200]),
+      async fetchImpl() {
+        return new Response(malformed, { status: 200 });
+      },
+    }),
+    (error) => {
+      assert.match(error.message, /GET \/api\/v1\/malformed.*invalid JSON response/);
+      assert.doesNotMatch(error.message, /trace-fixture-utf8|�/);
+      return true;
+    },
+  );
+});
+
+test("request preparation failures cannot reflect header or body exception messages", async () => {
+  const preparationSecret = "fixture-request-body-secret-marker";
+
+  await assert.rejects(
+    () => requestJson({
+      url: "https://cmsify.test/api/v1/content",
+      method: "POST",
+      expectedStatuses: new Set([201]),
+      body: {
+        toJSON() {
+          throw new Error(preparationSecret);
+        },
+      },
+      async fetchImpl() {
+        throw new Error("fetch must not run");
+      },
+    }),
+    (error) => {
+      assert.match(error.message, /POST \/api\/v1\/content.*request preparation error/);
+      assert.doesNotMatch(error.message, new RegExp(preparationSecret));
+      return true;
+    },
+  );
+});
+
 test("byte requests hash streamed chunks and enforce the 10 MiB cap", async () => {
   const chunks = [Buffer.from("abc"), Buffer.from("def")];
   const response = await requestBytes({
@@ -376,11 +518,12 @@ test("HTTP timeout remains active while streaming and stream failures stay sanit
 test("candidate lifecycle assertion distinguishes active and deleted historical media", async () => {
   const sqlCalls = [];
   const fakeSql = {
-    async json(statement) {
-      sqlCalls.push(statement);
+    async json(statement, parameters) {
+      sqlCalls.push({ statement, parameters });
       return [
         {
           id: expected.ids.textMedia,
+          workspaceId: expected.ids.primaryWorkspace,
           provider: "s3",
           storageKey: expected.media.text.storageKey,
           blobState: "Available",
@@ -391,6 +534,7 @@ test("candidate lifecycle assertion distinguishes active and deleted historical 
         },
         {
           id: expected.ids.imageMedia,
+          workspaceId: expected.ids.primaryWorkspace,
           provider: "s3",
           storageKey: expected.media.image.storageKey,
           blobState: "DeletePending",
@@ -406,6 +550,12 @@ test("candidate lifecycle assertion distinguishes active and deleted historical 
   await runNamedAssertion("candidate-deletion-boundary", context({ phase: "candidate", sql: fakeSql }));
 
   assert.equal(sqlCalls.length, 1);
+  assert.doesNotMatch(sqlCalls[0].statement, new RegExp(expected.ids.textMedia));
+  assert.deepEqual(sqlCalls[0].parameters, {
+    text_media_id: expected.ids.textMedia,
+    image_media_id: expected.ids.imageMedia,
+    primary_workspace_id: expected.ids.primaryWorkspace,
+  });
 });
 
 test("candidate legacy webhook assertion decrypts v1 ciphertext without exposing plaintext", async () => {
@@ -432,15 +582,64 @@ test("candidate legacy webhook assertion decrypts v1 ciphertext without exposing
   );
 });
 
-test("candidate canary uses the public API and records the created identity", async () => {
+test("candidate canary rejects a create response without an ETag", async () => {
+  const fakeHttp = {
+    async requestJson(request) {
+      if (request.url.endsWith("/api/v1/auth/login")) return { status: 200, body: { token: "session-token" }, headers: new Headers() };
+      if (request.method === "POST") return { status: 201, body: { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", slug: request.body.slug }, headers: new Headers() };
+      return { status: 200, body: { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", slug: "upgrade-canary-unit-run-001" }, headers: new Headers() };
+    },
+  };
+  const fakeSql = { async json() { return {
+    componentVersionCount: 1,
+    componentFieldCount: 2,
+    choiceRevisionCount: 2,
+    contentVersionCount: 1,
+    originalChoiceLabel: expected.content.publishedChoiceLabel,
+    currentChoiceLabel: expected.content.currentChoiceLabel,
+    publishedChoiceLabel: expected.content.publishedChoiceLabel,
+  }; } };
+
+  await assert.rejects(
+    () => runNamedAssertion("candidate-canary-write-read", context({ phase: "candidate", runId: "unit-run-001", http: fakeHttp, sql: fakeSql })),
+    /create.*ETag/i,
+  );
+});
+
+test("candidate canary exercises ETag concurrency and preserves immutable history", async () => {
   const canaryId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const createEtag = '"canary-create-etag"';
+  const updateEtag = '"canary-update-etag"';
   const requests = [];
+  let updatedFields = [];
   const fakeHttp = {
     async requestJson(request) {
       requests.push(request);
       if (request.url.endsWith("/api/v1/auth/login")) return { status: 200, body: { token: "session-token" }, headers: new Headers() };
-      if (request.method === "POST") return { status: 201, body: { id: canaryId, slug: request.body.slug }, headers: new Headers() };
-      return { status: 200, body: { id: canaryId, slug: requests[1].body.slug }, headers: new Headers() };
+      if (request.method === "POST") return { status: 201, body: { id: canaryId, slug: request.body.slug, fields: request.body.fields }, headers: new Headers({ etag: createEtag }) };
+      if (request.method === "PUT" && !request.headers?.["if-match"]) return { status: 412, body: { title: "Concurrency mismatch" }, headers: new Headers() };
+      if (request.method === "PUT" && request.headers["if-match"] === '"stale-canary-etag"') return { status: 412, body: { title: "Concurrency mismatch" }, headers: new Headers() };
+      if (request.method === "PUT") {
+        updatedFields = request.body.fields;
+        return { status: 200, body: { id: canaryId, slug: request.body.slug, fields: updatedFields }, headers: new Headers({ etag: updateEtag }) };
+      }
+      return { status: 200, body: { id: canaryId, slug: requests[1].body.slug, fields: updatedFields }, headers: new Headers({ etag: updateEtag }) };
+    },
+  };
+  const immutableSnapshot = {
+    componentVersionCount: 1,
+    componentFieldCount: 2,
+    choiceRevisionCount: 2,
+    contentVersionCount: 1,
+    originalChoiceLabel: expected.content.publishedChoiceLabel,
+    currentChoiceLabel: expected.content.currentChoiceLabel,
+    publishedChoiceLabel: expected.content.publishedChoiceLabel,
+  };
+  const sqlCalls = [];
+  const fakeSql = {
+    async json(statement, parameters) {
+      sqlCalls.push({ statement, parameters });
+      return immutableSnapshot;
     },
   };
 
@@ -448,12 +647,21 @@ test("candidate canary uses the public API and records the created identity", as
     phase: "candidate",
     runId: "unit-run-001",
     http: fakeHttp,
+    sql: fakeSql,
   }));
 
   assert.equal(result.detail, `canaryId=${canaryId}`);
-  assert.deepEqual(requests.map((request) => request.method), ["POST", "POST", "GET"]);
+  assert.deepEqual(requests.map((request) => request.method), ["POST", "POST", "PUT", "PUT", "PUT", "GET"]);
   assert.equal(requests[0].token, undefined);
   assert.equal(requests[1].token, "session-token");
   assert.match(requests[1].body.slug, /^upgrade-canary-unit-run-001$/);
-  assert.equal(requests[2].token, expected.authentication.readerToken);
+  assert.equal(requests[2].headers, undefined);
+  assert.equal(requests[3].headers["if-match"], '"stale-canary-etag"');
+  assert.equal(requests[4].headers["if-match"], createEtag);
+  assert.equal(requests[5].token, expected.authentication.readerToken);
+  assert.equal(requests[5].body, undefined);
+  assert.equal(requests[5].method, "GET");
+  assert.equal(requests[4].body.fields[0].textValue, "Upgrade canary updated unit-run-001");
+  assert.equal(sqlCalls.length, 2);
+  assert.deepEqual(sqlCalls[0].parameters, sqlCalls[1].parameters);
 });

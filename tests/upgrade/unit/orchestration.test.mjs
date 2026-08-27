@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { writeFixtureChecksums } from "../../../eng/upgrade-tests/checksums.mjs";
 import { installGeneratedFixture, prepareGenerationDirectory } from "../../../eng/upgrade-tests/cli.mjs";
-import { compareFixtureTrees, fixtureAssertionCleanupSql, runWithCleanup } from "../../../eng/upgrade-tests/fixture.mjs";
+import { compareFixtureTrees, fixtureAssertionCleanupCommand, runWithCleanup } from "../../../eng/upgrade-tests/fixture.mjs";
 import { validExpectedDocument, validManifestDocument } from "./fixture-documents.mjs";
 
 function temporaryDirectory(prefix = "cmsify-upgrade-orchestration-") {
@@ -28,14 +28,20 @@ async function materializeValidFixture(root) {
 }
 
 test("fixture assertion cleanup removes generated auth audit rows but preserves the canonical audit", () => {
-  const sql = fixtureAssertionCleanupSql(
-    "22222222-2222-4222-8222-222222222221",
-    "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
-  );
+  const adminUserId = "22222222-2222-4222-8222-222222222221";
+  const canonicalAuditId = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+  const command = fixtureAssertionCleanupCommand(adminUserId, canonicalAuditId);
+  const sql = command.stdin;
 
   assert.match(sql, /DELETE FROM user_sessions/);
-  assert.match(sql, /DELETE FROM audit_logs WHERE id <> 'cccccccc-cccc-4ccc-8ccc-ccccccccccc1'/);
-  assert.match(sql, /WHEN id = '22222222-2222-4222-8222-222222222221'/);
+  assert.match(sql, /DELETE FROM audit_logs WHERE id <> :'canonical_audit_id'/);
+  assert.match(sql, /WHEN id = :'admin_user_id'/);
+  assert.doesNotMatch(sql, new RegExp(`${adminUserId}|${canonicalAuditId}`));
+  assert.deepEqual(command.args.slice(0, -1), [
+    "--set", `admin_user_id=${adminUserId}`,
+    "--set", `canonical_audit_id=${canonicalAuditId}`,
+  ]);
+  assert.equal(command.args.at(-1), "--file=-");
   assert.doesNotMatch(sql, /DELETE FROM audit_logs;/);
 });
 
