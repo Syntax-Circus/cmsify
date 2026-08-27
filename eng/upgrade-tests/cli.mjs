@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { verifyFixtureChecksums } from "./checksums.mjs";
 import { loadExpectedData } from "./expected.mjs";
-import { compareFixtureTrees, generateFixture } from "./fixture.mjs";
+import { compareFixtureTrees, generateFixture, runWithCleanup } from "./fixture.mjs";
 import { loadFixtureManifest } from "./manifest.mjs";
 
 function assert(condition, message) {
@@ -34,18 +34,19 @@ function sanitize(error, fixtureDirectory) {
     .join("\n");
 }
 
-export async function prepareGenerationDirectory(repositoryRoot, fixtureDirectory, prefix) {
+export async function prepareGenerationDirectory(repositoryRoot, fixtureDirectory, prefix, { remove = rm } = {}) {
   const runDirectory = resolve(repositoryRoot, "tests", "upgrade", ".runs");
   await mkdir(runDirectory, { recursive: true });
   const output = await mkdtemp(resolve(runDirectory, prefix));
-  try {
+  let prepared = false;
+  return runWithCleanup(async () => {
     await copyFile(resolve(fixtureDirectory, "manifest.json"), resolve(output, "manifest.json"));
     await copyFile(resolve(fixtureDirectory, "expected.json"), resolve(output, "expected.json"));
+    prepared = true;
     return output;
-  } catch (error) {
-    await rm(output, { force: true, recursive: true });
-    throw error;
-  }
+  }, async () => {
+    if (!prepared) await remove(output, { force: true, recursive: true });
+  });
 }
 
 function siblingPath(fixtureDirectory, purpose) {
@@ -53,11 +54,27 @@ function siblingPath(fixtureDirectory, purpose) {
   return resolve(dirname(fixtureDirectory), `.${basename(fixtureDirectory)}.${purpose}-${nonce}`);
 }
 
-export async function installGeneratedFixture(generatedDirectory, fixtureDirectory, { rename = renameDirectory } = {}) {
+async function removeFixtureSiblings(paths, remove) {
+  const failures = [];
+  for (const path of paths) {
+    try {
+      await remove(path, { force: true, recursive: true });
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    const message = failures[0] instanceof Error ? failures[0].message : "Fixture sibling cleanup failed.";
+    throw new AggregateError(failures, message, { cause: failures[0] });
+  }
+}
+
+export async function installGeneratedFixture(generatedDirectory, fixtureDirectory, { rename = renameDirectory, remove = rm } = {}) {
   const replacement = siblingPath(fixtureDirectory, "replacement");
   const backup = siblingPath(fixtureDirectory, "backup");
   let backupExists = false;
-  try {
+  return runWithCleanup(async () => {
     await cp(generatedDirectory, replacement, { recursive: true, force: false, errorOnExist: true });
     const replacementManifest = loadFixtureManifest(replacement);
     await loadExpectedData(replacement, replacementManifest);
@@ -77,12 +94,13 @@ export async function installGeneratedFixture(generatedDirectory, fixtureDirecto
       throw replacementFailure;
     }
 
-    await rm(backup, { force: true, recursive: true });
+    await remove(backup, { force: true, recursive: true });
     backupExists = false;
-  } finally {
-    await rm(replacement, { force: true, recursive: true });
-    if (!backupExists) await rm(backup, { force: true, recursive: true });
-  }
+  }, async () => {
+    const cleanupPaths = [replacement];
+    if (!backupExists) cleanupPaths.push(backup);
+    await removeFixtureSiblings(cleanupPaths, remove);
+  });
 }
 
 async function generateCommand(repositoryRoot, fixtureDirectory, check) {

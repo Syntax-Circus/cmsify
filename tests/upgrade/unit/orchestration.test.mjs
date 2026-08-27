@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { rename } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import test from "node:test";
 
 import { writeFixtureChecksums } from "../../../eng/upgrade-tests/checksums.mjs";
@@ -42,6 +42,27 @@ test("removes a preparation directory when an initial fixture copy fails", async
   assert.deepEqual(readdirSync(runDirectory), []);
 });
 
+test("preserves a preparation copy failure before its cleanup failure", async () => {
+  const repositoryRoot = temporaryDirectory();
+  const fixtureDirectory = resolve(repositoryRoot, "source-fixture");
+  const cleanup = new Error("injected preparation cleanup failure");
+  mkdirSync(fixtureDirectory, { recursive: true });
+  writeFileSync(resolve(fixtureDirectory, "manifest.json"), "{}");
+
+  await assert.rejects(
+    () => prepareGenerationDirectory(repositoryRoot, fixtureDirectory, "fixture-broken-", {
+      remove: async () => { throw cleanup; },
+    }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true);
+      assert.match(error.errors[0].message, /ENOENT|cannot find/i);
+      assert.equal(error.errors[1], cleanup);
+      assert.equal(error.cause, error.errors[0]);
+      return true;
+    },
+  );
+});
+
 test("installs a verified complete fixture tree without retaining stale live files", async () => {
   const parent = temporaryDirectory();
   const generated = resolve(parent, "generated");
@@ -75,6 +96,65 @@ test("leaves the live fixture untouched when the replacement tree fails verifica
   assert.deepEqual(readdirSync(parent).sort(), ["generated", "v0.1.3"]);
 });
 
+test("preserves replacement validation failure before replacement cleanup failure", async () => {
+  const parent = temporaryDirectory();
+  const generated = resolve(parent, "generated");
+  const live = resolve(parent, "v0.1.3");
+  const cleanup = new Error("injected replacement cleanup failure");
+  mkdirSync(generated);
+  mkdirSync(live);
+  writeFileSync(resolve(live, "sentinel.txt"), "original fixture");
+  await materializeValidFixture(generated);
+  writeFileSync(resolve(generated, "database.sql"), "tampered after checksumming\n");
+  const failReplacementCleanup = async (path, options) => {
+    if (basename(path).includes(".replacement-")) throw cleanup;
+    await rm(path, options);
+  };
+
+  await assert.rejects(
+    () => installGeneratedFixture(generated, live, { remove: failReplacementCleanup }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true);
+      assert.match(error.errors[0].message, /checksum mismatch for database\.sql/i);
+      assert.equal(error.errors[1], cleanup);
+      assert.equal(error.cause, error.errors[0]);
+      return true;
+    },
+  );
+
+  assert.equal(readFileSync(resolve(live, "sentinel.txt"), "utf8"), "original fixture");
+});
+
+test("preserves initial swap failure before backup cleanup failure", async () => {
+  const parent = temporaryDirectory();
+  const generated = resolve(parent, "generated");
+  const live = resolve(parent, "v0.1.3");
+  const swap = new Error("injected initial swap failure");
+  const cleanup = new Error("injected backup cleanup failure");
+  mkdirSync(generated);
+  mkdirSync(live);
+  writeFileSync(resolve(live, "sentinel.txt"), "original fixture");
+  await materializeValidFixture(generated);
+  const failInitialSwap = async () => { throw swap; };
+  const failBackupCleanup = async (path, options) => {
+    if (basename(path).includes(".backup-")) throw cleanup;
+    await rm(path, options);
+  };
+
+  await assert.rejects(
+    () => installGeneratedFixture(generated, live, { rename: failInitialSwap, remove: failBackupCleanup }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true);
+      assert.equal(error.errors[0], swap);
+      assert.equal(error.errors[1], cleanup);
+      assert.equal(error.cause, swap);
+      return true;
+    },
+  );
+
+  assert.equal(readFileSync(resolve(live, "sentinel.txt"), "utf8"), "original fixture");
+});
+
 test("restores the original fixture when the replacement rename fails", async () => {
   const parent = temporaryDirectory();
   const generated = resolve(parent, "generated");
@@ -97,6 +177,44 @@ test("restores the original fixture when the replacement rename fails", async ()
 
   assert.equal(readFileSync(resolve(live, "sentinel.txt"), "utf8"), "original fixture");
   assert.deepEqual(readdirSync(parent).sort(), ["generated", "v0.1.3"]);
+});
+
+test("preserves replacement and restoration failures before replacement cleanup failure", async () => {
+  const parent = temporaryDirectory();
+  const generated = resolve(parent, "generated");
+  const live = resolve(parent, "v0.1.3");
+  const replacement = new Error("injected replacement rename failure");
+  const restore = new Error("injected restoration rename failure");
+  const cleanup = new Error("injected replacement cleanup failure");
+  mkdirSync(generated);
+  mkdirSync(live);
+  writeFileSync(resolve(live, "sentinel.txt"), "original fixture");
+  await materializeValidFixture(generated);
+  let renameCount = 0;
+  const failReplacementAndRestore = async (source, destination) => {
+    renameCount += 1;
+    if (renameCount === 2) throw replacement;
+    if (renameCount === 3) throw restore;
+    await rename(source, destination);
+  };
+  const failReplacementCleanup = async (path, options) => {
+    if (basename(path).includes(".replacement-")) throw cleanup;
+    await rm(path, options);
+  };
+
+  await assert.rejects(
+    () => installGeneratedFixture(generated, live, { rename: failReplacementAndRestore, remove: failReplacementCleanup }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true);
+      const primary = error.errors[0];
+      assert.equal(primary instanceof AggregateError, true);
+      assert.deepEqual(primary.errors, [replacement, restore]);
+      assert.equal(primary.cause, replacement);
+      assert.equal(error.errors[1], cleanup);
+      assert.equal(error.cause, primary);
+      return true;
+    },
+  );
 });
 
 test("preserves a primary generation failure before a cleanup failure", async () => {
