@@ -99,6 +99,8 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+/artifacts/upgrade-tests/
+/tests/upgrade/.runs/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

@@ -42,6 +42,14 @@ function imageReference(image) {
   return `${image.repository}@${image.digest}`;
 }
 
+function canonicalDockerHubReference(reference) {
+  const [repository, digest] = reference.split("@", 2);
+  if (!digest) return reference;
+  let canonicalRepository = repository.startsWith("docker.io/") ? repository.slice("docker.io/".length) : repository;
+  if (canonicalRepository.startsWith("library/")) canonicalRepository = canonicalRepository.slice("library/".length);
+  return `${canonicalRepository}@${digest}`;
+}
+
 function isContainedBy(parent, candidate) {
   const pathFromParent = relative(parent, candidate);
   return pathFromParent === "" || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== ".." && !isAbsolute(pathFromParent));
@@ -183,7 +191,8 @@ export function createDockerHarness(scope, executor = runProcess) {
         throw new Error(`Docker image inspection did not return JSON for ${image.repository}.`);
       }
       assert(inspected?.Os === "linux" && inspected?.Architecture === "amd64", `Docker image ${image.repository} is not linux/amd64.`);
-      assert(Array.isArray(inspected.RepoDigests) && inspected.RepoDigests.includes(reference), `Docker image ${image.repository} does not contain the required repository digest.`);
+      const canonicalReference = canonicalDockerHubReference(reference);
+      assert(Array.isArray(inspected.RepoDigests) && inspected.RepoDigests.some((value) => canonicalDockerHubReference(value) === canonicalReference), `Docker image ${image.repository} does not contain the required repository digest.`);
       return inspected;
     },
 

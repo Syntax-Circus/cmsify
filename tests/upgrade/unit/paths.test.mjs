@@ -103,6 +103,20 @@ test("compose commands carry the run scope without wildcard cleanup", async () =
   }
 });
 
+test("accepts Docker Hub's canonical repository spelling for an immutable digest", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-009");
+  const digest = "sha256:e28a7c884ed4cc4933fbb58608ba8d1dd97bf6a1e443ef234e0a0aa8b5c51931";
+  const executor = async () => ({
+    exitCode: 0,
+    stdout: JSON.stringify({ Os: "linux", Architecture: "amd64", RepoDigests: [`syntaxcircus/cmsify-api@${digest}`] }),
+    stderr: "",
+    durationMs: 0,
+  });
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.inspectImage({ repository: "docker.io/syntaxcircus/cmsify-api", digest, platform: "linux/amd64" });
+});
+
 test("captures logs before explicitly removing label-verified resources", async () => {
   const scope = createRunScope(repositoryRoot, "safe-run-004");
   const calls = [];

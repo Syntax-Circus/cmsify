@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { verifyFixtureChecksums, writeFixtureChecksums } from "../../../eng/upgrade-tests/checksums.mjs";
+import { canonicalizeFixtureDump, compareFixtureTrees } from "../../../eng/upgrade-tests/fixture.mjs";
 import { REQUIRED_SCENARIOS, validateFixtureManifest } from "../../../eng/upgrade-tests/manifest.mjs";
 
 const CLI = resolve(process.cwd(), "eng", "upgrade-tests", "cli.mjs");
@@ -107,6 +108,52 @@ test("writes ordinal forward-slash SHA256SUMS", async () => {
   const text = await writeFixtureChecksums(root, ["media/z.txt", "database.sql", "media/a.txt"]);
 
   assert.deepEqual(text.split("\n").filter(Boolean).map((line) => line.slice(66)), ["database.sql", "media/a.txt", "media/z.txt"]);
+});
+
+test("reports the first byte-level fixture drift", async () => {
+  const first = temporaryFixture();
+  const second = temporaryFixture();
+  writeFileSync(resolve(first, "database.sql"), "SELECT 1;\n");
+  writeFileSync(resolve(second, "database.sql"), "SELECT 2;\n");
+
+  await assert.rejects(
+    () => compareFixtureTrees(first, second),
+    /fixture drift: database\.sql/i,
+  );
+});
+
+test("canonicalizes anonymous COPY row UUIDs independently of insertion order", () => {
+  const expected = {
+    ids: { primaryWorkspace: "11111111-1111-4111-8111-111111111111" },
+    relatedIds: {},
+  };
+  const firstObserved = { ids: { primaryWorkspace: "01a04440-0000-7000-8000-000000000001" }, relatedIds: {} };
+  const secondObserved = { ids: { primaryWorkspace: "01a04441-0000-7000-8000-000000000001" }, relatedIds: {} };
+  const first = [
+    'COPY "public"."empty_options" ("id", "workspace_id", "label") FROM stdin;',
+    "\\.",
+    "",
+    'COPY "public"."options" ("id", "workspace_id", "label") FROM stdin;',
+    "01a04440-0000-7000-8000-000000000010\t01a04440-0000-7000-8000-000000000001\tBeta",
+    "01a04440-0000-7000-8000-000000000011\t01a04440-0000-7000-8000-000000000001\tAlpha",
+    "\\.",
+    "",
+  ].join("\n");
+  const second = [
+    'COPY "public"."empty_options" ("id", "workspace_id", "label") FROM stdin;',
+    "\\.",
+    "",
+    'COPY "public"."options" ("id", "workspace_id", "label") FROM stdin;',
+    "01a04441-0000-7000-8000-000000000020\t01a04441-0000-7000-8000-000000000001\tAlpha",
+    "01a04441-0000-7000-8000-000000000021\t01a04441-0000-7000-8000-000000000001\tBeta",
+    "\\.",
+    "",
+  ].join("\n");
+
+  const firstCanonical = canonicalizeFixtureDump(first, firstObserved, expected);
+  const secondCanonical = canonicalizeFixtureDump(second, secondObserved, expected);
+  assert.equal(firstCanonical, secondCanonical);
+  assert.match(firstCanonical, /\n\\\.\n$/);
 });
 
 test("refuses to hash a payload through a linked parent directory", async () => {
