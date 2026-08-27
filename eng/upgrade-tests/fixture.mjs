@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
-import { assertBaselineFixture } from "./assertions.mjs";
+import { assertBaselineFixture, captureWebhookWorkerState } from "./assertions.mjs";
 import { writeFixtureChecksums } from "./checksums.mjs";
 import { createDockerHarness } from "./docker.mjs";
+import { loadExpectedData } from "./expected.mjs";
 import { loadFixtureManifest } from "./manifest.mjs";
 import { createRunScope } from "./paths.mjs";
 
@@ -80,14 +81,44 @@ function normalizedRelativePath(root, file) {
 }
 
 async function fixtureFiles(root, directory = root) {
+  const directoryStat = await lstat(directory);
+  if (directoryStat.isSymbolicLink()) throw new Error(`Fixture tree contains a symbolic link: ${normalizedRelativePath(root, directory) || "."}.`);
+  if (!directoryStat.isDirectory()) throw new Error(`Fixture tree root is not a directory: ${normalizedRelativePath(root, directory) || "."}.`);
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
     const path = resolve(directory, entry.name);
+    const relativePath = normalizedRelativePath(root, path);
+    if (entry.isSymbolicLink()) throw new Error(`Fixture tree contains a symbolic link: ${relativePath}.`);
     if (entry.isDirectory()) files.push(...await fixtureFiles(root, path));
     else if (entry.isFile()) files.push(normalizedRelativePath(root, path));
+    else throw new Error(`Fixture tree contains an unsupported fixture entry: ${relativePath}.`);
   }
   return files.sort();
+}
+
+/** Runs work and preserves its failure ahead of any cleanup failure. */
+export async function runWithCleanup(work, cleanup) {
+  let result;
+  let primaryFailure;
+  try {
+    result = await work();
+  } catch (error) {
+    primaryFailure = error;
+  }
+
+  try {
+    await cleanup();
+  } catch (cleanupFailure) {
+    if (primaryFailure !== undefined) {
+      const message = primaryFailure instanceof Error ? primaryFailure.message : "Fixture generation failed.";
+      throw new AggregateError([primaryFailure, cleanupFailure], message, { cause: primaryFailure });
+    }
+    throw cleanupFailure;
+  }
+
+  if (primaryFailure !== undefined) throw primaryFailure;
+  return result;
 }
 
 async function writeRunEnvironment(harness, scope, manifest) {
@@ -193,6 +224,19 @@ async function seedThroughPublishedApi(harness, expected, mediaPaths) {
     },
   });
 
+  // v0.1.3 has no worker-disable switch and POST always creates an active endpoint.
+  // Create and immediately deactivate it before any fixture operation can enqueue an event.
+  const webhook = await apiRequest(harness, {
+    method: "POST", path: `/api/v1/workspaces/${primaryWorkspace}/webhooks`, token,
+    body: { name: "Fixture Webhook", url: "https://fixture-webhook.example.test/cmsify-upgrade-fixture", secret: "fixture-webhook-secret", events: ["content.published"] },
+  });
+  const webhookCurrent = await apiRequest(harness, { method: "GET", path: `/api/v1/workspaces/${primaryWorkspace}/webhooks/${webhook.body.endpoint.id}`, token });
+  await apiRequest(harness, {
+    method: "PUT", path: `/api/v1/workspaces/${primaryWorkspace}/webhooks/${webhook.body.endpoint.id}`, token,
+    headers: [`If-Match: ${responseEtag(webhookCurrent)}`],
+    body: { name: "Fixture Webhook", url: "https://fixture-webhook.example.test/cmsify-upgrade-fixture", isActive: false, events: ["content.published"] },
+  });
+
   const choiceOne = await apiRequest(harness, {
     method: "POST", path: `/api/v1/workspaces/${primaryWorkspace}/picklists`, token,
     body: {
@@ -249,7 +293,7 @@ async function seedThroughPublishedApi(harness, expected, mediaPaths) {
   const published = await createContent("fixture-published", "published");
   const scheduled = await createContent("fixture-scheduled", "scheduled");
   const expired = await createContent("fixture-expired", "expired");
-  await transitionContent(harness, primaryWorkspace, published.body.id, token, { publishAt: null, effectiveStartAt: null, effectiveEndAt: null });
+  await transitionContent(harness, primaryWorkspace, published.body.id, token, { publishAt: null, effectiveStartAt: expected.content.currentEffectiveStartAt, effectiveEndAt: expected.content.currentEffectiveEndAt });
   await transitionContent(harness, primaryWorkspace, scheduled.body.id, token, { publishAt: expected.content.scheduledPublishAt, effectiveStartAt: null, effectiveEndAt: null });
   await transitionContent(harness, primaryWorkspace, expired.body.id, token, { publishAt: null, effectiveStartAt: expected.content.expiredEffectiveStartAt, effectiveEndAt: expected.content.expiredEffectiveEndAt });
 
@@ -273,11 +317,6 @@ async function seedThroughPublishedApi(harness, expected, mediaPaths) {
     method: "POST", path: "/api/v1/clients", token,
     body: { name: "Fixture Reader", description: "Synthetic least-privilege upgrade reader", role: "Reader", workspaceId: primaryWorkspace, expiresAt: null },
   });
-  const webhook = await apiRequest(harness, {
-    method: "POST", path: `/api/v1/workspaces/${primaryWorkspace}/webhooks`, token,
-    body: { name: "Fixture Webhook", url: "https://fixture-webhook.example.test/cmsify-upgrade-fixture", secret: "fixture-webhook-secret", events: ["content.published"] },
-  });
-
   return {
     ids: {
       primaryWorkspace, restrictedWorkspace, adminUser, editorUser: editor.body.userId,
@@ -420,55 +459,58 @@ async function writeMedia(fixtureDirectory, expected) {
  */
 export async function generateFixture({ repositoryRoot, fixtureDirectory, keepDiagnostics = false }) {
   const manifest = loadFixtureManifest(fixtureDirectory);
-  const expected = JSON.parse(await readFile(resolve(fixtureDirectory, manifest.expectedDataFile), "utf8"));
+  const expected = await loadExpectedData(fixtureDirectory, manifest);
   const scope = createRunScope(repositoryRoot);
   const harness = createDockerHarness(scope);
-  const mediaPaths = await writeMedia(fixtureDirectory, expected);
-  let assertionResult;
-  try {
-    await writeRunEnvironment(harness, scope, manifest);
-    await harness.up(["postgres", "minio", "baseline-api"]);
-    await Promise.all([
-      harness.inspectImage(manifest.baseline.apiImage),
-      harness.inspectImage(manifest.baseline.postgresImage),
-      harness.inspectImage(manifest.baseline.minioImage),
-    ]);
-    await waitForBaseline(harness);
-    await harness.exec("minio", ["mc", "alias", "set", "fixture", "http://localhost:9000", "cmsify-fixture-access", FIXTURE_ENVIRONMENT.MINIO_ROOT_PASSWORD]);
-    await harness.exec("minio", ["mc", "mb", "--ignore-existing", "fixture/cmsify-upgrade"]);
-    const observed = await seedThroughPublishedApi(harness, expected, mediaPaths);
-    await harness.stop("baseline-api");
-    await applyHistoricalSeed(harness, repositoryRoot, expected, observed);
-    await uploadExactMedia(harness, expected, mediaPaths);
-    await harness.start("baseline-api");
-    await waitForBaseline(harness);
-    assertionResult = await assertBaselineFixture({ harness, expected, ids: { ...observed.ids, ...observed.relatedIds } });
-    await harness.stop("baseline-api");
-    await psql(harness, ["--command", "DELETE FROM user_sessions; UPDATE api_clients SET last_used_at = NULL;"]);
-    await exportDatabase(harness, fixtureDirectory, observed, expected);
-    await writeFixtureChecksums(fixtureDirectory, manifest.requiredFiles);
-    return Object.freeze({
-      fixtureDirectory,
-      runId: scope.runId,
-      diagnosticsDirectory: scope.diagnosticsDirectory,
-      mediaAggregateSha256: assertionResult.mediaAggregateSha256,
-      imageReferences: Object.freeze({
-        api: imageReference(manifest.baseline.apiImage),
-        postgres: imageReference(manifest.baseline.postgresImage),
-        minio: imageReference(manifest.baseline.minioImage),
-      }),
-    });
-  } catch (error) {
+  return runWithCleanup(async () => {
     try {
-      await harness.logs();
-    } catch {
-      // The original generation failure remains authoritative.
+      const mediaPaths = await writeMedia(fixtureDirectory, expected);
+      await writeRunEnvironment(harness, scope, manifest);
+      await harness.up(["postgres", "minio", "baseline-api"]);
+      await Promise.all([
+        harness.inspectImage(manifest.baseline.apiImage),
+        harness.inspectImage(manifest.baseline.postgresImage),
+        harness.inspectImage(manifest.baseline.minioImage),
+      ]);
+      await waitForBaseline(harness);
+      await harness.exec("minio", ["mc", "alias", "set", "fixture", "http://localhost:9000", "cmsify-fixture-access", FIXTURE_ENVIRONMENT.MINIO_ROOT_PASSWORD]);
+      await harness.exec("minio", ["mc", "mb", "--ignore-existing", "fixture/cmsify-upgrade"]);
+      const observed = await seedThroughPublishedApi(harness, expected, mediaPaths);
+      await harness.stop("baseline-api");
+      await applyHistoricalSeed(harness, repositoryRoot, expected, observed);
+      await uploadExactMedia(harness, expected, mediaPaths);
+      const ids = { ...observed.ids, ...observed.relatedIds };
+      const webhookWorkerStateBeforeStart = await captureWebhookWorkerState(harness, ids);
+      await harness.start("baseline-api");
+      await waitForBaseline(harness);
+      const assertionResult = await assertBaselineFixture({ harness, expected, ids, webhookWorkerStateBeforeStart });
+      await harness.stop("baseline-api");
+      await psql(harness, ["--command", "DELETE FROM user_sessions; UPDATE api_clients SET last_used_at = NULL;"]);
+      await exportDatabase(harness, fixtureDirectory, observed, expected);
+      await writeFixtureChecksums(fixtureDirectory, manifest.requiredFiles);
+      return Object.freeze({
+        fixtureDirectory,
+        runId: scope.runId,
+        diagnosticsDirectory: scope.diagnosticsDirectory,
+        mediaAggregateSha256: assertionResult.mediaAggregateSha256,
+        imageReferences: Object.freeze({
+          api: imageReference(manifest.baseline.apiImage),
+          postgres: imageReference(manifest.baseline.postgresImage),
+          minio: imageReference(manifest.baseline.minioImage),
+        }),
+      });
+    } catch (error) {
+      try {
+        await harness.logs();
+      } catch {
+        // The primary generation failure remains authoritative.
+      }
+      throw error;
     }
-    throw error;
-  } finally {
+  }, async () => {
     await harness.cleanup();
     void keepDiagnostics;
-  }
+  });
 }
 
 /**

@@ -691,7 +691,7 @@ c0fb5dd9-b8ea-4b03-84cd-213a902b78b8	77777777-7777-4777-8777-777777777782	444444
 --
 
 COPY "public"."content_versions" ("id", "content_item_id", "workspace_id", "version_number", "status", "template_version_id", "slug", "locale_code", "translation_group_id", "tags", "published_at", "retired_at", "published_by_user_id", "rolled_back_from_version_number", "effective_end_at", "effective_start_at") FROM stdin;
-77777777-7777-4777-8777-777777777781	77777777-7777-4777-8777-777777777772	11111111-1111-4111-8111-111111111111	1	Published	44444444-4444-4444-8444-444444444442	fixture-published	en-US	\N	{}	2026-08-20 12:08:30+00	\N	22222222-2222-4222-8222-222222222221	\N	\N	\N
+77777777-7777-4777-8777-777777777781	77777777-7777-4777-8777-777777777772	11111111-1111-4111-8111-111111111111	1	Published	44444444-4444-4444-8444-444444444442	fixture-published	en-US	\N	{}	2026-08-20 12:08:30+00	\N	22222222-2222-4222-8222-222222222221	\N	2026-08-21 12:00:00+00	2026-08-19 12:00:00+00
 77777777-7777-4777-8777-777777777782	77777777-7777-4777-8777-777777777774	11111111-1111-4111-8111-111111111111	1	Published	44444444-4444-4444-8444-444444444442	fixture-expired	en-US	\N	{}	2026-08-20 12:10:30+00	\N	22222222-2222-4222-8222-222222222221	\N	2026-08-19 12:00:00+00	2026-08-18 12:00:00+00
 \.
 
@@ -702,7 +702,7 @@ COPY "public"."content_versions" ("id", "content_item_id", "workspace_id", "vers
 
 COPY "public"."media_assets" ("id", "workspace_id", "file_name", "mime_type", "size_bytes", "storage_key", "storage_provider", "alt_text", "created_by_user_id", "created_at", "updated_at", "is_deleted", "deleted_at", "deleted_by_user_id") FROM stdin;
 aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1	11111111-1111-4111-8111-111111111111	fixture.txt	text/plain	30	cmsify/media/11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1-fixture.txt	s3	Deterministic text fixture	22222222-2222-4222-8222-222222222221	2026-08-20 12:11:00+00	2026-08-20 12:11:00+00	f	\N	\N
-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2	11111111-1111-4111-8111-111111111111	pixel.png	image/png	69	cmsify/media/11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2-pixel.png	s3	Deterministic one pixel image	22222222-2222-4222-8222-222222222221	2026-08-20 12:12:00+00	2026-08-20 12:12:00+00	f	\N	\N
+aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2	11111111-1111-4111-8111-111111111111	pixel.png	image/png	69	cmsify/media/11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2-pixel.png	s3	Deterministic one pixel image	22222222-2222-4222-8222-222222222221	2026-08-20 12:12:00+00	2026-08-20 12:12:30+00	t	2026-08-20 12:12:30+00	22222222-2222-4222-8222-222222222221
 \.
 
 

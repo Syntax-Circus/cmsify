@@ -7,46 +7,20 @@ import test from "node:test";
 
 import { verifyFixtureChecksums, writeFixtureChecksums } from "../../../eng/upgrade-tests/checksums.mjs";
 import { canonicalizeFixtureDump, compareFixtureTrees } from "../../../eng/upgrade-tests/fixture.mjs";
-import { REQUIRED_SCENARIOS, validateFixtureManifest } from "../../../eng/upgrade-tests/manifest.mjs";
+import { validateFixtureManifest } from "../../../eng/upgrade-tests/manifest.mjs";
+import { validExpectedDocument, validManifestDocument } from "./fixture-documents.mjs";
 
 const CLI = resolve(process.cwd(), "eng", "upgrade-tests", "cli.mjs");
 
 function manifestDocument() {
-  return {
-    schemaVersion: 1,
-    baseline: {
-      version: "0.1.3",
-      sourceSha: "bc652aec1acad7ef440576b5019a0fe7c72004b3",
-      apiImage: {
-        repository: "docker.io/syntaxcircus/cmsify-api",
-        tag: "0.1.3",
-        digest: "sha256:e28a7c884ed4cc4933fbb58608ba8d1dd97bf6a1e443ef234e0a0aa8b5c51931",
-        platform: "linux/amd64",
-      },
-      postgresImage: {
-        repository: "docker.io/library/postgres",
-        tag: "17-alpine",
-        digest: "sha256:7456ef82e5f5bc43d997f4781bbd7c0d6389bff397564649a356e206ba473aee",
-        platform: "linux/amd64",
-      },
-      minioImage: {
-        repository: "docker.io/minio/minio",
-        tag: "RELEASE.2025-09-07T16-13-09Z",
-        digest: "sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2",
-        platform: "linux/amd64",
-      },
-    },
-    requiredFiles: ["database.sql", "expected.json", "manifest.json", "media/a.txt", "media/z.txt"],
-    requiredScenarios: [...REQUIRED_SCENARIOS],
-    expectedDataFile: "expected.json",
-  };
+  return validManifestDocument();
 }
 
 async function materializeFixture(root) {
   const document = manifestDocument();
   mkdirSync(resolve(root, "media"), { recursive: true });
   writeFileSync(resolve(root, "database.sql"), "SELECT 1;\n");
-  writeFileSync(resolve(root, "expected.json"), JSON.stringify({ scenarios: [...REQUIRED_SCENARIOS].map((id) => ({ id })) }));
+  writeFileSync(resolve(root, "expected.json"), JSON.stringify(validExpectedDocument()));
   writeFileSync(resolve(root, "manifest.json"), JSON.stringify(document));
   writeFileSync(resolve(root, "media", "a.txt"), "a");
   writeFileSync(resolve(root, "media", "z.txt"), "z");
@@ -122,6 +96,32 @@ test("reports the first byte-level fixture drift", async () => {
   );
 });
 
+test("tree comparison rejects linked or unsupported fixture entries", async () => {
+  const first = temporaryFixture();
+  const second = temporaryFixture();
+  const outside = temporaryFixture();
+  mkdirSync(resolve(second, "linked"));
+  linkedDirectory(outside, resolve(first, "linked"));
+
+  await assert.rejects(
+    () => compareFixtureTrees(first, second),
+    /fixture.*symbolic link|unsupported fixture entry/i,
+  );
+});
+
+test("tree comparison rejects a linked fixture root", async () => {
+  const target = temporaryFixture();
+  const linkParent = temporaryFixture();
+  const link = resolve(linkParent, "fixture-link");
+  const second = temporaryFixture();
+  linkedDirectory(target, link);
+
+  await assert.rejects(
+    () => compareFixtureTrees(link, second),
+    /fixture.*symbolic link/i,
+  );
+});
+
 test("canonicalizes anonymous COPY row UUIDs independently of insertion order", () => {
   const expected = {
     ids: { primaryWorkspace: "11111111-1111-4111-8111-111111111111" },
@@ -188,14 +188,44 @@ test("verify-fixture reports success for a complete temporary fixture", async ()
 test("verify-fixture rejects incomplete scenario coverage without leaking the fixture path", async () => {
   const root = temporaryFixture();
   await materializeFixture(root);
-  writeFileSync(resolve(root, "expected.json"), JSON.stringify({ scenarios: [{ id: "workspaces" }] }));
+  const expected = validExpectedDocument();
+  expected.scenarios = expected.scenarios.slice(0, 1);
+  writeFileSync(resolve(root, "expected.json"), JSON.stringify(expected));
   await writeFixtureChecksums(root, manifestDocument().requiredFiles);
 
   const result = spawnSync(process.execPath, [CLI, "verify-fixture", "--fixture", root], { encoding: "utf8" });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /expected\.json.*scenario/i);
+  assert.match(result.stderr, /expected fixture data.*scenario/i);
   assert.doesNotMatch(result.stderr, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+});
+
+test("verify-fixture rejects expected provenance that contradicts the manifest", async () => {
+  const root = temporaryFixture();
+  await materializeFixture(root);
+  const expected = validExpectedDocument();
+  expected.provenance.apiImageDigest = `sha256:${"0".repeat(64)}`;
+  writeFileSync(resolve(root, "expected.json"), JSON.stringify(expected));
+  await writeFixtureChecksums(root, manifestDocument().requiredFiles);
+
+  const result = spawnSync(process.execPath, [CLI, "verify-fixture", "--fixture", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /provenance\.apiImageDigest.*manifest/i);
+});
+
+test("verify-fixture rejects scenarios stripped of assertion categories", async () => {
+  const root = temporaryFixture();
+  await materializeFixture(root);
+  const expected = validExpectedDocument();
+  expected.scenarios = expected.scenarios.map(({ id }) => ({ id, assertions: [] }));
+  writeFileSync(resolve(root, "expected.json"), JSON.stringify(expected));
+  await writeFixtureChecksums(root, manifestDocument().requiredFiles);
+
+  const result = spawnSync(process.execPath, [CLI, "verify-fixture", "--fixture", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /assertion categor/i);
 });
 
 test("verify-fixture redacts malformed checksum paths without inventory noise", async () => {

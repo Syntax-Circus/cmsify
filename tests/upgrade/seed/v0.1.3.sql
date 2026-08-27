@@ -134,7 +134,10 @@ SET file_name = 'pixel.png',
     storage_provider = 's3',
     alt_text = 'Deterministic one pixel image',
     created_at = '2026-08-20T12:12:00Z',
-    updated_at = '2026-08-20T12:12:00Z'
+    updated_at = '2026-08-20T12:12:30Z',
+    is_deleted = true,
+    deleted_at = '2026-08-20T12:12:30Z',
+    deleted_by_user_id = :'admin_user'::uuid
 WHERE id = :'image_media'::uuid;
 
 UPDATE api_clients

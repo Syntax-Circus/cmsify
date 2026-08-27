@@ -1,10 +1,12 @@
-import { copyFile, cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import { copyFile, cp, mkdir, mkdtemp, rename as renameDirectory, rm } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { verifyFixtureChecksums } from "./checksums.mjs";
+import { loadExpectedData } from "./expected.mjs";
 import { compareFixtureTrees, generateFixture } from "./fixture.mjs";
-import { loadFixtureManifest, REQUIRED_SCENARIOS } from "./manifest.mjs";
+import { loadFixtureManifest } from "./manifest.mjs";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -21,25 +23,6 @@ function parseArguments(arguments_) {
   return { command: arguments_[0], fixtureDirectory: resolve(arguments_[2]), check: options.has("--check") };
 }
 
-async function loadExpectedScenarioIds(fixtureDirectory, expectedDataFile) {
-  let expected;
-  try {
-    expected = JSON.parse(await readFile(resolve(fixtureDirectory, expectedDataFile), "utf8"));
-  } catch {
-    throw new Error("expected.json must contain valid JSON.");
-  }
-  assert(expected !== null && typeof expected === "object" && !Array.isArray(expected), "expected.json must be an object.");
-  assert(Array.isArray(expected.scenarios), "expected.json must contain a scenarios array.");
-
-  const scenarioIds = [];
-  for (const scenario of expected.scenarios) {
-    assert(scenario !== null && typeof scenario === "object" && !Array.isArray(scenario) && typeof scenario.id === "string", "expected.json scenarios must each contain an id.");
-    scenarioIds.push(scenario.id);
-  }
-  assert(new Set(scenarioIds).size === scenarioIds.length, "expected.json scenario IDs must be unique.");
-  assert(scenarioIds.length === REQUIRED_SCENARIOS.size && scenarioIds.every((id) => REQUIRED_SCENARIOS.has(id)), "expected.json scenario IDs must provide exact required coverage.");
-}
-
 function sanitize(error, fixtureDirectory) {
   const message = error instanceof Error ? error.message : "Fixture verification failed.";
   const escapedDirectory = fixtureDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -51,22 +34,55 @@ function sanitize(error, fixtureDirectory) {
     .join("\n");
 }
 
-async function prepareGenerationDirectory(repositoryRoot, fixtureDirectory, prefix) {
+export async function prepareGenerationDirectory(repositoryRoot, fixtureDirectory, prefix) {
   const runDirectory = resolve(repositoryRoot, "tests", "upgrade", ".runs");
   await mkdir(runDirectory, { recursive: true });
   const output = await mkdtemp(resolve(runDirectory, prefix));
-  await Promise.all([
-    copyFile(resolve(fixtureDirectory, "manifest.json"), resolve(output, "manifest.json")),
-    copyFile(resolve(fixtureDirectory, "expected.json"), resolve(output, "expected.json")),
-  ]);
-  return output;
+  try {
+    await copyFile(resolve(fixtureDirectory, "manifest.json"), resolve(output, "manifest.json"));
+    await copyFile(resolve(fixtureDirectory, "expected.json"), resolve(output, "expected.json"));
+    return output;
+  } catch (error) {
+    await rm(output, { force: true, recursive: true });
+    throw error;
+  }
 }
 
-async function installGeneratedFixture(generatedDirectory, fixtureDirectory) {
-  await copyFile(resolve(generatedDirectory, "database.sql"), resolve(fixtureDirectory, "database.sql"));
-  await rm(resolve(fixtureDirectory, "media"), { force: true, recursive: true });
-  await cp(resolve(generatedDirectory, "media"), resolve(fixtureDirectory, "media"), { recursive: true, force: false, errorOnExist: true });
-  await copyFile(resolve(generatedDirectory, "SHA256SUMS"), resolve(fixtureDirectory, "SHA256SUMS"));
+function siblingPath(fixtureDirectory, purpose) {
+  const nonce = randomBytes(8).toString("hex");
+  return resolve(dirname(fixtureDirectory), `.${basename(fixtureDirectory)}.${purpose}-${nonce}`);
+}
+
+export async function installGeneratedFixture(generatedDirectory, fixtureDirectory, { rename = renameDirectory } = {}) {
+  const replacement = siblingPath(fixtureDirectory, "replacement");
+  const backup = siblingPath(fixtureDirectory, "backup");
+  let backupExists = false;
+  try {
+    await cp(generatedDirectory, replacement, { recursive: true, force: false, errorOnExist: true });
+    const replacementManifest = loadFixtureManifest(replacement);
+    await loadExpectedData(replacement, replacementManifest);
+    await verifyFixtureChecksums(replacement, replacementManifest);
+
+    await rename(fixtureDirectory, backup);
+    backupExists = true;
+    try {
+      await rename(replacement, fixtureDirectory);
+    } catch (replacementFailure) {
+      try {
+        await rename(backup, fixtureDirectory);
+        backupExists = false;
+      } catch (restoreFailure) {
+        throw new AggregateError([replacementFailure, restoreFailure], replacementFailure.message, { cause: replacementFailure });
+      }
+      throw replacementFailure;
+    }
+
+    await rm(backup, { force: true, recursive: true });
+    backupExists = false;
+  } finally {
+    await rm(replacement, { force: true, recursive: true });
+    if (!backupExists) await rm(backup, { force: true, recursive: true });
+  }
 }
 
 async function generateCommand(repositoryRoot, fixtureDirectory, check) {
@@ -107,7 +123,7 @@ export async function main(arguments_) {
       return 0;
     }
     const manifest = loadFixtureManifest(fixtureDirectory);
-    await loadExpectedScenarioIds(fixtureDirectory, manifest.expectedDataFile);
+    await loadExpectedData(fixtureDirectory, manifest);
     await verifyFixtureChecksums(fixtureDirectory, manifest);
     process.stdout.write(`Fixture verified for ${manifest.baseline.version}.\n`);
     return 0;

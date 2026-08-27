@@ -15,6 +15,8 @@ x-api-environment: &api-environment
   Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD}
   Storage__S3__ServiceUrl: http://minio:9000
   Webhook__AllowHttp: "false"
+  # Published v0.1.3 registers both workers unconditionally and has no Enabled switch.
+  # The generator therefore makes all webhook state ineligible and asserts it is unchanged across startup.
   Webhook__RetryIntervalSeconds: "3600"
   Webhook__OutboxPollIntervalSeconds: "3600"
   Webhook__CleanupIntervalSeconds: "86400"
