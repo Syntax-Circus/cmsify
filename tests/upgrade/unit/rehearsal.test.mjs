@@ -43,7 +43,7 @@ function successfulOperations(events, failure) {
     baseline: operation("baseline"),
     backup: operation("backup:create", { manifestSha256: "b".repeat(64) }),
     upgrade: operation("upgrade"),
-    candidate: operation("candidate", { canaryId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }),
+    candidate: operation("candidate", { canaryId: "dddddddd-dddd-7ddd-8ddd-dddddddddddd" }),
     backupReverify: operation("backup:verify-again"),
     discardUpgradedState: operation("upgraded-volumes:remove"),
     restoreBackup: operation("backup:restore"),
