@@ -17,7 +17,7 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                 type: "character varying(50)",
                 maxLength: 50,
                 nullable: false,
-                defaultValue: "PendingUpload");
+                defaultValue: "Available");
 
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "blob_state_changed_at",

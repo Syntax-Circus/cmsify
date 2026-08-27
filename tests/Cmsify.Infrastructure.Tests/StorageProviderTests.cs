@@ -2,7 +2,8 @@ using System.Text;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Cmsify.Core.Interfaces.Services;
+using Microsoft.Extensions.Options;
+using SyntaxCircus.Storage;
 
 namespace Cmsify.Infrastructure.Tests;
 
@@ -18,7 +19,7 @@ public sealed class StorageProviderTests
             ["Storage:Local:BasePath"] = basePath
         }).Build();
         var services = new ServiceCollection();
-        services.AddStorageProvider(configuration);
+        Cmsify.Infrastructure.Storage.StorageServiceCollectionExtensions.AddStorageProvider(services, configuration);
 
         using var serviceProvider = services.BuildServiceProvider();
 
@@ -26,35 +27,70 @@ public sealed class StorageProviderTests
             .ShouldBeOfType<SyntaxCircus.Storage.LocalFileStorageProvider>();
         serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SyntaxCircus.Storage.LocalStorageOptions>>()
             .Value.RootPath.ShouldBe(basePath);
-        serviceProvider.GetRequiredService<IStorageProvider>().ShouldNotBeNull();
     }
 
     [Fact]
-    public async Task LocalFileSystemStorageProvider_StoresRetrievesAndDeletesFile()
+    public void AddStorageProvider_PrefersLegacyBasePathWhenBothLocalPathsAreConfigured()
+    {
+        var basePath = Path.Combine(Path.GetTempPath(), "cmsify-storage-base", Guid.NewGuid().ToString("N"));
+        var rootPath = Path.Combine(Path.GetTempPath(), "cmsify-storage-root", Guid.NewGuid().ToString("N"));
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Storage:Provider"] = "local",
+            ["Storage:Local:BasePath"] = basePath,
+            ["Storage:Local:RootPath"] = rootPath
+        }).Build();
+        var services = new ServiceCollection();
+
+        Cmsify.Infrastructure.Storage.StorageServiceCollectionExtensions.AddStorageProvider(services, configuration);
+
+        using var serviceProvider = services.BuildServiceProvider();
+        serviceProvider.GetRequiredService<IOptions<LocalStorageOptions>>().Value.RootPath.ShouldBe(basePath);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("false", false)]
+    public void AddStorageProvider_PreservesServiceUrlPathStyleCompatibility(string? configuredForcePathStyle, bool expected)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["Storage:Provider"] = "s3",
+            ["Storage:S3:BucketName"] = "cmsify",
+            ["Storage:S3:ServiceUrl"] = "http://minio:9000",
+            ["Storage:S3:AccessKey"] = "test-access",
+            ["Storage:S3:SecretKey"] = "test-secret"
+        };
+        if (configuredForcePathStyle is not null) values["Storage:S3:ForcePathStyle"] = configuredForcePathStyle;
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        var services = new ServiceCollection();
+
+        Cmsify.Infrastructure.Storage.StorageServiceCollectionExtensions.AddStorageProvider(services, configuration);
+
+        using var serviceProvider = services.BuildServiceProvider();
+        serviceProvider.GetRequiredService<IOptions<S3StorageOptions>>().Value.ForcePathStyle.ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task SharedLocalStorageProvider_StoresRetrievesAndDeletesFile()
     {
         var basePath = Path.Combine(Path.GetTempPath(), "cmsify-storage-tests", Guid.NewGuid().ToString("N"));
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Storage:Local:BasePath"] = basePath
-            })
-            .Build();
-        var provider = new LocalFileSystemStorageProvider(configuration);
+        var provider = new LocalFileStorageProvider(Options.Create(new LocalStorageOptions { RootPath = basePath }));
 
         await using var input = new MemoryStream(Encoding.UTF8.GetBytes("hello cmsify"));
-        var stored = await provider.StoreAsync(input, "hello.txt", "text/plain");
+        var stored = await provider.StoreAsync(new StoreObjectRequest("default/hello.txt", input, "text/plain"));
 
-        Assert.Equal(LocalFileSystemStorageProvider.ProviderName, stored.Provider);
-        Assert.True(await provider.ExistsAsync(stored.StorageKey));
+        Assert.Equal("default/hello.txt", stored.Key);
+        Assert.NotNull(await provider.GetMetadataAsync(stored.Key));
 
-        await using (var output = await provider.RetrieveAsync(stored.StorageKey))
-        using (var reader = new StreamReader(output, Encoding.UTF8))
+        await using (var output = await provider.ReadAsync(stored.Key))
+        using (var reader = new StreamReader(output!.Content, Encoding.UTF8))
         {
             Assert.Equal("hello cmsify", await reader.ReadToEndAsync());
         }
 
-        await provider.DeleteAsync(stored.StorageKey);
-        Assert.False(await provider.ExistsAsync(stored.StorageKey));
+        await provider.DeleteAsync(stored.Key);
+        Assert.Null(await provider.GetMetadataAsync(stored.Key));
 
         if (Directory.Exists(basePath))
         {

@@ -1,4 +1,3 @@
-using Cmsify.Core.Interfaces.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharedStorage = SyntaxCircus.Storage;
@@ -9,33 +8,43 @@ public static class StorageServiceCollectionExtensions
 {
     public static IServiceCollection AddStorageProvider(this IServiceCollection services, IConfiguration configuration)
     {
-        var provider = (configuration["Storage:Provider"] ?? LocalFileSystemStorageProvider.ProviderName).ToLowerInvariant();
+        var provider = (configuration["Storage:Provider"] ?? "local").ToLowerInvariant();
         services.Configure<SharedStorage.LocalStorageOptions>(configuration.GetSection(SharedStorage.LocalStorageOptions.SectionName));
         services.PostConfigure<SharedStorage.LocalStorageOptions>(options =>
         {
-            if (string.IsNullOrWhiteSpace(options.RootPath))
+            var legacyBasePath = configuration["Storage:Local:BasePath"];
+            if (!string.IsNullOrWhiteSpace(legacyBasePath))
             {
-                options.RootPath = configuration["Storage:Local:BasePath"] ?? Path.Combine(AppContext.BaseDirectory, "storage");
+                options.RootPath = legacyBasePath;
+            }
+            else if (string.IsNullOrWhiteSpace(options.RootPath))
+            {
+                options.RootPath = Path.Combine(AppContext.BaseDirectory, "storage");
             }
         });
         services.AddOptions<SharedStorage.S3StorageOptions>()
             .Bind(configuration.GetSection(SharedStorage.S3StorageOptions.SectionName))
             .Validate(options => SharedStorage.S3StorageOptions.Validate(options).Succeeded, "Storage:S3 configuration is invalid.");
+        services.PostConfigure<SharedStorage.S3StorageOptions>(options =>
+        {
+            if (!string.IsNullOrWhiteSpace(options.ServiceUrl) &&
+                string.IsNullOrWhiteSpace(configuration["Storage:S3:ForcePathStyle"]))
+            {
+                options.ForcePathStyle = true;
+            }
+        });
 
         switch (provider)
         {
-            case LocalFileSystemStorageProvider.ProviderName:
+            case "local":
                 services.AddSingleton<SharedStorage.IStorageProvider, SharedStorage.LocalFileStorageProvider>();
                 break;
-            case S3BlobStorageProvider.ProviderName:
+            case "s3":
                 services.AddSingleton<SharedStorage.IStorageProvider, SharedStorage.S3StorageProvider>();
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported storage provider '{provider}'.");
         }
-
-        services.AddSingleton<IStorageProvider>(serviceProvider => new SharedStorageProviderAdapter(
-            serviceProvider.GetRequiredService<SharedStorage.IStorageProvider>(), provider));
         return services;
     }
 }

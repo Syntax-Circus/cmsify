@@ -3,9 +3,13 @@ using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
+using Cmsify.Infrastructure.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using SyntaxCircus.Storage;
 using SyntaxCircus.Cmsify.Contracts;
 using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
@@ -31,18 +35,22 @@ public sealed class MediaController : ControllerBase
     ];
 
     private readonly CmsifyDbContext dbContext;
-    private readonly IStorageProvider storageProvider;
+    private readonly SyntaxCircus.Storage.IStorageProvider storageProvider;
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IConfiguration configuration;
+    private readonly MediaOperationalOptions mediaOperations;
+    private readonly string storageProviderName;
 
-    public MediaController(CmsifyDbContext dbContext, IStorageProvider storageProvider, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IConfiguration configuration)
+    public MediaController(CmsifyDbContext dbContext, SyntaxCircus.Storage.IStorageProvider storageProvider, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IConfiguration configuration, IOptions<MediaOperationalOptions> mediaOperations)
     {
         this.dbContext = dbContext;
         this.storageProvider = storageProvider;
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
         this.configuration = configuration;
+        this.mediaOperations = mediaOperations.Value;
+        storageProviderName = (configuration["Storage:Provider"] ?? "local").ToLowerInvariant();
     }
 
     [HttpPost]
@@ -71,22 +79,44 @@ public sealed class MediaController : ControllerBase
             return this.Error(StatusCodes.Status415UnsupportedMediaType, "bad-request", "MIME type is not allowed", $"The MIME type '{file.ContentType}' is not allowed.");
         }
 
-        await using var stream = file.OpenReadStream();
-        var stored = await storageProvider.StoreAsync(stream, Path.GetFileName(file.FileName), file.ContentType, ct);
+        var now = DateTimeOffset.UtcNow;
+        var assetId = Guid.CreateVersion7();
+        var fileName = Path.GetFileName(file.FileName);
         var asset = new MediaAsset
         {
+            Id = assetId,
             WorkspaceId = workspaceId,
-            FileName = Path.GetFileName(file.FileName),
+            FileName = fileName,
             MimeType = file.ContentType,
-            SizeBytes = stored.SizeBytes,
-            StorageKey = stored.StorageKey,
-            StorageProvider = stored.Provider,
+            SizeBytes = file.Length,
+            StorageKey = StorageKeyBuilder.Build(workspaceId, assetId, fileName, now),
+            StorageProvider = storageProviderName,
             AltText = altText,
-            CreatedByUserId = currentActor.UserId
+            CreatedByUserId = currentActor.UserId,
+            BlobState = MediaBlobState.PendingUpload,
+            BlobStateChangedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
         };
 
         dbContext.MediaAssets.Add(asset);
         await dbContext.SaveChangesAsync(ct);
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var stored = await storageProvider.StoreAsync(
+                new StoreObjectRequest(asset.StorageKey, stream, file.ContentType), ct);
+            asset.SizeBytes = stored.SizeBytes;
+            asset.TransitionBlobState(MediaBlobState.Available, DateTimeOffset.UtcNow);
+            asset.UpdatedAt = asset.BlobStateChangedAt;
+            await dbContext.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            await BestEffortFailUploadAsync(asset.Id, CancellationToken.None);
+            throw;
+        }
+
         Response.Headers.ETag = ControllerHelpers.ETag(asset.UpdatedAt);
         return CreatedAtAction(nameof(Get), new { workspaceId, id = asset.Id }, ToResponse(asset));
     }
@@ -99,7 +129,8 @@ public sealed class MediaController : ControllerBase
             return NotFound();
         }
 
-        var query = dbContext.MediaAssets.AsNoTracking().Where(asset => asset.WorkspaceId == workspaceId && !asset.IsDeleted);
+        var query = dbContext.MediaAssets.AsNoTracking().Where(asset =>
+            asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
         if (!string.IsNullOrWhiteSpace(mimeType))
         {
             query = query.Where(asset => asset.MimeType.StartsWith(mimeType));
@@ -147,14 +178,20 @@ public sealed class MediaController : ControllerBase
             return NotFound();
         }
 
-        var stream = await storageProvider.RetrieveAsync(asset.StorageKey, ct);
+        var stored = await storageProvider.ReadAsync(asset.StorageKey, ct);
+        if (stored is null)
+        {
+            return this.Error(StatusCodes.Status404NotFound, "media-blob-missing", "Media blob is missing");
+        }
+
+        HttpContext.Response.RegisterForDisposeAsync(stored);
         var contentDisposition = new ContentDisposition
         {
             FileName = asset.FileName,
             Inline = asset.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
         };
         Response.Headers[HeaderNames.ContentDisposition] = contentDisposition.ToString();
-        return File(stream, asset.MimeType);
+        return File(stored.Content, asset.MimeType);
     }
 
     [HttpPut("{id:guid}")]
@@ -205,10 +242,23 @@ public sealed class MediaController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "referenced-by-other-entity", "Media asset is referenced by content", extensions: new Dictionary<string, object?> { ["referencedBy"] = referencedBy });
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var purgeAfter = now.AddDays(mediaOperations.RetentionDays);
+        asset.TransitionBlobState(MediaBlobState.DeletePending, now, purgeAfter);
         asset.IsDeleted = true;
-        asset.DeletedAt = DateTimeOffset.UtcNow;
+        asset.DeletedAt = now;
         asset.DeletedByUserId = currentActor.UserId;
-        asset.UpdatedAt = DateTimeOffset.UtcNow;
+        asset.UpdatedAt = now;
+        dbContext.MediaDeletionIntents.Add(new MediaDeletionIntent
+        {
+            MediaAssetId = asset.Id,
+            Provider = asset.StorageProvider,
+            StorageKey = asset.StorageKey,
+            Reason = "user_delete",
+            NotBefore = purgeAfter,
+            NextAttemptAt = purgeAfter,
+            CreatedAt = now
+        });
         await dbContext.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -223,8 +273,37 @@ public sealed class MediaController : ControllerBase
             return null;
         }
 
-        var query = dbContext.MediaAssets.Where(asset => asset.Id == id && asset.WorkspaceId == workspaceId && !asset.IsDeleted);
+        var query = dbContext.MediaAssets.Where(asset =>
+            asset.Id == id && asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
         return await (tracking ? query : query.AsNoTracking()).FirstOrDefaultAsync(ct);
+    }
+
+    private async Task BestEffortFailUploadAsync(Guid assetId, CancellationToken ct)
+    {
+        try
+        {
+            dbContext.ChangeTracker.Clear();
+            var failed = await dbContext.MediaAssets.SingleOrDefaultAsync(asset => asset.Id == assetId, ct);
+            if (failed?.BlobState != MediaBlobState.PendingUpload) return;
+            var now = DateTimeOffset.UtcNow;
+            failed.TransitionBlobState(MediaBlobState.UploadFailed, now);
+            failed.UpdatedAt = now;
+            dbContext.MediaDeletionIntents.Add(new MediaDeletionIntent
+            {
+                MediaAssetId = failed.Id,
+                Provider = failed.StorageProvider,
+                StorageKey = failed.StorageKey,
+                Reason = "upload_failed",
+                NotBefore = now,
+                NextAttemptAt = now,
+                CreatedAt = now
+            });
+            await dbContext.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // A stale PendingUpload row remains authoritative for reconciliation.
+        }
     }
 
     private bool IsAllowedMimeType(string mimeType)

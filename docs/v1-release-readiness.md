@@ -148,7 +148,8 @@ Priority uses `(Impact + Risk) × (6 - Effort)`, where each input is 1–5. High
 #### F-09 — Media database and blob state are not transactional or reconciled
 
 - **Score:** Impact 4, Risk 4, Effort 3 → **24**
-- **Evidence:** Upload stores the blob before saving the database row (`MediaController.cs:72`); a later database failure leaves an orphan. Delete soft-deletes only the database row even though both providers expose `DeleteAsync`; no cleanup/reconciliation job was found.
+- **Status:** Remediated on `feature/readiness-audit`; final release-package publication/candidate certification remains approval-gated.
+- **Evidence:** Upload now commits `PendingUpload` with the final deterministic key before storage and exposes only `Available` rows. Durable 30-day deletion intents use fenced, reclaimable leases and capped retry; stale uploads, missing/reappearing blobs, and old managed-prefix orphans are reconciled in bounded batches. Final local evidence: shared storage 91/91; Core 66/66; Infrastructure 292/292 with PostgreSQL/MinIO; API 69/69; Admin 29/29; .NET client 38/38; TypeScript generation/typecheck/40 tests/build; no EF/OpenAPI drift; independent review clean. Operator configuration, alerts, upgrade semantics, and pre-purge recovery are documented in `docs/operations.md`.
 - **Required outcome:** Define retention semantics. Either delete blobs after a durable tombstone with retry, or explicitly retain them for a documented recovery window. Add orphan reconciliation, failed-upload cleanup, metrics, and local/S3 integration tests.
 
 #### F-10 — API pagination and error contracts are inconsistent before freeze

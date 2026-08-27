@@ -39,6 +39,16 @@ services:
       - Storage__S3__AccessKey=${Storage__S3__AccessKey:-}
       - Storage__S3__SecretKey=${Storage__S3__SecretKey:-}
       - Storage__S3__ServiceUrl=${Storage__S3__ServiceUrl:-}
+      - Media__Operations__ReconciliationIntervalSeconds=${Media__Operations__ReconciliationIntervalSeconds:-300}
+      - Media__Operations__LeaseDurationSeconds=${Media__Operations__LeaseDurationSeconds:-300}
+      - Media__Operations__BatchSize=${Media__Operations__BatchSize:-100}
+      - Media__Operations__RetryBaseSeconds=${Media__Operations__RetryBaseSeconds:-30}
+      - Media__Operations__RetryCapSeconds=${Media__Operations__RetryCapSeconds:-3600}
+      - Media__Operations__RetentionDays=${Media__Operations__RetentionDays:-30}
+      - Media__Operations__OrphanGraceHours=${Media__Operations__OrphanGraceHours:-24}
+      - Media__Operations__AbandonedUploadMinutes=${Media__Operations__AbandonedUploadMinutes:-30}
+      - Media__Operations__ManagedPrefixes__0=cmsify/media/
+      - Media__Operations__ManagedPrefixes__1=default/
       - Api__SwaggerEnabled=${Api__SwaggerEnabled:-false}
       - TrustedProxy__RequireTrustedProxiesInProduction=${TrustedProxy__RequireTrustedProxiesInProduction:-false}
     depends_on:

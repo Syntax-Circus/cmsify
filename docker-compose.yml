@@ -29,6 +29,16 @@ services:
       Seed__Admin__Password: change-this-temporary-password
       Storage__Provider: local
       Storage__Local__BasePath: /var/cmsify/media
+      Media__Operations__ReconciliationIntervalSeconds: "300"
+      Media__Operations__LeaseDurationSeconds: "300"
+      Media__Operations__BatchSize: "100"
+      Media__Operations__RetryBaseSeconds: "30"
+      Media__Operations__RetryCapSeconds: "3600"
+      Media__Operations__RetentionDays: "30"
+      Media__Operations__OrphanGraceHours: "24"
+      Media__Operations__AbandonedUploadMinutes: "30"
+      Media__Operations__ManagedPrefixes__0: cmsify/media/
+      Media__Operations__ManagedPrefixes__1: default/
       Api__SwaggerEnabled: "true"
     depends_on:
       postgres:

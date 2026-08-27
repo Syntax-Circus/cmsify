@@ -28,7 +28,8 @@ public sealed class MediaReconciliationService(
             scope.ServiceProvider.GetRequiredService<IStorageProvider>(),
             options,
             providerName,
-            loggerFactory.CreateLogger<MediaReconciliationProcessor>());
+            loggerFactory.CreateLogger<MediaReconciliationProcessor>(),
+            timeProvider ?? TimeProvider.System);
         await processor.RunCycleAsync(workerId, (timeProvider ?? TimeProvider.System).GetUtcNow(), ct);
     }
 
@@ -45,10 +46,10 @@ public sealed class MediaReconciliationService(
             {
                 break;
             }
-            catch (Exception exception)
+            catch (Exception)
             {
                 CmsifyOperationalMetrics.RecordMediaCycleFailure();
-                logger.LogError(exception, "Media reconciliation cycle failed.");
+                logger.LogError("Media reconciliation cycle failed.");
             }
 
             try

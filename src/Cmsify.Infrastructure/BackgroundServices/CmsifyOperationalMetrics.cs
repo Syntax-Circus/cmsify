@@ -199,6 +199,7 @@ public static class CmsifyOperationalMetrics
         "orphan" => "orphan",
         "migration_deleted" => "migration_deleted",
         "provider_mismatch" => "provider_mismatch",
+        "upload_failed" => "upload_failed",
         _ => "unknown"
     };
 

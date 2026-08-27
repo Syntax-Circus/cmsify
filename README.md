@@ -113,8 +113,18 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Storage__S3__AccessKey` | empty | S3 access key; treat as a secret. |
 | `Storage__S3__SecretKey` | empty | S3 secret key; treat as a secret. |
 | `Storage__S3__ServiceUrl` | empty | Optional S3-compatible endpoint URL. |
+| `Storage__S3__ForcePathStyle` | automatic | Uses path-style addressing when `ServiceUrl` is set unless explicitly `false`; otherwise uses the provider default. |
 | `Media__MaxFileSizeMb` | `50` | Maximum uploaded media-file size in MiB. |
 | `Media__AllowedMimeTypes` | documented default list | Comma-separated MIME types or prefixes allowed for uploads. |
+| `Media__Operations__ReconciliationIntervalSeconds` | `300` | Delay between bounded reconciliation cycles. |
+| `Media__Operations__LeaseDurationSeconds` | `300` | Fenced deletion/checkpoint claim lease. Expired claims can be recovered by another replica. |
+| `Media__Operations__BatchSize` | `100` | Maximum deletion, stale-upload, verification, or listing work per operation (1–1,000). |
+| `Media__Operations__RetryBaseSeconds` | `30` | First failed-deletion retry delay. |
+| `Media__Operations__RetryCapSeconds` | `3600` | Maximum exponential retry delay. |
+| `Media__Operations__RetentionDays` | `30` | Recovery window before a user-deleted blob becomes eligible for purge. |
+| `Media__Operations__OrphanGraceHours` | `24` | Minimum object age before an unowned managed-prefix object can be queued for deletion. |
+| `Media__Operations__AbandonedUploadMinutes` | `30` | Age at which an incomplete database-first upload becomes failed cleanup work. |
+| `Media__Operations__ManagedPrefixes__0/1` | `cmsify/media/`, `default/` | Fixed prefixes eligible for orphan scans; foreign prefixes are rejected by validation. |
 | `Webhook__OutboxPollIntervalSeconds` | `30` | Durable outbox polling interval (1–3600 seconds). |
 | `Webhook__OutboxLeaseDurationSeconds` | `300` | Outbox claim lease (1–1800 seconds). |
 | `Webhook__OutboxBatchSize` | `100` | Maximum outbox rows claimed per cycle (1–500). |

@@ -27,13 +27,21 @@ public sealed record MediaCheckpointClaim(
 
 public sealed record MediaVerificationCandidate(Guid Id, string Provider, string StorageKey, MediaBlobState State);
 
+public enum DeletionPreparationResult
+{
+    ClaimLost,
+    Ready,
+    Owned
+}
+
 public interface IMediaReconciliationRepository
 {
     Task<IReadOnlyList<MediaDeletionClaim>> ClaimDeletionIntentsAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default);
+    Task<DeletionPreparationResult> PrepareDeletionAsync(MediaDeletionClaim claim, DateTimeOffset now, TimeSpan leaseDuration, CancellationToken ct = default);
     Task<bool> CompleteDeletionAsync(MediaDeletionClaim claim, DateTimeOffset now, CancellationToken ct = default);
     Task<bool> RetryDeletionAsync(MediaDeletionClaim claim, DateTimeOffset now, DateTimeOffset nextAttemptAt, string error, CancellationToken ct = default);
     Task<int> FailStaleUploadsAsync(DateTimeOffset cutoff, DateTimeOffset now, int limit, CancellationToken ct = default);
-    Task<IReadOnlyList<MediaVerificationCandidate>> GetVerificationBatchAsync(int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<MediaVerificationCandidate>> GetVerificationBatchAsync(string provider, int limit, CancellationToken ct = default);
     Task RecordBlobMissingAsync(Guid assetId, DateTimeOffset now, CancellationToken ct = default);
     Task RecordBlobPresentAsync(Guid assetId, DateTimeOffset now, CancellationToken ct = default);
     Task<bool> StorageKeyExistsAsync(string provider, string storageKey, CancellationToken ct = default);
@@ -113,6 +121,45 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
         await dbContext.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return true;
+    }
+
+    public async Task<DeletionPreparationResult> PrepareDeletionAsync(
+        MediaDeletionClaim claim,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        if (leaseDuration < TimeSpan.FromSeconds(1) || leaseDuration > TimeSpan.FromHours(1))
+        {
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration));
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
+        var intent = await GetFencedIntentAsync(claim, now, ct);
+        if (intent is null)
+        {
+            await transaction.RollbackAsync(ct);
+            return DeletionPreparationResult.ClaimLost;
+        }
+
+        if (string.Equals(intent.Reason, "orphan", StringComparison.Ordinal) &&
+            await dbContext.MediaAssets.IgnoreQueryFilters().AnyAsync(
+                asset => asset.StorageProvider == intent.Provider &&
+                         asset.StorageKey == intent.StorageKey &&
+                         asset.BlobState != MediaBlobState.Deleted,
+                ct))
+        {
+            intent.CompletedAt = now;
+            ClearLease(intent);
+            await dbContext.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return DeletionPreparationResult.Owned;
+        }
+
+        intent.LeaseExpiresAt = now.Add(leaseDuration);
+        await dbContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return DeletionPreparationResult.Ready;
     }
 
     public async Task<bool> RetryDeletionAsync(
@@ -218,13 +265,16 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
     }
 
     public async Task<IReadOnlyList<MediaVerificationCandidate>> GetVerificationBatchAsync(
+        string provider,
         int limit,
         CancellationToken ct = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 1_000);
         return await dbContext.MediaAssets.AsNoTracking()
-            .Where(asset => asset.BlobState == MediaBlobState.Available || asset.BlobState == MediaBlobState.Missing)
+            .Where(asset => asset.StorageProvider == provider &&
+                            (asset.BlobState == MediaBlobState.Available || asset.BlobState == MediaBlobState.Missing))
             .OrderBy(asset => asset.BlobVerifiedAt)
             .ThenBy(asset => asset.Id)
             .Take(limit)

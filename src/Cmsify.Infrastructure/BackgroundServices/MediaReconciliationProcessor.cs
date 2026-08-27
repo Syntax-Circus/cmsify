@@ -10,7 +10,8 @@ public sealed class MediaReconciliationProcessor(
     IStorageProvider storage,
     IOptions<MediaOperationalOptions> options,
     string providerName,
-    ILogger<MediaReconciliationProcessor> logger)
+    ILogger<MediaReconciliationProcessor> logger,
+    TimeProvider? timeProvider = null)
 {
     private readonly MediaOperationalOptions settings = options.Value;
 
@@ -27,15 +28,29 @@ public sealed class MediaReconciliationProcessor(
             CmsifyOperationalMetrics.RecordMediaDeletionClaim(claim.Provider, claim.WasReclaimed);
             if (!string.Equals(claim.Provider, providerName, StringComparison.OrdinalIgnoreCase))
             {
-                await RetryAsync(claim, now, "provider_mismatch", ct);
+                await RetryAsync(claim, CurrentTime(now), "provider_mismatch", ct);
                 continue;
             }
 
             try
             {
+                var preparation = await repository.PrepareDeletionAsync(
+                    claim,
+                    CurrentTime(now),
+                    TimeSpan.FromSeconds(settings.LeaseDurationSeconds),
+                    ct);
+                if (preparation != DeletionPreparationResult.Ready)
+                {
+                    CmsifyOperationalMetrics.RecordMediaDeletion(claim.Provider, claim.Reason, "skipped");
+                    continue;
+                }
+
                 await storage.DeleteAsync(claim.StorageKey, ct);
-                await repository.CompleteDeletionAsync(claim, now, ct);
-                CmsifyOperationalMetrics.RecordMediaDeletion(claim.Provider, claim.Reason, "succeeded");
+                var completed = await repository.CompleteDeletionAsync(claim, CurrentTime(now), ct);
+                CmsifyOperationalMetrics.RecordMediaDeletion(
+                    claim.Provider,
+                    claim.Reason,
+                    completed ? "succeeded" : "skipped");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -43,14 +58,16 @@ public sealed class MediaReconciliationProcessor(
             }
             catch (Exception exception)
             {
-                logger.LogWarning(exception, "Media deletion attempt failed for provider {Provider}.", NormalizeProvider(claim.Provider));
-                await RetryAsync(claim, now, exception.GetType().Name, ct);
+                logger.LogWarning(
+                    "Media deletion attempt failed for provider {Provider} and reason {Reason}.",
+                    NormalizeProvider(claim.Provider),
+                    NormalizeFailure(exception));
+                await RetryAsync(claim, CurrentTime(now), NormalizeFailure(exception), ct);
             }
         }
 
-        var candidates = await repository.GetVerificationBatchAsync(settings.BatchSize, ct);
-        foreach (var candidate in candidates.Where(candidate =>
-                     string.Equals(candidate.Provider, providerName, StringComparison.OrdinalIgnoreCase)))
+        var candidates = await repository.GetVerificationBatchAsync(providerName, settings.BatchSize, ct);
+        foreach (var candidate in candidates)
         {
             var metadata = await storage.GetMetadataAsync(candidate.StorageKey, ct);
             if (metadata is null)
@@ -72,8 +89,9 @@ public sealed class MediaReconciliationProcessor(
 
     private async Task ScanPrefixAsync(string prefix, string workerId, DateTimeOffset now, CancellationToken ct)
     {
+        var claimTime = CurrentTime(now);
         var checkpoint = await repository.ClaimCheckpointAsync(
-            providerName, prefix, workerId, now, TimeSpan.FromSeconds(settings.LeaseDurationSeconds), ct);
+            providerName, prefix, workerId, claimTime, TimeSpan.FromSeconds(settings.LeaseDurationSeconds), ct);
         if (checkpoint is null) return;
 
         var page = await storage.ListAsync(new ListStorageObjectsRequest(prefix, checkpoint.AfterKey, settings.BatchSize), ct);
@@ -88,9 +106,9 @@ public sealed class MediaReconciliationProcessor(
             }
         }
 
-        await repository.CompleteCheckpointAsync(
-            checkpoint, page.NextAfterKey, page.NextAfterKey is null, now, ct);
-        CmsifyOperationalMetrics.RecordMediaScan(providerName, "succeeded");
+        var completed = await repository.CompleteCheckpointAsync(
+            checkpoint, page.NextAfterKey, page.NextAfterKey is null, CurrentTime(now), ct);
+        CmsifyOperationalMetrics.RecordMediaScan(providerName, completed ? "succeeded" : "skipped");
     }
 
     private Task RetryAsync(MediaDeletionClaim claim, DateTimeOffset now, string reason, CancellationToken ct)
@@ -107,6 +125,16 @@ public sealed class MediaReconciliationProcessor(
     {
         "local" => "local",
         "s3" => "s3",
+        _ => "unknown"
+    };
+
+    private DateTimeOffset CurrentTime(DateTimeOffset cycleTime) => timeProvider?.GetUtcNow() ?? cycleTime;
+
+    private static string NormalizeFailure(Exception exception) => exception switch
+    {
+        TimeoutException => "timeout",
+        IOException => "io",
+        UnauthorizedAccessException => "authorization",
         _ => "unknown"
     };
 }

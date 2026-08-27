@@ -101,6 +101,36 @@ Treat every decrypt failure and every `failed` row as an investigation item befo
 
 After any `v2` write, a rollback requires a v2-capable binary and every key that can be referenced by stored ciphertext. A pre-v2 reader cannot safely decrypt the database. Keep rotation disabled while rolling back, restore a matched database backup when required, and investigate configuration errors before attempting another rotation window.
 
+## Durable media reconciliation
+
+Media uploads are database-first. The API commits the final asset ID and storage key in `PendingUpload` before it writes the blob, then exposes the asset only after it reaches `Available`. A failed upload becomes `UploadFailed` with an immediate deletion intent when the database is reachable; otherwise the stale-upload pass performs that transition after `Media__Operations__AbandonedUploadMinutes` (30 minutes by default). An object missing during verification becomes `Missing` and is hidden from callers; a later successful metadata check restores it to `Available`.
+
+User deletion is recoverable for `Media__Operations__RetentionDays` (30 days by default). The API atomically marks the asset `DeletePending`, soft-deletes it, and creates a durable intent that is not eligible before the recovery deadline. Workers use owner/token/expiry fencing and PostgreSQL row locks, so a crashed replica's expired work can be reclaimed and a stale replica cannot complete it. Failed storage deletes retry exponentially from 30 seconds up to 3,600 seconds. Immediately before an orphan deletion, the worker renews its fenced claim and cancels the intent if a database owner has appeared.
+
+Each cycle is deliberately bounded. By default, every 300 seconds each replica processes at most 100 due deletes, 100 abandoned uploads, 100 verification candidates for its configured provider, and one page of 100 objects per managed prefix. Only `cmsify/media/` and the legacy `default/` prefix pass configuration validation. Objects outside those prefixes are never listed or deleted by reconciliation, and an unowned managed object must be at least 24 hours old before it is queued. Size the interval/batch combination for the expected object count and provider request budget; sustained backlog growth means capacity must be increased or the underlying provider/database failure fixed.
+
+Export the bounded `Cmsify.Operational` media instruments: `cmsify.media.deletion.pending`, `cmsify.media.upload.stale`, `cmsify.media.blob.missing`, `cmsify.media.scan`, `cmsify.media.orphan.discovered`, `cmsify.media.deletion.claimed`, `cmsify.media.deletion.reclaimed`, `cmsify.media.deletion.outcome`, `cmsify.media.deletion.retried`, and `cmsify.media.reconciliation.cycle_failures`. Alert on any cycle failure, sustained retries, reclaimed work, a non-draining pending-deletion gauge, or increases in missing blobs/orphans. Labels are limited to normalized provider, reason, and outcome values; logs and metrics do not include workspace IDs, asset IDs, keys, file names, or exception messages.
+
+### Upgrade and provider mismatch behavior
+
+The media-lifecycle migration marks existing active media `Available`. Existing soft-deleted media becomes `DeletePending` and receives a fresh full retention window beginning when the migration runs; it is not purged immediately based on its historical deletion date. The database default remains `Available` during the rolling upgrade so an older API replica cannot accidentally create `PendingUpload` rows that stale reconciliation would clean. New binaries explicitly write `PendingUpload` before storage.
+
+Keep all API replicas on the same `Storage__Provider` during deployment. A deletion intent whose provider does not match the current replica is not sent to that replica's storage client; it is released for bounded retry with reason `provider_mismatch`. During a provider migration, keep a worker capable of the old provider running until its intents and retained assets are drained, or migrate both blobs and database provider/key values under a separately reviewed procedure. Do not point one provider at another provider's managed prefix.
+
+For S3-compatible services, `Storage__S3__ServiceUrl` enables path-style addressing unless `Storage__S3__ForcePathStyle=false` is explicitly set. For local storage, the historical `Storage__Local__BasePath` remains authoritative when both it and `RootPath` are present.
+
+### Recover a user-deleted asset before purge
+
+There is intentionally no public restore endpoint. Use a maintenance window and an audited database transaction:
+
+1. Stop or pause every media reconciler and wait for active deletion leases to expire; prevent new writes for the affected asset.
+2. Verify the exact blob exists in the asset's recorded provider/key. Never restore the row against a guessed key or another backup generation.
+3. Begin one database transaction and lock the soft-deleted `media_assets` row plus its incomplete `media_deletion_intents` row with `FOR UPDATE`.
+4. Confirm the asset is `DeletePending`, its purge deadline has not elapsed, and no worker owns an unexpired intent lease. Mark the intent completed/canceled, clear its lease fields, clear `is_deleted`, `deleted_at`, `deleted_by_user_id`, `deletion_requested_at`, and `purge_after`, then transition the blob state to `Available` and update its verification timestamp.
+5. Commit, resume reconcilers and traffic, and download the asset through the authenticated `/api/v1/workspaces/{workspaceId}/media/{assetId}/file` endpoint. If verification fails, pause again and restore the matched database/blob backup rather than manufacturing a second row.
+
+After the retention deadline or a completed physical delete, recovery requires a matched database and storage backup. Never merely clear soft-delete fields after the blob has been purged.
+
 For example, a healthy readiness response contains the existing dependency results plus deployment metadata:
 
 ```json
