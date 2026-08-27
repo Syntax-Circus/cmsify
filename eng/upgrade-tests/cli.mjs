@@ -54,8 +54,18 @@ function parseArguments(arguments_, cwd = process.cwd()) {
   return { command: arguments_[0], fixtureDirectory: resolve(cwd, arguments_[2]), check: options.has("--check") };
 }
 
-function sanitize(error, paths) {
+function sanitize(error, paths, { rehearsal = false } = {}) {
   const message = error instanceof Error ? error.message : "Fixture verification failed.";
+  if (rehearsal) {
+    if (message === USAGE || /^Usage:/i.test(message)) return USAGE;
+    if (/cancel(?:led|ation)|aborted/i.test(message)) return "Upgrade rehearsal was cancelled.";
+    if (/build metadata/i.test(message)) return "Candidate version build metadata is not accepted.";
+    if (/valid SemVer/i.test(message)) return "Candidate version must be valid SemVer.";
+    if (/candidate image reference is malformed/i.test(message)) return "Candidate image reference is malformed.";
+    if (/candidate source SHA/i.test(message)) return "Candidate source SHA is invalid.";
+    if (error?.name === "RehearsalFailure" && typeof error.message === "string" && error.message.length <= 256) return error.message;
+    return "Upgrade rehearsal failed; diagnostic detail withheld.";
+  }
   let sanitized = message;
   for (const [path, replacement] of paths) {
     if (typeof path !== "string" || path.length === 0) continue;
@@ -215,7 +225,7 @@ export async function main(arguments_, runtime = {}) {
     stdout.write(`Fixture verified for ${manifest.baseline.version}.\n`);
     return 0;
   } catch (error) {
-    stderr.write(`${sanitize(error, [[fixtureDirectory, "<fixture>"], [cwd, "<repository>"]])}\n`);
+    stderr.write(`${sanitize(error, [[fixtureDirectory, "<fixture>"], [cwd, "<repository>"]], { rehearsal: arguments_[0] === "rehearse" })}\n`);
     return 1;
   }
 }

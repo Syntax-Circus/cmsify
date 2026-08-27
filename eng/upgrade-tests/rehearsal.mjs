@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { lstat, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -11,6 +10,7 @@ import { loadExpectedData } from "./expected.mjs";
 import { createDockerHttpAdapter } from "./http.mjs";
 import { loadFixtureManifest } from "./manifest.mjs";
 import { assertTrustedRunScope, createRunScope } from "./paths.mjs";
+import { assertPhysicalPath, ensureSafeDirectory, openSafeRegularFile, readSafeFile, writeSafeAtomically } from "./safe-files.mjs";
 
 export const REHEARSAL_PHASES = Object.freeze([
   "preflight",
@@ -27,7 +27,7 @@ export const REHEARSAL_PHASES = Object.freeze([
 ]);
 
 const READINESS_TIMEOUT_MS = 120_000;
-const CANDIDATE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/;
+const CANDIDATE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?$/;
 const CANDIDATE_SOURCE_SHA = /^[0-9a-f]{40}$/;
 const FIXTURE_ENVIRONMENT = Object.freeze({
   POSTGRES_PASSWORD: "cmsify-fixture-postgres-only",
@@ -49,8 +49,9 @@ function assert(condition, message) {
 
 /** Validates caller-supplied candidate syntax before Docker inspection. */
 export function validateCandidateInput({ candidateImage, candidateVersion, candidateSourceSha }) {
-  assert(typeof candidateImage === "string" && candidateImage.length > 0 && candidateImage.length <= 512 && !/[\s\r\n\0]/.test(candidateImage) && !candidateImage.startsWith("-"), "Candidate image reference is malformed.");
-  assert(typeof candidateVersion === "string" && CANDIDATE_SEMVER.test(candidateVersion), "Candidate version must be valid SemVer.");
+  assert(typeof candidateImage === "string" && candidateImage.length > 0 && candidateImage.length <= 256 && !/[\s\r\n\0]/.test(candidateImage) && !candidateImage.startsWith("-") && !candidateImage.includes("://"), "Candidate image reference is malformed.");
+  assert(typeof candidateVersion === "string" && !candidateVersion.includes("+"), "Candidate version build metadata is not accepted; source identity is appended by the rehearsal.");
+  assert(CANDIDATE_SEMVER.test(candidateVersion), "Candidate version must be valid SemVer.");
   assert(typeof candidateSourceSha === "string" && CANDIDATE_SOURCE_SHA.test(candidateSourceSha), "Candidate source SHA must be exactly 40 lowercase hexadecimal characters.");
   return Object.freeze({ candidateImage, candidateVersion, candidateSourceSha });
 }
@@ -71,11 +72,13 @@ function throwIfCancelled(signal) {
 async function waitUntilReady(check, description, { signal, timeoutMs = READINESS_TIMEOUT_MS } = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
+  let attempts = 0;
   while (Date.now() < deadline) {
     throwIfCancelled(signal);
+    attempts += 1;
     try {
       await check();
-      return;
+      return Object.freeze({ service: description, status: "ready", attempts });
     } catch (error) {
       lastError = error;
     }
@@ -86,7 +89,9 @@ async function waitUntilReady(check, description, { signal, timeoutMs = READINES
       throw new Error(`${description} readiness wait failed.`);
     }
   }
-  throw new Error(`${description} did not become ready within ${timeoutMs} milliseconds.`, { cause: lastError });
+  const failure = new Error(`${description} did not become ready within ${timeoutMs} milliseconds.`, { cause: lastError });
+  failure.safeEvidence = { readiness: [{ service: description, status: "failed", attempts }] };
+  throw failure;
 }
 
 function dockerOptions(context) {
@@ -98,24 +103,33 @@ function dockerOptions(context) {
 
 async function waitForInfrastructure(context) {
   const options = dockerOptions(context);
-  await waitUntilReady(
+  const postgres = await waitUntilReady(
     () => context.harness.exec("postgres", ["pg_isready", "--username", "cmsify", "--dbname", "cmsify"], options),
     "PostgreSQL",
     { signal: context.signal, timeoutMs: context.readinessTimeoutMs },
   );
-  await waitUntilReady(
+  const minio = await waitUntilReady(
     () => context.harness.exec("minio", ["curl", "--silent", "--show-error", "--fail", "http://localhost:9000/minio/health/live"], options),
     "MinIO",
     { signal: context.signal, timeoutMs: context.readinessTimeoutMs },
   );
+  return [postgres, minio];
 }
 
 async function waitForApi(context, service, description) {
-  await waitUntilReady(
+  return waitUntilReady(
     () => context.harness.exec(service, ["curl", "--silent", "--show-error", "--fail", "http://localhost:8080/health/ready"], dockerOptions(context)),
     description,
     { signal: context.signal, timeoutMs: context.readinessTimeoutMs },
   );
+}
+
+function assertionFailureEvidence(error, readiness = []) {
+  const match = messageOf(error).match(/^Invariant ([a-z0-9][a-z0-9-]{0,63}) failed:/);
+  return {
+    ...(readiness.length > 0 ? { readiness } : {}),
+    ...(match ? { assertions: [{ name: match[1], status: "failed" }] } : {}),
+  };
 }
 
 async function configureMedia(context) {
@@ -129,29 +143,41 @@ async function configureMedia(context) {
 async function restoreFixtureState(context) {
   throwIfCancelled(context.signal);
   await context.harness.up(["postgres", "minio"], dockerOptions(context));
-  await waitForInfrastructure(context);
-  await context.harness.copyTo("postgres", resolve(context.fixtureDirectory, "database.sql"), "/tmp/cmsify-upgrade-fixture.sql", dockerOptions(context));
-  await context.harness.exec("postgres", [
-    "psql", "--username", "cmsify", "--dbname", "cmsify", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--file=/tmp/cmsify-upgrade-fixture.sql",
-  ], dockerOptions(context));
-  await configureMedia(context);
-  await context.harness.copyTo("minio", `${resolve(context.fixtureDirectory, "media")}${sep}.`, "/tmp/cmsify-upgrade-fixture-media", dockerOptions(context));
-  await context.harness.exec("minio", ["mc", "mirror", "--overwrite", "/tmp/cmsify-upgrade-fixture-media", "fixture/cmsify-upgrade"], dockerOptions(context));
+  const readiness = await waitForInfrastructure(context);
+  try {
+    await context.harness.copyTo("postgres", resolve(context.fixtureDirectory, "database.sql"), "/tmp/cmsify-upgrade-fixture.sql", dockerOptions(context));
+    await context.harness.exec("postgres", [
+      "psql", "--username", "cmsify", "--dbname", "cmsify", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--file=/tmp/cmsify-upgrade-fixture.sql",
+    ], dockerOptions(context));
+    await configureMedia(context);
+    await context.harness.copyTo("minio", `${resolve(context.fixtureDirectory, "media")}${sep}.`, "/tmp/cmsify-upgrade-fixture-media", dockerOptions(context));
+    await context.harness.exec("minio", ["mc", "mirror", "--overwrite", "/tmp/cmsify-upgrade-fixture-media", "fixture/cmsify-upgrade"], dockerOptions(context));
+    return readiness;
+  } catch (error) {
+    error.safeEvidence = { readiness };
+    throw error;
+  }
 }
 
 async function restoreBackupState(context) {
   throwIfCancelled(context.signal);
   await context.harness.up(["postgres", "minio"], dockerOptions(context));
-  await waitForInfrastructure(context);
-  const backupDirectory = backupDirectoryFor(context.scope);
-  await context.harness.copyTo("postgres", resolve(backupDirectory, "database.dump"), "/tmp/cmsify-matched-restore.dump", dockerOptions(context));
-  await context.harness.exec("postgres", [
-    "pg_restore", "--username", "cmsify", "--dbname", "cmsify", "--clean", "--if-exists",
-    "--no-owner", "--no-privileges", "--exit-on-error", "/tmp/cmsify-matched-restore.dump",
-  ], dockerOptions(context));
-  await configureMedia(context);
-  await context.harness.copyTo("minio", `${resolve(backupDirectory, "media")}${sep}.`, "/tmp/cmsify-matched-restore-media", dockerOptions(context));
-  await context.harness.exec("minio", ["mc", "mirror", "--overwrite", "/tmp/cmsify-matched-restore-media", "fixture/cmsify-upgrade"], dockerOptions(context));
+  const readiness = await waitForInfrastructure(context);
+  try {
+    const backupDirectory = backupDirectoryFor(context.scope);
+    await context.harness.copyTo("postgres", resolve(backupDirectory, "database.dump"), "/tmp/cmsify-matched-restore.dump", dockerOptions(context));
+    await context.harness.exec("postgres", [
+      "pg_restore", "--username", "cmsify", "--dbname", "cmsify", "--clean", "--if-exists",
+      "--no-owner", "--no-privileges", "--exit-on-error", "/tmp/cmsify-matched-restore.dump",
+    ], dockerOptions(context));
+    await configureMedia(context);
+    await context.harness.copyTo("minio", `${resolve(backupDirectory, "media")}${sep}.`, "/tmp/cmsify-matched-restore-media", dockerOptions(context));
+    await context.harness.exec("minio", ["mc", "mirror", "--overwrite", "/tmp/cmsify-matched-restore-media", "fixture/cmsify-upgrade"], dockerOptions(context));
+    return readiness;
+  } catch (error) {
+    error.safeEvidence = { readiness };
+    throw error;
+  }
 }
 
 function assertionDocker(context) {
@@ -202,10 +228,15 @@ function createDefaultOperations(context, dependencies = {}) {
   return {
     async preflight() {
       throwIfCancelled(context.signal);
-      validateCandidateInput(context);
       context.manifest = loadManifest(context.fixtureDirectory);
       context.expected = await loadExpected(context.fixtureDirectory, context.manifest);
       await verifyChecksums(context.fixtureDirectory, context.manifest);
+      context.redactions = [
+        ...Object.values(FIXTURE_ENVIRONMENT),
+        context.expected.authentication.readerToken,
+        context.expected.authentication.adminPassword,
+        context.candidateImage,
+      ].filter((value) => typeof value === "string" && value.length > 0);
       await context.harness.inspectImage(context.manifest.baseline.apiImage, dockerOptions(context));
       await context.harness.inspectImage(context.manifest.baseline.postgresImage, dockerOptions(context));
       await context.harness.inspectImage(context.manifest.baseline.minioImage, dockerOptions(context));
@@ -213,11 +244,12 @@ function createDefaultOperations(context, dependencies = {}) {
         version: context.candidateVersion,
         sourceSha: context.candidateSourceSha,
       }, dockerOptions(context));
-      context.redactions = [
-        ...Object.values(FIXTURE_ENVIRONMENT),
-        context.expected.authentication.readerToken,
-        context.expected.authentication.adminPassword,
-      ];
+      const prerequisites = await context.harness.verifyPrerequisites({
+        postgresImage: context.manifest.baseline.postgresImage,
+        minioImage: context.manifest.baseline.minioImage,
+        baselineApiImage: context.manifest.baseline.apiImage,
+        candidateImageId: context.candidateIdentity.imageId,
+      }, dockerOptions(context));
       await context.harness.writeEnvironment({
         POSTGRES_IMAGE: imageReference(context.manifest.baseline.postgresImage),
         MINIO_IMAGE: imageReference(context.manifest.baseline.minioImage),
@@ -227,23 +259,31 @@ function createDefaultOperations(context, dependencies = {}) {
         CANDIDATE_API_IMAGE_ID: context.candidateIdentity.imageId,
         ...FIXTURE_ENVIRONMENT,
       });
-      context.report.fixture = {
+      context.environmentWritten = true;
+      context.fixtureIdentity = {
         baselineVersion: context.manifest.baseline.version,
         baselineSourceSha: context.manifest.baseline.sourceSha,
       };
-      return context.candidateIdentity;
+      return { ...context.candidateIdentity, prerequisites };
     },
 
     async restoreFixture() {
-      await restoreFixtureState(context);
+      const readiness = await restoreFixtureState(context);
+      return { readiness };
     },
 
     async baseline() {
       throwIfCancelled(context.signal);
       context.webhookWorkerStateBeforeStart = await captureWorkerState(assertionDocker(context), { ...context.expected.ids, ...context.expected.relatedIds });
       await context.harness.up(["baseline-api"], dockerOptions(context));
-      await waitForApi(context, "baseline-api", "Published baseline API");
-      return baselineAssertions(assertionContext(context, "baseline-api"));
+      const readiness = await waitForApi(context, "baseline-api", "baseline-api");
+      try {
+        const result = await baselineAssertions(assertionContext(context, "baseline-api"));
+        return { readiness: [readiness], assertions: result.assertions };
+      } catch (error) {
+        error.safeEvidence = assertionFailureEvidence(error, [readiness]);
+        throw error;
+      }
     },
 
     async backup() {
@@ -263,68 +303,96 @@ function createDefaultOperations(context, dependencies = {}) {
       throwIfCancelled(context.signal);
       context.webhookWorkerStateBeforeStart = await captureWorkerState(assertionDocker(context), { ...context.expected.ids, ...context.expected.relatedIds });
       await context.harness.up(["candidate-api"], dockerOptions(context));
-      await waitForApi(context, "candidate-api", "Candidate API migration/startup");
+      const readiness = await waitForApi(context, "candidate-api", "candidate-api");
+      return { readiness: [readiness] };
     },
 
     async candidate() {
-      const result = await candidateAssertions(assertionContext(context, "candidate-api", { candidate: context.candidateIdentity }));
-      assert(typeof result?.canaryId === "string" && result.canaryId.length > 0, "Candidate assertions did not return the required canary ID.");
-      return result;
+      try {
+        const result = await candidateAssertions(assertionContext(context, "candidate-api", { candidate: context.candidateIdentity }));
+        assert(typeof result?.canaryId === "string" && result.canaryId.length > 0, "Candidate assertions did not return the required canary ID.");
+        return result;
+      } catch (error) {
+        error.safeEvidence = assertionFailureEvidence(error);
+        throw error;
+      }
     },
 
     async backupReverify() {
       throwIfCancelled(context.signal);
       await context.harness.stop("candidate-api", dockerOptions(context));
       return verifyBackup({
+        harness: context.harness,
         scope: context.scope,
         baselineVersion: context.manifest.baseline.version,
         manifestSha256: context.backup.manifestSha256,
         signal: context.signal,
+        redact: context.redactions,
       });
     },
 
     async discardUpgradedState() {
       throwIfCancelled(context.signal);
+      await verifyBackup({
+        harness: context.harness,
+        scope: context.scope,
+        baselineVersion: context.manifest.baseline.version,
+        manifestSha256: context.backup.manifestSha256,
+        signal: context.signal,
+        redact: context.redactions,
+      });
       await context.harness.discardDataVolumes(dockerOptions(context));
+      return { backupVerified: true, dataVolumesDiscarded: true };
     },
 
     async restoreBackup() {
-      await restoreBackupState(context);
+      const readiness = await restoreBackupState(context);
+      return { readiness };
     },
 
     async rollback() {
       throwIfCancelled(context.signal);
       context.webhookWorkerStateBeforeStart = await captureWorkerState(assertionDocker(context), { ...context.expected.ids, ...context.expected.relatedIds });
       await context.harness.up(["baseline-api"], dockerOptions(context));
-      await waitForApi(context, "baseline-api", "Rollback baseline API");
-      return rollbackAssertions(assertionContext(context, "baseline-api", { canaryId: context.canaryId }));
+      const readiness = await waitForApi(context, "baseline-api", "baseline-api");
+      try {
+        const result = await rollbackAssertions(assertionContext(context, "baseline-api", { canaryId: context.canaryId }));
+        return { readiness: [readiness], assertions: result.assertions };
+      } catch (error) {
+        error.safeEvidence = assertionFailureEvidence(error, [readiness]);
+        throw error;
+      }
     },
 
     async captureDiagnostics() {
-      await context.harness.logs();
+      return context.harness.logs({ ...dockerOptions(context), resourcesStarted: context.environmentWritten === true });
     },
 
     async cleanup() {
-      await context.harness.cleanup();
+      return context.harness.cleanup({ redact: context.redactions ?? [], resourcesStarted: context.environmentWritten === true });
     },
   };
 }
 
-async function regularFileSha256(path, description, signal) {
+async function regularFileSha256(path, description, signal, safeRoot = resolve(path, "..")) {
   throwIfCancelled(signal);
-  let stat;
+  let handle;
   try {
-    stat = await lstat(path);
+    handle = await openSafeRegularFile(safeRoot, path);
   } catch {
     throw new Error(`Matched backup is missing ${description}.`);
   }
-  assert(stat.isFile() && !stat.isSymbolicLink(), `Matched backup ${description} must be a regular file.`);
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) {
-    throwIfCancelled(signal);
-    hash.update(chunk);
+  try {
+    const hash = createHash("sha256");
+    const stream = handle.createReadStream({ autoClose: false });
+    for await (const chunk of stream) {
+      throwIfCancelled(signal);
+      hash.update(chunk);
+    }
+    return hash.digest("hex");
+  } finally {
+    await handle.close();
   }
-  return hash.digest("hex");
 }
 
 async function mediaInventory(root, directory = root, signal) {
@@ -335,18 +403,68 @@ async function mediaInventory(root, directory = root, signal) {
   } catch {
     throw new Error("Matched backup media directory is missing.");
   }
+  await assertPhysicalPath(root, directory, { leaf: "directory" });
   assert(stat.isDirectory() && !stat.isSymbolicLink(), "Matched backup media must be a real directory.");
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
     const path = resolve(directory, entry.name);
     const relativePath = relative(root, path).replaceAll("\\", "/");
-    assert(isContainedBy(root, path) && !entry.isSymbolicLink(), `Matched backup media contains an unsafe path: ${relativePath}.`);
+    assert(isContainedBy(root, path) && !entry.isSymbolicLink(), "Matched backup media contains an unsafe path.");
     if (entry.isDirectory()) files.push(...await mediaInventory(root, path, signal));
-    else if (entry.isFile()) files.push({ path: relativePath, sha256: await regularFileSha256(path, `media object ${relativePath}`, signal) });
-    else throw new Error(`Matched backup media contains an unsupported entry: ${relativePath}.`);
+    else if (entry.isFile()) files.push({ path: relativePath, size: (await lstat(path)).size, sha256: await regularFileSha256(path, "media object", signal, root) });
+    else throw new Error("Matched backup media contains an unsupported entry.");
   }
-  return files.sort((left, right) => left.path.localeCompare(right.path));
+  return files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+}
+
+function canonicalMediaPath(path) {
+  assert(typeof path === "string" && path.length > 0 && path.length <= 1_024, "Source media inventory path is invalid.");
+  const normalized = path.replaceAll("\\", "/").replace(/^\/+/, "");
+  assert(!isAbsolute(normalized) && normalized.split("/").every((part) => part && part !== "." && part !== ".."), "Source media inventory path is unsafe.");
+  return normalized;
+}
+
+function inventorySha256(inventory) {
+  return createHash("sha256").update(JSON.stringify(inventory)).digest("hex");
+}
+
+function inventoriesEqual(left, right) {
+  return left.length === right.length && left.every((item, index) => item.path === right[index].path && item.size === right[index].size && item.sha256 === right[index].sha256);
+}
+
+/** Captures source MinIO object paths, sizes, and bytes independently of the mirror destination. */
+export async function captureSourceMediaInventory({ harness, signal, redact = [] }) {
+  assert(harness && typeof harness.exec === "function", "A Docker source inventory harness is required.");
+  const options = { ...(signal ? { signal } : {}), redact };
+  const listed = await harness.exec("minio", ["mc", "ls", "--recursive", "--json", "fixture/cmsify-upgrade"], options);
+  const records = listed.stdout.split(/\r?\n/).filter(Boolean);
+  assert(records.length > 0 && records.length <= 10_000, "Source media inventory must be non-empty and bounded.");
+  const inventory = [];
+  for (let index = 0; index < records.length; index += 1) {
+    let item;
+    try {
+      item = JSON.parse(records[index]);
+    } catch {
+      throw new Error("Source media inventory output is invalid.");
+    }
+    if (item.type !== undefined) assert(item.type === "file", "Source media inventory contains a non-file entry.");
+    const path = canonicalMediaPath(item.key ?? item.name);
+    assert(Number.isSafeInteger(item.size) && item.size >= 0, "Source media inventory size is invalid.");
+    const temporary = `/tmp/cmsify-source-object-${createHash("sha256").update(path).digest("hex")}`;
+    try {
+      await harness.exec("minio", ["mc", "cp", `fixture/cmsify-upgrade/${path}`, temporary], options);
+      const checksum = await harness.exec("minio", ["sha256sum", temporary], options);
+      const sha256 = checksum.stdout.trim().split(/\s+/, 1)[0];
+      assert(/^[0-9a-f]{64}$/.test(sha256), "Source media checksum output is invalid.");
+      inventory.push({ path, size: item.size, sha256 });
+    } finally {
+      await harness.exec("minio", ["rm", "-f", temporary], options).catch(() => undefined);
+    }
+  }
+  inventory.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  assert(new Set(inventory.map(({ path }) => path)).size === inventory.length, "Source media inventory contains duplicate paths.");
+  return Object.freeze(inventory.map((item) => Object.freeze(item)));
 }
 
 function backupDirectoryFor(scope) {
@@ -365,9 +483,14 @@ export async function createMatchedBackup({ harness, scope, baselineVersion, now
   const mediaDirectory = resolve(backupDirectory, "media");
   const options = { ...(signal ? { signal } : {}), redact };
   throwIfCancelled(signal);
-  await mkdir(scope.diagnosticsDirectory, { recursive: true });
+  await ensureSafeDirectory(scope.repositoryRoot, scope.diagnosticsDirectory);
+  await assertPhysicalPath(scope.repositoryRoot, backupDirectory, { allowMissing: true });
   await mkdir(backupDirectory);
+  await assertPhysicalPath(scope.repositoryRoot, backupDirectory, { leaf: "directory" });
   await mkdir(mediaDirectory);
+  await assertPhysicalPath(scope.repositoryRoot, mediaDirectory, { leaf: "directory" });
+
+  const sourceMedia = await captureSourceMediaInventory({ harness, signal, redact });
 
   await harness.exec("postgres", [
     "pg_dump", "--username", "cmsify", "--dbname", "cmsify", "--format=custom",
@@ -377,28 +500,32 @@ export async function createMatchedBackup({ harness, scope, baselineVersion, now
   await harness.exec("minio", ["mc", "mirror", "--overwrite", "fixture/cmsify-upgrade", "/tmp/cmsify-matched-backup-media"], options);
   await harness.copyFrom("minio", "/tmp/cmsify-matched-backup-media/.", mediaDirectory, options);
 
-  const createdAt = now();
-  assert(typeof createdAt === "string" && Number.isFinite(Date.parse(createdAt)), "Matched backup creation time must be a timestamp.");
+  const suppliedCreatedAt = now();
+  assert(typeof suppliedCreatedAt === "string" && suppliedCreatedAt.length <= 64 && Number.isFinite(Date.parse(suppliedCreatedAt)), "Matched backup creation time must be a timestamp.");
+  const createdAt = new Date(suppliedCreatedAt).toISOString();
+  const mirroredMedia = await mediaInventory(mediaDirectory, mediaDirectory, signal);
+  assert(inventoriesEqual(sourceMedia, mirroredMedia), "Matched backup media inventory does not equal the independently observed source inventory.");
   const manifest = {
     schemaVersion: 1,
     runId: scope.runId,
     baselineVersion,
     createdAt,
-    databaseSha256: await regularFileSha256(databasePath, "database dump", signal),
-    mediaObjects: await mediaInventory(mediaDirectory, mediaDirectory, signal),
+    databaseSha256: await regularFileSha256(databasePath, "database dump", signal, backupDirectory),
+    sourceMediaObjectCount: sourceMedia.length,
+    sourceMediaInventorySha256: inventorySha256(sourceMedia),
+    mediaObjects: sourceMedia,
   };
   assert(manifest.mediaObjects.length > 0, "Matched backup must contain media objects.");
   const manifestPath = resolve(backupDirectory, "backup-manifest.json");
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
-  await writeFile(`${manifestPath}.tmp`, manifestText, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  await rename(`${manifestPath}.tmp`, manifestPath);
+  await writeSafeAtomically(scope.repositoryRoot, manifestPath, manifestText, { encoding: "utf8", mode: 0o600 });
   const manifestSha256 = createHash("sha256").update(manifestText).digest("hex");
-  await verifyMatchedBackup({ scope, baselineVersion, manifestSha256, signal });
+  await verifyMatchedBackup({ scope, baselineVersion, manifestSha256, signal, sourceMediaInventory: sourceMedia });
   return Object.freeze({ backupDirectory, manifestSha256, manifest: Object.freeze(manifest) });
 }
 
 /** Re-reads and verifies the exact matched backup generation. */
-export async function verifyMatchedBackup({ scope, baselineVersion, manifestSha256, signal }) {
+export async function verifyMatchedBackup({ harness, scope, baselineVersion, manifestSha256, signal, redact = [], sourceMediaInventory }) {
   assert(typeof baselineVersion === "string" && baselineVersion.length > 0, "Matched backup baseline version is required.");
   assert(typeof manifestSha256 === "string" && /^[0-9a-f]{64}$/.test(manifestSha256), "Matched backup manifest SHA-256 is required.");
   const backupDirectory = backupDirectoryFor(scope);
@@ -406,7 +533,7 @@ export async function verifyMatchedBackup({ scope, baselineVersion, manifestSha2
   const manifestPath = resolve(backupDirectory, "backup-manifest.json");
   let manifestText;
   try {
-    manifestText = await readFile(manifestPath, "utf8");
+    manifestText = await readSafeFile(scope.repositoryRoot, manifestPath, "utf8");
   } catch {
     throw new Error("Matched backup manifest is missing.");
   }
@@ -418,46 +545,96 @@ export async function verifyMatchedBackup({ scope, baselineVersion, manifestSha2
     throw new Error("Matched backup manifest is not valid JSON.");
   }
   assert(manifest && typeof manifest === "object" && !Array.isArray(manifest), "Matched backup manifest must be an object.");
-  assert(Object.keys(manifest).sort().join(",") === ["baselineVersion", "createdAt", "databaseSha256", "mediaObjects", "runId", "schemaVersion"].sort().join(","), "Matched backup manifest has unknown or missing fields.");
+  assert(Object.keys(manifest).sort().join(",") === ["baselineVersion", "createdAt", "databaseSha256", "mediaObjects", "runId", "schemaVersion", "sourceMediaInventorySha256", "sourceMediaObjectCount"].sort().join(","), "Matched backup manifest has unknown or missing fields.");
   assert(manifest.schemaVersion === 1, "Matched backup manifest schema is unsupported.");
   assert(manifest.runId === scope.runId, "Matched backup run ID does not match the current rehearsal.");
   assert(manifest.baselineVersion === baselineVersion, "Matched backup baseline does not match the current rehearsal.");
   assert(typeof manifest.createdAt === "string" && Number.isFinite(Date.parse(manifest.createdAt)), "Matched backup creation time is invalid.");
   assert(typeof manifest.databaseSha256 === "string" && /^[0-9a-f]{64}$/.test(manifest.databaseSha256), "Matched backup database checksum is invalid.");
-  assert(await regularFileSha256(resolve(backupDirectory, "database.dump"), "database dump", signal) === manifest.databaseSha256, "Matched backup database checksum mismatch.");
+  assert(await regularFileSha256(resolve(backupDirectory, "database.dump"), "database dump", signal, backupDirectory) === manifest.databaseSha256, "Matched backup database checksum mismatch.");
   assert(Array.isArray(manifest.mediaObjects) && manifest.mediaObjects.length > 0, "Matched backup media manifest must be non-empty.");
+  assert(manifest.sourceMediaObjectCount === manifest.mediaObjects.length, "Matched backup source media count is invalid.");
+  assert(typeof manifest.sourceMediaInventorySha256 === "string" && /^[0-9a-f]{64}$/.test(manifest.sourceMediaInventorySha256), "Matched backup source inventory checksum is invalid.");
   const actualMedia = await mediaInventory(resolve(backupDirectory, "media"), resolve(backupDirectory, "media"), signal);
   const declaredPaths = new Set();
   for (const item of manifest.mediaObjects) {
-    assert(item && typeof item === "object" && !Array.isArray(item) && Object.keys(item).sort().join(",") === "path,sha256", "Matched backup media entry is invalid.");
+    assert(item && typeof item === "object" && !Array.isArray(item) && Object.keys(item).sort().join(",") === "path,sha256,size", "Matched backup media entry is invalid.");
     assert(typeof item.path === "string" && item.path.length > 0 && !item.path.includes("\\") && !isAbsolute(item.path) && item.path.split("/").every((part) => part && part !== "." && part !== ".."), "Matched backup media path is unsafe.");
-    assert(typeof item.sha256 === "string" && /^[0-9a-f]{64}$/.test(item.sha256) && !declaredPaths.has(item.path), "Matched backup media checksum entry is invalid.");
+    assert(Number.isSafeInteger(item.size) && item.size >= 0 && typeof item.sha256 === "string" && /^[0-9a-f]{64}$/.test(item.sha256) && !declaredPaths.has(item.path), "Matched backup media checksum entry is invalid.");
     declaredPaths.add(item.path);
   }
-  assert(actualMedia.length === manifest.mediaObjects.length && actualMedia.every((item, index) => item.path === manifest.mediaObjects[index].path), "Matched backup media inventory mismatch.");
+  assert(actualMedia.length === manifest.mediaObjects.length && actualMedia.every((item, index) => item.path === manifest.mediaObjects[index].path && item.size === manifest.mediaObjects[index].size), "Matched backup media inventory mismatch.");
   for (let index = 0; index < actualMedia.length; index += 1) {
-    assert(actualMedia[index].sha256 === manifest.mediaObjects[index].sha256, `Matched backup media checksum mismatch for ${actualMedia[index].path}.`);
+    assert(actualMedia[index].sha256 === manifest.mediaObjects[index].sha256, "Matched backup media checksum mismatch.");
   }
+  assert(inventorySha256(manifest.mediaObjects) === manifest.sourceMediaInventorySha256, "Matched backup source inventory fence mismatch.");
+  const observedSource = sourceMediaInventory ?? (harness ? await captureSourceMediaInventory({ harness, signal, redact }) : undefined);
+  if (observedSource !== undefined) assert(inventoriesEqual(observedSource, manifest.mediaObjects), "Matched backup source inventory changed or is incomplete.");
   return Object.freeze({ backupDirectory, manifestSha256, manifest: Object.freeze(manifest) });
 }
 
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const SAFE_ASSERTION_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const SAFE_CANARY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function failureSummary(error, phaseName, kind) {
+  const raw = messageOf(error);
+  if (kind === "diagnostics") return { code: "diagnostic-capture-failed", message: "Diagnostic capture failed; diagnostic detail withheld." };
+  if (kind === "cleanup") return { code: "cleanup-failed", message: "Owned-resource cleanup failed; diagnostic detail withheld." };
+  if (error instanceof ReportPersistenceFailure) return { code: "report-persistence-failed", message: `Report persistence failed during the ${error.phaseName} phase.` };
+  if (/cancel(?:led|ation)|aborted/i.test(raw)) return { code: "cancelled", message: "Upgrade rehearsal was cancelled." };
+  if (/timed? out|did not become ready/i.test(raw)) return { code: "timeout", message: `The ${phaseName} phase timed out.` };
+  if (/build metadata/i.test(raw)) return { code: "candidate-build-metadata", message: "Candidate version build metadata is not accepted." };
+  if (/SemVer/i.test(raw)) return { code: "candidate-semver", message: "Candidate version must be valid SemVer." };
+  if (/candidate image reference is malformed/i.test(raw)) return { code: "candidate-reference", message: "Candidate image reference is malformed." };
+  if (/candidate source SHA/i.test(raw)) return { code: "candidate-source", message: "Candidate source SHA is invalid." };
+  if (/Docker prerequisite/i.test(raw)) return { code: "docker-prerequisite", message: "Docker prerequisite check failed." };
+  if (/matched backup|backup manifest|backup media|source media/i.test(raw)) return { code: "backup-validation", message: "Matched backup validation failed." };
+  if (/invariant failed|^Invariant [a-z0-9-]+ failed:/i.test(raw)) return { code: "invariant-failed", message: `The ${phaseName} phase invariant failed.` };
+  return { code: "phase-failed", message: `The ${phaseName} phase failed; diagnostic detail withheld.` };
 }
 
-function sanitizedMessage(error, options) {
-  let message = messageOf(error).replace(/[\r\n]+/g, " ").trim() || "Upgrade rehearsal failed.";
-  const replacements = [
-    [options.fixtureDirectory, "<fixture>"],
-    [options.repositoryRoot, "<repository>"],
-    ...((options.redact ?? []).map((value) => [value, "<redacted>"])),
-  ];
-  for (const [value, replacement] of replacements) {
-    if (typeof value === "string" && value.length > 0) message = message.replace(new RegExp(escapeRegex(value), "gi"), replacement);
+function safeError(error, phaseName, kind) {
+  const summary = failureSummary(error, phaseName, kind);
+  const result = new Error(summary.message.slice(0, 256));
+  result.name = "RehearsalDiagnostic";
+  result.code = summary.code;
+  result.phase = phaseName;
+  return result;
+}
+
+function safeEvidence(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const evidence = {};
+  if (Array.isArray(value.readiness)) {
+    evidence.readiness = value.readiness.slice(0, 16).map((item) => ({
+      service: typeof item?.service === "string" && /^[a-zA-Z0-9 ._-]{1,64}$/.test(item.service) ? item.service : "service",
+      status: item?.status === "ready" ? "ready" : "failed",
+      attempts: Number.isSafeInteger(item?.attempts) && item.attempts > 0 ? Math.min(item.attempts, 10_000) : 1,
+    }));
   }
-  return message
-    .replace(/cmsify_[a-z0-9._-]{12,}/gi, "<redacted>")
-    .replace(/(password|secret|token|encryption[_-]?key)\s*[=:]\s*[^\s,;]+/gi, "$1=<redacted>");
+  if (Array.isArray(value.assertions)) {
+    evidence.assertions = value.assertions.slice(0, 128).map((item) => ({
+      name: typeof item?.name === "string" && SAFE_ASSERTION_NAME.test(item.name) ? item.name : "assertion",
+      status: item?.status === "passed" ? "passed" : "failed",
+    }));
+  }
+  if (typeof value.manifestSha256 === "string" && /^[0-9a-f]{64}$/.test(value.manifestSha256)) evidence.manifestSha256 = value.manifestSha256;
+  const mediaCount = value.manifest?.sourceMediaObjectCount ?? value.sourceMediaObjectCount;
+  if (Number.isSafeInteger(mediaCount) && mediaCount >= 0) evidence.sourceMediaObjectCount = Math.min(mediaCount, 10_000);
+  if (value.prerequisites?.status === "passed") evidence.prerequisites = { status: "passed", mode: "immutable-image-nonpersistent-probes" };
+  if (value.backupVerified === true) evidence.backupVerified = true;
+  if (value.dataVolumesDiscarded === true) evidence.dataVolumesDiscarded = true;
+  if (typeof value.canaryId === "string" && SAFE_CANARY_ID.test(value.canaryId)) evidence.canaryId = value.canaryId;
+  return Object.keys(evidence).length === 0 ? undefined : evidence;
+}
+
+class ReportPersistenceFailure extends Error {
+  constructor(phaseName, status) {
+    super(`Report persistence failed during the ${phaseName} ${status} boundary.`);
+    this.name = "ReportPersistenceFailure";
+    this.phaseName = phaseName;
+    this.status = status;
+  }
 }
 
 export class RehearsalFailure extends Error {
@@ -470,10 +647,7 @@ export class RehearsalFailure extends Error {
 }
 
 async function writeReportAtomically(path, report) {
-  await mkdir(resolve(path, ".."), { recursive: true });
-  const temporary = `${path}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, path);
+  await writeSafeAtomically(report.repositoryRoot, path, `${JSON.stringify(report.value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 function createReport(scope, options, now) {
@@ -484,11 +658,12 @@ function createReport(scope, options, now) {
     startedAt: now(),
     completedAt: null,
     candidate: {
-      reference: options.candidateImage,
-      version: options.candidateVersion,
-      sourceSha: options.candidateSourceSha,
+      reference: null,
+      version: null,
+      sourceSha: null,
     },
     canaryId: null,
+    diagnostics: null,
     phases: REHEARSAL_PHASES.map((name) => ({
       name,
       status: "pending",
@@ -523,36 +698,77 @@ function operationFor(operations, phase) {
 export async function rehearse(options) {
   const scope = createRunScope(options.repositoryRoot, options.runId);
   const reportPath = resolve(scope.diagnosticsDirectory, "report.json");
-  const now = options.now ?? (() => new Date().toISOString());
+  const clock = options.now ?? (() => new Date().toISOString());
+  const now = () => {
+    const value = clock();
+    assert(typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value)), "Rehearsal clock must return a timestamp.");
+    return new Date(value).toISOString();
+  };
   const report = createReport(scope, options, now);
-  const persist = options.reportWriter ?? ((value) => writeReportAtomically(reportPath, value));
+  const persist = options.reportWriter ?? ((value) => writeReportAtomically(reportPath, { repositoryRoot: scope.repositoryRoot, value }));
   const context = { ...options, now, scope, report, reportPath };
   const operations = options.operations ?? createDefaultOperations(context, options.dependencies);
   let primaryFailure;
+  let primaryPhase;
+  const secondaryFailures = [];
 
-  const sanitize = (error) => sanitizedMessage(error, {
-    ...options,
-    redact: [...(options.redact ?? []), ...(context.redactions ?? [])],
-  });
-
-  const transition = async (phaseName, status, error) => {
-    const phaseIndex = REHEARSAL_PHASES.indexOf(phaseName);
-    const phase = report.phases[phaseIndex];
-    if (status === "running") {
-      if (phase.status !== "pending") throw new Error(`Rehearsal phase ${phaseName} cannot be re-entered.`);
-      if (phaseName !== "cleanup") {
-        const earlier = report.phases.slice(0, phaseIndex);
-        if (earlier.some((entry) => entry.status !== "passed")) throw new Error(`Rehearsal phase ${phaseName} cannot skip an earlier phase.`);
-      }
-      phase.status = "running";
-      phase.startedAt = now();
-    } else {
-      if (phase.status !== "running" || !["passed", "failed"].includes(status)) throw new Error(`Rehearsal phase ${phaseName} has an invalid transition.`);
-      phase.status = status;
-      phase.completedAt = now();
-      if (error !== undefined) phase.error = sanitize(error);
+  const commit = async (phaseName, status, mutate) => {
+    const next = structuredClone(report);
+    mutate(next);
+    try {
+      await persist(structuredClone(next));
+    } catch {
+      throw new ReportPersistenceFailure(phaseName, status);
     }
-    await persist(report);
+    for (const key of Object.keys(report)) delete report[key];
+    Object.assign(report, next);
+  };
+
+  const transition = async (phaseName, status, error, evidence, reportMutation) => {
+    const phaseIndex = REHEARSAL_PHASES.indexOf(phaseName);
+    await commit(phaseName, status, (next) => {
+      const phase = next.phases[phaseIndex];
+      if (status === "running") {
+        if (phase.status !== "pending") throw new Error(`Rehearsal phase ${phaseName} cannot be re-entered.`);
+        if (phaseName !== "cleanup") {
+          const earlier = next.phases.slice(0, phaseIndex);
+          if (earlier.some((entry) => entry.status !== "passed")) throw new Error(`Rehearsal phase ${phaseName} cannot skip an earlier phase.`);
+        }
+        phase.status = "running";
+        phase.startedAt = now();
+      } else {
+        if (phase.status !== "running" || !["passed", "failed"].includes(status)) throw new Error(`Rehearsal phase ${phaseName} has an invalid transition.`);
+        phase.status = status;
+        phase.completedAt = now();
+        const allowedEvidence = safeEvidence(evidence);
+        if (allowedEvidence) phase.evidence = allowedEvidence;
+        if (error !== undefined) {
+          const summary = failureSummary(error, phaseName);
+          phase.error = summary.message.slice(0, 256);
+          phase.errorCode = summary.code;
+        }
+      }
+      if (reportMutation) reportMutation(next);
+    });
+  };
+
+  const terminalizeFailedPhase = async (phaseName, error) => {
+    const phaseIndex = REHEARSAL_PHASES.indexOf(phaseName);
+    await commit(phaseName, "failed", (next) => {
+      const phase = next.phases[phaseIndex];
+      if (phase.status === "pending") phase.startedAt = now();
+      if (phase.status !== "passed") {
+        phase.status = "failed";
+        phase.completedAt = now();
+        const summary = failureSummary(error, phaseName);
+        phase.error = summary.message.slice(0, 256);
+        phase.errorCode = summary.code;
+        const allowedEvidence = safeEvidence(error?.safeEvidence);
+        if (allowedEvidence) phase.evidence = allowedEvidence;
+      }
+      next.status = "failed";
+      if (phaseName === "cleanup") next.completedAt = now();
+    });
   };
 
   const runPhase = async (phaseName) => {
@@ -560,31 +776,56 @@ export async function rehearse(options) {
     await transition(phaseName, "running");
     let value;
     try {
+      if (phaseName === "preflight") validateCandidateInput(context);
       value = await operation(context);
-      if (phaseName === "preflight" && value) report.candidate = { ...report.candidate, ...value };
       if (phaseName === "backup" && value) context.backup = value;
       if (phaseName === "candidate" && value?.canaryId) {
-        report.canaryId = value.canaryId;
+        assert(SAFE_CANARY_ID.test(value.canaryId), "Candidate assertions returned a malformed canary ID.");
         context.canaryId = value.canaryId;
       }
     } catch (error) {
       try {
-        await transition(phaseName, "failed", error);
+        await transition(phaseName, "failed", error, error?.safeEvidence);
       } catch (reportFailure) {
-        throw new AggregateError([error, reportFailure], messageOf(error), { cause: error });
+        const combined = new AggregateError([error, reportFailure], "Rehearsal operation and report persistence failed.", { cause: error });
+        combined.phaseName = phaseName;
+        combined.primaryError = error;
+        combined.secondaryErrors = [reportFailure];
+        throw combined;
       }
-      throw error;
+      if (error && typeof error === "object") {
+        error.phaseName = phaseName;
+        throw error;
+      }
+      const wrapped = new Error("Rehearsal operation failed with a non-error value.");
+      wrapped.phaseName = phaseName;
+      throw wrapped;
     }
-    await transition(phaseName, "passed");
+    await transition(phaseName, "passed", undefined, value, (next) => {
+      if (phaseName === "preflight" && value) {
+        next.candidate = {
+          reference: options.candidateImage,
+          version: value.version ?? options.candidateVersion,
+          sourceSha: value.sourceSha ?? options.candidateSourceSha,
+          imageId: typeof value.imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(value.imageId) ? value.imageId : null,
+          platform: value.platform === "linux/amd64" ? value.platform : null,
+          informationalVersion: value.informationalVersion === `${options.candidateVersion}+${options.candidateSourceSha}` ? value.informationalVersion : null,
+        };
+        if (context.fixtureIdentity) next.fixture = structuredClone(context.fixtureIdentity);
+      }
+      if (phaseName === "candidate" && value?.canaryId) next.canaryId = value.canaryId;
+    });
     return value;
   };
 
   const runCleanup = async () => {
     const failures = [];
+    let startFailure;
     let cleanupFailure;
     try {
       await transition("cleanup", "running");
     } catch (error) {
+      startFailure = error;
       failures.push(error);
     }
     try {
@@ -593,15 +834,28 @@ export async function rehearse(options) {
       cleanupFailure = error;
       failures.push(error);
     }
-    report.status = primaryFailure === undefined && failures.length === 0 ? "passed" : "failed";
-    report.completedAt = now();
-    const cleanupPhase = report.phases.at(-1);
-    if (cleanupPhase.status === "running") {
-      try {
-        await transition("cleanup", cleanupFailure === undefined ? "passed" : "failed", cleanupFailure);
-      } catch (error) {
-        failures.push(error);
+    try {
+      const cleanupPhase = report.phases.at(-1);
+      if (cleanupPhase.status === "running") {
+        await transition("cleanup", cleanupFailure === undefined ? "passed" : "failed", cleanupFailure, undefined, (next) => {
+          next.status = primaryFailure === undefined && startFailure === undefined && cleanupFailure === undefined ? "passed" : "failed";
+          next.completedAt = now();
+        });
+      } else if (cleanupPhase.status === "pending") {
+        await commit("cleanup", "failed", (next) => {
+          const phase = next.phases.at(-1);
+          phase.status = "failed";
+          phase.startedAt = now();
+          phase.completedAt = now();
+          const summary = failureSummary(startFailure ?? cleanupFailure, "cleanup");
+          phase.error = summary.message;
+          phase.errorCode = summary.code;
+          next.status = "failed";
+          next.completedAt = now();
+        });
       }
+    } catch (error) {
+      failures.push(error);
     }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, messageOf(failures[0]), { cause: failures[0] });
@@ -610,30 +864,66 @@ export async function rehearse(options) {
   try {
     for (const phase of REHEARSAL_PHASES.slice(0, -1)) await runPhase(phase);
   } catch (error) {
-    primaryFailure = error;
-    report.status = "failed";
+    primaryFailure = error.primaryError ?? error;
+    primaryPhase = error.phaseName ?? primaryFailure.phaseName ?? "preflight";
+    if (Array.isArray(error.secondaryErrors)) secondaryFailures.push(...error.secondaryErrors.map((item) => ({ error: item, phase: primaryPhase })));
     try {
-      await operations.captureDiagnostics(context);
-    } catch {
-      // Diagnostic capture is best effort and cannot mask the rehearsal failure.
+      await terminalizeFailedPhase(primaryPhase, primaryFailure);
+    } catch (reportFailure) {
+      secondaryFailures.push({ error: reportFailure, phase: primaryPhase });
+    }
+    let diagnosticFailure;
+    let diagnosticResult;
+    try {
+      diagnosticResult = await operations.captureDiagnostics(context);
+    } catch (error) {
+      diagnosticFailure = error;
+    }
+    if (diagnosticFailure !== undefined) {
+      secondaryFailures.push({ error: diagnosticFailure, phase: primaryPhase, kind: "diagnostics" });
+      try {
+        await commit(primaryPhase, "diagnostics", (next) => { next.diagnostics = { status: "failed", code: "diagnostic-capture-failed" }; });
+      } catch (reportFailure) {
+        secondaryFailures.push({ error: reportFailure, phase: primaryPhase });
+      }
+    } else {
+      try {
+        await commit(primaryPhase, "diagnostics", (next) => {
+          next.diagnostics = diagnosticResult?.status === "unavailable"
+            ? { status: "unavailable", code: "resources-not-started" }
+            : { status: "captured" };
+        });
+      } catch (reportFailure) {
+        secondaryFailures.push({ error: reportFailure, phase: primaryPhase });
+      }
     }
   } finally {
     try {
       await runCleanup();
     } catch (cleanupFailure) {
-      report.status = "failed";
+      if (report.phases.at(-1).status === "running") {
+        try {
+          await terminalizeFailedPhase("cleanup", cleanupFailure);
+        } catch (reportFailure) {
+          secondaryFailures.push({ error: reportFailure, phase: "cleanup" });
+        }
+      }
       if (primaryFailure === undefined) primaryFailure = cleanupFailure;
-      else primaryFailure = new AggregateError([primaryFailure, cleanupFailure], messageOf(primaryFailure), { cause: primaryFailure });
+      if (primaryPhase === undefined) primaryPhase = "cleanup";
+      else secondaryFailures.push({ error: cleanupFailure, phase: "cleanup", kind: "cleanup" });
     }
   }
 
   if (primaryFailure !== undefined) {
-    const failedPhase = report.phases.find(({ status }) => status === "failed")?.name ?? "cleanup";
-    throw new RehearsalFailure(sanitize(primaryFailure), {
-      cause: primaryFailure,
-      reportPath,
-      phase: failedPhase,
+    const primarySafeError = safeError(primaryFailure, primaryPhase);
+    const causes = [primarySafeError, ...secondaryFailures.map(({ error, phase, kind }) => safeError(error, phase, kind))];
+    const cause = causes.length === 1 ? causes[0] : new AggregateError(causes, primarySafeError.message, { cause: primarySafeError });
+    throw new RehearsalFailure(primarySafeError.message, {
+      cause,
+      reportPath: relative(scope.repositoryRoot, reportPath).replaceAll("\\", "/"),
+      phase: primaryPhase,
     });
   }
+  assert(report.status === "passed" && report.phases.every(({ status }) => status === "passed"), "Rehearsal cannot pass unless every mandatory phase and cleanup passed.");
   return report;
 }

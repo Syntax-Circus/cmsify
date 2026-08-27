@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 import test from "node:test";
@@ -337,4 +337,80 @@ test("refuses to remove a discovered resource without both ownership labels", as
   await assert.rejects(createDockerHarness(scope, executor).cleanup(), /lacks the required ownership labels/i);
 
   assert.equal(calls.some(({ args }) => args[0] === "rm" && args.includes("container-id")), false);
+});
+
+test("stores only a bounded structured Docker diagnostic summary", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-016");
+  const secret = "cmsify_sensitive-token-value";
+  const password = "fixture-password-value";
+  const raw = `SELECT * FROM users; row=(1, '${secret}'); password=${password}; C:\\outside\\data.sql; ${"z".repeat(100_000)}`;
+  const harness = createDockerHarness(scope, async (_command, args, options) => {
+    assert.deepEqual(options.redact, [secret, password]);
+    return { exitCode: 0, stdout: raw, stderr: raw, durationMs: 12 };
+  });
+
+  const summary = await harness.logs({ redact: [secret, password] });
+  const artifact = resolve(scope.diagnosticsDirectory, "docker-diagnostics.json");
+  const serialized = readFileSync(artifact, "utf8");
+
+  assert.deepEqual(summary, { status: "captured", stdoutBytes: Buffer.byteLength(raw), stderrBytes: Buffer.byteLength(raw) });
+  assert.ok(serialized.length <= 1_024);
+  for (const forbidden of ["SELECT", "row=(", secret, password, "outside", "z".repeat(1_000)]) assert.equal(serialized.includes(forbidden), false);
+  assert.equal(existsSync(resolve(scope.diagnosticsDirectory, "docker-compose.log")), false);
+});
+
+test("fails prerequisite probing before a Compose up when a required tool is missing", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-017");
+  const calls = [];
+  const harness = createDockerHarness(scope, async (command, args) => {
+    calls.push({ command, args });
+    if (args.includes("pg_restore")) throw new Error("missing tool");
+    return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 0 };
+  });
+  const image = (repository) => ({ repository, digest: `sha256:${"a".repeat(64)}`, platform: "linux/amd64" });
+
+  await assert.rejects(() => harness.verifyPrerequisites({
+    postgresImage: image("postgres"),
+    minioImage: image("minio"),
+    baselineApiImage: image("baseline-api"),
+    candidateImageId: `sha256:${"b".repeat(64)}`,
+  }), /prerequisite/i);
+
+  assert.equal(calls.some(({ args }) => args[0] === "compose" && args.includes("up")), false);
+  assert.equal(existsSync(harness.environmentFile), false);
+});
+
+test("records unavailable diagnostics without Compose or an env write before resources start", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-019");
+  const calls = [];
+  const harness = createDockerHarness(scope, async (command, args) => {
+    calls.push({ command, args });
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  });
+
+  const summary = await harness.logs({ resourcesStarted: false, redact: ["fixture-secret"] });
+
+  assert.deepEqual(summary, { status: "unavailable", stdoutBytes: 0, stderrBytes: 0 });
+  assert.deepEqual(calls, []);
+  assert.equal(existsSync(harness.environmentFile), false);
+});
+
+test("rejects a junction parent for the run environment file", async (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "cmsify-env-link-"));
+  const outside = mkdtempSync(resolve(tmpdir(), "cmsify-env-outside-"));
+  mkdirSync(resolve(root, "tests", "upgrade"), { recursive: true });
+  try {
+    try {
+      symlinkSync(outside, resolve(root, "tests", "upgrade", ".runs"), process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) return t.skip("filesystem does not permit link creation");
+      throw error;
+    }
+    const harness = createDockerHarness(createRunScope(root, "safe-run-018"), async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }));
+    await assert.rejects(() => harness.writeEnvironment({ VALUE: "safe" }), /linked|reparse|safe.*path/i);
+    assert.equal(existsSync(resolve(outside, "safe-run-018.env")), false);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+    rmSync(outside, { force: true, recursive: true });
+  }
 });

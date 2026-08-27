@@ -1,8 +1,9 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { assertTrustedRunScope, OWNERSHIP_LABELS } from "./paths.mjs";
 import { ProcessFailure, runProcess } from "./process.mjs";
+import { assertPhysicalPath, ensureSafeDirectory, writeSafeAtomically } from "./safe-files.mjs";
 
 const COMPOSE_FILE = "tests/upgrade/compose.yml";
 const SERVICE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
@@ -95,18 +96,18 @@ export function createDockerHarness(scope, executor = runProcess) {
 
   async function ensureRunFiles() {
     assertSafeEnvironmentFile();
-    await Promise.all([
-      mkdir(scope.diagnosticsDirectory, { recursive: true }),
-      mkdir(environmentDirectory, { recursive: true }),
-    ]);
+    await ensureSafeDirectory(scope.repositoryRoot, scope.diagnosticsDirectory);
+    await ensureSafeDirectory(scope.repositoryRoot, environmentDirectory);
     try {
-      await writeFile(environmentFile, [
+      await lstat(environmentFile);
+      await assertPhysicalPath(scope.repositoryRoot, environmentFile, { leaf: "file" });
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await writeSafeAtomically(scope.repositoryRoot, environmentFile, [
         `CMSIFY_UPGRADE_RUN_ID=${scope.runId}`,
         "CMSIFY_UPGRADE_TEST_LABEL=true",
         "",
-      ].join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
     }
   }
 
@@ -119,17 +120,15 @@ export function createDockerHarness(scope, executor = runProcess) {
       assert(typeof value === "string" && !/[\r\n\0]/.test(value), `Docker run environment value ${name} must be a single-line string.`);
     }
     assertSafeEnvironmentFile();
-    await Promise.all([
-      mkdir(scope.diagnosticsDirectory, { recursive: true }),
-      mkdir(environmentDirectory, { recursive: true }),
-    ]);
+    await ensureSafeDirectory(scope.repositoryRoot, scope.diagnosticsDirectory);
+    await ensureSafeDirectory(scope.repositoryRoot, environmentDirectory);
     const linesToWrite = [
       `CMSIFY_UPGRADE_RUN_ID=${scope.runId}`,
       "CMSIFY_UPGRADE_TEST_LABEL=true",
       ...entries.map(([name, value]) => `${name}=${value}`),
       "",
     ];
-    await writeFile(environmentFile, linesToWrite.join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await writeSafeAtomically(scope.repositoryRoot, environmentFile, linesToWrite.join("\n"), { encoding: "utf8", mode: 0o600 });
   }
 
   async function execute(command, args, phase, timeoutMs = MAX_DOCKER_TIMEOUT_MS, options = {}) {
@@ -174,9 +173,9 @@ export function createDockerHarness(scope, executor = runProcess) {
     }
   }
 
-  async function discover(commandArgs, phase) {
+  async function discover(commandArgs, phase, options = {}) {
     const filters = labelsFor(scope);
-    const result = await execute("docker", [...commandArgs, "--filter", filters[0], "--filter", filters[1]], phase);
+    const result = await execute("docker", [...commandArgs, "--filter", filters[0], "--filter", filters[1]], phase, undefined, options);
     return lines(result.stdout);
   }
 
@@ -191,17 +190,61 @@ export function createDockerHarness(scope, executor = runProcess) {
     }
   }
 
-  async function logs() {
-    const result = await compose(["logs", "--no-color"], "docker-compose-logs", MAX_DOCKER_LOG_TIMEOUT_MS);
-    await mkdir(scope.diagnosticsDirectory, { recursive: true });
-    await writeFile(resolve(scope.diagnosticsDirectory, "docker-compose.log"), `${result.stdout}${result.stderr}`, "utf8");
-    return result;
+  async function logs(options = {}) {
+    assertLifecycleOptions(options);
+    assert(options.resourcesStarted === undefined || typeof options.resourcesStarted === "boolean", "Docker diagnostic resource state must be boolean.");
+    const result = options.resourcesStarted === false
+      ? { stdout: "", stderr: "" }
+      : await compose(["logs", "--no-color"], "docker-compose-logs", MAX_DOCKER_LOG_TIMEOUT_MS, options);
+    const summary = Object.freeze({
+      status: options.resourcesStarted === false ? "unavailable" : "captured",
+      stdoutBytes: Buffer.byteLength(result.stdout),
+      stderrBytes: Buffer.byteLength(result.stderr),
+    });
+    await writeSafeAtomically(
+      scope.repositoryRoot,
+      resolve(scope.diagnosticsDirectory, "docker-diagnostics.json"),
+      `${JSON.stringify(summary, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    return summary;
   }
 
   return Object.freeze({
     environmentFile,
 
     writeEnvironment,
+
+    async verifyPrerequisites(images, options = {}) {
+      assert(images && typeof images === "object" && !Array.isArray(images), "Docker prerequisite images are required.");
+      assertLifecycleOptions(options);
+      const required = ["postgresImage", "minioImage", "baselineApiImage"];
+      required.forEach((name) => assert(images[name] && typeof images[name] === "object", `Docker prerequisite ${name} is required.`));
+      assert(typeof images.candidateImageId === "string" && IMAGE_ID.test(images.candidateImageId), "Docker prerequisite candidate image ID is required.");
+      const runLabels = Object.entries(scope.labels).flatMap(([name, value]) => ["--label", `${name}=${value}`]);
+      // Tool presence cannot be proven from image metadata. Probe the already-inspected immutable
+      // image with --pull=never, no network, --rm, and both ownership labels; no run env is written.
+      const probe = async (image, tool, args = ["--version"]) => execute("docker", [
+        "run", "--rm", "--network", "none", "--pull", "never", ...runLabels,
+        "--entrypoint", tool, image, ...args,
+      ], `docker-prerequisite-${tool}`, undefined, options);
+      try {
+        await execute("docker", ["version", "--format", "{{json .Server.Version}}"], "docker-prerequisite-engine", undefined, options);
+        await execute("docker", ["compose", "version", "--short"], "docker-prerequisite-compose", undefined, options);
+        await execute("docker", ["compose", "--file", COMPOSE_FILE, "config", "--no-interpolate", "--quiet"], "docker-prerequisite-compose-config", undefined, options);
+        const postgres = imageReference(images.postgresImage);
+        for (const tool of ["pg_dump", "psql", "pg_restore"]) await probe(postgres, tool);
+        const minio = imageReference(images.minioImage);
+        for (const tool of ["mc", "curl"]) await probe(minio, tool);
+        await probe(minio, "sha256sum", ["/dev/null"]);
+        await probe(minio, "rm", ["-f", "/tmp/cmsify-prerequisite-nonexistent"]);
+        await probe(imageReference(images.baselineApiImage), "curl");
+        await probe(images.candidateImageId, "curl");
+      } catch {
+        throw new Error("Docker prerequisite check failed.");
+      }
+      return Object.freeze({ status: "passed", mode: "immutable-image-nonpersistent-probes" });
+    },
 
     async up(services, options = {}) {
       assertStringArray(services, "Docker services");
@@ -300,7 +343,9 @@ export function createDockerHarness(scope, executor = runProcess) {
       );
     },
 
-    async cleanup() {
+    async cleanup(options = {}) {
+      assertLifecycleOptions(options);
+      assert(options.resourcesStarted === undefined || typeof options.resourcesStarted === "boolean", "Docker cleanup resource state must be boolean.");
       const failures = [];
       const collectFailure = async (operation) => {
         try {
@@ -311,18 +356,19 @@ export function createDockerHarness(scope, executor = runProcess) {
         }
       };
       try {
-        await collectFailure(logs);
+        await collectFailure(() => logs(options));
         const [containers = [], networks = [], volumes = []] = await Promise.all([
-          collectFailure(() => discover(["ps", "--all", "--quiet"], "docker-cleanup-discover-containers")),
-          collectFailure(() => discover(["network", "ls", "--quiet"], "docker-cleanup-discover-networks")),
-          collectFailure(() => discover(["volume", "ls", "--quiet"], "docker-cleanup-discover-volumes")),
+          collectFailure(() => discover(["ps", "--all", "--quiet"], "docker-cleanup-discover-containers", options)),
+          collectFailure(() => discover(["network", "ls", "--quiet"], "docker-cleanup-discover-networks", options)),
+          collectFailure(() => discover(["volume", "ls", "--quiet"], "docker-cleanup-discover-volumes", options)),
         ]);
-        await collectFailure(() => removeResources(containers, "container", ["rm", "--force"], "docker-cleanup-remove-container"));
-        await collectFailure(() => removeResources(networks, "network", ["network", "rm"], "docker-cleanup-remove-network"));
-        await collectFailure(() => removeResources(volumes, "volume", ["volume", "rm"], "docker-cleanup-remove-volume"));
+        await collectFailure(() => removeResources(containers, "container", ["rm", "--force"], "docker-cleanup-remove-container", options));
+        await collectFailure(() => removeResources(networks, "network", ["network", "rm"], "docker-cleanup-remove-network", options));
+        await collectFailure(() => removeResources(volumes, "volume", ["volume", "rm"], "docker-cleanup-remove-volume", options));
       } finally {
         await collectFailure(async () => {
           assertSafeEnvironmentFile();
+          await assertPhysicalPath(scope.repositoryRoot, environmentFile, { leaf: "file", allowMissing: true });
           await rm(environmentFile, { force: true });
         });
       }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createMatchedBackup, rehearse, verifyMatchedBackup } from "../../../eng/upgrade-tests/rehearsal.mjs";
+import { createMatchedBackup, rehearse, validateCandidateInput, verifyMatchedBackup } from "../../../eng/upgrade-tests/rehearsal.mjs";
 import { createRunScope } from "../../../eng/upgrade-tests/paths.mjs";
 
 const candidateSourceSha = "0123456789abcdef0123456789abcdef01234567";
@@ -73,7 +74,7 @@ test("candidate failure still captures logs and cleans owned resources", async (
   await assert.rejects(
     () => runWithFakes({ fail: "candidate" }),
     (error) => {
-      assert.match(error.message, /candidate invariant/i);
+      assert.match(error.message, /candidate phase invariant/i);
       assert.deepEqual(error.events.slice(-2), ["diagnostics:capture", "owned-resources:cleanup"]);
       return true;
     },
@@ -115,7 +116,7 @@ test("failure reports expose only the exact phase contract and sanitized diagnos
     const serialized = JSON.stringify(finalReport);
     assert.equal(serialized.includes(secret), false);
     assert.equal(serialized.includes(repositoryRoot), false);
-    assert.match(finalReport.phases.find(({ name }) => name === "candidate").error, /candidate invariant/i);
+    assert.equal(finalReport.phases.find(({ name }) => name === "candidate").error, "The candidate phase failed; diagnostic detail withheld.");
   } finally {
     rmSync(repositoryRoot, { force: true, recursive: true });
   }
@@ -127,8 +128,21 @@ test("matched backup verification fences one database and media generation", asy
   const controller = new AbortController();
   const operationOptions = [];
   const harness = {
-    exec: async (_service, _args, options) => {
+    exec: async (service, args, options) => {
       operationOptions.push(options);
+      if (service === "minio" && args[0] === "mc" && args[1] === "ls") return {
+        exitCode: 0,
+        stdout: [
+          JSON.stringify({ key: "cmsify/media/first.txt", size: Buffer.byteLength("first media"), type: "file" }),
+          JSON.stringify({ key: "cmsify/media/second.bin", size: 4, type: "file" }),
+        ].join("\n") + "\n",
+        stderr: "",
+        durationMs: 0,
+      };
+      if (service === "minio" && args[0] === "sha256sum") {
+        const body = args[1].includes(createHash("sha256").update("cmsify/media/first.txt").digest("hex")) ? "first media" : Buffer.from([0, 1, 2, 3]);
+        return { exitCode: 0, stdout: `${createHash("sha256").update(body).digest("hex")}  object\n`, stderr: "", durationMs: 0 };
+      }
       return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
     },
     copyFrom: async (service, _source, destination, options) => {
@@ -165,7 +179,7 @@ test("matched backup verification fences one database and media generation", asy
     writeFileSync(resolve(scope.diagnosticsDirectory, "backup", "media", "cmsify", "media", "first.txt"), "changed", "utf8");
     await assert.rejects(
       verifyMatchedBackup({ scope, baselineVersion: "0.1.3", manifestSha256: fence.manifestSha256 }),
-      /backup media checksum mismatch/i,
+      /backup media (inventory|checksum) mismatch/i,
     );
   } finally {
     rmSync(repositoryRoot, { force: true, recursive: true });
@@ -208,6 +222,7 @@ test("default preflight validates fixture and every image before the first resou
         },
       };
     },
+    verifyPrerequisites: async () => events.push("prerequisites:verify"),
     writeEnvironment: async (values) => {
       events.push("environment:write");
       assert.equal(values.CANDIDATE_API_IMAGE, imageId);
@@ -242,9 +257,9 @@ test("default preflight validates fixture and every image before the first resou
         },
         verifyFixtureChecksums: async () => events.push("checksums:verify"),
       },
-    }), /restore fixture stop/i);
+    }), /restore-fixture phase failed/i);
 
-    assert.deepEqual(events.slice(0, 8), [
+    assert.deepEqual(events.slice(0, 9), [
       "manifest:validate",
       "expected:validate",
       "checksums:verify",
@@ -252,9 +267,67 @@ test("default preflight validates fixture and every image before the first resou
       "inspect:postgres",
       "inspect:minio",
       "inspect:candidate",
+      "prerequisites:verify",
       "environment:write",
     ]);
     assert.equal(events.indexOf("inspect:candidate") < events.indexOf("docker:up"), true);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("default preflight failure for a missing tool cannot write the run env or start resources", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-prerequisite-"));
+  const events = [];
+  const image = (repository) => ({ repository, digest: `sha256:${"c".repeat(64)}`, platform: "linux/amd64" });
+  const manifest = {
+    baseline: {
+      version: "0.1.3",
+      sourceSha: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      apiImage: image("baseline-api"),
+      postgresImage: image("postgres"),
+      minioImage: image("minio"),
+    },
+  };
+  const harness = {
+    inspectImage: async () => events.push("image:inspect"),
+    inspectCandidateImage: async () => ({
+      reference: "cmsify-candidate:test",
+      imageId: `sha256:${"d".repeat(64)}`,
+      platform: "linux/amd64",
+      version: "1.0.0",
+      sourceSha: candidateSourceSha,
+      informationalVersion: `1.0.0+${candidateSourceSha}`,
+    }),
+    verifyPrerequisites: async () => {
+      events.push("prerequisites:verify");
+      throw new Error("Docker prerequisite check failed.");
+    },
+    writeEnvironment: async () => events.push("environment:write"),
+    up: async () => events.push("docker:up"),
+    logs: async () => events.push("diagnostics:capture"),
+    cleanup: async () => events.push("owned-resources:cleanup"),
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "missing-prerequisite-001",
+      dependencies: {
+        createDockerHarness: () => harness,
+        loadFixtureManifest: () => manifest,
+        loadExpectedData: async () => ({ authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-password" } }),
+        verifyFixtureChecksums: async () => undefined,
+      },
+    }), /prerequisite/i);
+
+    assert.equal(events.includes("environment:write"), false);
+    assert.equal(events.includes("docker:up"), false);
+    assert.deepEqual(events.slice(-2), ["diagnostics:capture", "owned-resources:cleanup"]);
   } finally {
     rmSync(repositoryRoot, { force: true, recursive: true });
   }
@@ -296,6 +369,7 @@ test("default operations pass the candidate canary through isolated backup rollb
         "org.opencontainers.image.revision": candidateSourceSha,
       },
     }),
+    verifyPrerequisites: async () => ({ status: "passed" }),
     writeEnvironment: async () => events.push("environment:write"),
     up: async (services) => events.push(`up:${services.join(",")}`),
     stop: async (service) => events.push(`stop:${service}`),
@@ -362,6 +436,7 @@ test("default operations pass the candidate canary through isolated backup rollb
     assert.equal(report.phases.every(({ status }) => status === "passed"), true);
     assert.deepEqual(events.filter((event) => event.startsWith("up:candidate")), ["up:candidate-api"]);
     assert.ok(events.indexOf("backup:verify-again") < events.indexOf("upgraded-volumes:remove"));
+    assert.equal(events.filter((event) => event === "backup:verify-again").length, 2, "default discard must reverify again inside the destructive operation");
     const rollbackBaselineStart = events.lastIndexOf("up:baseline-api");
     assert.ok(events.indexOf("upgraded-volumes:remove") < events.lastIndexOf("copy:postgres:backup"));
     assert.ok(events.lastIndexOf("copy:postgres:backup") < rollbackBaselineStart);
@@ -442,10 +517,29 @@ test("CLI process forwards cancellation and sanitizes its failure", () => {
   const result = spawnSync(node, ["--input-type=module", "--eval", script], { cwd: repositoryRootForProcess, encoding: "utf8" });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Rehearsal cancelled/i);
+  assert.match(result.stderr, /rehearsal was cancelled/i);
   assert.equal(result.stderr.includes(secret), false);
   assert.equal(result.stderr.includes(repositoryRootForProcess), false);
-  assert.equal(result.stderr.includes("<fixture>"), true);
+  assert.equal(result.stderr.trim(), "Upgrade rehearsal was cancelled.");
+});
+
+test("CLI withholds arbitrary SQL, row, path, secret, and oversized failure text", () => {
+  const script = `
+    import { main } from "./eng/upgrade-tests/cli.mjs";
+    const exitCode = await main([
+      "rehearse", "--fixture", "tests/upgrade/fixtures/v0.1.3",
+      "--candidate-image", "cmsify-candidate:test", "--candidate-version", "1.0.0",
+      "--candidate-source-sha", "${candidateSourceSha}"
+    ], {
+      rehearse: async () => { throw new Error("SELECT password FROM users; row=user@example.test; token=raw-token; C:\\\\outside\\\\private.sql; " + "q".repeat(20_000)); },
+    });
+    process.exitCode = exitCode;
+  `;
+  const result = spawnSync(node, ["--input-type=module", "--eval", script], { cwd: repositoryRootForProcess, encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.trim(), "Upgrade rehearsal failed; diagnostic detail withheld.");
+  assert.ok(result.stderr.length <= 256);
 });
 
 test("pre-cancelled default rehearsal records failure and cleans without inspecting or starting images", async () => {
@@ -532,11 +626,11 @@ test("cleanup failure never replaces the primary rehearsal failure", async () =>
       runId: "cleanup-test-001",
       operations,
     }), (error) => {
-      assert.match(error.message, /candidate invariant failed/i);
+      assert.match(error.message, /candidate phase invariant failed/i);
       assert.equal(error.message.includes("cleanup-only-secret"), false);
       assert.ok(error.cause instanceof AggregateError);
-      assert.match(error.cause.errors[0].message, /candidate invariant failed/i);
-      assert.match(error.cause.errors[1].message, /cleanup-only-secret/i);
+      assert.match(error.cause.errors[0].message, /candidate phase invariant failed/i);
+      assert.equal(error.cause.errors[1].message, "Owned-resource cleanup failed; diagnostic detail withheld.");
       return true;
     });
   } finally {
@@ -616,10 +710,367 @@ test("report persistence failure cannot prevent diagnostics and owned cleanup", 
       runId: "report-failure-001",
       operations,
       reportWriter: async () => { throw new Error("report storage unavailable"); },
-    }), /report storage unavailable/i);
+    }), /report persistence failed/i);
 
     assert.deepEqual(events, ["diagnostics:capture", "owned-resources:cleanup"]);
   } finally {
     rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("rejects candidate SemVer build metadata before direct or CLI rehearsal", async () => {
+  assert.throws(() => validateCandidateInput({
+    candidateImage: "cmsify-candidate:test",
+    candidateVersion: "1.2.3+existing.build",
+    candidateSourceSha,
+  }), /build metadata/i);
+
+  const cli = resolve(repositoryRootForProcess, "eng", "upgrade-tests", "cli.mjs");
+  const result = spawnSync(node, [
+    cli, "rehearse", "--fixture", "fixture",
+    "--candidate-image", "cmsify-candidate:test", "--candidate-version", "1.2.3+existing.build",
+    "--candidate-source-sha", candidateSourceSha,
+  ], { cwd: repositoryRootForProcess, encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /build metadata/i);
+  assert.equal(result.stderr.includes("+existing.build+"), false);
+});
+
+test("does not let a destination-only media inventory certify a matched backup", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-source-inventory-"));
+  const scope = createRunScope(repositoryRoot, "source-inventory-001");
+  const first = "first media";
+  const second = "second media";
+  const source = [
+    { path: "cmsify/media/first.txt", body: first },
+    { path: "cmsify/media/second.txt", body: second },
+  ];
+  let checksumIndex = 0;
+  const harness = {
+    exec: async (service, args) => {
+      if (service === "minio" && args[0] === "mc" && args[1] === "ls") {
+        return {
+          exitCode: 0,
+          stdout: `${source.map(({ path, body }) => JSON.stringify({ key: path, size: Buffer.byteLength(body), type: "file" })).join("\n")}\n`,
+          stderr: "",
+          durationMs: 0,
+        };
+      }
+      if (service === "minio" && args[0] === "sha256sum") {
+        const item = source[checksumIndex++];
+        return { exitCode: 0, stdout: `${createHash("sha256").update(item.body).digest("hex")}  object\n`, stderr: "", durationMs: 0 };
+      }
+      return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    },
+    copyFrom: async (service, _source, destination) => {
+      if (service === "postgres") writeFileSync(destination, "database backup bytes");
+      else {
+        mkdirSync(resolve(destination, "cmsify", "media"), { recursive: true });
+        writeFileSync(resolve(destination, "cmsify", "media", "first.txt"), first);
+      }
+    },
+  };
+
+  try {
+    await assert.rejects(() => createMatchedBackup({
+      harness,
+      scope,
+      baselineVersion: "0.1.3",
+      now: () => "2026-08-27T12:00:00.000Z",
+    }), /source.*inventory|media inventory/i);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("re-verifies the exact backup inside discard after its running transition", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-discard-fence-"));
+  const events = [];
+  const snapshots = [];
+  let backupValid = true;
+  let verifyCount = 0;
+  const operations = successfulOperations(events);
+  operations.backupReverify = async () => {
+    events.push("backup:verify-again");
+    verifyCount += 1;
+  };
+  operations.discardUpgradedState = async () => {
+    events.push("backup:verify-inside-discard");
+    verifyCount += 1;
+    if (!backupValid) throw new Error("matched backup changed");
+    events.push("upgraded-volumes:remove");
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "discard-fence-001",
+      operations,
+      reportWriter: async (report) => {
+        snapshots.push(structuredClone(report));
+        if (report.phases.find(({ name }) => name === "backup-reverify").status === "passed") backupValid = false;
+      },
+    }), /backup/i);
+
+    assert.equal(verifyCount, 2);
+    assert.equal(events.includes("upgraded-volumes:remove"), false);
+    assert.equal(snapshots.at(-1).phases.find(({ name }) => name === "discard-upgraded-state").status, "failed");
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("rolls back in-memory transitions when report persistence fails", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-report-transaction-"));
+  const snapshots = [];
+  const events = [];
+  let writes = 0;
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "report-transaction-001",
+      operations: successfulOperations(events),
+      reportWriter: async (report) => {
+        writes += 1;
+        if (writes === 1) throw new Error("arbitrary persistence backend failure with password=hunter2");
+        snapshots.push(structuredClone(report));
+      },
+    }), (error) => {
+      assert.equal(error.phase, "preflight");
+      assert.equal(error.message.includes("hunter2"), false);
+      return true;
+    });
+
+    assert.deepEqual(events, ["diagnostics:capture", "owned-resources:cleanup"]);
+    const finalReport = snapshots.at(-1);
+    assert.equal(finalReport.phases[0].status, "failed");
+    assert.notEqual(finalReport.phases[0].status, "running");
+    assert.equal(finalReport.phases.at(-1).status, "passed");
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("terminalizes cleanup when its passed report write fails transiently", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-cleanup-transaction-"));
+  const snapshots = [];
+  let failedOnce = false;
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "cleanup-transaction-001",
+      operations: successfulOperations([]),
+      reportWriter: async (report) => {
+        if (!failedOnce && report.phases.at(-1).status === "passed") {
+          failedOnce = true;
+          throw new Error("cleanup report backend leaked row=(secret)");
+        }
+        snapshots.push(structuredClone(report));
+      },
+    }), (error) => {
+      assert.equal(error.phase, "cleanup");
+      assert.match(error.message, /report persistence/i);
+      assert.equal(error.message.includes("row=(secret)"), false);
+      return true;
+    });
+
+    const finalReport = snapshots.at(-1);
+    assert.equal(finalReport.status, "failed");
+    assert.equal(finalReport.phases.at(-1).status, "failed");
+    assert.equal(finalReport.phases.some(({ status }) => status === "running"), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("persists allow-listed partial evidence when an assertion phase fails", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-partial-evidence-"));
+  const snapshots = [];
+  const operations = successfulOperations([]);
+  operations.baseline = async () => {
+    const error = new Error("Invariant exact-migration-history failed: SELECT secret FROM rows");
+    error.safeEvidence = {
+      readiness: [{ service: "baseline-api", status: "ready", attempts: 3, path: "C:\\outside" }],
+      assertions: [{ name: "exact-migration-history", status: "failed", rows: [{ password: "secret" }] }],
+      sql: "SELECT secret FROM rows",
+    };
+    throw error;
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "partial-evidence-001",
+      operations,
+      reportWriter: async (report) => snapshots.push(structuredClone(report)),
+    }), /baseline phase invariant/i);
+
+    const evidence = snapshots.at(-1).phases.find(({ name }) => name === "baseline").evidence;
+    assert.deepEqual(evidence, {
+      readiness: [{ service: "baseline-api", status: "ready", attempts: 3 }],
+      assertions: [{ name: "exact-migration-history", status: "failed" }],
+    });
+    assert.equal(JSON.stringify(evidence).includes("SELECT"), false);
+    assert.equal(JSON.stringify(evidence).includes("outside"), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("keeps diagnostic-capture failure as bounded secondary evidence", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-diagnostic-secondary-"));
+  const snapshots = [];
+  const events = [];
+  const operations = successfulOperations(events, "candidate");
+  operations.captureDiagnostics = async () => {
+    events.push("diagnostics:capture");
+    throw new Error(`SELECT password FROM users; row=(token-secret); ${"x".repeat(20_000)}; C:\\outside\\secret.sql`);
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "diagnostic-secondary-001",
+      operations,
+      reportWriter: async (report) => snapshots.push(structuredClone(report)),
+    }), (error) => {
+      assert.equal(error.phase, "candidate");
+      assert.equal(error.cause instanceof AggregateError, true);
+      assert.match(error.cause.errors[0].message, /candidate/i);
+      assert.match(error.cause.errors[1].message, /diagnostic/i);
+      assert.equal(error.cause.errors[1].message.includes("SELECT"), false);
+      assert.ok(error.cause.errors[1].message.length <= 256);
+      return true;
+    });
+
+    const serialized = JSON.stringify(snapshots.at(-1));
+    for (const forbidden of ["SELECT", "row=(", "token-secret", "outside", "x".repeat(1_000)]) assert.equal(serialized.includes(forbidden), false);
+    assert.deepEqual(snapshots.at(-1).diagnostics, { status: "failed", code: "diagnostic-capture-failed" });
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("persists bounded allow-listed assertion and readiness evidence", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-evidence-"));
+  const events = [];
+  const operations = successfulOperations(events);
+  operations.baseline = async () => ({
+    readiness: [{ service: "baseline-api", status: "ready", attempts: 2 }],
+    assertions: [
+      { name: "exact-migration-history", status: "passed", detail: "SELECT * FROM __EFMigrationsHistory; password=secret" },
+      { name: "published-content", status: "passed", rows: [{ secret: "payload" }] },
+    ],
+  });
+
+  try {
+    const report = await rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "evidence-test-001",
+      operations,
+    });
+    const evidence = report.phases.find(({ name }) => name === "baseline").evidence;
+    assert.deepEqual(evidence.readiness, [{ service: "baseline-api", status: "ready", attempts: 2 }]);
+    assert.deepEqual(evidence.assertions, [
+      { name: "exact-migration-history", status: "passed" },
+      { name: "published-content", status: "passed" },
+    ]);
+    assert.equal(JSON.stringify(evidence).includes("SELECT"), false);
+    assert.ok(JSON.stringify(evidence).length <= 4_096);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("rejects a linked report directory without writing outside the owned run", async (t) => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-report-link-"));
+  const outside = mkdtempSync(resolve(tmpdir(), "cmsify-report-outside-"));
+  const ownedParent = resolve(repositoryRoot, "artifacts", "upgrade-tests");
+  mkdirSync(ownedParent, { recursive: true });
+  try {
+    try {
+      symlinkSync(outside, resolve(ownedParent, "linked-report-001"), process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) return t.skip("filesystem does not permit link creation");
+      throw error;
+    }
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "linked-report-001",
+      operations: successfulOperations([]),
+    }), /report persistence failed/i);
+    assert.equal(existsSync(resolve(outside, "report.json")), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+    rmSync(outside, { force: true, recursive: true });
+  }
+});
+
+test("rejects a linked backup manifest leaf", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-manifest-link-"));
+  const outside = mkdtempSync(resolve(tmpdir(), "cmsify-manifest-outside-"));
+  const scope = createRunScope(repositoryRoot, "linked-manifest-001");
+  const backup = resolve(scope.diagnosticsDirectory, "backup");
+  const media = resolve(backup, "media");
+  const database = "database";
+  const object = "media";
+  mkdirSync(media, { recursive: true });
+  writeFileSync(resolve(backup, "database.dump"), database);
+  writeFileSync(resolve(media, "object.txt"), object);
+  const mediaObjects = [{ path: "object.txt", size: Buffer.byteLength(object), sha256: createHash("sha256").update(object).digest("hex") }];
+  const manifest = {
+    schemaVersion: 1,
+    runId: scope.runId,
+    baselineVersion: "0.1.3",
+    createdAt: "2026-08-27T12:00:00.000Z",
+    databaseSha256: createHash("sha256").update(database).digest("hex"),
+    sourceMediaObjectCount: 1,
+    sourceMediaInventorySha256: createHash("sha256").update(JSON.stringify(mediaObjects)).digest("hex"),
+    mediaObjects,
+  };
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+  const outsideManifest = resolve(outside, "manifest.json");
+  writeFileSync(outsideManifest, manifestText);
+  try {
+    linkSync(outsideManifest, resolve(backup, "backup-manifest.json"));
+    await assert.rejects(() => verifyMatchedBackup({
+      scope,
+      baselineVersion: "0.1.3",
+      manifestSha256: createHash("sha256").update(manifestText).digest("hex"),
+    }), /manifest is missing|linked|reparse/i);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+    rmSync(outside, { force: true, recursive: true });
   }
 });
