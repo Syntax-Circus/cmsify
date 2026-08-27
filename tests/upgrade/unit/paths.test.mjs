@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
@@ -6,6 +7,7 @@ import test from "node:test";
 
 import { createDockerHarness } from "../../../eng/upgrade-tests/docker.mjs";
 import { createRunScope } from "../../../eng/upgrade-tests/paths.mjs";
+import { verifyMatchedBackup } from "../../../eng/upgrade-tests/rehearsal.mjs";
 
 const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-upgrade-paths-"));
 
@@ -265,6 +267,63 @@ test("discarding upgraded state label-verifies exact data containers and volumes
   assert.equal(calls.some(({ args }) => args.includes("prune") || args.includes("--volumes") || args.includes("down")), false);
 });
 
+test("final discard fence catches local media mutation from the source-inventory hook before first removal", async () => {
+  const root = mkdtempSync(resolve(tmpdir(), "cmsify-final-fence-"));
+  const scope = createRunScope(root, "final-fence-001");
+  const backup = resolve(scope.diagnosticsDirectory, "backup");
+  const media = resolve(backup, "media");
+  const mediaPath = resolve(media, "object.txt");
+  const database = "database bytes";
+  const originalMedia = "media";
+  mkdirSync(media, { recursive: true });
+  writeFileSync(resolve(backup, "database.dump"), database);
+  writeFileSync(mediaPath, originalMedia);
+  const mediaObjects = [{
+    path: "object.txt",
+    size: Buffer.byteLength(originalMedia),
+    sha256: createHash("sha256").update(originalMedia).digest("hex"),
+  }];
+  const manifest = {
+    schemaVersion: 1,
+    runId: scope.runId,
+    baselineVersion: "0.1.3",
+    createdAt: "2026-08-27T12:00:00.000Z",
+    databaseSha256: createHash("sha256").update(database).digest("hex"),
+    sourceMediaObjectCount: 1,
+    sourceMediaInventorySha256: createHash("sha256").update(JSON.stringify(mediaObjects)).digest("hex"),
+    mediaObjects,
+  };
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(resolve(backup, "backup-manifest.json"), manifestText);
+  const removals = [];
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) return { exitCode: 0, stdout: "postgres-id\nminio-id\n", stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(scope.labels), stderr: "", durationMs: 0 };
+    if (args[0] === "compose" && args.includes("mc") && args.includes("ls")) {
+      writeFileSync(mediaPath, "mutat");
+      return { exitCode: 0, stdout: `${JSON.stringify({ key: "object.txt", size: 5, type: "file" })}\n`, stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "compose" && args.includes("sha256sum")) {
+      return { exitCode: 0, stdout: `${mediaObjects[0].sha256}  object\n`, stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  try {
+    await assert.rejects(() => harness.discardDataVolumes({}, () => verifyMatchedBackup({
+      harness,
+      scope,
+      baselineVersion: "0.1.3",
+      manifestSha256: createHash("sha256").update(manifestText).digest("hex"),
+    })), /backup media checksum mismatch/i);
+    assert.deepEqual(removals, []);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
 test("captures logs before explicitly removing label-verified resources", async () => {
   const scope = createRunScope(repositoryRoot, "safe-run-004");
   const calls = [];
@@ -378,6 +437,26 @@ test("fails prerequisite probing before a Compose up when a required tool is mis
 
   assert.equal(calls.some(({ args }) => args[0] === "compose" && args.includes("up")), false);
   assert.equal(existsSync(harness.environmentFile), false);
+});
+
+test("preserves cancellation when an immutable-image prerequisite probe aborts", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-020");
+  const controller = new AbortController();
+  const executor = async (_command, args) => {
+    if (args.includes("pg_dump")) {
+      controller.abort();
+      throw new Error("raw prerequisite abort detail");
+    }
+    return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 0 };
+  };
+  const image = (repository) => ({ repository, digest: `sha256:${"a".repeat(64)}`, platform: "linux/amd64" });
+
+  await assert.rejects(() => createDockerHarness(scope, executor).verifyPrerequisites({
+    postgresImage: image("postgres"),
+    minioImage: image("minio"),
+    baselineApiImage: image("baseline-api"),
+    candidateImageId: `sha256:${"b".repeat(64)}`,
+  }, { signal: controller.signal }), /cancelled/i);
 });
 
 test("records unavailable diagnostics without Compose or an env write before resources start", async () => {

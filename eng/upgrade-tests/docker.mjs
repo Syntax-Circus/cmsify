@@ -221,6 +221,7 @@ export function createDockerHarness(scope, executor = runProcess) {
       const required = ["postgresImage", "minioImage", "baselineApiImage"];
       required.forEach((name) => assert(images[name] && typeof images[name] === "object", `Docker prerequisite ${name} is required.`));
       assert(typeof images.candidateImageId === "string" && IMAGE_ID.test(images.candidateImageId), "Docker prerequisite candidate image ID is required.");
+      if (options.signal?.aborted) throw new Error("Docker prerequisite check was cancelled.");
       const runLabels = Object.entries(scope.labels).flatMap(([name, value]) => ["--label", `${name}=${value}`]);
       // Tool presence cannot be proven from image metadata. Probe the already-inspected immutable
       // image with --pull=never, no network, --rm, and both ownership labels; no run env is written.
@@ -240,7 +241,10 @@ export function createDockerHarness(scope, executor = runProcess) {
         await probe(minio, "rm", ["-f", "/tmp/cmsify-prerequisite-nonexistent"]);
         await probe(imageReference(images.baselineApiImage), "curl");
         await probe(images.candidateImageId, "curl");
-      } catch {
+      } catch (error) {
+        if (options.signal?.aborted || (error instanceof ProcessFailure && /:\s*aborted$/i.test(error.phase))) {
+          throw new Error("Docker prerequisite check was cancelled.");
+        }
         throw new Error("Docker prerequisite check failed.");
       }
       return Object.freeze({ status: "passed", mode: "immutable-image-nonpersistent-probes" });
@@ -330,17 +334,29 @@ export function createDockerHarness(scope, executor = runProcess) {
       return compose(["cp", source, `${service}:${destination}`], "docker-compose-copy-to", undefined, options);
     },
 
-    async discardDataVolumes(options = {}) {
+    async discardDataVolumes(options = {}, finalFence) {
       assertLifecycleOptions(options);
+      assert(finalFence === undefined || typeof finalFence === "function", "Docker discard final fence must be a function.");
       const result = await compose(["ps", "--all", "--quiet", "postgres", "minio"], "docker-discard-state-discover-containers", undefined, options);
-      await removeResources(lines(result.stdout), "container", ["rm", "--force"], "docker-discard-state-remove-container", options);
-      await removeResources(
-        [`${scope.projectName}_postgres-data`, `${scope.projectName}_minio-data`],
-        "volume",
-        ["volume", "rm"],
-        "docker-discard-state-remove-volume",
-        options,
-      );
+      const containers = lines(result.stdout);
+      const volumes = [`${scope.projectName}_postgres-data`, `${scope.projectName}_minio-data`];
+      for (const container of containers) assert(await inspectLabels("container", container, options), "An owned data container disappeared before discard fencing.");
+      for (const volume of volumes) assert(await inspectLabels("volume", volume, options), "An owned data volume disappeared before discard fencing.");
+      if (finalFence) await finalFence();
+      for (const container of containers) {
+        try {
+          await execute("docker", ["rm", "--force", container], "docker-discard-state-remove-container", undefined, options);
+        } catch (error) {
+          if (!resourceWasAlreadyRemoved(error)) throw error;
+        }
+      }
+      for (const volume of volumes) {
+        try {
+          await execute("docker", ["volume", "rm", volume], "docker-discard-state-remove-volume", undefined, options);
+        } catch (error) {
+          if (!resourceWasAlreadyRemoved(error)) throw error;
+        }
+      }
     },
 
     async cleanup(options = {}) {

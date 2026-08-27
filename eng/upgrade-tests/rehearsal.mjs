@@ -333,15 +333,14 @@ function createDefaultOperations(context, dependencies = {}) {
 
     async discardUpgradedState() {
       throwIfCancelled(context.signal);
-      await verifyBackup({
+      await context.harness.discardDataVolumes(dockerOptions(context), () => verifyBackup({
         harness: context.harness,
         scope: context.scope,
         baselineVersion: context.manifest.baseline.version,
         manifestSha256: context.backup.manifestSha256,
         signal: context.signal,
         redact: context.redactions,
-      });
-      await context.harness.discardDataVolumes(dockerOptions(context));
+      }));
       return { backupVerified: true, dataVolumesDiscarded: true };
     },
 
@@ -530,6 +529,9 @@ export async function verifyMatchedBackup({ harness, scope, baselineVersion, man
   assert(typeof manifestSha256 === "string" && /^[0-9a-f]{64}$/.test(manifestSha256), "Matched backup manifest SHA-256 is required.");
   const backupDirectory = backupDirectoryFor(scope);
   throwIfCancelled(signal);
+  // Docker/source inventory is the externally injectable hook. Observe it first so the
+  // manifest and every local member are checked only after that hook has fully settled.
+  const observedSource = sourceMediaInventory ?? (harness ? await captureSourceMediaInventory({ harness, signal, redact }) : undefined);
   const manifestPath = resolve(backupDirectory, "backup-manifest.json");
   let manifestText;
   try {
@@ -568,7 +570,6 @@ export async function verifyMatchedBackup({ harness, scope, baselineVersion, man
     assert(actualMedia[index].sha256 === manifest.mediaObjects[index].sha256, "Matched backup media checksum mismatch.");
   }
   assert(inventorySha256(manifest.mediaObjects) === manifest.sourceMediaInventorySha256, "Matched backup source inventory fence mismatch.");
-  const observedSource = sourceMediaInventory ?? (harness ? await captureSourceMediaInventory({ harness, signal, redact }) : undefined);
   if (observedSource !== undefined) assert(inventoriesEqual(observedSource, manifest.mediaObjects), "Matched backup source inventory changed or is incomplete.");
   return Object.freeze({ backupDirectory, manifestSha256, manifest: Object.freeze(manifest) });
 }
@@ -634,6 +635,14 @@ class ReportPersistenceFailure extends Error {
     this.name = "ReportPersistenceFailure";
     this.phaseName = phaseName;
     this.status = status;
+  }
+}
+
+class CleanupBoundaryFailure extends AggregateError {
+  constructor(records) {
+    super(records.map(({ error }) => error), "Cleanup boundary failed.", { cause: records[0].error });
+    this.name = "CleanupBoundaryFailure";
+    this.records = records;
   }
 }
 
@@ -710,6 +719,7 @@ export async function rehearse(options) {
   const operations = options.operations ?? createDefaultOperations(context, options.dependencies);
   let primaryFailure;
   let primaryPhase;
+  let primaryKind;
   const secondaryFailures = [];
 
   const commit = async (phaseName, status, mutate) => {
@@ -826,13 +836,13 @@ export async function rehearse(options) {
       await transition("cleanup", "running");
     } catch (error) {
       startFailure = error;
-      failures.push(error);
+      failures.push({ error });
     }
     try {
       await operations.cleanup(context);
     } catch (error) {
       cleanupFailure = error;
-      failures.push(error);
+      failures.push({ error, kind: "cleanup" });
     }
     try {
       const cleanupPhase = report.phases.at(-1);
@@ -855,10 +865,9 @@ export async function rehearse(options) {
         });
       }
     } catch (error) {
-      failures.push(error);
+      failures.push({ error });
     }
-    if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) throw new AggregateError(failures, messageOf(failures[0]), { cause: failures[0] });
+    if (failures.length > 0) throw new CleanupBoundaryFailure(failures);
   };
 
   try {
@@ -901,21 +910,30 @@ export async function rehearse(options) {
     try {
       await runCleanup();
     } catch (cleanupFailure) {
+      const records = cleanupFailure instanceof CleanupBoundaryFailure
+        ? cleanupFailure.records
+        : [{ error: cleanupFailure, kind: "cleanup" }];
+      const boundary = records[0];
       if (report.phases.at(-1).status === "running") {
         try {
-          await terminalizeFailedPhase("cleanup", cleanupFailure);
+          await terminalizeFailedPhase("cleanup", boundary.error);
         } catch (reportFailure) {
           secondaryFailures.push({ error: reportFailure, phase: "cleanup" });
         }
       }
-      if (primaryFailure === undefined) primaryFailure = cleanupFailure;
-      if (primaryPhase === undefined) primaryPhase = "cleanup";
-      else secondaryFailures.push({ error: cleanupFailure, phase: "cleanup", kind: "cleanup" });
+      if (primaryFailure === undefined) {
+        primaryFailure = boundary.error;
+        primaryKind = boundary.kind;
+        primaryPhase = "cleanup";
+        secondaryFailures.push(...records.slice(1).map(({ error, kind }) => ({ error, phase: "cleanup", kind })));
+      } else {
+        secondaryFailures.push(...records.map(({ error, kind }) => ({ error, phase: "cleanup", kind })));
+      }
     }
   }
 
   if (primaryFailure !== undefined) {
-    const primarySafeError = safeError(primaryFailure, primaryPhase);
+    const primarySafeError = safeError(primaryFailure, primaryPhase, primaryKind);
     const causes = [primarySafeError, ...secondaryFailures.map(({ error, phase, kind }) => safeError(error, phase, kind))];
     const cause = causes.length === 1 ? causes[0] : new AggregateError(causes, primarySafeError.message, { cause: primarySafeError });
     throw new RehearsalFailure(primarySafeError.message, {

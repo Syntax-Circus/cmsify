@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createMatchedBackup, rehearse, validateCandidateInput, verifyMatchedBackup } from "../../../eng/upgrade-tests/rehearsal.mjs";
+import { createDockerHarness } from "../../../eng/upgrade-tests/docker.mjs";
 import { createRunScope } from "../../../eng/upgrade-tests/paths.mjs";
 
 const candidateSourceSha = "0123456789abcdef0123456789abcdef01234567";
@@ -333,6 +334,81 @@ test("default preflight failure for a missing tool cannot write the run env or s
   }
 });
 
+test("default preflight reports an aborted immutable-image tool probe as cancellation", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-prerequisite-cancel-"));
+  const controller = new AbortController();
+  const digest = `sha256:${"c".repeat(64)}`;
+  const image = (repository) => ({ repository, digest, platform: "linux/amd64" });
+  const manifest = {
+    baseline: {
+      version: "0.1.3",
+      sourceSha: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      apiImage: image("baseline-api"),
+      postgresImage: image("postgres"),
+      minioImage: image("minio"),
+    },
+  };
+  const candidateId = `sha256:${"d".repeat(64)}`;
+  const calls = [];
+  const executor = async (_command, args) => {
+    calls.push(args);
+    if (args[0] === "image" && args[1] === "inspect") {
+      const reference = args.at(-1);
+      if (reference === "cmsify-candidate:test") return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          Id: candidateId,
+          Os: "linux",
+          Architecture: "amd64",
+          Config: { Labels: {
+            "org.opencontainers.image.version": "1.0.0",
+            "org.opencontainers.image.revision": candidateSourceSha,
+          } },
+        }),
+        stderr: "",
+        durationMs: 0,
+      };
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({ Os: "linux", Architecture: "amd64", RepoDigests: [reference] }),
+        stderr: "",
+        durationMs: 0,
+      };
+    }
+    if (args.includes("pg_dump")) {
+      controller.abort();
+      throw new Error("raw tool abort detail token=secret");
+    }
+    return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 0 };
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "cancel-prerequisite-001",
+      signal: controller.signal,
+      dependencies: {
+        createDockerHarness: (scope) => createDockerHarness(scope, executor),
+        loadFixtureManifest: () => manifest,
+        loadExpectedData: async () => ({ authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-password" } }),
+        verifyFixtureChecksums: async () => undefined,
+      },
+    }), (error) => {
+      assert.equal(error.phase, "preflight");
+      assert.match(error.message, /cancelled/i);
+      assert.equal(error.message.includes("secret"), false);
+      return true;
+    });
+    assert.equal(calls.some((args) => args[0] === "compose" && args.includes("up")), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
 test("default operations pass the candidate canary through isolated backup rollback", async () => {
   const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-default-"));
   const fixtureDirectory = resolve(repositoryRoot, "fixture");
@@ -379,7 +455,11 @@ test("default operations pass the candidate canary through isolated backup rollb
       return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
     },
     copyTo: async (service, source) => events.push(`copy:${service}:${source.includes("backup") ? "backup" : "fixture"}`),
-    discardDataVolumes: async () => events.push("upgraded-volumes:remove"),
+    discardDataVolumes: async (_options, finalFence) => {
+      events.push("upgraded-volumes:resolve");
+      await finalFence();
+      events.push("upgraded-volumes:remove");
+    },
     logs: async () => events.push("diagnostics:capture"),
     cleanup: async () => events.push("owned-resources:cleanup"),
   };
@@ -886,13 +966,57 @@ test("terminalizes cleanup when its passed report write fails transiently", asyn
       assert.equal(error.phase, "cleanup");
       assert.match(error.message, /report persistence/i);
       assert.equal(error.message.includes("row=(secret)"), false);
+      assert.equal(error.cause.code, "report-persistence-failed");
+      assert.equal(error.cause.phase, "cleanup");
       return true;
     });
 
     const finalReport = snapshots.at(-1);
     assert.equal(finalReport.status, "failed");
     assert.equal(finalReport.phases.at(-1).status, "failed");
+    assert.equal(finalReport.phases.at(-1).errorCode, "report-persistence-failed");
     assert.equal(finalReport.phases.some(({ status }) => status === "running"), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("classifies cleanup transition persistence separately from owned-resource cleanup", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-cleanup-boundary-"));
+  const snapshots = [];
+  const events = [];
+  const operations = successfulOperations(events, "candidate");
+  let failedCleanupTransition = false;
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "cleanup-boundary-001",
+      operations,
+      reportWriter: async (report) => {
+        if (!failedCleanupTransition && report.phases.at(-1).status === "running") {
+          failedCleanupTransition = true;
+          throw new Error("report backend row=(secret)");
+        }
+        snapshots.push(structuredClone(report));
+      },
+    }), (error) => {
+      assert.equal(error.phase, "candidate");
+      assert.equal(error.cause instanceof AggregateError, true);
+      assert.equal(error.cause.errors[1].code, "report-persistence-failed");
+      assert.equal(error.cause.errors[1].phase, "cleanup");
+      assert.equal(error.cause.errors[1].message.includes("row=(secret)"), false);
+      return true;
+    });
+
+    assert.equal(events.at(-1), "owned-resources:cleanup");
+    const cleanup = snapshots.at(-1).phases.at(-1);
+    assert.equal(cleanup.status, "failed");
+    assert.equal(cleanup.errorCode, "report-persistence-failed");
   } finally {
     rmSync(repositoryRoot, { force: true, recursive: true });
   }
