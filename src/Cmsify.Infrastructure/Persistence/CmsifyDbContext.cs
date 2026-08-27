@@ -32,6 +32,10 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
 
+    public DbSet<MediaDeletionIntent> MediaDeletionIntents => Set<MediaDeletionIntent>();
+
+    public DbSet<MediaReconciliationCheckpoint> MediaReconciliationCheckpoints => Set<MediaReconciliationCheckpoint>();
+
     public DbSet<Tag> Tags => Set<Tag>();
 
     public DbSet<ContentItemTag> ContentItemTags => Set<ContentItemTag>();

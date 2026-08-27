@@ -24,6 +24,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="SyntaxCircus.EntityFrameworkCore.Postgres" />
+    <PackageReference Include="SyntaxCircus.Storage" />
     <PackageReference Include="UUIDNext" />
   </ItemGroup>
 </Project>

@@ -10,6 +10,7 @@ public static class CmsifyOperationalMetrics
     private static long pendingOutbox;
     private static long dueDeliveries;
     private static long dueScheduled;
+    private static long pendingMediaDeletion;
     private static SecretRotationRemainingSnapshot secretRotationRemaining = SecretRotationRemainingSnapshot.Empty;
 
     private static readonly Counter<long> OutboxClaimed = Meter.CreateCounter<long>("cmsify.webhook.outbox.claimed");
@@ -33,12 +34,22 @@ public static class CmsifyOperationalMetrics
     private static readonly Counter<long> SecretRotationRows = Meter.CreateCounter<long>("cmsify.webhook.secret.rotation.rows");
     private static readonly Counter<long> SecretRotationCycles = Meter.CreateCounter<long>("cmsify.webhook.secret.rotation.cycles");
     private static readonly Histogram<double> SecretRotationDuration = Meter.CreateHistogram<double>("cmsify.webhook.secret.rotation.duration", unit: "s");
+    private static readonly Counter<long> MediaCycleFailures = Meter.CreateCounter<long>("cmsify.media.reconciliation.cycle_failures");
+    private static readonly Counter<long> MediaDeletionClaims = Meter.CreateCounter<long>("cmsify.media.deletion.claimed");
+    private static readonly Counter<long> MediaDeletionReclaims = Meter.CreateCounter<long>("cmsify.media.deletion.reclaimed");
+    private static readonly Counter<long> MediaDeletionOutcomes = Meter.CreateCounter<long>("cmsify.media.deletion.outcome");
+    private static readonly Counter<long> MediaDeletionRetries = Meter.CreateCounter<long>("cmsify.media.deletion.retried");
+    private static readonly Counter<long> MediaStaleUploads = Meter.CreateCounter<long>("cmsify.media.upload.stale");
+    private static readonly Counter<long> MediaMissingBlobs = Meter.CreateCounter<long>("cmsify.media.blob.missing");
+    private static readonly Counter<long> MediaScans = Meter.CreateCounter<long>("cmsify.media.scan");
+    private static readonly Counter<long> MediaOrphans = Meter.CreateCounter<long>("cmsify.media.orphan.discovered");
 
     static CmsifyOperationalMetrics()
     {
         Meter.CreateObservableGauge("cmsify.webhook.outbox.pending", () => Volatile.Read(ref pendingOutbox));
         Meter.CreateObservableGauge("cmsify.webhook.delivery.due", () => Volatile.Read(ref dueDeliveries));
         Meter.CreateObservableGauge("cmsify.schedule.due", () => Volatile.Read(ref dueScheduled));
+        Meter.CreateObservableGauge("cmsify.media.deletion.pending", () => Volatile.Read(ref pendingMediaDeletion));
         Meter.CreateObservableGauge("cmsify.webhook.secret.rotation.remaining", ObserveSecretRotationRemaining);
     }
 
@@ -71,6 +82,30 @@ public static class CmsifyOperationalMetrics
     }
     public static void RecordSecretRotationCycle(string outcome) => SecretRotationCycles.Add(1, new KeyValuePair<string, object?>("outcome", NormalizeSecretRotationCycleOutcome(outcome)));
     public static void RecordSecretRotationDuration(TimeSpan duration) => SecretRotationDuration.Record(duration.TotalSeconds);
+    public static void RecordMediaCycleFailure() => MediaCycleFailures.Add(1);
+    public static void ReportMediaPendingDeletion(long value) => Interlocked.Exchange(ref pendingMediaDeletion, Math.Max(0, value));
+    public static void RecordMediaDeletionClaim(string provider, bool reclaimed)
+    {
+        var tag = new KeyValuePair<string, object?>("provider", NormalizeMediaProvider(provider));
+        MediaDeletionClaims.Add(1, tag);
+        if (reclaimed) MediaDeletionReclaims.Add(1, tag);
+    }
+    public static void RecordMediaDeletion(string provider, string reason, string outcome) => MediaDeletionOutcomes.Add(1,
+        new KeyValuePair<string, object?>("provider", NormalizeMediaProvider(provider)),
+        new KeyValuePair<string, object?>("reason", NormalizeMediaReason(reason)),
+        new KeyValuePair<string, object?>("outcome", NormalizeMediaOutcome(outcome)));
+    public static void RecordMediaRetry(string provider, string reason) => MediaDeletionRetries.Add(1,
+        new KeyValuePair<string, object?>("provider", NormalizeMediaProvider(provider)),
+        new KeyValuePair<string, object?>("reason", NormalizeMediaReason(reason)));
+    public static void RecordMediaStaleUpload(string provider, long count) => MediaStaleUploads.Add(count,
+        new KeyValuePair<string, object?>("provider", NormalizeMediaProvider(provider)));
+    public static void RecordMediaMissing(string provider) => MediaMissingBlobs.Add(1,
+        new KeyValuePair<string, object?>("provider", NormalizeMediaProvider(provider)));
+    public static void RecordMediaScan(string provider, string outcome) => MediaScans.Add(1,
+        new KeyValuePair<string, object?>("provider", NormalizeMediaProvider(provider)),
+        new KeyValuePair<string, object?>("outcome", NormalizeMediaOutcome(outcome)));
+    public static void RecordMediaOrphan(string provider) => MediaOrphans.Add(1,
+        new KeyValuePair<string, object?>("provider", NormalizeMediaProvider(provider)));
     public static void ReportSecretRotationRemaining(IEnumerable<SecretCiphertextCount> counts, IEnumerable<string> configuredKeyIds)
     {
         var configured = configuredKeyIds.Distinct(StringComparer.Ordinal).ToArray();
@@ -147,6 +182,30 @@ public static class CmsifyOperationalMetrics
     {
         "succeeded" => "succeeded",
         "failed" => "failed",
+        _ => "failed"
+    };
+
+    private static string NormalizeMediaProvider(string provider) => provider.ToLowerInvariant() switch
+    {
+        "local" => "local",
+        "s3" => "s3",
+        _ => "unknown"
+    };
+
+    private static string NormalizeMediaReason(string reason) => reason switch
+    {
+        "user_delete" => "user_delete",
+        "abandoned_upload" => "abandoned_upload",
+        "orphan" => "orphan",
+        "migration_deleted" => "migration_deleted",
+        "provider_mismatch" => "provider_mismatch",
+        _ => "unknown"
+    };
+
+    private static string NormalizeMediaOutcome(string outcome) => outcome switch
+    {
+        "succeeded" => "succeeded",
+        "skipped" => "skipped",
         _ => "failed"
     };
 

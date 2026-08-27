@@ -25,6 +25,8 @@ public sealed partial class ModelConfigurationTests
             typeof(ContentItem),
             typeof(ContentFieldValue),
             typeof(MediaAsset),
+            typeof(MediaDeletionIntent),
+            typeof(MediaReconciliationCheckpoint),
             typeof(Tag),
             typeof(ContentItemTag),
             typeof(User),
@@ -41,6 +43,19 @@ public sealed partial class ModelConfigurationTests
         {
             Assert.NotNull(model.FindEntityType(mappedType));
         }
+    }
+
+    [Fact]
+    public void MediaLifecycle_HasOneLiveDeletionIntentAndOneCheckpointPerProviderPrefix()
+    {
+        var intent = GetEntityType(typeof(MediaDeletionIntent));
+        var checkpoint = GetEntityType(typeof(MediaReconciliationCheckpoint));
+
+        Assert.Contains(intent.GetIndexes(), index =>
+            index.IsUnique && index.GetFilter() == "completed_at IS NULL");
+        Assert.Contains(checkpoint.GetIndexes(), index =>
+            index.IsUnique && index.Properties.Select(property => property.Name)
+                .SequenceEqual([nameof(MediaReconciliationCheckpoint.Provider), nameof(MediaReconciliationCheckpoint.Prefix)]));
     }
 
     [Fact]

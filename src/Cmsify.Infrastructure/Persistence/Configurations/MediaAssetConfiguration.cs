@@ -13,6 +13,7 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
         builder.ConfigureXminConcurrency();
 
         builder.HasIndex(asset => asset.WorkspaceId);
+        builder.HasIndex(asset => new { asset.BlobState, asset.BlobStateChangedAt });
 
         builder.HasOne<Workspace>()
             .WithMany()
@@ -24,5 +25,6 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
         builder.Property(asset => asset.StorageKey).HasMaxLength(1_000).IsRequired();
         builder.Property(asset => asset.StorageProvider).HasMaxLength(50).IsRequired();
         builder.Property(asset => asset.AltText).HasMaxLength(500);
+        builder.Property(asset => asset.BlobState).HasConversion<string>().HasMaxLength(50).IsRequired();
     }
 }

@@ -96,3 +96,13 @@ public enum AuditAction
     Deleted,
     StatusChanged
 }
+
+public enum MediaBlobState
+{
+    PendingUpload,
+    Available,
+    UploadFailed,
+    DeletePending,
+    Deleted,
+    Missing
+}

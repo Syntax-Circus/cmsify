@@ -131,6 +131,26 @@ public sealed class CmsifyOperationalMetricsTests
         Assert.DoesNotContain(measurements.SelectMany(measurement => measurement.Tags), tag => tag.Key is "endpoint" or "workspace" or "ciphertext");
     }
 
+    [Fact]
+    public void MediaMetrics_NormalizeProviderReasonAndOutcomeLabels()
+    {
+        var (listener, measurements) = CreateListener();
+        using (listener)
+        {
+            CmsifyOperationalMetrics.RecordMediaDeletionClaim("attacker-provider", reclaimed: true);
+            CmsifyOperationalMetrics.RecordMediaDeletion("attacker-provider", "asset-secret", "attacker-outcome");
+            CmsifyOperationalMetrics.RecordMediaRetry("attacker-provider", "exception text");
+            CmsifyOperationalMetrics.RecordMediaOrphan("attacker-provider");
+            CmsifyOperationalMetrics.RecordMediaMissing("attacker-provider");
+            CmsifyOperationalMetrics.RecordMediaScan("attacker-provider", "attacker-outcome");
+
+            AssertMetric(measurements, "cmsify.media.deletion.claimed", ["provider"], ["unknown"]);
+            AssertMetric(measurements, "cmsify.media.deletion.outcome", ["provider", "reason", "outcome"], ["unknown", "unknown", "failed"]);
+            AssertMetric(measurements, "cmsify.media.deletion.retried", ["provider", "reason"], ["unknown", "unknown"]);
+            Assert.DoesNotContain(measurements.SelectMany(measurement => measurement.Tags), tag => tag.Value?.ToString() is "asset-secret" or "exception text");
+        }
+    }
+
     private static void AssertMetric(
         IEnumerable<(string Name, List<KeyValuePair<string, object?>> Tags)> measurements,
         string name,

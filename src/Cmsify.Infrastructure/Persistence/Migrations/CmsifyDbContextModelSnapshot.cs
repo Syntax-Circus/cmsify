@@ -830,6 +830,20 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("alt_text");
 
+                    b.Property<string>("BlobState")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("blob_state");
+
+                    b.Property<DateTimeOffset>("BlobStateChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("blob_state_changed_at");
+
+                    b.Property<DateTimeOffset?>("BlobVerifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("blob_verified_at");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -845,6 +859,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("DeletedByUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("deleted_by_user_id");
+
+                    b.Property<DateTimeOffset?>("DeletionRequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deletion_requested_at");
 
                     b.Property<string>("FileName")
                         .IsRequired()
@@ -863,6 +881,14 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("mime_type");
+
+                    b.Property<DateTimeOffset?>("MissingDetectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("missing_detected_at");
+
+                    b.Property<DateTimeOffset?>("PurgeAfter")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("purge_after");
 
                     b.Property<long>("SizeBytes")
                         .HasColumnType("bigint")
@@ -884,6 +910,14 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
+                    b.Property<DateTimeOffset?>("UploadCompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("upload_completed_at");
+
+                    b.Property<DateTimeOffset?>("UploadFailedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("upload_failed_at");
+
                     b.Property<Guid>("WorkspaceId")
                         .HasColumnType("uuid")
                         .HasColumnName("workspace_id");
@@ -900,7 +934,159 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.HasIndex("WorkspaceId")
                         .HasDatabaseName("ix_media_assets_workspace_id");
 
+                    b.HasIndex("BlobState", "BlobStateChangedAt")
+                        .HasDatabaseName("ix_media_assets_blob_state_blob_state_changed_at");
+
                     b.ToTable("media_assets", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.MediaDeletionIntent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<Guid?>("MediaAssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("media_asset_id");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<DateTimeOffset>("NotBefore")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("not_before");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("storage_key");
+
+                    b.HasKey("Id")
+                        .HasName("pk_media_deletion_intents");
+
+                    b.HasIndex("MediaAssetId")
+                        .HasDatabaseName("ix_media_deletion_intents_media_asset_id");
+
+                    b.HasIndex("Provider", "StorageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_media_deletion_intents_provider_storage_key")
+                        .HasFilter("completed_at IS NULL");
+
+                    b.HasIndex("CompletedAt", "NextAttemptAt", "LeaseExpiresAt")
+                        .HasDatabaseName("ix_media_deletion_intents_completed_at_next_attempt_at_lease_e");
+
+                    b.ToTable("media_deletion_intents", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.MediaReconciliationCheckpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("AfterKey")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("after_key");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("LastScanCompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_scan_completed_at");
+
+                    b.Property<DateTimeOffset?>("LastScanStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_scan_started_at");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<string>("Prefix")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("prefix");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_media_reconciliation_checkpoints");
+
+                    b.HasIndex("Provider", "Prefix")
+                        .IsUnique()
+                        .HasDatabaseName("ix_media_reconciliation_checkpoints_provider_prefix");
+
+                    b.ToTable("media_reconciliation_checkpoints", (string)null);
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickList", b =>
@@ -2188,6 +2374,15 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_media_assets_workspaces_workspace_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Core.Domain.Entities.MediaDeletionIntent", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("MediaAssetId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_media_deletion_intents_media_assets_media_asset_id");
                 });
 
             modelBuilder.Entity("Cmsify.Core.Domain.Entities.PickList", b =>

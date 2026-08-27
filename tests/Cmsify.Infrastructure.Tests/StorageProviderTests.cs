@@ -1,11 +1,34 @@
 using System.Text;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Cmsify.Core.Interfaces.Services;
 
 namespace Cmsify.Infrastructure.Tests;
 
 public sealed class StorageProviderTests
 {
+    [Fact]
+    public void AddStorageProvider_UsesSharedProviderAndMapsLegacyBasePath()
+    {
+        var basePath = Path.Combine(Path.GetTempPath(), "cmsify-storage-registration", Guid.NewGuid().ToString("N"));
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Storage:Provider"] = "LOCAL",
+            ["Storage:Local:BasePath"] = basePath
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddStorageProvider(configuration);
+
+        using var serviceProvider = services.BuildServiceProvider();
+
+        serviceProvider.GetRequiredService<SyntaxCircus.Storage.IStorageProvider>()
+            .ShouldBeOfType<SyntaxCircus.Storage.LocalFileStorageProvider>();
+        serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SyntaxCircus.Storage.LocalStorageOptions>>()
+            .Value.RootPath.ShouldBe(basePath);
+        serviceProvider.GetRequiredService<IStorageProvider>().ShouldNotBeNull();
+    }
+
     [Fact]
     public async Task LocalFileSystemStorageProvider_StoresRetrievesAndDeletesFile()
     {

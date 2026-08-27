@@ -60,6 +60,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IScheduledPublishingRepository, ScheduledPublishingRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddStorageProvider(configuration);
+        services.AddOptions<MediaOperationalOptions>()
+            .Bind(configuration.GetSection(MediaOperationalOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<MediaOperationalOptions>, MediaOperationalOptionsValidator>();
+        services.AddScoped<IMediaReconciliationRepository, MediaReconciliationRepository>();
         services.AddOptions<WebhookOperationalOptions>()
             .Bind(configuration.GetSection(WebhookOperationalOptions.SectionName))
             .ValidateOnStart();
@@ -88,6 +93,12 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
             provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SchedulerOperationalOptions>>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ScheduledPublishingService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new MediaReconciliationService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<MediaOperationalOptions>>(),
+            configuration,
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MediaReconciliationService>>()));
         services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookDispatchService(
             provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
             provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
