@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,13 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const readRepositoryFile = (relativePath) =>
   readFileSync(path.join(repositoryRoot, relativePath), "utf8");
+const getTrackedFiles = (...pathspecs) =>
+  execFileSync("git", ["ls-files", "--", ...pathspecs], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  })
+    .split(/\r?\n/)
+    .filter(Boolean);
 
 test("pins the SDK used for locked solution restores", () => {
   const globalJson = JSON.parse(readRepositoryFile("global.json"));
@@ -26,8 +33,7 @@ test("enables lock files and maintains one for every solution project", () => {
     .map((match) => match[1].replaceAll("\\", "/"));
   const expectedLockFiles = projectPaths.map((projectPath) =>
     path.posix.join(path.posix.dirname(projectPath), "packages.lock.json"));
-  const lockFiles = expectedLockFiles.filter((lockFile) =>
-    existsSync(path.join(repositoryRoot, lockFile)));
+  const lockFiles = getTrackedFiles(":(glob)**/packages.lock.json");
 
   assert.equal(
     directoryBuildProps.includes("<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>"),
@@ -38,13 +44,7 @@ test("enables lock files and maintains one for every solution project", () => {
 });
 
 test("does not track a local NuGet feed configuration", () => {
-  const trackedNuGetConfigs = execFileSync(
-    "git",
-    ["ls-files", "--", "*NuGet.Config", "*nuget.config"],
-    { cwd: repositoryRoot, encoding: "utf8" },
-  )
-    .split(/\r?\n/)
-    .filter(Boolean);
+  const trackedNuGetConfigs = getTrackedFiles("*NuGet.Config", "*nuget.config");
 
   for (const configPath of trackedNuGetConfigs) {
     assert.equal(readRepositoryFile(configPath).includes("artifacts/local-nuget"), false);
