@@ -21,6 +21,7 @@ public sealed class CmsifyClient
     private readonly HttpClient httpClient;
     private readonly CmsifyClientOptions options;
     private readonly HttpRequestResiliencePipeline resiliencePipeline;
+    private readonly bool enableRetries;
     private readonly ConcurrentDictionary<string, string> etags = new(StringComparer.OrdinalIgnoreCase);
 
     public CmsifyClient(CmsifyClientOptions options)
@@ -37,6 +38,7 @@ public sealed class CmsifyClient
         this.httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.resiliencePipeline = resiliencePipeline ?? throw new ArgumentNullException(nameof(resiliencePipeline));
+        enableRetries = options.EnableRetries;
         if (options.BaseUrl is not null)
         {
             httpClient.BaseAddress = options.BaseUrl;
@@ -281,7 +283,7 @@ public sealed class CmsifyClient
     private Uri CreateUri(string path) => new(httpClient.BaseAddress ?? throw new InvalidOperationException("Cmsify BaseUrl is not configured."), path.TrimStart('/'));
 
     private HttpRequestReplaySafety GetReplaySafety(HttpMethod method) =>
-        options.EnableRetries && (method == HttpMethod.Get || method == HttpMethod.Head || method == HttpMethod.Options)
+        enableRetries && (method == HttpMethod.Get || method == HttpMethod.Head || method == HttpMethod.Options)
             ? HttpRequestReplaySafety.Replayable
             : HttpRequestReplaySafety.NotReplayable;
 

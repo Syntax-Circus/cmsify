@@ -314,6 +314,34 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task DirectClient_EnableRetriesIsSnapshottedAtConstructionForReplayFencing()
+    {
+        var attempts = 0;
+        var options = new CmsifyClientOptions
+        {
+            BaseUrl = new Uri("https://cms.test"),
+            EnableRetries = true,
+            MaxRetryAttempts = 2,
+            RequestTimeout = TimeSpan.FromSeconds(2),
+        };
+        var pipeline = new HttpRequestResiliencePipeline("cmsify-test", TestPipelineOptions(options));
+        var client = new CmsifyClient(
+            new HttpClient(new AsyncStubHandler((_, _) => Task.FromResult(
+                ++attempts == 1
+                    ? Response(HttpStatusCode.ServiceUnavailable)
+                    : Json(HttpStatusCode.OK, new { value = "ok" })))),
+            options,
+            pipeline);
+
+        options.EnableRetries = false;
+
+        var result = await client.GetAsync<JsonValue>("/snapshotted-retries", TestContext.Current.CancellationToken);
+
+        result!.Value.ShouldBe("ok");
+        attempts.ShouldBe(2);
+    }
+
+    [Fact]
     public void PipelineAwareConstructor_SetsHttpClientTimeoutToInfinite()
     {
         var options = new CmsifyClientOptions
