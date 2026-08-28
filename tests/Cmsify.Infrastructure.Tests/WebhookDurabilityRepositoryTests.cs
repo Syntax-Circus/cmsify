@@ -658,21 +658,24 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         Assert.Equal(51, await CountUnclaimedOutboxEventsAsync());
 
         await ResetOutboxLeasesAsync();
-        var barrier = new ConcurrentClaimBarrierInterceptor("webhook_outbox_events");
-        await using var concurrentContextA = await CreateContextAsync(barrier);
-        await using var concurrentContextB = await CreateContextAsync(barrier);
+        var overlap = new ClaimLockOverlapInterceptor("webhook_outbox_events");
+        await using var concurrentContextA = await CreateContextAsync(overlap);
+        await using var concurrentContextB = await CreateContextAsync(overlap);
         Assert.NotSame(
             concurrentContextA.Database.GetDbConnection(),
             concurrentContextB.Database.GetDbConnection());
 
-        var concurrent = await Task.WhenAll(
-            CreateRepository(concurrentContextA).ClaimOutboxEventsAsync(
+        var concurrent = await ClaimWithVerifiedLockOverlapAsync(
+            concurrentContextA,
+            concurrentContextB,
+            overlap,
+            () => CreateRepository(concurrentContextA).ClaimOutboxEventsAsync(
                 "concurrent-outbox-a",
                 now,
                 TimeSpan.FromMinutes(5),
                 batchSize,
                 TestContext.Current.CancellationToken),
-            CreateRepository(concurrentContextB).ClaimOutboxEventsAsync(
+            () => CreateRepository(concurrentContextB).ClaimOutboxEventsAsync(
                 "concurrent-outbox-b",
                 now,
                 TimeSpan.FromMinutes(5),
@@ -718,21 +721,24 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         Assert.Equal(51, await CountUnclaimedDeliveryLogsAsync());
 
         await ResetDeliveryLeasesAsync();
-        var barrier = new ConcurrentClaimBarrierInterceptor("webhook_delivery_logs");
-        await using var concurrentContextA = await CreateContextAsync(barrier);
-        await using var concurrentContextB = await CreateContextAsync(barrier);
+        var overlap = new ClaimLockOverlapInterceptor("webhook_delivery_logs");
+        await using var concurrentContextA = await CreateContextAsync(overlap);
+        await using var concurrentContextB = await CreateContextAsync(overlap);
         Assert.NotSame(
             concurrentContextA.Database.GetDbConnection(),
             concurrentContextB.Database.GetDbConnection());
 
-        var concurrent = await Task.WhenAll(
-            CreateRepository(concurrentContextA).ClaimPendingDeliveryLogsAsync(
+        var concurrent = await ClaimWithVerifiedLockOverlapAsync(
+            concurrentContextA,
+            concurrentContextB,
+            overlap,
+            () => CreateRepository(concurrentContextA).ClaimPendingDeliveryLogsAsync(
                 "concurrent-delivery-a",
                 now,
                 TimeSpan.FromMinutes(5),
                 batchSize,
                 TestContext.Current.CancellationToken),
-            CreateRepository(concurrentContextB).ClaimPendingDeliveryLogsAsync(
+            () => CreateRepository(concurrentContextB).ClaimPendingDeliveryLogsAsync(
                 "concurrent-delivery-b",
                 now,
                 TimeSpan.FromMinutes(5),
@@ -1334,6 +1340,62 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         Assert.Equal(expectedCount, claims.Select(claim => claim.LeaseToken).Distinct().Count());
     }
 
+    private static async Task<IReadOnlyList<TClaim>[]> ClaimWithVerifiedLockOverlapAsync<TClaim>(
+        CmsifyDbContext firstContext,
+        CmsifyDbContext secondContext,
+        ClaimLockOverlapInterceptor overlap,
+        Func<Task<IReadOnlyList<TClaim>>> firstClaim,
+        Func<Task<IReadOnlyList<TClaim>>> secondClaim)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var firstConnection = firstContext.Database.GetDbConnection();
+        var secondConnection = secondContext.Database.GetDbConnection();
+        Assert.NotSame(firstConnection, secondConnection);
+        overlap.RegisterConnections(firstConnection, secondConnection, cancellationToken);
+
+        var firstTask = firstClaim();
+        Task<IReadOnlyList<TClaim>>? secondTask = null;
+        IReadOnlyList<TClaim>? firstResult = null;
+        IReadOnlyList<TClaim>? secondResult = null;
+        try
+        {
+            await overlap.FirstClaimLocksHeld.WaitAsync(ClaimLockOverlapInterceptor.ObservationTimeout, cancellationToken);
+            Assert.Same(firstConnection, overlap.FirstObservedConnection);
+            Assert.True(overlap.FirstClaimUsedAsyncReaderClose);
+            Assert.True(overlap.FirstClaimReadCount >= 100);
+            Assert.True(overlap.FirstTransactionIsOpen);
+            Assert.NotNull(firstContext.Database.CurrentTransaction);
+            Assert.False(firstTask.IsCompleted);
+
+            secondTask = secondClaim();
+            secondResult = await secondTask.WaitAsync(ClaimLockOverlapInterceptor.ObservationTimeout, cancellationToken);
+
+            Assert.Same(secondConnection, overlap.SecondObservedConnection);
+            Assert.NotEqual(overlap.FirstConnectionId, overlap.SecondConnectionId);
+            Assert.True(overlap.FirstTransactionIsOpen);
+            Assert.NotNull(firstContext.Database.CurrentTransaction);
+            Assert.False(firstTask.IsCompleted);
+        }
+        finally
+        {
+            overlap.ReleaseFirstClaim();
+            try
+            {
+                firstResult = await firstTask.WaitAsync(ClaimLockOverlapInterceptor.CleanupTimeout);
+            }
+            finally
+            {
+                if (secondTask is not null)
+                {
+                    secondResult ??= await secondTask.WaitAsync(ClaimLockOverlapInterceptor.CleanupTimeout);
+                }
+            }
+        }
+
+        Assert.NotNull(secondResult);
+        return [firstResult, secondResult];
+    }
+
     private async Task WriteWebhookCapacityReportAsync(DateTimeOffset now, int expectedCommandCount)
     {
         if (Environment.GetEnvironmentVariable("CMSIFY_CAPACITY_REPORT_DIR") is not { } reportDirectory
@@ -1576,31 +1638,95 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         }
     }
 
-    private sealed class ConcurrentClaimBarrierInterceptor(string table) : DbCommandInterceptor
+    private sealed class ClaimLockOverlapInterceptor(string table) : DbCommandInterceptor
     {
-        private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int arrivals;
+        public static readonly TimeSpan ObservationTimeout = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan HoldFailSafeTimeout = TimeSpan.FromSeconds(20);
 
-        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
-            DbCommand command,
-            CommandEventData eventData,
-            InterceptionResult<DbDataReader> result,
-            CancellationToken cancellationToken = default)
+        private readonly TaskCompletionSource firstClaimLocksHeld = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource releaseFirstClaim = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private DbConnection? expectedFirstConnection;
+        private DbConnection? expectedSecondConnection;
+        private DbTransaction? firstTransaction;
+        private CancellationToken cancellationToken;
+        private int firstClaimHeld;
+
+        public Task FirstClaimLocksHeld => firstClaimLocksHeld.Task;
+
+        public DbConnection? FirstObservedConnection { get; private set; }
+
+        public DbConnection? SecondObservedConnection { get; private set; }
+
+        public Guid? FirstConnectionId { get; private set; }
+
+        public Guid? SecondConnectionId { get; private set; }
+
+        public int FirstClaimReadCount { get; private set; }
+
+        public bool FirstClaimUsedAsyncReaderClose { get; private set; }
+
+        public bool FirstTransactionIsOpen =>
+            firstTransaction?.Connection is not null
+            && expectedFirstConnection?.State == System.Data.ConnectionState.Open;
+
+        public void RegisterConnections(
+            DbConnection firstConnection,
+            DbConnection secondConnection,
+            CancellationToken testCancellationToken)
         {
-            if (command.CommandText.Contains($"FROM {table}", StringComparison.OrdinalIgnoreCase)
-                && command.CommandText.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase)
-                && command.CommandText.Contains("LIMIT", StringComparison.OrdinalIgnoreCase))
+            ArgumentNullException.ThrowIfNull(firstConnection);
+            ArgumentNullException.ThrowIfNull(secondConnection);
+            if (ReferenceEquals(firstConnection, secondConnection))
             {
-                if (Interlocked.Increment(ref arrivals) == 2)
-                {
-                    release.TrySetResult();
-                }
+                throw new ArgumentException("Concurrent claims require distinct database connection instances.");
+            }
 
-                await release.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            if (Interlocked.CompareExchange(ref expectedFirstConnection, firstConnection, null) is not null)
+            {
+                throw new InvalidOperationException("Claim connections are already registered.");
+            }
+
+            expectedSecondConnection = secondConnection;
+            cancellationToken = testCancellationToken;
+        }
+
+        public void ReleaseFirstClaim() => releaseFirstClaim.TrySetResult();
+
+        public override async ValueTask<InterceptionResult> DataReaderClosingAsync(
+            DbCommand command,
+            DataReaderClosingEventData eventData,
+            InterceptionResult result)
+        {
+            if (!IsClaimSelection(command.CommandText))
+            {
+                return result;
+            }
+
+            if (ReferenceEquals(command.Connection, expectedFirstConnection)
+                && Interlocked.CompareExchange(ref firstClaimHeld, 1, 0) == 0)
+            {
+                FirstObservedConnection = command.Connection;
+                FirstConnectionId = eventData.ConnectionId;
+                FirstClaimReadCount = eventData.ReadCount;
+                FirstClaimUsedAsyncReaderClose = eventData.IsAsync;
+                firstTransaction = command.Transaction;
+                firstClaimLocksHeld.TrySetResult();
+                await releaseFirstClaim.Task.WaitAsync(HoldFailSafeTimeout, cancellationToken);
+            }
+            else if (ReferenceEquals(command.Connection, expectedSecondConnection))
+            {
+                SecondObservedConnection = command.Connection;
+                SecondConnectionId = eventData.ConnectionId;
             }
 
             return result;
         }
+
+        private bool IsClaimSelection(string commandText) =>
+            commandText.Contains($"FROM {table}", StringComparison.OrdinalIgnoreCase)
+            && commandText.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase)
+            && commandText.Contains("LIMIT", StringComparison.OrdinalIgnoreCase);
     }
 
 }
