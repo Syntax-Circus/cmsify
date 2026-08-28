@@ -109,3 +109,47 @@ Result: no output after LF-normalizing the generated changed locks.
 
 - Docker was unavailable to this environment (`npipe://./pipe/docker_engine` reports access denied), so the Docker-backed success baselines could not be re-established. The commands were run once and no suites were skipped.
 - xUnit v3 enables existing `xUnit1051` analyzer warnings about cancellation-token use across the test projects. This task preserved every existing token as required and does not alter the test bodies; the warnings are non-fatal and should be addressed as a separate, scoped test-quality change if desired.
+
+## Fix round 1: isolate the global stale-upload boundary test
+
+### Finding and RED evidence
+
+The covering test is `MediaReconciliationRepositoryTests.FailStaleUploads_UsesInclusiveBoundaryAndCreatesImmediateCleanup`. Under xUnit v3, the full Infrastructure suite reproducibly reported 291/292: that test expected `FailStaleUploadsAsync` to affect one row but observed two. The same test passed in isolation. Docker was verified available outside the sandbox; the failure was a shared-fixture database-state dependency, not a product behavior change.
+
+RED command:
+
+```powershell
+dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-restore
+```
+
+Result before the fix: 291 passed, 1 failed (292 total). The named boundary test received `2` for its exact `count.ShouldBe(1)` assertion.
+
+### Implementation
+
+At the start of the covering test's setup, a set-based EF Core update changes only pre-existing rows matching the production operation's global predicate (`PendingUpload` with `BlobStateChangedAt <= cutoff`) to `Available`. The test then seeds exactly its boundary candidate and its immediately newer control row.
+
+This leaves the production repository method and its exact `count.ShouldBe(1)` assertion unchanged. It makes the candidate set explicit and independent of test execution order: rows left by earlier collection tests cannot satisfy this test's global operation, while this test's stale-at-cutoff row remains the sole eligible candidate.
+
+### GREEN verification
+
+Focused command:
+
+```powershell
+dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~MediaReconciliationRepositoryTests.FailStaleUploads_UsesInclusiveBoundaryAndCreatesImmediateCleanup'
+```
+
+Result: 1 passed, 0 failed, 0 skipped; duration 2 s.
+
+Full-suite command (outside sandbox with Docker access):
+
+```powershell
+dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-restore --verbosity minimal
+```
+
+Result: 292 passed, 0 failed, 0 skipped; duration 1 m 11 s.
+
+### Fix-round self-review
+
+- The cleanup uses the exact global predicate under test and does not suppress xUnit analyzers.
+- It does not delete historical rows or alter production code; it only prevents shared fixture data from joining this test's candidate set.
+- The full Docker-backed suite establishes that the isolation works across the actual collection execution order.

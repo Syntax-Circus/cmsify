@@ -211,6 +211,10 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var cutoff = now.AddMinutes(-30);
         await using (var setup = await CreateContextAsync())
         {
+            // FailStaleUploadsAsync is global, so isolate its candidate set from prior collection tests.
+            await setup.MediaAssets
+                .Where(asset => asset.BlobState == MediaBlobState.PendingUpload && asset.BlobStateChangedAt <= cutoff)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(asset => asset.BlobState, MediaBlobState.Available));
             var workspace = new Workspace { Name = "Media", Slug = $"media-{Guid.NewGuid():N}" };
             setup.Workspaces.Add(workspace);
             setup.MediaAssets.AddRange(
