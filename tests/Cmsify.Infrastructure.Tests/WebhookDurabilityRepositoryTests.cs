@@ -19,6 +19,7 @@ using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Testcontainers.PostgreSql;
 using System.Net;
 using System.Data.Common;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace Cmsify.Infrastructure.Tests;
@@ -626,6 +627,268 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task OutboxClaim_BoundsSequentialBatchesAndConcurrentLeases()
+    {
+        const int eligibleRows = 251;
+        const int batchSize = 100;
+        var now = DateTimeOffset.Parse("2026-08-28T12:00:00Z");
+        await SeedCapacityOutboxEventsAsync(now, eligibleRows);
+
+        await using var firstContext = await CreateContextAsync();
+        var first = await CreateRepository(firstContext).ClaimOutboxEventsAsync(
+            "sequential-outbox-a",
+            now,
+            TimeSpan.FromMinutes(5),
+            batchSize,
+            TestContext.Current.CancellationToken);
+        AssertDistinctClaims(first, batchSize);
+        Assert.Equal(151, await CountUnclaimedOutboxEventsAsync());
+
+        await using var secondContext = await CreateContextAsync();
+        var second = await CreateRepository(secondContext).ClaimOutboxEventsAsync(
+            "sequential-outbox-b",
+            now,
+            TimeSpan.FromMinutes(5),
+            batchSize,
+            TestContext.Current.CancellationToken);
+        AssertDistinctClaims(second, batchSize);
+        Assert.Empty(first.Select(claim => claim.Id).Intersect(second.Select(claim => claim.Id)));
+        Assert.Empty(first.Select(claim => claim.LeaseToken).Intersect(second.Select(claim => claim.LeaseToken)));
+        Assert.Equal(51, await CountUnclaimedOutboxEventsAsync());
+
+        await ResetOutboxLeasesAsync();
+        var barrier = new ConcurrentClaimBarrierInterceptor("webhook_outbox_events");
+        await using var concurrentContextA = await CreateContextAsync(barrier);
+        await using var concurrentContextB = await CreateContextAsync(barrier);
+        Assert.NotSame(
+            concurrentContextA.Database.GetDbConnection(),
+            concurrentContextB.Database.GetDbConnection());
+
+        var concurrent = await Task.WhenAll(
+            CreateRepository(concurrentContextA).ClaimOutboxEventsAsync(
+                "concurrent-outbox-a",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken),
+            CreateRepository(concurrentContextB).ClaimOutboxEventsAsync(
+                "concurrent-outbox-b",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken));
+
+        Assert.All(concurrent, batch => AssertDistinctClaims(batch, batchSize));
+        var concurrentClaims = concurrent.SelectMany(batch => batch).ToArray();
+        Assert.Equal(batchSize * 2, concurrentClaims.Select(claim => claim.Id).Distinct().Count());
+        Assert.Equal(batchSize * 2, concurrentClaims.Select(claim => claim.LeaseToken).Distinct().Count());
+        Assert.Equal(51, await CountUnclaimedOutboxEventsAsync());
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task DeliveryClaim_BoundsSequentialBatchesAndConcurrentLeases()
+    {
+        const int eligibleRows = 251;
+        const int batchSize = 100;
+        var now = DateTimeOffset.Parse("2026-08-28T12:05:00Z");
+        await SeedCapacityDeliveryLogsAsync(now, eligibleRows);
+
+        await using var firstContext = await CreateContextAsync();
+        var first = await CreateRepository(firstContext).ClaimPendingDeliveryLogsAsync(
+            "sequential-delivery-a",
+            now,
+            TimeSpan.FromMinutes(5),
+            batchSize,
+            TestContext.Current.CancellationToken);
+        AssertDistinctClaims(first, batchSize);
+        Assert.Equal(151, await CountUnclaimedDeliveryLogsAsync());
+
+        await using var secondContext = await CreateContextAsync();
+        var second = await CreateRepository(secondContext).ClaimPendingDeliveryLogsAsync(
+            "sequential-delivery-b",
+            now,
+            TimeSpan.FromMinutes(5),
+            batchSize,
+            TestContext.Current.CancellationToken);
+        AssertDistinctClaims(second, batchSize);
+        Assert.Empty(first.Select(claim => claim.Id).Intersect(second.Select(claim => claim.Id)));
+        Assert.Empty(first.Select(claim => claim.LeaseToken).Intersect(second.Select(claim => claim.LeaseToken)));
+        Assert.Equal(51, await CountUnclaimedDeliveryLogsAsync());
+
+        await ResetDeliveryLeasesAsync();
+        var barrier = new ConcurrentClaimBarrierInterceptor("webhook_delivery_logs");
+        await using var concurrentContextA = await CreateContextAsync(barrier);
+        await using var concurrentContextB = await CreateContextAsync(barrier);
+        Assert.NotSame(
+            concurrentContextA.Database.GetDbConnection(),
+            concurrentContextB.Database.GetDbConnection());
+
+        var concurrent = await Task.WhenAll(
+            CreateRepository(concurrentContextA).ClaimPendingDeliveryLogsAsync(
+                "concurrent-delivery-a",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken),
+            CreateRepository(concurrentContextB).ClaimPendingDeliveryLogsAsync(
+                "concurrent-delivery-b",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken));
+
+        Assert.All(concurrent, batch => AssertDistinctClaims(batch, batchSize));
+        var concurrentClaims = concurrent.SelectMany(batch => batch).ToArray();
+        Assert.Equal(batchSize * 2, concurrentClaims.Select(claim => claim.Id).Distinct().Count());
+        Assert.Equal(batchSize * 2, concurrentClaims.Select(claim => claim.LeaseToken).Distinct().Count());
+        Assert.Equal(51, await CountUnclaimedDeliveryLogsAsync());
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task OutboxClaim_CommandCountDoesNotGrowWithEligibleRows()
+    {
+        const int batchSize = 100;
+        var now = DateTimeOffset.Parse("2026-08-28T12:10:00Z");
+        await SeedCapacityOutboxEventsAsync(now, 1);
+
+        var baselineCounter = new CommandCountingInterceptor();
+        await using var baselineContext = await CreateContextAsync(baselineCounter);
+        IReadOnlyList<ClaimedWebhookOutboxEventDto> baselineClaims;
+        using (baselineCounter.BeginMeasurement())
+        {
+            baselineClaims = await CreateRepository(baselineContext).ClaimOutboxEventsAsync(
+                "baseline-outbox",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken);
+        }
+
+        Assert.Single(baselineClaims);
+        Assert.NotEmpty(baselineCounter.Commands);
+
+        await ReplaceCapacityOutboxEventsAsync(now, 251);
+        var capacityCounter = new CommandCountingInterceptor();
+        await using var capacityContext = await CreateContextAsync(capacityCounter);
+        IReadOnlyList<ClaimedWebhookOutboxEventDto> capacityClaims;
+        using (capacityCounter.BeginMeasurement())
+        {
+            capacityClaims = await CreateRepository(capacityContext).ClaimOutboxEventsAsync(
+                "capacity-outbox",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(batchSize, capacityClaims.Count);
+        Assert.True(capacityClaims.Count <= batchSize);
+        Assert.Equal(baselineCounter.CommandCount, capacityCounter.CommandCount);
+        Assert.Equal(capacityCounter.CommandCount, capacityCounter.Commands.Count);
+        Assert.All(capacityCounter.Commands, command => Assert.False(string.IsNullOrWhiteSpace(command)));
+
+        await WriteWebhookCapacityReportAsync(now, capacityCounter.CommandCount);
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task DeliveryClaim_CommandCountDoesNotGrowWithEligibleRows()
+    {
+        const int batchSize = 100;
+        var now = DateTimeOffset.Parse("2026-08-28T12:15:00Z");
+        await SeedCapacityDeliveryLogsAsync(now, 1);
+
+        var baselineCounter = new CommandCountingInterceptor();
+        await using var baselineContext = await CreateContextAsync(baselineCounter);
+        IReadOnlyList<PendingWebhookDeliveryDto> baselineClaims;
+        using (baselineCounter.BeginMeasurement())
+        {
+            baselineClaims = await CreateRepository(baselineContext).ClaimPendingDeliveryLogsAsync(
+                "baseline-delivery",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken);
+        }
+
+        Assert.Single(baselineClaims);
+        Assert.NotEmpty(baselineCounter.Commands);
+
+        await ReplaceCapacityDeliveryLogsAsync(now, 251);
+        var capacityCounter = new CommandCountingInterceptor();
+        await using var capacityContext = await CreateContextAsync(capacityCounter);
+        IReadOnlyList<PendingWebhookDeliveryDto> capacityClaims;
+        using (capacityCounter.BeginMeasurement())
+        {
+            capacityClaims = await CreateRepository(capacityContext).ClaimPendingDeliveryLogsAsync(
+                "capacity-delivery",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(batchSize, capacityClaims.Count);
+        Assert.True(capacityClaims.Count <= batchSize);
+        Assert.Equal(baselineCounter.CommandCount, capacityCounter.CommandCount);
+        Assert.Equal(capacityCounter.CommandCount, capacityCounter.Commands.Count);
+        Assert.All(capacityCounter.Commands, command => Assert.False(string.IsNullOrWhiteSpace(command)));
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task CommandCountingInterceptor_CountsEveryCommandOnlyInsideTheMeasurementScope()
+    {
+        var counter = new CommandCountingInterceptor();
+        await using var context = await CreateContextAsync(counter);
+        await context.Database.ExecuteSqlRawAsync("SELECT 1", TestContext.Current.CancellationToken);
+
+        using (counter.BeginMeasurement())
+        {
+            await context.Database.ExecuteSqlRawAsync("SELECT 2", TestContext.Current.CancellationToken);
+            _ = await context.WebhookOutboxEvents.CountAsync(TestContext.Current.CancellationToken);
+        }
+
+        await context.Database.ExecuteSqlRawAsync("SELECT 3", TestContext.Current.CancellationToken);
+        Assert.Equal(2, counter.CommandCount);
+        Assert.Equal(2, counter.Commands.Count);
+        Assert.Contains(counter.Commands, command => command.Contains("select 2", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(counter.Commands, command => command.Contains("webhook_outbox_events", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task CapacityReportFragmentWriter_AtomicallyReplacesWebhookClaimFragment()
+    {
+        var reportDirectory = Path.Combine(Path.GetTempPath(), $"cmsify-capacity-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(reportDirectory);
+        var reportPath = Path.Combine(reportDirectory, "webhook-claim.json");
+        try
+        {
+            await File.WriteAllTextAsync(reportPath, "stale", TestContext.Current.CancellationToken);
+
+            await CapacityReportFragmentWriter.WriteAsync(
+                reportDirectory,
+                "webhook-claim.json",
+                new { databaseVersion = "PostgreSQL test", eligibleRows = 251, sampleCount = 5 },
+                TestContext.Current.CancellationToken);
+
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+            Assert.Equal("PostgreSQL test", document.RootElement.GetProperty("databaseVersion").GetString());
+            Assert.Equal(251, document.RootElement.GetProperty("eligibleRows").GetInt32());
+            Assert.Equal(5, document.RootElement.GetProperty("sampleCount").GetInt32());
+            Assert.Equal([reportPath], Directory.GetFiles(reportDirectory));
+        }
+        finally
+        {
+            Directory.Delete(reportDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Materialization_CreatesOneIntentForActiveMatchingEndpointAndReplayDoesNotDuplicate()
     {
         var now = DateTimeOffset.Parse("2026-08-26T02:00:00Z");
@@ -939,6 +1202,247 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id, cancellationToken: TestContext.Current.CancellationToken));
     }
 
+    private async Task SeedCapacityOutboxEventsAsync(DateTimeOffset now, int count)
+    {
+        await using var context = await CreateContextAsync();
+        context.WebhookOutboxEvents.AddRange(CreateCapacityOutboxEvents(now, count));
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private async Task ReplaceCapacityOutboxEventsAsync(DateTimeOffset now, int count)
+    {
+        await using var context = await CreateContextAsync();
+        await context.WebhookOutboxEvents.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        context.WebhookOutboxEvents.AddRange(CreateCapacityOutboxEvents(now, count));
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private static IEnumerable<WebhookOutboxEvent> CreateCapacityOutboxEvents(DateTimeOffset now, int count) =>
+        Enumerable.Range(1, count).Select(index => new WebhookOutboxEvent
+        {
+            Id = StableGuid(8, index),
+            EventType = "capacity.outbox",
+            EntityId = StableGuid(9, index),
+            Payload = JsonDocument.Parse("{}").RootElement.Clone(),
+            OccurredAt = now.AddMinutes(-1).AddTicks(index),
+            CreatedAt = now.AddMinutes(-1).AddTicks(index)
+        });
+
+    private async Task SeedCapacityDeliveryLogsAsync(DateTimeOffset now, int count)
+    {
+        await using var context = await CreateContextAsync();
+        var workspace = new Workspace
+        {
+            Id = StableGuid(10, 1),
+            Name = "Capacity delivery",
+            Slug = "capacity-delivery"
+        };
+        var user = new User
+        {
+            Id = StableGuid(10, 2),
+            Email = "capacity-delivery@example.test",
+            DisplayName = "Capacity delivery",
+            PasswordHash = "hash",
+            Role = UserRole.Admin
+        };
+        var endpoint = new WebhookEndpoint
+        {
+            Id = StableGuid(10, 3),
+            WorkspaceId = workspace.Id,
+            Name = "Capacity endpoint",
+            Url = "https://example.test/capacity",
+            Secret = "secret",
+            CreatedByUserId = user.Id
+        };
+        context.AddRange(workspace, user, endpoint);
+        context.WebhookDeliveryLogs.AddRange(CreateCapacityDeliveryLogs(endpoint.Id, now, count));
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private async Task ReplaceCapacityDeliveryLogsAsync(DateTimeOffset now, int count)
+    {
+        await using var context = await CreateContextAsync();
+        await context.WebhookDeliveryLogs.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        var endpointId = await context.WebhookEndpoints
+            .Select(endpoint => endpoint.Id)
+            .SingleAsync(TestContext.Current.CancellationToken);
+        context.WebhookDeliveryLogs.AddRange(CreateCapacityDeliveryLogs(endpointId, now, count));
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private static IEnumerable<WebhookDeliveryLog> CreateCapacityDeliveryLogs(Guid endpointId, DateTimeOffset now, int count) =>
+        Enumerable.Range(1, count).Select(index => new WebhookDeliveryLog
+        {
+            Id = StableGuid(11, index),
+            WebhookEventId = StableGuid(12, index),
+            WebhookEndpointId = endpointId,
+            EventType = "capacity.delivery",
+            Payload = JsonDocument.Parse("{}").RootElement.Clone(),
+            NextRetryAt = now.AddMinutes(-1).AddTicks(index),
+            CreatedAt = now.AddMinutes(-1).AddTicks(index)
+        });
+
+    private async Task ResetOutboxLeasesAsync()
+    {
+        await using var context = await CreateContextAsync();
+        await context.WebhookOutboxEvents.ExecuteUpdateAsync(
+            setters => setters
+                .SetProperty(evt => evt.LeaseOwner, (string?)null)
+                .SetProperty(evt => evt.LeaseToken, (Guid?)null)
+                .SetProperty(evt => evt.LeaseExpiresAt, (DateTimeOffset?)null),
+            TestContext.Current.CancellationToken);
+    }
+
+    private async Task ResetDeliveryLeasesAsync()
+    {
+        await using var context = await CreateContextAsync();
+        await context.WebhookDeliveryLogs.ExecuteUpdateAsync(
+            setters => setters
+                .SetProperty(log => log.LeaseOwner, (string?)null)
+                .SetProperty(log => log.LeaseToken, (Guid?)null)
+                .SetProperty(log => log.LeaseExpiresAt, (DateTimeOffset?)null),
+            TestContext.Current.CancellationToken);
+    }
+
+    private async Task<int> CountUnclaimedOutboxEventsAsync()
+    {
+        await using var context = await CreateContextAsync();
+        return await context.WebhookOutboxEvents.CountAsync(
+            evt => evt.LeaseOwner == null && evt.LeaseToken == null && evt.LeaseExpiresAt == null,
+            TestContext.Current.CancellationToken);
+    }
+
+    private async Task<int> CountUnclaimedDeliveryLogsAsync()
+    {
+        await using var context = await CreateContextAsync();
+        return await context.WebhookDeliveryLogs.CountAsync(
+            log => log.LeaseOwner == null && log.LeaseToken == null && log.LeaseExpiresAt == null,
+            TestContext.Current.CancellationToken);
+    }
+
+    private static void AssertDistinctClaims(IReadOnlyList<ClaimedWebhookOutboxEventDto> claims, int expectedCount)
+    {
+        Assert.Equal(expectedCount, claims.Count);
+        Assert.Equal(expectedCount, claims.Select(claim => claim.Id).Distinct().Count());
+        Assert.Equal(expectedCount, claims.Select(claim => claim.LeaseToken).Distinct().Count());
+    }
+
+    private static void AssertDistinctClaims(IReadOnlyList<PendingWebhookDeliveryDto> claims, int expectedCount)
+    {
+        Assert.Equal(expectedCount, claims.Count);
+        Assert.Equal(expectedCount, claims.Select(claim => claim.Id).Distinct().Count());
+        Assert.Equal(expectedCount, claims.Select(claim => claim.LeaseToken).Distinct().Count());
+    }
+
+    private async Task WriteWebhookCapacityReportAsync(DateTimeOffset now, int expectedCommandCount)
+    {
+        if (Environment.GetEnvironmentVariable("CMSIFY_CAPACITY_REPORT_DIR") is not { } reportDirectory
+            || string.IsNullOrWhiteSpace(reportDirectory))
+        {
+            return;
+        }
+
+        const int eligibleRows = 251;
+        const int batchSize = 100;
+        const int sampleCount = 5;
+        await ReplaceCapacityOutboxEventsAsync(now, eligibleRows);
+        await using (var warmContext = await CreateContextAsync())
+        {
+            var warmClaims = await CreateRepository(warmContext).ClaimOutboxEventsAsync(
+                "warm-outbox",
+                now,
+                TimeSpan.FromMinutes(5),
+                batchSize,
+                TestContext.Current.CancellationToken);
+            AssertDistinctClaims(warmClaims, batchSize);
+        }
+
+        await ResetOutboxLeasesAsync();
+        await using var versionContext = await CreateContextAsync();
+        await versionContext.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        var databaseVersion = $"PostgreSQL {versionContext.Database.GetDbConnection().ServerVersion}";
+        var samplesMilliseconds = new List<double>(sampleCount);
+        var commandCounts = new List<int>(sampleCount);
+        var duplicateCount = 0;
+        var overclaimCount = 0;
+
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var counter = new CommandCountingInterceptor();
+            await using var sampleContext = await CreateContextAsync(counter);
+            var stopwatch = Stopwatch.StartNew();
+            IReadOnlyList<ClaimedWebhookOutboxEventDto> claims;
+            using (counter.BeginMeasurement())
+            {
+                claims = await CreateRepository(sampleContext).ClaimOutboxEventsAsync(
+                    $"sample-outbox-{index}",
+                    now,
+                    TimeSpan.FromMinutes(5),
+                    batchSize,
+                    TestContext.Current.CancellationToken);
+            }
+
+            stopwatch.Stop();
+            samplesMilliseconds.Add(Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3));
+            commandCounts.Add(counter.CommandCount);
+            duplicateCount += claims.Count - claims.Select(claim => claim.Id).Distinct().Count();
+            duplicateCount += claims.Count - claims.Select(claim => claim.LeaseToken).Distinct().Count();
+            overclaimCount += Math.Max(0, claims.Count - batchSize);
+            AssertDistinctClaims(claims, batchSize);
+            Assert.Equal(expectedCommandCount, counter.CommandCount);
+            if (index + 1 < sampleCount)
+            {
+                await ResetOutboxLeasesAsync();
+            }
+        }
+
+        Assert.Equal(0, duplicateCount);
+        Assert.Equal(0, overclaimCount);
+        Assert.All(commandCounts, count => Assert.Equal(expectedCommandCount, count));
+        samplesMilliseconds.Sort();
+        var p50Milliseconds = Percentile(samplesMilliseconds, 0.50);
+        var p95Milliseconds = Percentile(samplesMilliseconds, 0.95);
+        var p99Milliseconds = Percentile(samplesMilliseconds, 0.99);
+        var p95AtOrBelow250Milliseconds = p95Milliseconds <= 250;
+        await CapacityReportFragmentWriter.WriteAsync(
+            reportDirectory,
+            "webhook-claim.json",
+            new
+            {
+                databaseVersion,
+                eligibleRows,
+                batchSize,
+                commandCount = expectedCommandCount,
+                sampleCount,
+                samplesMilliseconds,
+                p50Milliseconds,
+                p95Milliseconds,
+                p99Milliseconds,
+                duplicateCount,
+                overclaimCount,
+                p95AtOrBelow250Milliseconds,
+                blockingInvariantsPassed = true
+            },
+            TestContext.Current.CancellationToken);
+
+        if (!p95AtOrBelow250Milliseconds)
+        {
+            var warning = $"::warning::Webhook claim capacity timing missed the diagnostic budget (p95={p95Milliseconds:F3} ms).";
+            TestContext.Current.SendDiagnosticMessage(warning);
+            Console.Error.WriteLine(warning);
+        }
+    }
+
+    private static double Percentile(IReadOnlyList<double> sortedValues, double percentile)
+    {
+        Assert.NotEmpty(sortedValues);
+        var index = Math.Clamp((int)Math.Ceiling(percentile * sortedValues.Count) - 1, 0, sortedValues.Count - 1);
+        return sortedValues[index];
+    }
+
+    private static Guid StableGuid(int category, int index) =>
+        Guid.Parse($"{category:x8}-0000-0000-0000-{index:x12}");
+
     private static WebhookOutboxEvent CreateOutboxEvent(Guid? workspaceId = null) => new()
     {
         EventType = "workspace.updated",
@@ -1066,6 +1570,33 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             {
                 Reached.TrySetResult();
                 await Release.Task.WaitAsync(cancellationToken);
+            }
+
+            return result;
+        }
+    }
+
+    private sealed class ConcurrentClaimBarrierInterceptor(string table) : DbCommandInterceptor
+    {
+        private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int arrivals;
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains($"FROM {table}", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("LIMIT", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Interlocked.Increment(ref arrivals) == 2)
+                {
+                    release.TrySetResult();
+                }
+
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
             }
 
             return result;

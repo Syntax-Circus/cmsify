@@ -10,6 +10,42 @@ namespace Cmsify.Infrastructure.Tests;
 public sealed class WebhookOperationalConfigurationTests
 {
     [Fact]
+    public void WebhookBatchDefaults_AreOneHundred()
+    {
+        var options = new WebhookOperationalOptions();
+
+        Assert.Equal(100, options.OutboxBatchSize);
+        Assert.Equal(100, options.DeliveryBatchSize);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(500)]
+    public void WebhookBatchBounds_AcceptSupportedEndpoints(int batchSize)
+    {
+        var options = new WebhookOperationalOptions
+        {
+            OutboxBatchSize = batchSize,
+            DeliveryBatchSize = batchSize
+        };
+
+        Assert.True(new WebhookOperationalOptionsValidator().Validate(null, options).Succeeded);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(501)]
+    public void WebhookBatchBounds_RejectValuesOutsideSupportedRange(int batchSize)
+    {
+        var outbox = new WebhookOperationalOptions { OutboxBatchSize = batchSize };
+        var delivery = new WebhookOperationalOptions { DeliveryBatchSize = batchSize };
+        var validator = new WebhookOperationalOptionsValidator();
+
+        Assert.True(validator.Validate(null, outbox).Failed);
+        Assert.True(validator.Validate(null, delivery).Failed);
+    }
+
+    [Fact]
     public void RetryWorker_RejectsZeroMaxAttemptsAtConstruction()
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
