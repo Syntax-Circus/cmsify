@@ -1,14 +1,14 @@
-# V1 release remediation handoff after Task 7
+# V1 release remediation handoff after Task 9
 
-This is a point-in-time resume document for moving the remediation work to another computer. Resume from the commit containing this file; do not redo Tasks 1–7.
+This is a point-in-time resume document for moving the remediation work to another computer. Resume from the commit containing this file; do not redo Tasks 1–9.
 
 ## Resume point
 
 - Branch: `feature/readiness-audit`
-- Task 7 source head: `64ee4fb Complete webhook secret rotation preflight`
-- State: intentionally paused after Task 7; Task 8 has not started.
-- Worktree was clean before this handoff was added.
-- No push, merge, tag, package publication, or release was performed in this session.
+- Exact Task 9 executable/workflow/runbook source tested: `56b83a61c430047e31942b8a33421b63e51a73d6` (`Document upgrade rollback operations`).
+- State: Task 9/F-04 is implemented and fully validated locally; continue with Task 10, “Consolidate HTTP resilience.”
+- The final Task 9 evidence update is documentation-only. It intentionally follows the tested source commit and does not change runtime, workflow, fixture, or harness behavior.
+- No push, merge, tag, package publication, image publication, or release was performed in Task 9.
 
 On the new computer, first make sure this branch and the commit containing this document have been transferred or pushed by the user. Then run:
 
@@ -18,12 +18,14 @@ git status --short
 git log -5 --oneline
 ```
 
-Expected: a clean worktree, this handoff commit at `HEAD`, and `64ee4fb` immediately before the handoff commit. Read `AGENTS.md` before changing anything.
+Expected: a clean worktree with the Task 9 evidence-only documentation commit at `HEAD` and tested source `56b83a61c430047e31942b8a33421b63e51a73d6` in its direct history. Read `AGENTS.md` before changing anything.
 
 ## Authoritative plans and audit
 
 - Master remediation plan: [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md)
 - Release-readiness audit: [`docs/v1-release-readiness.md`](v1-release-readiness.md)
+- Task 9 design: [`docs/superpowers/specs/2026-08-27-moving-baseline-upgrade-rollback-design.md`](superpowers/specs/2026-08-27-moving-baseline-upgrade-rollback-design.md)
+- Task 9 implementation plan: [`docs/superpowers/plans/2026-08-27-moving-baseline-upgrade-rollback.md`](superpowers/plans/2026-08-27-moving-baseline-upgrade-rollback.md)
 - Task 7 design: [`docs/superpowers/specs/2026-08-26-webhook-egress-secret-rotation-design.md`](superpowers/specs/2026-08-26-webhook-egress-secret-rotation-design.md)
 - Task 7 egress plan: [`docs/superpowers/plans/2026-08-26-webhook-egress-hardening.md`](superpowers/plans/2026-08-26-webhook-egress-hardening.md)
 - Task 7 key-rotation plan: [`docs/superpowers/plans/2026-08-26-webhook-secret-key-rotation.md`](superpowers/plans/2026-08-26-webhook-secret-key-rotation.md)
@@ -32,7 +34,7 @@ The master plan checkboxes are not the execution ledger. Use this handoff, Git h
 
 ## Completed remediation
 
-Tasks 1–7 are complete and reviewed. Key Cmsify milestones are:
+Tasks 1–9 are complete through local implementation and validation. Key Cmsify milestones are:
 
 | Area | Commit | Result |
 | --- | --- | --- |
@@ -46,6 +48,8 @@ Tasks 1–7 are complete and reviewed. Key Cmsify milestones are:
 | Task 7 egress | through `4618a92` | F-08 remediation complete, including NAT64 correction. |
 | Task 7 key rotation | through `643776c` | Versioned keys, online rotation, migration, metrics, config, and runbook complete. |
 | Task 7 final | `64ee4fb` | Reader-first inventory, runtime decrypt telemetry, and actionable diagnostics; combined GO. |
+| Task 8 | `415a6a7` | Durable media reconciliation implemented and independently approved. |
+| Task 9 | through `56b83a6` plus the evidence-only documentation commit | Moving-baseline fixture, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
 
 Task 5 also changed sibling packages outside this repository:
 
@@ -81,9 +85,9 @@ These are explicitly non-blocking and must remain visible for final release adju
 - Task 4's Syft relationship-only `DESCRIBES` handling and smoke cleanup trap requirement.
 - Task 5 package publication and all external release evidence remain explicit-approval gates.
 
-## Next task: Task 8 / F-09
+## Historical Task 8 start point
 
-Start with Task 8, “Reconcile media database and blob state,” in the master remediation plan and F-09 in the audit. Required outcome:
+The following section is retained as historical transfer context; Task 8 has since completed. Its required outcome was:
 
 - Define durable blob retention/tombstone semantics.
 - Clean up failed uploads and reconcile database/blob orphans.
@@ -107,7 +111,7 @@ Before implementation on the new computer:
 - Run one heavy process at a time. Before killing a suspected stale process, verify its command line and that its parent has exited; do not touch IDE, Docker, or unrelated session processes.
 - Do not push, merge, tag, publish, or release without explicit user approval.
 
-When resuming, tell Codex: “Read `AGENTS.md` and `docs/v1-release-remediation-handoff.md`, then continue with Task 8. Do not redo Tasks 1–7.”
+The historical resume instruction at this point was to continue with Task 8. The current resume point is Task 10, as recorded below.
 
 ## Task 8 continuation result
 
@@ -124,7 +128,7 @@ Final local evidence at the Task 8 commit:
 
 The Task 8 continuation originally paused on the local prerelease package. The user later confirmed that stable `SyntaxCircus.Storage` `0.2.0` had been published; Task 9.6 replaced the prerelease with that stable public-feed dependency and proved the production Dockerfile could restore it normally. This records the user-confirmed publication state; it does not claim this Cmsify task published the package. No push, merge, tag, publication, or release was performed by the Task 9 work.
 
-Resume with Task 9 in `docs/superpowers/plans/2026-08-24-v1-remediation.md`; do not redo Tasks 1–8.
+This historical continuation next entered Task 9; Task 9 has now completed with the evidence below.
 
 ## Task 9 moving-baseline implementation
 
@@ -137,4 +141,96 @@ Task 9's upgrade/rollback contract is described by the [approved design](superpo
 - dedicated branch/PR/manual rehearsal: [`.github/workflows/upgrade-rollback.yml`](../.github/workflows/upgrade-rollback.yml);
 - tag certification and protected promotion dependency: [`.github/workflows/publish-cmsify.yml`](../.github/workflows/publish-cmsify.yml).
 
-The exact final candidate identity, two clean run IDs, pass counts, cleanup audit, and complete validation results are appended only after Task 9.8's fresh run passes. Until then, the implementation itself is not a certification claim.
+## Task 9 final validation and evidence
+
+Task 9/F-04 passed the complete local validation from a clean committed source state. This proves only the exact local candidate below; the release workflow must repeat certification for the exact OCI artifact associated with any proposed tag before protected promotion.
+
+### Exact candidate and baseline identities
+
+- Tested source SHA: `56b83a61c430047e31942b8a33421b63e51a73d6`.
+- Candidate reference: `syntaxcircus/cmsify-api:1.0.0-task9` (a mutable local alias used only to select the image once).
+- Immutable local image ID: `sha256:eeb4da7b70826bfdef21ded9c093e6324a08a912b27f31b5d8bf9ecf5fd52c58`.
+- Candidate platform: `linux/amd64`.
+- OCI version/revision: `1.0.0-task9` / `56b83a61c430047e31942b8a33421b63e51a73d6`.
+- Build informational version: `1.0.0-task9+56b83a61c430047e31942b8a33421b63e51a73d6`.
+- The image was built from [`src/Cmsify.Api/Dockerfile`](../src/Cmsify.Api/Dockerfile) with its normal public NuGet restore. It has no registry `RepoDigest` because Task 9 did not push or publish it.
+
+The checked-in baseline remained:
+
+| Artifact | Exact identity |
+| --- | --- |
+| API | `docker.io/syntaxcircus/cmsify-api:0.1.3@sha256:e28a7c884ed4cc4933fbb58608ba8d1dd97bf6a1e443ef234e0a0aa8b5c51931`, linux/amd64, source `bc652aec1acad7ef440576b5019a0fe7c72004b3` |
+| PostgreSQL | `docker.io/library/postgres:17-alpine@sha256:7456ef82e5f5bc43d997f4781bbd7c0d6389bff397564649a356e206ba473aee`, linux/amd64 |
+| MinIO | `docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2`, linux/amd64 |
+
+`verify-fixture` passed. Docker-backed deterministic regeneration was byte-identical with aggregate `81c9291f324691dce421292c14901c4811b82321295a645b2ed46f2a4dcfbcb6`. Both rehearsal reports bound the SHA-256 of the canonical verified `SHA256SUMS` inventory as fixture digest `6936f9f530aa21b5e547b840fc0c6823280dcfc6a34ee5c99cce0fbd67645855`.
+
+### Two clean rehearsal passes
+
+The opt-in integration command passed 1/1 after running two complete rehearsals:
+
+| Run | Result and assertion counts | Matched-backup manifest | Canary |
+| --- | --- | --- | --- |
+| `cmsify-upgrade-08c59f324ba2` | All eleven phases passed; baseline 26, candidate 29, rollback 27 | `9da81f71eec90637b6bdd4cd5b5b4d877a4469200c6ba85714f17fe81ef4a2e2`; 2 media objects | `01a045a5-cbfd-7024-9521-70cf6f792489`, absent after rollback |
+| `cmsify-upgrade-e03997c30374` | All eleven phases passed; baseline 26, candidate 29, rollback 27 | `38c41f4fb20d7749ec3afb49568f4fd316bfe21dd9bd773794cd0635194043e0`; 2 media objects | `01a045a7-bc47-74b2-a590-bed9d7bb4ab3`, absent after rollback |
+
+Each run re-verified its original backup before discarding v1-written volumes, restored database and media into fresh storage, and started exact `0.1.3` only after restore. The immediate post-run and final ownership-label audits each found zero containers, zero volumes, and zero networks.
+
+### Commands and pass counts
+
+- Complete upgrade/release-contract Node set: 335/335 passed, 0 failed/skipped.
+- `verify-fixture`: passed for `0.1.3`.
+- `generate-fixture --check`: passed byte-identically.
+- `verify-release-contract.mjs`: passed.
+- Fresh production Dockerfile candidate build/inspect: passed with the exact identity above.
+- Opt-in `tests/upgrade/integration/rehearsal.test.mjs`: 1/1 passed, containing the two runs above.
+- Focused Infrastructure PostgreSQL/MinIO Testcontainers: 292/292 passed.
+- Focused API PostgreSQL Testcontainers: 70/70 passed.
+- TypeScript: `npm ci`, live OpenAPI/generation check, typecheck, 40/40 tests, and ESM/CommonJS/declaration build passed.
+- Release solution build: passed with 0 errors and 45 existing Admin nullable warnings assigned to Task 11.
+- Release solution test: 495/495 passed: Core 66, Infrastructure 292, API 70, Admin 29, and .NET client 38.
+- Final fixture diff, `git diff --check`, and the requirement-by-requirement design audit passed; final clean-worktree evidence is recorded in the Task 9.8 execution report after the documentation-only commit.
+
+The exact command forms are in the [harness runbook](../tests/upgrade/README.md). The dedicated [upgrade workflow](../.github/workflows/upgrade-rollback.yml) and [release workflow](../.github/workflows/publish-cmsify.yml) run the same public CLI contract; the structural release-contract tests passed in this run.
+
+The final run used these command contracts. On local PowerShell, the two Node globs were expanded to their complete file lists and Node commands were invoked with the Node 24.19.0 executable described below:
+
+```powershell
+node --test tests/upgrade/unit/*.test.mjs tests/release-contract/*.test.mjs
+node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v0.1.3
+node eng/upgrade-tests/cli.mjs generate-fixture --fixture tests/upgrade/fixtures/v0.1.3 --check
+node scripts/release/verify-release-contract.mjs
+
+$sourceSha = '56b83a61c430047e31942b8a33421b63e51a73d6'
+docker build --platform linux/amd64 --provenance=false --build-arg BUILD_VERSION=1.0.0-task9 --build-arg "BUILD_INFORMATIONAL_VERSION=1.0.0-task9+$sourceSha" --build-arg "BUILD_SOURCE_REVISION=$sourceSha" --tag syntaxcircus/cmsify-api:1.0.0-task9 --file src/Cmsify.Api/Dockerfile .
+$env:CMSIFY_UPGRADE_TEST = '1'
+$env:CMSIFY_UPGRADE_CANDIDATE_IMAGE = 'syntaxcircus/cmsify-api:1.0.0-task9'
+$env:CMSIFY_UPGRADE_CANDIDATE_VERSION = '1.0.0-task9'
+$env:CMSIFY_UPGRADE_CANDIDATE_SOURCE_SHA = $sourceSha
+node --test tests/upgrade/integration/rehearsal.test.mjs
+
+dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-restore --verbosity minimal
+dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-restore --verbosity minimal
+Set-Location sdk/typescript
+npm ci
+npm run generate:check
+npm run typecheck
+npm test
+npm run build
+Set-Location ../..
+dotnet build Cmsify.slnx --configuration Release --no-restore
+dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
+```
+
+### Environment facts and limitations
+
+- Windows `10.0.26200` x64, PowerShell `7.6.5`, .NET SDK `10.0.400`.
+- Docker client/server `29.7.2`; Docker Compose `v5.4.0` through the required `docker compose` interface.
+- The documented and CI prerequisite remains Node 22. The local nvm installation exposed only Node 18.16.0, so the complete Node and TypeScript checks used the available newer Codex runtime Node 24.19.0 with npm 11.11.0. No Node check was skipped.
+- `npm ci` reported 8 dependency advisories (1 low, 1 moderate, 5 high, 1 critical); dependency remediation is outside Task 9.8 and remains visible for final release adjudication.
+- Stable `SyntaxCircus.Storage` `0.2.0` is pinned and resolved in Infrastructure/API assets. Its publication was user-confirmed; Task 9 did not publish it.
+- The candidate is a local content-addressed image, not a published release artifact. No external GitHub Actions run ID exists for this local evidence, and no release is certified solely by this handoff.
+
+## Next task: Task 10
+
+Resume with Task 10, “Consolidate HTTP resilience,” in [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md). Preserve tested source `56b83a61c430047e31942b8a33421b63e51a73d6`, the evidence-only documentation commit above it, and all completed Tasks 1–9. Do not push, merge, tag, publish, or release without explicit approval.
