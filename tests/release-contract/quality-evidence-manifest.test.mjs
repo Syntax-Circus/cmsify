@@ -302,7 +302,7 @@ const evidenceMutations = [
   ["rejects release-ready success after a negated contrast clause", (fixture) => {
     fixture.readiness = fixture.readiness.replace(
       "| F-16 |",
-      "| F-16 | Not release-ready previously, but release-ready today.",
+      "| F-16 | The release remained not ready previously, but it is release-ready today.",
     );
   }],
 ];
