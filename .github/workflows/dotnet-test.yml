@@ -12,11 +12,42 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
-      - name: Restore
-        run: dotnet restore Cmsify.slnx
-      - name: Test
-        run: dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -p:DisableGitVersionTask=true
+          global-json-file: global.json
+      # Public restore remains gated on publication/replacement of SyntaxCircus.Http.Resilience 0.2.0-cmsify.1.
+      - name: Restore locked dependencies
+        run: dotnet restore Cmsify.slnx --locked-mode
+      - name: Build Release binaries
+        run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
+      - name: Run full test suite
+        run: dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
+      - name: Collect raw coverage
+        run: dotnet test Cmsify.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage --verbosity minimal
+      - name: Summarize coverage
+        run: node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md
+      - name: Publish coverage summary
+        run: cat artifacts/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload raw coverage reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dotnet-coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/coverage/**/coverage.cobertura.xml
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload coverage summary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dotnet-coverage-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/coverage/summary.json
+            artifacts/coverage/summary.md
+          if-no-files-found: error
+          retention-days: 14
+      - name: Run API capacity invariants
+        run: dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --filter Category=Capacity
+      - name: Run Infrastructure capacity invariants
+        run: dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --filter Category=Capacity
+      - name: Run .NET client capacity invariants
+        run: dotnet test sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj --configuration Release --no-build --filter Category=Capacity
 
   release-contract:
     runs-on: ubuntu-latest
