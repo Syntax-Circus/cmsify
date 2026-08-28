@@ -26,7 +26,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
@@ -38,9 +38,9 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Secrets__EncryptionKeys__integration", IntegrationEncryptionKey);
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        await postgres.DisposeAsync().AsTask();
+        await postgres.DisposeAsync();
         ClearEnvironment();
     }
 

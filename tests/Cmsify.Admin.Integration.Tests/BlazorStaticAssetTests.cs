@@ -4,9 +4,9 @@ public sealed class BlazorStaticAssetTests : IAsyncLifetime
 {
     private readonly AdminAuthTestFactory factory = new();
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         await factory.DisposeAsync();
     }

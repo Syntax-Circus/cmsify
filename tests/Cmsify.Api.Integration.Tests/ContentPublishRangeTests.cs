@@ -22,7 +22,7 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
@@ -32,9 +32,9 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        await postgres.DisposeAsync().AsTask();
+        await postgres.DisposeAsync();
         foreach (var key in new[]
         {
             "ConnectionStrings__Cmsify",

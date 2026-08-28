@@ -34,8 +34,8 @@ public sealed class MediaPostgresFixture : IAsyncLifetime
 
     public string ConnectionString => postgres.GetConnectionString();
 
-    public async Task InitializeAsync() => await postgres.StartAsync();
-    public async Task DisposeAsync() => await postgres.DisposeAsync();
+    public ValueTask InitializeAsync() => new(postgres.StartAsync());
+    public async ValueTask DisposeAsync() => await postgres.DisposeAsync();
 }
 
 [Collection(MediaPostgresTestGroup.Name)]

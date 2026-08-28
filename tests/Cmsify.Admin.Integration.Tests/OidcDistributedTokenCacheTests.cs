@@ -19,9 +19,9 @@ public sealed class OidcDistributedTokenCacheTests : IAsyncLifetime
 {
     private readonly RedisContainer redis = new RedisBuilder("redis:7.4-alpine").Build();
 
-    public async Task InitializeAsync() => await redis.StartAsync();
+    public ValueTask InitializeAsync() => new(redis.StartAsync());
 
-    public async Task DisposeAsync() => await redis.DisposeAsync();
+    public async ValueTask DisposeAsync() => await redis.DisposeAsync();
 
     [Fact]
     public async Task OidcDistributedTokenCache_UsesRedisAcrossIndependentProvidersWithSinglePrefixAndEviction()

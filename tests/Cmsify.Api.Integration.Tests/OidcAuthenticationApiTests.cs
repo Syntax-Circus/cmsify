@@ -34,13 +34,13 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", null);
         await postgres.DisposeAsync();

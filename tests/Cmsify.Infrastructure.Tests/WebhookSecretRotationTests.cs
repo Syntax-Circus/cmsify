@@ -24,9 +24,9 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public Task InitializeAsync() => postgres.StartAsync();
+    public ValueTask InitializeAsync() => new(postgres.StartAsync());
 
-    public async Task DisposeAsync() => await postgres.DisposeAsync();
+    public async ValueTask DisposeAsync() => await postgres.DisposeAsync();
 
     [Fact]
     public async Task RotateBatch_IsBoundedIncludesSoftDeletedAndLeavesActiveCiphertextUntouched()

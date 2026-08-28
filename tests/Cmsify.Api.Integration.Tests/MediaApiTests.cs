@@ -30,7 +30,7 @@ public sealed class MediaApiTests : IAsyncLifetime
 
     private string storagePath = string.Empty;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         storagePath = Path.Combine(Path.GetTempPath(), "cmsify-media-tests", Guid.NewGuid().ToString("N"));
         await postgres.StartAsync();
@@ -45,9 +45,9 @@ public sealed class MediaApiTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Media__MaxFileSizeMb", "1");
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        await postgres.DisposeAsync().AsTask();
+        await postgres.DisposeAsync();
         if (Directory.Exists(storagePath))
         {
             Directory.Delete(storagePath, recursive: true);

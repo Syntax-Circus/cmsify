@@ -15,6 +15,13 @@ const getTrackedFiles = (...pathspecs) =>
   })
     .split(/\r?\n/)
     .filter(Boolean);
+const testProjectPaths = [
+  "tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj",
+  "tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj",
+  "tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj",
+  "tests/Cmsify.Admin.Integration.Tests/Cmsify.Admin.Integration.Tests.csproj",
+  "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj",
+];
 
 test("pins the SDK used for locked solution restores", () => {
   const globalJson = JSON.parse(readRepositoryFile("global.json"));
@@ -48,5 +55,30 @@ test("does not track a local NuGet feed configuration", () => {
 
   for (const configPath of trackedNuGetConfigs) {
     assert.equal(readRepositoryFile(configPath).includes("artifacts/local-nuget"), false);
+  }
+});
+
+test("standardizes every test project on the xUnit v3 host", () => {
+  const centralPackages = readRepositoryFile("Directory.Packages.props");
+
+  assert.equal(centralPackages.includes('<PackageVersion Include="xunit"'), false);
+  assert.equal(
+    centralPackages.includes('<PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />'),
+    true);
+  assert.equal(
+    centralPackages.includes('<PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />'),
+    true);
+  assert.equal(
+    centralPackages.includes('<PackageVersion Include="xunit.v3" Version="3.2.2" />'),
+    true);
+
+  for (const projectPath of testProjectPaths) {
+    const project = readRepositoryFile(projectPath);
+
+    assert.equal(project.includes("<OutputType>Exe</OutputType>"), true, projectPath);
+    assert.equal(project.includes('<PackageReference Include="Microsoft.NET.Test.Sdk" />'), true, projectPath);
+    assert.equal(project.includes('<PackageReference Include="xunit.runner.visualstudio"'), true, projectPath);
+    assert.equal(project.includes('<PackageReference Include="xunit.v3" />'), true, projectPath);
+    assert.equal(project.includes('<PackageReference Include="xunit"'), false, projectPath);
   }
 });

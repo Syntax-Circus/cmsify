@@ -15,7 +15,7 @@ public sealed class HealthCheckApiTests : IAsyncLifetime
 
     private string storagePath = string.Empty;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         storagePath = Path.Combine(Path.GetTempPath(), "cmsify-health-tests", Guid.NewGuid().ToString("N"));
         await postgres.StartAsync();
@@ -29,9 +29,9 @@ public sealed class HealthCheckApiTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Api__HealthDashboardEnabled", "false");
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        await postgres.DisposeAsync().AsTask();
+        await postgres.DisposeAsync();
         if (Directory.Exists(storagePath))
         {
             Directory.Delete(storagePath, recursive: true);

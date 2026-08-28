@@ -24,9 +24,9 @@ public sealed class OidcCircuitTokenForwardingTests : IAsyncLifetime
         Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent)
     };
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task DisposeAsync() => await factory.DisposeAsync();
+    public async ValueTask DisposeAsync() => await factory.DisposeAsync();
 
     [Fact]
     public async Task RenderedOidcCircuit_ScopedCmsifyClientForwardsOnlyTheRenderedUsersBearer()

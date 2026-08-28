@@ -15,9 +15,9 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync() => await postgres.StartAsync();
+    public ValueTask InitializeAsync() => new(postgres.StartAsync());
 
-    public async Task DisposeAsync() => await postgres.DisposeAsync().AsTask();
+    public async ValueTask DisposeAsync() => await postgres.DisposeAsync();
 
     [Fact]
     public async Task Migrations_ApplyCleanlyAndCreateExpectedIndexes()
