@@ -113,6 +113,55 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Capacity")]
+    public async Task ContentCommandRecorder_CountsContentItemOnlyCommands()
+    {
+        var commands = new ContentCommandRecorder();
+        await using var factory = CreateFactory(commands);
+        using var client = factory.CreateClient();
+        commands.Start();
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+
+        _ = await dbContext.ContentItems.CountAsync(TestContext.Current.CancellationToken);
+
+        Assert.Single(commands.Commands);
+        Assert.Contains("content_items", commands.Commands[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("content_versions", commands.Commands[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("template_versions", commands.Commands[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("templates", commands.Commands[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task ContentCommandRecorder_PreservesSqlParameterNamesAndValues()
+    {
+        var commands = new ContentCommandRecorder();
+        await using var factory = CreateFactory(commands);
+        using var client = factory.CreateClient();
+        _ = await SeedTwoResolvedItemsAsync(factory);
+        commands.Start();
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+
+        _ = await dbContext.ContentVersions
+            .OrderBy(version => version.Id)
+            .Skip(1)
+            .Take(2)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        var recorded = Assert.Single(commands.RecordedCommands);
+        Assert.Contains("limit", recorded.NormalizedSql, StringComparison.Ordinal);
+        Assert.Contains("offset", recorded.NormalizedSql, StringComparison.Ordinal);
+        Assert.All(
+            recorded.Parameters,
+            parameter => Assert.Contains(parameter.Name.TrimStart('@'), recorded.NormalizedSql, StringComparison.Ordinal));
+        Assert.Equal(
+            [1, 2],
+            recorded.Parameters.Select(parameter => Convert.ToInt32(parameter.Value)).Order().ToArray());
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
     public async Task RepresentativeResolvedList_HasStableBoundedPagesAndConstantCommandCount()
     {
         var commands = new ContentCommandRecorder();
@@ -126,35 +175,35 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             commands,
             seed.WorkspaceId,
             "localeCode=en-US&page=1&pageSize=1");
-        AssertCapacityPage(filteredFirst, seed, 250, [498]);
+        AssertCapacityPage(filteredFirst, seed, 250, 1, 0, [498]);
 
         var singleFirst = await ExecuteCapacityRequestAsync(
             client,
             commands,
             seed.WorkspaceId,
             "page=1&pageSize=1");
-        AssertCapacityPage(singleFirst, seed, CapacityLiveItemCount, [499]);
+        AssertCapacityPage(singleFirst, seed, CapacityLiveItemCount, 1, 0, [499]);
 
         var singleLater = await ExecuteCapacityRequestAsync(
             client,
             commands,
             seed.WorkspaceId,
             "page=250&pageSize=1");
-        AssertCapacityPage(singleLater, seed, CapacityLiveItemCount, [250]);
+        AssertCapacityPage(singleLater, seed, CapacityLiveItemCount, 1, 249, [250]);
 
         var maximumFirst = await ExecuteCapacityRequestAsync(
             client,
             commands,
             seed.WorkspaceId,
             "page=1&pageSize=100");
-        AssertCapacityPage(maximumFirst, seed, CapacityLiveItemCount, Enumerable.Range(400, 100).Reverse());
+        AssertCapacityPage(maximumFirst, seed, CapacityLiveItemCount, 100, 0, Enumerable.Range(400, 100).Reverse());
 
         var maximumLater = await ExecuteCapacityRequestAsync(
             client,
             commands,
             seed.WorkspaceId,
             "page=3&pageSize=100");
-        AssertCapacityPage(maximumLater, seed, CapacityLiveItemCount, Enumerable.Range(200, 100).Reverse());
+        AssertCapacityPage(maximumLater, seed, CapacityLiveItemCount, 100, 200, Enumerable.Range(200, 100).Reverse());
 
         var samples = new[] { filteredFirst, singleFirst, singleLater, maximumFirst, maximumLater };
         Assert.All(samples, sample => Assert.Equal(2, sample.Commands.Count));
@@ -516,13 +565,19 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             $"/api/v1/workspaces/{workspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z&{query}",
             TestContext.Current.CancellationToken);
         stopwatch.Stop();
-        return new CapacityRequestResult(response, stopwatch.Elapsed.TotalMilliseconds, commands.Commands);
+        return new CapacityRequestResult(
+            response,
+            stopwatch.Elapsed.TotalMilliseconds,
+            commands.Commands,
+            commands.RecordedCommands);
     }
 
     private static void AssertCapacityPage(
         CapacityRequestResult result,
         RepresentativeCapacitySeed seed,
         int expectedTotal,
+        int expectedPageSize,
+        int expectedOffset,
         IEnumerable<int> expectedItemIndices)
     {
         var expectedIndices = expectedItemIndices.ToArray();
@@ -547,7 +602,35 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
         }
 
         Assert.Equal(2, result.Commands.Count);
-        Assert.Single(result.Commands, command => command.Contains("templates", StringComparison.Ordinal));
+        var pageCommand = Assert.Single(
+            result.RecordedCommands,
+            command => command.NormalizedSql.Contains("templates", StringComparison.Ordinal));
+        Assert.Equal(expectedPageSize, SqlClauseValue(pageCommand, "limit"));
+        Assert.Equal(expectedOffset, SqlClauseValue(pageCommand, "offset"));
+    }
+
+    private static int SqlClauseValue(RecordedContentCommand command, string clause)
+    {
+        var matches = Regex.Matches(
+            command.NormalizedSql,
+            $@"\b{Regex.Escape(clause)}\s+(?<operand>[@:$]?[a-z0-9_]+)",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        Assert.True(
+            matches.Count > 0,
+            $"Expected PostgreSQL {clause.ToUpperInvariant()} in page SQL. SQL: {command.NormalizedSql}");
+        var match = matches[matches.Count - 1];
+        var operand = match.Groups["operand"].Value;
+        if (int.TryParse(operand, out var literalValue))
+        {
+            return literalValue;
+        }
+
+        var normalizedOperand = operand.TrimStart('@', ':', '$');
+        var parameter = Assert.Single(
+            command.Parameters,
+            candidate => candidate.Name.TrimStart('@', ':', '$').Equals(normalizedOperand, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(parameter.Value);
+        return Convert.ToInt32(parameter.Value);
     }
 
     private static string CapacitySelectedSlug(int itemIndex) => $"capacity-{itemIndex:D4}-selected";
@@ -611,24 +694,28 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
         private readonly Lock sync = new();
         private bool isStarted;
 
-        public IReadOnlyList<string> Commands
+        public IReadOnlyList<RecordedContentCommand> RecordedCommands
         {
             get
             {
                 lock (sync)
                 {
-                    return commands.ToList();
+                    return recordedCommands.ToList();
                 }
             }
         }
 
-        private readonly List<string> commands = [];
+        public IReadOnlyList<string> Commands => RecordedCommands
+            .Select(command => command.NormalizedSql)
+            .ToList();
+
+        private readonly List<RecordedContentCommand> recordedCommands = [];
 
         public void Start()
         {
             lock (sync)
             {
-                commands.Clear();
+                recordedCommands.Clear();
                 isStarted = true;
             }
         }
@@ -639,14 +726,15 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             InterceptionResult<DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
-            Record(command.CommandText);
+            Record(command);
             return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
         }
 
-        private void Record(string commandText)
+        private void Record(DbCommand command)
         {
-            var normalized = Regex.Replace(commandText, @"\s+", " ").Trim().ToLowerInvariant();
+            var normalized = Regex.Replace(command.CommandText, @"\s+", " ").Trim().ToLowerInvariant();
             if (!normalized.Contains("content_versions", StringComparison.Ordinal)
+                && !normalized.Contains("content_items", StringComparison.Ordinal)
                 && !normalized.Contains("template_versions", StringComparison.Ordinal)
                 && !normalized.Contains("templates", StringComparison.Ordinal))
             {
@@ -657,11 +745,23 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             {
                 if (isStarted)
                 {
-                    commands.Add(normalized);
+                    var parameters = command.Parameters
+                        .Cast<DbParameter>()
+                        .Select(parameter => new RecordedParameter(
+                            parameter.ParameterName,
+                            parameter.Value is DBNull ? null : parameter.Value))
+                        .ToArray();
+                    recordedCommands.Add(new RecordedContentCommand(normalized, parameters));
                 }
             }
         }
     }
+
+    private sealed record RecordedContentCommand(
+        string NormalizedSql,
+        IReadOnlyList<RecordedParameter> Parameters);
+
+    private sealed record RecordedParameter(string Name, object? Value);
 
     private sealed record RepresentativeCapacitySeed(
         Guid WorkspaceId,
@@ -672,5 +772,6 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
     private sealed record CapacityRequestResult(
         JsonElement Response,
         double ElapsedMilliseconds,
-        IReadOnlyList<string> Commands);
+        IReadOnlyList<string> Commands,
+        IReadOnlyList<RecordedContentCommand> RecordedCommands);
 }
