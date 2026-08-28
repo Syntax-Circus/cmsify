@@ -1,4 +1,5 @@
 using System.Net;
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using Cmsify.Admin.Auth;
 using Cmsify.Admin.Services;
@@ -19,6 +20,7 @@ public sealed class OidcCircuitTokenForwardingTests : IAsyncLifetime
     {
         OidcEnabled = true,
         UseCircuitAuthenticationStateProvider = true,
+        UseRecordingApiTokenAccessor = true,
         Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent)
     };
 
@@ -50,20 +52,39 @@ public sealed class OidcCircuitTokenForwardingTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ConcurrentRenderedOidcCircuits_KeepEachScopedCmsifyClientBearerOnItsOwnUri()
+    public async Task ConcurrentRenderedOidcCircuits_RetryWithFreshCorrelationAndKeepBearerAndObserverScoped()
     {
-        var bothArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var arrived = 0;
-        factory.AsyncResponder = async (_, cancellationToken) =>
+        var attempts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+        var bothFirstAttemptsArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstAttemptsArrived = 0;
+        var oneExpiries = new[]
         {
-            if (Interlocked.Increment(ref arrived) == 2)
+            new DateTimeOffset(2030, 1, 1, 0, 0, 1, TimeSpan.Zero),
+            new DateTimeOffset(2030, 1, 1, 0, 0, 2, TimeSpan.Zero)
+        };
+        var twoExpiries = new[]
+        {
+            new DateTimeOffset(2040, 2, 2, 0, 0, 1, TimeSpan.Zero),
+            new DateTimeOffset(2040, 2, 2, 0, 0, 2, TimeSpan.Zero)
+        };
+        factory.AsyncResponder = async (request, cancellationToken) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            var attempt = attempts.AddOrUpdate(path, 1, static (_, current) => current + 1);
+            if (attempt == 1)
             {
-                bothArrived.TrySetResult();
+                if (Interlocked.Increment(ref firstAttemptsArrived) == 2)
+                {
+                    bothFirstAttemptsArrived.TrySetResult();
+                }
+
+                await bothFirstAttemptsArrived.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
             }
 
-            await release.Task.WaitAsync(cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.NoContent);
+            var response = new HttpResponseMessage(attempt == 1 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK);
+            var expiries = path == "/test/circuit-one" ? oneExpiries : twoExpiries;
+            response.Headers.TryAddWithoutValidation("X-Session-Expires-At", expiries[attempt - 1].ToString("O"));
+            return response;
         };
 
         _ = factory.CreateClient();
@@ -75,19 +96,25 @@ public sealed class OidcCircuitTokenForwardingTests : IAsyncLifetime
         using var twoScope = factory.Services.CreateScope();
         oneScope.ServiceProvider.GetRequiredService<CircuitIdentitySlot>().Principal = OidcUser("one");
         twoScope.ServiceProvider.GetRequiredService<CircuitIdentitySlot>().Principal = OidcUser("two");
+        var oneObserver = oneScope.ServiceProvider.GetRequiredService<RecordingApiTokenAccessor>();
+        var twoObserver = twoScope.ServiceProvider.GetRequiredService<RecordingApiTokenAccessor>();
         await using var oneRenderer = new HtmlRenderer(oneScope.ServiceProvider, NullLoggerFactory.Instance);
         await using var twoRenderer = new HtmlRenderer(twoScope.ServiceProvider, NullLoggerFactory.Instance);
 
         var oneRender = oneRenderer.Dispatcher.InvokeAsync(() => oneRenderer.RenderComponentAsync<FirstCircuitCmsifyClientProbe>());
         var twoRender = twoRenderer.Dispatcher.InvokeAsync(() => twoRenderer.RenderComponentAsync<SecondCircuitCmsifyClientProbe>());
-        await bothArrived.Task.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None);
-        release.TrySetResult();
         await Task.WhenAll(oneRender, twoRender);
 
-        (factory.ObservedRequests.Single(request => request.RequestUri!.AbsolutePath == "/test/circuit-one")
-            .Headers.Authorization?.ToString()).ShouldBe("Bearer token-one");
-        (factory.ObservedRequests.Single(request => request.RequestUri!.AbsolutePath == "/test/circuit-two")
-            .Headers.Authorization?.ToString()).ShouldBe("Bearer token-two");
+        var oneRequests = factory.ObservedApiRequests.Where(request => request.Path == "/test/circuit-one").ToArray();
+        var twoRequests = factory.ObservedApiRequests.Where(request => request.Path == "/test/circuit-two").ToArray();
+        oneRequests.Length.ShouldBe(2);
+        twoRequests.Length.ShouldBe(2);
+        oneRequests.ShouldAllBe(request => request.Authorization == "Bearer token-one");
+        twoRequests.ShouldAllBe(request => request.Authorization == "Bearer token-two");
+        oneRequests.Concat(twoRequests).Select(request => request.CorrelationId).ShouldAllBe(correlationId => !string.IsNullOrWhiteSpace(correlationId));
+        oneRequests.Concat(twoRequests).Select(request => request.CorrelationId).Distinct().Count().ShouldBe(4);
+        oneObserver.Expiries.ShouldBe(oneExpiries);
+        twoObserver.Expiries.ShouldBe(twoExpiries);
     }
 
     private static ServerTokenCacheEntry Token(string accessToken) => new(

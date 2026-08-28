@@ -11,6 +11,7 @@ using SyntaxCircus.AspNetCore.Common;
 using SyntaxCircus.Blazor.Auth;
 using SyntaxCircus.DotEnv;
 using SyntaxCircus.Cmsify;
+using SyntaxCircus.Http.Resilience;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -109,10 +110,12 @@ if (oidcEnabled)
 {
     cmsifyApiClientBuilder.AddHttpMessageHandler<ApiAuthHandler>();
 }
+builder.Services.AddSingleton(new HttpRequestResiliencePipeline("CmsifyApi", new HttpRequestResilienceOptions()));
 builder.Services.AddScoped<CmsifyClient>(services =>
 {
     var tokenAccessor = services.GetRequiredService<IApiTokenAccessor>();
     var httpContextAccessor = services.GetRequiredService<IHttpContextAccessor>();
+    var resiliencePipeline = services.GetRequiredService<HttpRequestResiliencePipeline>();
     var httpClient = oidcEnabled
         ? services.GetRequiredService<IBlazorCircuitHttpClientFactory>().CreateClient("CmsifyApi")
         : services.GetRequiredService<IHttpClientFactory>().CreateClient("CmsifyApi");
@@ -136,7 +139,7 @@ builder.Services.AddScoped<CmsifyClient>(services =>
                 await tokenAccessor.NoteSessionExpiryAsync(expiresAt, ct);
             }
         }
-    });
+    }, resiliencePipeline);
 });
 builder.Services.AddScoped<BrowserStorage>();
 builder.Services.AddScoped<BrowserDownloads>();

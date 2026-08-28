@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Collections.Concurrent;
+using Cmsify.Admin.Auth;
 using Cmsify.Admin.Services;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
@@ -37,6 +39,7 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     public string? OidcRedisConnectionString { get; set; }
     public string? OidcRedisInstanceName { get; set; }
     public bool UseCircuitAuthenticationStateProvider { get; set; }
+    public bool UseRecordingApiTokenAccessor { get; set; }
 
     public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } =
         _ => new HttpResponseMessage(HttpStatusCode.NotImplemented);
@@ -44,6 +47,8 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? AsyncResponder { get; set; }
 
     public List<HttpRequestMessage> ObservedRequests { get; } = new();
+
+    public ConcurrentQueue<ObservedApiRequest> ObservedApiRequests { get; } = new();
 
     public List<OidcTokenRequest> OidcTokenRequests { get; } = new();
 
@@ -85,6 +90,12 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 services.AddScoped<CircuitIdentitySlot>();
                 services.AddScoped<AuthenticationStateProvider>(sp => new CircuitAuthenticationStateProvider(
                     sp.GetRequiredService<CircuitIdentitySlot>()));
+            }
+            if (UseRecordingApiTokenAccessor)
+            {
+                services.RemoveAll<IApiTokenAccessor>();
+                services.AddScoped<RecordingApiTokenAccessor>();
+                services.AddScoped<IApiTokenAccessor>(sp => sp.GetRequiredService<RecordingApiTokenAccessor>());
             }
             services.AddHttpClient("CmsifyApi")
                 .ConfigurePrimaryHttpMessageHandler(() => new DelegatingFakeHandler(this));
@@ -150,6 +161,10 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
             {
                 factory.ObservedRequests.Add(request);
             }
+            factory.ObservedApiRequests.Enqueue(new ObservedApiRequest(
+                request.RequestUri?.AbsolutePath ?? string.Empty,
+                request.Headers.Authorization?.ToString(),
+                request.Headers.TryGetValues("X-Correlation-Id", out var values) ? values.Single() : null));
             return factory.AsyncResponder is { } asyncResponder
                 ? await asyncResponder(request, cancellationToken)
                 : factory.Responder(request);
@@ -184,6 +199,8 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     }
 
     public sealed record OidcTokenRequest(string GrantType, string? RefreshToken);
+
+    public sealed record ObservedApiRequest(string Path, string? Authorization, string? CorrelationId);
 
     private sealed class OidcBackchannelHandler(AdminAuthTestFactory factory, SecurityKey signingKey) : HttpMessageHandler
     {
@@ -247,5 +264,38 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     {
         Content = JsonContent.Create(payload)
     };
+}
+
+internal sealed class RecordingApiTokenAccessor(AuthenticationStateProvider authenticationStateProvider) : IApiTokenAccessor
+{
+    private readonly object expiriesGate = new();
+    private readonly List<DateTimeOffset> expiries = new();
+
+    public IReadOnlyList<DateTimeOffset> Expiries
+    {
+        get
+        {
+            lock (expiriesGate)
+            {
+                return expiries.ToArray();
+            }
+        }
+    }
+
+    public async Task<string?> GetTokenAsync(CancellationToken ct = default)
+    {
+        var state = await authenticationStateProvider.GetAuthenticationStateAsync();
+        return state.User.FindFirst(CmsifyAuthClaims.ApiToken)?.Value;
+    }
+
+    public Task NoteSessionExpiryAsync(DateTimeOffset expiresAt, CancellationToken ct = default)
+    {
+        lock (expiriesGate)
+        {
+            expiries.Add(expiresAt);
+        }
+
+        return Task.CompletedTask;
+    }
 }
 
