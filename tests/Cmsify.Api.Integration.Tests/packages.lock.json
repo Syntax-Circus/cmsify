@@ -8,6 +8,12 @@
         "resolved": "4.2.0",
         "contentHash": "gwLD2KfCuwQesP17aVh4h6lpiMPEVt5Lbpndo0ej903hNUUTtyxt3ARdDjmuydBRTAUICc7OVKVbaOvc6SQYXA=="
       },
+      "coverlet.collector": {
+        "type": "Direct",
+        "requested": "[10.0.1, )",
+        "resolved": "10.0.1",
+        "contentHash": "27jXSV/0DbVqF5jDrAxuQFZ9oaz6gmG03p8ttxAFk+X0M4woFYj7MoWDLCna5EGLb0CE6OE7X6ZH3Wt5smTtaA=="
+      },
       "Microsoft.AspNetCore.Mvc.Testing": {
         "type": "Direct",
         "requested": "[10.0.11, )",
