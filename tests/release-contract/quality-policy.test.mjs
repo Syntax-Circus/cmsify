@@ -91,8 +91,13 @@ test("treats Release warnings as errors without broadening suppression policy", 
     ":(glob)**/*.targets",
   );
   const noWarnEntries = buildPolicyPaths.flatMap((filePath) =>
-    [...readRepositoryFile(filePath).matchAll(/<NoWarn>(.*?)<\/NoWarn>/g)]
-      .map((match) => `${filePath}:${match[1]}`));
+    [...readRepositoryFile(filePath).matchAll(
+      /<NoWarn\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/NoWarn\s*>)/gi,
+    )].map((match) => ({
+      attributes: match[1].trim(),
+      filePath,
+      value: (match[2] ?? "").trim(),
+    })));
 
   assert.equal(
     directoryBuildProps.includes(
@@ -100,17 +105,28 @@ test("treats Release warnings as errors without broadening suppression policy", 
     ),
     true,
   );
-  assert.deepEqual(noWarnEntries.sort(), [
+  assert.deepEqual(noWarnEntries.map(({ filePath, value }) => `${filePath}:${value}`).sort(), [
     "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj:$(NoWarn);1591",
     "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj:$(NoWarn);1591",
     "src/Cmsify.Api/Cmsify.Api.csproj:$(NoWarn);1591",
     "src/Cmsify.Contracts/Cmsify.Contracts.csproj:$(NoWarn);1591",
   ]);
+  for (const { attributes, filePath } of noWarnEntries) {
+    assert.equal(attributes, "", `${filePath}: NoWarn attributes are not allowed`);
+  }
 
   for (const filePath of buildPolicyPaths) {
     const project = readRepositoryFile(filePath);
 
-    assert.equal(project.includes("<WarningsNotAsErrors>"), false, filePath);
-    assert.equal(/<Nullable>\s*disable\s*<\/Nullable>/i.test(project), false, filePath);
+    assert.equal(
+      /<WarningsNotAsErrors\b/i.test(project),
+      false,
+      `${filePath}: WarningsNotAsErrors is not allowed`,
+    );
+    assert.equal(
+      /<Nullable\b[^>]*>\s*disable\s*<\/Nullable\s*>/i.test(project),
+      false,
+      `${filePath}: nullable disable policy is not allowed`,
+    );
   }
 });
