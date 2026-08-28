@@ -324,6 +324,7 @@ test("default preflight validates fixture and every image before the first resou
           events.push("manifest:validate");
           return manifest;
         },
+        verifyFixtureGenerationProvenance: () => events.push("generation:verify"),
         loadExpectedData: async () => {
           events.push("expected:validate");
           return { authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-admin-password" } };
@@ -335,8 +336,9 @@ test("default preflight validates fixture and every image before the first resou
       },
     }), /restore-fixture phase failed/i);
 
-    assert.deepEqual(events.slice(0, 9), [
+    assert.deepEqual(events.slice(0, 10), [
       "manifest:validate",
+      "generation:verify",
       "expected:validate",
       "checksums:verify",
       "inspect:baseline-api",
@@ -396,6 +398,7 @@ test("default preflight failure for a missing tool cannot write the run env or s
       dependencies: {
         createDockerHarness: () => harness,
         loadFixtureManifest: () => manifest,
+        verifyFixtureGenerationProvenance: () => undefined,
         loadExpectedData: async () => ({ authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-password" } }),
         verifyFixtureChecksums: async () => verifiedChecksums(),
       },
@@ -469,6 +472,7 @@ test("default preflight reports an aborted immutable-image tool probe as cancell
       dependencies: {
         createDockerHarness: (scope) => createDockerHarness(scope, executor),
         loadFixtureManifest: () => manifest,
+        verifyFixtureGenerationProvenance: () => undefined,
         loadExpectedData: async () => ({ authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-password" } }),
         verifyFixtureChecksums: async () => verifiedChecksums(),
       },
@@ -551,6 +555,7 @@ test("default operations pass the candidate canary through isolated backup rollb
       dependencies: {
         createDockerHarness: () => harness,
         loadFixtureManifest: () => manifest,
+        verifyFixtureGenerationProvenance: () => undefined,
         loadExpectedData: async () => expected,
         verifyFixtureChecksums: async () => verifiedChecksums(),
         captureWebhookWorkerState: async (docker) => {

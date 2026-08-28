@@ -171,9 +171,16 @@ jobs:
       - name: Load and verify the exact release candidate
         run: |
           sha256sum --check artifacts/SHA256SUMS
-          docker load --input artifacts/oci/cmsify-api.oci.tar
           node eng/upgrade-tests/cli.mjs verify-release-baseline --fixture tests/upgrade/fixtures/v0.1.3 --candidate-version "$VERSION" --github-token-env GITHUB_TOKEN
           node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v0.1.3
+          FIXTURE_MANIFEST="tests/upgrade/fixtures/v0.1.3/manifest.json"
+          BASELINE_API_IMAGE="$(jq -er '.baseline.apiImage | "\(.repository)@\(.digest)"' "$FIXTURE_MANIFEST")"
+          POSTGRES_IMAGE="$(jq -er '.baseline.postgresImage | "\(.repository)@\(.digest)"' "$FIXTURE_MANIFEST")"
+          MINIO_IMAGE="$(jq -er '.baseline.minioImage | "\(.repository)@\(.digest)"' "$FIXTURE_MANIFEST")"
+          docker pull --platform linux/amd64 "$BASELINE_API_IMAGE"
+          docker pull --platform linux/amd64 "$POSTGRES_IMAGE"
+          docker pull --platform linux/amd64 "$MINIO_IMAGE"
+          docker load --input artifacts/oci/cmsify-api.oci.tar
           node eng/upgrade-tests/cli.mjs rehearse --fixture tests/upgrade/fixtures/v0.1.3 --candidate-image "$CANDIDATE_IMAGE" --candidate-version "$VERSION" --candidate-source-sha "$SOURCE_SHA"
       - name: Upload sanitized upgrade diagnostics on failure
         if: failure()

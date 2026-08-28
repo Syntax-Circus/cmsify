@@ -6,7 +6,12 @@ import { assertBaselineFixture, captureWebhookWorkerState } from "./assertions.m
 import { writeFixtureChecksums } from "./checksums.mjs";
 import { createDockerHarness } from "./docker.mjs";
 import { loadExpectedData } from "./expected.mjs";
-import { loadFixtureManifest } from "./manifest.mjs";
+import {
+  FIXTURE_GENERATION_SCHEMA_VERSION,
+  FIXTURE_GENERATOR_VERSION,
+  FIXTURE_SEED_PATH,
+  loadFixtureManifest,
+} from "./manifest.mjs";
 import { createRunScope } from "./paths.mjs";
 
 const TEXT_MEDIA = Buffer.from("Cmsify v0.1.3 upgrade fixture\n", "utf8");
@@ -22,6 +27,28 @@ const FIXTURE_ENVIRONMENT = Object.freeze({
   CMSIFY_FIXTURE_LEGACY_KEY_BASE64: "Q21zaWZ5IGZpeHR1cmUgbGVnYWN5IGtleSAwLjEuMyE=",
   CMSIFY_FIXTURE_CANDIDATE_KEY_BASE64: "Q21zaWZ5IGZpeHR1cmUgY2FuZGlkYXRlIGtleSB2MSE=",
 });
+
+/** Writes only deterministic, source-derived fixture provenance through the checked-in generator. */
+export async function writeFixtureGenerationMetadata({ repositoryRoot, fixtureDirectory }) {
+  const seedSha256 = createHash("sha256").update(await readFile(resolve(repositoryRoot, FIXTURE_SEED_PATH))).digest("hex");
+  const generation = {
+    schemaVersion: FIXTURE_GENERATION_SCHEMA_VERSION,
+    generatorVersion: FIXTURE_GENERATOR_VERSION,
+    seed: { path: FIXTURE_SEED_PATH, sha256: seedSha256 },
+  };
+  const manifestPath = resolve(fixtureDirectory, "manifest.json");
+  const expectedPath = resolve(fixtureDirectory, "expected.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const expected = JSON.parse(await readFile(expectedPath, "utf8"));
+  manifest.generation = generation;
+  expected.provenance.generation = generation;
+  const permissions = expected.scenarios.find(({ id }) => id === "permissions");
+  assert(permissions, "Expected fixture data is missing the permissions scenario.");
+  permissions.assertions = ["editor-primary-write-grant", "global-admin-restricted-read", "reader-primary-resolve", "reader-restricted-hidden"];
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await writeFile(expectedPath, `${JSON.stringify(expected, null, 2)}\n`, "utf8");
+  return Object.freeze(generation);
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -482,6 +509,7 @@ async function writeMedia(fixtureDirectory, expected) {
  * @returns {Promise<object>}
  */
 export async function generateFixture({ repositoryRoot, fixtureDirectory, keepDiagnostics = false }) {
+  await writeFixtureGenerationMetadata({ repositoryRoot, fixtureDirectory });
   const manifest = loadFixtureManifest(fixtureDirectory);
   const expected = await loadExpectedData(fixtureDirectory, manifest);
   const scope = createRunScope(repositoryRoot);

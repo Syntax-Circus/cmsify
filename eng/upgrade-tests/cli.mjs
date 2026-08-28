@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { verifyFixtureChecksums } from "./checksums.mjs";
 import { loadExpectedData } from "./expected.mjs";
 import { compareFixtureTrees, generateFixture, runWithCleanup } from "./fixture.mjs";
-import { loadFixtureManifest } from "./manifest.mjs";
+import { loadFixtureManifest, verifyFixtureGenerationProvenance } from "./manifest.mjs";
 import { rehearse, validateCandidateInput } from "./rehearsal.mjs";
 import {
   fetchDockerLinuxAmd64Descriptor,
@@ -273,6 +273,7 @@ export async function main(arguments_, runtime = {}) {
       return 0;
     }
     const manifest = loadFixtureManifest(fixtureDirectory);
+    verifyFixtureGenerationProvenance(cwd, manifest);
     await loadExpectedData(fixtureDirectory, manifest);
     await verifyFixtureChecksums(fixtureDirectory, manifest);
     stdout.write(`Fixture verified for ${manifest.baseline.version}.\n`);

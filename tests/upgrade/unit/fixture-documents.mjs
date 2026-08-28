@@ -25,6 +25,14 @@ export function validManifestDocument() {
         platform: "linux/amd64",
       },
     },
+    generation: {
+      schemaVersion: 1,
+      generatorVersion: "1.0.0",
+      seed: {
+        path: "tests/upgrade/seed/v0.1.3.sql",
+        sha256: "d4f985494d9da184ee5a3473b40b8fd1b366c28fb288b0331eb2aa1a1f0408de",
+      },
+    },
     requiredFiles: ["database.sql", "expected.json", "manifest.json", "media/a.txt", "media/z.txt"],
     requiredScenarios: [...REQUIRED_SCENARIOS],
     expectedDataFile: "expected.json",
@@ -135,6 +143,14 @@ export function validExpectedDocument() {
       packageNamespace: "fixture.synthetic",
       packageId: "moving-baseline",
       packageVersion: "0.1.3",
+      generation: {
+        schemaVersion: 1,
+        generatorVersion: "1.0.0",
+        seed: {
+          path: "tests/upgrade/seed/v0.1.3.sql",
+          sha256: "d4f985494d9da184ee5a3473b40b8fd1b366c28fb288b0331eb2aa1a1f0408de",
+        },
+      },
     },
     timestamps: {
       workspaceCreatedAt: "2026-08-20T12:00:00.000000Z",
@@ -184,7 +200,7 @@ export function validExpectedDocument() {
     },
     scenarios: [
       { id: "workspaces", assertions: ["primary-and-restricted-exist"] },
-      { id: "permissions", assertions: ["editor-primary-write-grant", "reader-primary-resolve", "reader-restricted-hidden"] },
+      { id: "permissions", assertions: ["editor-primary-write-grant", "global-admin-restricted-read", "reader-primary-resolve", "reader-restricted-hidden"] },
       { id: "templates", assertions: ["published-template-fields"] },
       { id: "components", assertions: ["inline-acyclic-snapshot"] },
       { id: "choice-revisions", assertions: ["immutable-revisions", "published-choice-label-snapshot"] },

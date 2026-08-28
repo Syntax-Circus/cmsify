@@ -100,7 +100,15 @@
     "apiImageDigest": "sha256:e28a7c884ed4cc4933fbb58608ba8d1dd97bf6a1e443ef234e0a0aa8b5c51931",
     "packageNamespace": "fixture.synthetic",
     "packageId": "moving-baseline",
-    "packageVersion": "0.1.3"
+    "packageVersion": "0.1.3",
+    "generation": {
+      "schemaVersion": 1,
+      "generatorVersion": "1.0.0",
+      "seed": {
+        "path": "tests/upgrade/seed/v0.1.3.sql",
+        "sha256": "d4f985494d9da184ee5a3473b40b8fd1b366c28fb288b0331eb2aa1a1f0408de"
+      }
+    }
   },
   "timestamps": {
     "workspaceCreatedAt": "2026-08-20T12:00:00.000000Z",
@@ -149,17 +157,89 @@
     "legacyWebhookSecretSha256": "32827ae7210eb50db164d52a19c6e1fe9305fe7a5d4e6245c58e69ff9f9cf041"
   },
   "scenarios": [
-    { "id": "workspaces", "assertions": ["primary-and-restricted-exist"] },
-    { "id": "permissions", "assertions": ["editor-primary-write-grant", "reader-primary-resolve", "reader-restricted-hidden"] },
-    { "id": "templates", "assertions": ["published-template-fields"] },
-    { "id": "components", "assertions": ["inline-acyclic-snapshot"] },
-    { "id": "choice-revisions", "assertions": ["immutable-revisions", "published-choice-label-snapshot"] },
-    { "id": "content-versions", "assertions": ["draft-and-published-distinct"] },
-    { "id": "schedules", "assertions": ["future-publish-at", "bounded-current-effective", "expired-effective-range", "expired-hidden"] },
-    { "id": "media", "assertions": ["available-media-download", "historical-deleted-media-hidden", "candidate-deletion-boundary"] },
-    { "id": "webhooks", "assertions": ["inert-endpoint", "terminal-delivery", "startup-state-stable"] },
-    { "id": "audit", "assertions": ["linked-mutation"] },
-    { "id": "authentication", "assertions": ["fixed-reader-token"] },
-    { "id": "provenance", "assertions": ["baseline-manifest-binding", "package-provenance"] }
+    {
+      "id": "workspaces",
+      "assertions": [
+        "primary-and-restricted-exist"
+      ]
+    },
+    {
+      "id": "permissions",
+      "assertions": [
+        "editor-primary-write-grant",
+        "global-admin-restricted-read",
+        "reader-primary-resolve",
+        "reader-restricted-hidden"
+      ]
+    },
+    {
+      "id": "templates",
+      "assertions": [
+        "published-template-fields"
+      ]
+    },
+    {
+      "id": "components",
+      "assertions": [
+        "inline-acyclic-snapshot"
+      ]
+    },
+    {
+      "id": "choice-revisions",
+      "assertions": [
+        "immutable-revisions",
+        "published-choice-label-snapshot"
+      ]
+    },
+    {
+      "id": "content-versions",
+      "assertions": [
+        "draft-and-published-distinct"
+      ]
+    },
+    {
+      "id": "schedules",
+      "assertions": [
+        "future-publish-at",
+        "bounded-current-effective",
+        "expired-effective-range",
+        "expired-hidden"
+      ]
+    },
+    {
+      "id": "media",
+      "assertions": [
+        "available-media-download",
+        "historical-deleted-media-hidden",
+        "candidate-deletion-boundary"
+      ]
+    },
+    {
+      "id": "webhooks",
+      "assertions": [
+        "inert-endpoint",
+        "terminal-delivery",
+        "startup-state-stable"
+      ]
+    },
+    {
+      "id": "audit",
+      "assertions": [
+        "linked-mutation"
+      ]
+    },
+    {
+      "id": "authentication",
+      "assertions": [
+        "fixed-reader-token"
+      ]
+    },
+    {
+      "id": "provenance",
+      "assertions": [
+        "baseline-manifest-binding",
+        "package-provenance"
+      ]
+    }
   ]
 }

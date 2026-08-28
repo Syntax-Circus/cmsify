@@ -13,6 +13,13 @@ const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-upgrade-paths-"));
 
 test.after(() => rmSync(repositoryRoot, { force: true, recursive: true }));
 
+function inspectedResource(args, labels, { createdAt = "2026-08-27T12:00:00Z" } = {}) {
+  const resourceId = args.at(-1);
+  return args[0] === "container"
+    ? { Id: resourceId, Config: { Labels: labels } }
+    : { Name: resourceId, Driver: "local", Mountpoint: `/docker/volumes/${resourceId}`, CreatedAt: createdAt, Labels: labels, Scope: "local", Options: null };
+}
+
 test("creates an isolated, repository-owned run scope", () => {
   const scope = createRunScope(repositoryRoot, "safe-run-001");
 
@@ -91,7 +98,7 @@ test("compose commands carry the run scope without wildcard cleanup", async () =
   await harness.logs();
 
   const composeCalls = calls.filter(({ args }) => args[0] === "compose");
-  assert.equal(composeCalls.length, 5);
+  assert.equal(composeCalls.length, 6);
   for (const { command, args } of composeCalls) {
     assert.equal(command, "docker");
     assert.deepEqual(args.slice(0, 7), [
@@ -252,7 +259,8 @@ test("discarding upgraded state label-verifies exact data containers and volumes
     if (args[0] === "compose" && args.includes("ps")) {
       return { exitCode: 0, stdout: "postgres-container\nminio-container\n", stderr: "", durationMs: 0 };
     }
-    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(scope.labels), stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels)), stderr: "", durationMs: 0 };
     return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
   };
 
@@ -265,6 +273,79 @@ test("discarding upgraded state label-verifies exact data containers and volumes
   const firstVolumeRemoval = calls.findIndex(({ args }) => args[0] === "volume" && args[1] === "rm");
   assert.ok(firstVolumeRemoval > calls.findLastIndex(({ args }) => args[0] === "rm"));
   assert.equal(calls.some(({ args }) => args.includes("prune") || args.includes("--volumes") || args.includes("down")), false);
+});
+
+test("post-fence resource relabeling aborts the entire discard before any removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-020");
+  const removals = [];
+  let fenced = false;
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) {
+      return { exitCode: 0, stdout: "postgres-container\nminio-container\n", stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) {
+      const labels = fenced
+        ? { ...scope.labels, "io.syntaxcircus.cmsify.upgrade-run": "different-run" }
+        : scope.labels;
+      return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, labels)), stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(
+    () => createDockerHarness(scope, executor).discardDataVolumes({}, async () => { fenced = true; }),
+    /ownership|changed|fence/i,
+  );
+  assert.deepEqual(removals, []);
+});
+
+test("post-fence container replacement aborts the entire discard before any removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-021");
+  const removals = [];
+  let discoveries = 0;
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) {
+      discoveries += 1;
+      const containers = discoveries === 1
+        ? "postgres-container\nminio-container\n"
+        : "replacement-postgres\nminio-container\n";
+      return { exitCode: 0, stdout: containers, stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels)), stderr: "", durationMs: 0 };
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(
+    () => createDockerHarness(scope, executor).discardDataVolumes({}, async () => {}),
+    /changed|fence/i,
+  );
+  assert.deepEqual(removals, []);
+});
+
+test("post-fence volume replacement with the same name and labels aborts before any removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-023");
+  const removals = [];
+  let fenced = false;
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) return { exitCode: 0, stdout: "postgres-container\nminio-container\n", stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) {
+      const createdAt = fenced && args.at(-1).endsWith("_postgres-data") ? "2026-08-27T12:00:01Z" : "2026-08-27T12:00:00Z";
+      return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels, { createdAt })), stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(
+    () => createDockerHarness(scope, executor).discardDataVolumes({}, async () => { fenced = true; }),
+    /changed|fence/i,
+  );
+  assert.deepEqual(removals, []);
 });
 
 test("final discard fence catches local media mutation from the source-inventory hook before first removal", async () => {
@@ -298,7 +379,8 @@ test("final discard fence catches local media mutation from the source-inventory
   const removals = [];
   const executor = async (_command, args) => {
     if (args[0] === "compose" && args.includes("ps")) return { exitCode: 0, stdout: "postgres-id\nminio-id\n", stderr: "", durationMs: 0 };
-    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(scope.labels), stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels)), stderr: "", durationMs: 0 };
     if (args[0] === "compose" && args.includes("mc") && args.includes("ls")) {
       writeFileSync(mediaPath, "mutat");
       return { exitCode: 0, stdout: `${JSON.stringify({ key: "object.txt", size: 5, type: "file" })}\n`, stderr: "", durationMs: 0 };
@@ -416,6 +498,51 @@ test("stores only a bounded structured Docker diagnostic summary", async () => {
   assert.ok(serialized.length <= 1_024);
   for (const forbidden of ["SELECT", "row=(", secret, password, "outside", "z".repeat(1_000)]) assert.equal(serialized.includes(forbidden), false);
   assert.equal(existsSync(resolve(scope.diagnosticsDirectory, "docker-compose.log")), false);
+});
+
+test("persists bounded allow-listed per-service logs and safe migration state", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-022");
+  const secret = "cmsify_fixture-secret-never-retain";
+  const migration = "20260827135736_AddMediaLifecycleReconciliation";
+  const markerLines = Array.from({ length: 80 }, () => "Application started. useful-marker").join("\n");
+  const harness = createDockerHarness(scope, async (_command, args, options) => {
+    assert.deepEqual(options.redact, [secret]);
+    if (args.includes("logs")) {
+      const prefixedMarkers = markerLines.split("\n").map((line) => `safe-run-baseline-api-1 | ${line}`).join("\n");
+      const stdout = [
+        `safe-run-postgres-1 | database system is ready to accept connections`,
+        `safe-run-postgres-1 | SELECT * FROM users; token=${secret}`,
+        `safe-run-minio-1 | API: http://minio:9000`,
+        `safe-run-minio-1 | raw-object=${secret}`,
+        `safe-run-baseline-api-1 | Now listening on: http://[::]:8080`,
+        prefixedMarkers,
+        `safe-run-baseline-api-1 | body=${secret}`,
+        `safe-run-candidate-api-1 | Applying migration '${migration}'.`,
+        `safe-run-candidate-api-1 | Unhandled exception: ${secret}`,
+      ].join("\n");
+      return { exitCode: 0, stdout, stderr: "non-allow-listed stderr", durationMs: 12 };
+    }
+    if (args.includes("psql")) {
+      return { exitCode: 0, stdout: `${migration}\nnot-a-migration=${secret}\n`, stderr: "", durationMs: 3 };
+    }
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  });
+
+  const summary = await harness.logs({ redact: [secret] });
+  const artifact = JSON.parse(readFileSync(resolve(scope.diagnosticsDirectory, "docker-diagnostics.json"), "utf8"));
+  const serialized = JSON.stringify(artifact);
+
+  assert.equal(summary.status, "captured");
+  assert.deepEqual(artifact.migrations, { status: "captured", count: 1, ids: [migration] });
+  assert.ok(artifact.services.postgres.lines.includes("database system is ready to accept connections"));
+  assert.ok(artifact.services["baseline-api"].lines.includes("Application started."));
+  assert.ok(artifact.services["candidate-api"].lines.includes(`Applying migration ${migration}.`));
+  for (const service of Object.values(artifact.services)) {
+    assert.ok(service.lines.length <= 32);
+    assert.ok(service.lines.every((line) => line.length <= 160));
+  }
+  for (const forbidden of [secret, "SELECT", "raw-object", "body=", "non-allow-listed"]) assert.equal(serialized.includes(forbidden), false);
+  assert.ok(serialized.length <= 12_000);
 });
 
 test("fails prerequisite probing before a Compose up when a required tool is missing", async () => {

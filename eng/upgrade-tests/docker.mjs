@@ -12,6 +12,10 @@ const MAX_DOCKER_TIMEOUT_MS = 120_000;
 const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
 const SOURCE_SHA = /^[0-9a-f]{40}$/;
 const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/;
+const DIAGNOSTIC_SERVICES = Object.freeze(["postgres", "minio", "baseline-api", "candidate-api"]);
+const MIGRATION_ID = /^\d{14}_[A-Za-z0-9_]{1,96}$/;
+const MAX_DIAGNOSTIC_LINES = 32;
+const MAX_DIAGNOSTIC_LINE_LENGTH = 160;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -63,6 +67,46 @@ function canonicalDockerHubReference(reference) {
 function isContainedBy(parent, candidate) {
   const pathFromParent = relative(parent, candidate);
   return pathFromParent === "" || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== ".." && !isAbsolute(pathFromParent));
+}
+
+function diagnosticMarker(service, line) {
+  if (service === "postgres") {
+    if (/database system is ready to accept connections/i.test(line)) return "database system is ready to accept connections";
+    if (/database system is shut down/i.test(line)) return "database system is shut down";
+    if (/\bFATAL\b/i.test(line)) return "PostgreSQL fatal error observed.";
+    return undefined;
+  }
+  if (service === "minio") {
+    if (/\bAPI:\s*https?:\/\//i.test(line)) return "MinIO API endpoint announced.";
+    if (/\bStatus:/i.test(line)) return "MinIO status marker observed.";
+    if (/\b(?:ERROR|FATAL)\b/i.test(line)) return "MinIO error observed.";
+    return undefined;
+  }
+  const migration = line.match(/Applying migration\s+['\"]?(\d{14}_[A-Za-z0-9_]{1,96})['\"]?/i)?.[1];
+  if (migration && MIGRATION_ID.test(migration)) return `Applying migration ${migration}.`;
+  if (/Application started\.?/i.test(line)) return "Application started.";
+  if (/Now listening on:/i.test(line)) return "Now listening on HTTP.";
+  const readiness = line.match(/\bGET\s+\S*\/health\/ready\S*[^\r\n]*?\b([1-5]\d\d)\b/i);
+  if (readiness) return `GET /health/ready -> ${readiness[1]}.`;
+  if (/Unhandled exception/i.test(line)) return "Unhandled exception observed.";
+  if (/Application startup exception/i.test(line)) return "Application startup exception observed.";
+  return undefined;
+}
+
+function allowListedServiceLogs(raw) {
+  const services = Object.fromEntries(DIAGNOSTIC_SERVICES.map((service) => [service, { status: "captured", lines: [] }]));
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const separator = rawLine.indexOf("|");
+    if (separator < 0) continue;
+    const prefix = rawLine.slice(0, separator).toLowerCase();
+    const service = DIAGNOSTIC_SERVICES.find((candidate) => prefix.includes(candidate));
+    if (!service || services[service].lines.length >= MAX_DIAGNOSTIC_LINES) continue;
+    const marker = diagnosticMarker(service, rawLine.slice(separator + 1));
+    if (!marker) continue;
+    const bounded = marker.slice(0, MAX_DIAGNOSTIC_LINE_LENGTH);
+    if (!services[service].lines.includes(bounded)) services[service].lines.push(bounded);
+  }
+  return services;
 }
 
 /**
@@ -173,6 +217,40 @@ export function createDockerHarness(scope, executor = runProcess) {
     }
   }
 
+  async function inspectOwnedResource(resourceType, resourceId, options = {}) {
+    const inspectArgs = resourceType === "container"
+      ? ["container", "inspect", "--format", "{{json .}}", resourceId]
+      : ["volume", "inspect", "--format", "{{json .}}", resourceId];
+    try {
+      const result = await execute("docker", inspectArgs, "docker-discard-state-inspect", undefined, options);
+      const inspected = JSON.parse(result.stdout.trim());
+      assert(inspected && typeof inspected === "object" && !Array.isArray(inspected), `Owned Docker ${resourceType} ${resourceId} did not return identity metadata.`);
+      const labels = resourceType === "container" ? inspected.Config?.Labels : inspected.Labels;
+      assert(labels && typeof labels === "object" && !Array.isArray(labels), `Owned Docker ${resourceType} ${resourceId} did not return labels.`);
+      assert(labels[OWNERSHIP_LABELS.upgradeTest] === "true" && labels[OWNERSHIP_LABELS.upgradeRun] === scope.runId, `Owned Docker ${resourceType} ${resourceId} lacks the required ownership labels.`);
+      if (resourceType === "container") {
+        assert(typeof inspected.Id === "string" && inspected.Id.length > 0, `Owned Docker container ${resourceId} did not return a stable identity.`);
+        return Object.freeze({ id: resourceId, identity: inspected.Id });
+      }
+      assert(inspected.Name === resourceId, `Owned Docker volume ${resourceId} returned a different name.`);
+      assert(typeof inspected.CreatedAt === "string" && inspected.CreatedAt.length > 0, `Owned Docker volume ${resourceId} did not return creation identity.`);
+      return Object.freeze({
+        id: resourceId,
+        identity: JSON.stringify([
+          inspected.Name,
+          inspected.Driver ?? null,
+          inspected.Mountpoint ?? null,
+          inspected.CreatedAt,
+          inspected.Scope ?? null,
+          inspected.Options ?? null,
+        ]),
+      });
+    } catch (error) {
+      if (resourceWasAlreadyRemoved(error)) return undefined;
+      throw error;
+    }
+  }
+
   async function discover(commandArgs, phase, options = {}) {
     const filters = labelsFor(scope);
     const result = await execute("docker", [...commandArgs, "--filter", filters[0], "--filter", filters[1]], phase, undefined, options);
@@ -190,21 +268,79 @@ export function createDockerHarness(scope, executor = runProcess) {
     }
   }
 
+  async function dataResourceSnapshot(options) {
+    const containerResult = await compose(["ps", "--all", "--quiet", "postgres", "minio"], "docker-discard-state-discover-containers", undefined, options);
+    const containers = lines(containerResult.stdout);
+    const volumes = [`${scope.projectName}_postgres-data`, `${scope.projectName}_minio-data`];
+    const discoveredVolumes = (await discover(["volume", "ls", "--quiet"], "docker-discard-state-discover-volumes", options)).sort();
+    const expectedVolumes = [...volumes].sort();
+    assert(containers.length === 2 && new Set(containers).size === 2, "Owned data containers are missing or changed at the discard fence.");
+    assert(discoveredVolumes.length === expectedVolumes.length && discoveredVolumes.every((volume, index) => volume === expectedVolumes[index]), "Owned data volumes are missing or changed at the discard fence.");
+    const inspected = [];
+    for (const container of containers) {
+      const resource = await inspectOwnedResource("container", container, options);
+      assert(resource, "An owned data container disappeared at the discard fence.");
+      inspected.push(["container", resource]);
+    }
+    for (const volume of volumes) {
+      const resource = await inspectOwnedResource("volume", volume, options);
+      assert(resource, "An owned data volume disappeared at the discard fence.");
+      inspected.push(["volume", resource]);
+    }
+    return Object.freeze({ containers: Object.freeze(containers), volumes: Object.freeze(volumes), inspected: Object.freeze(inspected) });
+  }
+
+  function sameDataResourceSnapshot(before, after) {
+    return before.inspected.length === after.inspected.length
+      && before.inspected.every(([type, resource]) => {
+        const match = after.inspected.find(([nextType, next]) => type === nextType && resource.id === next.id);
+        return match?.[1].identity === resource.identity;
+      });
+  }
+
   async function logs(options = {}) {
     assertLifecycleOptions(options);
     assert(options.resourcesStarted === undefined || typeof options.resourcesStarted === "boolean", "Docker diagnostic resource state must be boolean.");
     const result = options.resourcesStarted === false
       ? { stdout: "", stderr: "" }
-      : await compose(["logs", "--no-color"], "docker-compose-logs", MAX_DOCKER_LOG_TIMEOUT_MS, options);
+      : await compose(["logs", "--no-color", "--tail", "200"], "docker-compose-logs", MAX_DOCKER_LOG_TIMEOUT_MS, options);
+    const services = options.resourcesStarted === false
+      ? Object.fromEntries(DIAGNOSTIC_SERVICES.map((service) => [service, { status: "unavailable", lines: [] }]))
+      : allowListedServiceLogs(`${result.stdout}\n${result.stderr}`);
+    let migrations = { status: "unavailable", count: 0, ids: [] };
+    if (options.resourcesStarted !== false) {
+      try {
+        const migrationResult = await compose([
+          "exec", "--interactive", "--no-TTY", "postgres",
+          "psql", "--username", "cmsify", "--dbname", "cmsify", "--no-psqlrc",
+          "--tuples-only", "--no-align", "--set", "ON_ERROR_STOP=1", "--file=-",
+        ], "docker-diagnostics-migrations", MAX_DOCKER_LOG_TIMEOUT_MS, {
+          ...options,
+          stdin: 'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";',
+        });
+        const ids = lines(migrationResult.stdout).filter((value) => MIGRATION_ID.test(value)).slice(0, 64);
+        migrations = { status: "captured", count: ids.length, ids };
+      } catch {
+        migrations = { status: "unavailable", count: 0, ids: [] };
+      }
+    }
     const summary = Object.freeze({
       status: options.resourcesStarted === false ? "unavailable" : "captured",
       stdoutBytes: Buffer.byteLength(result.stdout),
       stderrBytes: Buffer.byteLength(result.stderr),
     });
+    const artifact = {
+      schemaVersion: 1,
+      status: summary.status,
+      stdoutBytes: summary.stdoutBytes,
+      stderrBytes: summary.stderrBytes,
+      services,
+      migrations,
+    };
     await writeSafeAtomically(
       scope.repositoryRoot,
       resolve(scope.diagnosticsDirectory, "docker-diagnostics.json"),
-      `${JSON.stringify(summary, null, 2)}\n`,
+      `${JSON.stringify(artifact, null, 2)}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
     return summary;
@@ -337,26 +473,12 @@ export function createDockerHarness(scope, executor = runProcess) {
     async discardDataVolumes(options = {}, finalFence) {
       assertLifecycleOptions(options);
       assert(finalFence === undefined || typeof finalFence === "function", "Docker discard final fence must be a function.");
-      const result = await compose(["ps", "--all", "--quiet", "postgres", "minio"], "docker-discard-state-discover-containers", undefined, options);
-      const containers = lines(result.stdout);
-      const volumes = [`${scope.projectName}_postgres-data`, `${scope.projectName}_minio-data`];
-      for (const container of containers) assert(await inspectLabels("container", container, options), "An owned data container disappeared before discard fencing.");
-      for (const volume of volumes) assert(await inspectLabels("volume", volume, options), "An owned data volume disappeared before discard fencing.");
+      const beforeFence = await dataResourceSnapshot(options);
       if (finalFence) await finalFence();
-      for (const container of containers) {
-        try {
-          await execute("docker", ["rm", "--force", container], "docker-discard-state-remove-container", undefined, options);
-        } catch (error) {
-          if (!resourceWasAlreadyRemoved(error)) throw error;
-        }
-      }
-      for (const volume of volumes) {
-        try {
-          await execute("docker", ["volume", "rm", volume], "docker-discard-state-remove-volume", undefined, options);
-        } catch (error) {
-          if (!resourceWasAlreadyRemoved(error)) throw error;
-        }
-      }
+      const afterFence = await dataResourceSnapshot(options);
+      assert(sameDataResourceSnapshot(beforeFence, afterFence), "Owned data resource identity changed at the final discard fence.");
+      for (const container of afterFence.containers) await execute("docker", ["rm", "--force", container], "docker-discard-state-remove-container", undefined, options);
+      for (const volume of afterFence.volumes) await execute("docker", ["volume", "rm", volume], "docker-discard-state-remove-volume", undefined, options);
     },
 
     async cleanup(options = {}) {

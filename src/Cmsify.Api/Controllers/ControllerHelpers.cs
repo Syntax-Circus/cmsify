@@ -25,7 +25,15 @@ internal static class ControllerHelpers
     public static bool IfMatchMatches(this ControllerBase controller, DateTimeOffset updatedAt)
     {
         var ifMatch = controller.Request.Headers.IfMatch.ToString();
-        return !string.IsNullOrWhiteSpace(ifMatch) && string.Equals(ifMatch, ETag(updatedAt), StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            return false;
+        }
+
+        var normalized = ETag(updatedAt);
+        var legacy = $"\"{updatedAt.UtcTicks}\"";
+        return string.Equals(ifMatch, normalized, StringComparison.Ordinal)
+            || string.Equals(ifMatch, legacy, StringComparison.Ordinal);
     }
 
     public static ObjectResult Error(this ControllerBase controller, int status, string code, string title, string? detail = null, IDictionary<string, object?>? extensions = null)

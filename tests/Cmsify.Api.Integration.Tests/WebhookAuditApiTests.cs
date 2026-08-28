@@ -194,6 +194,55 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LegacyFullTickEtag_AuthorizesOnlyTheMatchingPostUpgradeMutation()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedApiClientAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+        var templateVersionId = await SeedPublishedTemplateVersionAsync(factory, seed.WorkspaceId, "legacy-full-tick-etag");
+        using var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new
+        {
+            templateVersionId,
+            slug = "legacy-full-tick-etag",
+            tags = Array.Empty<string>(),
+            fields = Array.Empty<object>()
+        });
+        create.EnsureSuccessStatusCode();
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        var contentId = created.GetProperty("id").GetGuid();
+        var updatedAt = created.GetProperty("updatedAt").GetDateTimeOffset();
+        var normalizedEtag = $"\"{updatedAt.UtcTicks / TimeSpan.TicksPerMicrosecond}\"";
+        var legacyEtag = $"\"{updatedAt.UtcTicks}\"";
+        Assert.Equal(normalizedEtag, create.Headers.ETag?.ToString());
+        Assert.NotEqual(normalizedEtag, legacyEtag);
+
+        var updateBody = new
+        {
+            slug = "legacy-full-tick-etag-updated",
+            tags = Array.Empty<string>(),
+            fields = Array.Empty<object>()
+        };
+        using (var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
+        {
+            Content = JsonContent.Create(updateBody)
+        })
+        {
+            updateRequest.Headers.TryAddWithoutValidation("If-Match", legacyEtag);
+            using var update = await client.SendAsync(updateRequest);
+            update.EnsureSuccessStatusCode();
+        }
+
+        using var staleRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
+        {
+            Content = JsonContent.Create(updateBody)
+        };
+        staleRequest.Headers.TryAddWithoutValidation("If-Match", legacyEtag);
+        using var stale = await client.SendAsync(staleRequest);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, stale.StatusCode);
+    }
+
+    [Fact]
     public async Task TemplatePublish_PersistsTheEventWithThePublishedState()
     {
         await using var factory = CreateFactory();

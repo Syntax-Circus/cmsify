@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   assertionCatalog,
   assertionNames,
+  assertBaseline,
   createDockerSqlAdapter,
   runNamedAssertion,
 } from "../../../eng/upgrade-tests/assertions.mjs";
@@ -98,6 +99,71 @@ test("every required scenario and expected category has a baseline assertion", (
 
 test("rollback cannot use a weaker assertion set", () => {
   assert.deepEqual(assertionNames("rollback"), assertionNames("baseline"));
+});
+
+test("global admin remains active and can read the workspace hidden from the reader", async () => {
+  const ids = { ...expected.ids, ...expected.relatedIds };
+  const requests = [];
+  const fakeHttp = {
+    async requestJson(request) {
+      requests.push(request);
+      const path = new URL(request.url).pathname;
+      if (path === "/api/v1/auth/login") {
+        assert.equal(request.token, undefined);
+        assert.deepEqual(request.body, { email: expected.authentication.adminEmail, password: expected.authentication.adminPassword });
+        return { status: 200, headers: new Headers(), body: { token: "fixture-admin-session" } };
+      }
+      if (path === `/api/v1/workspaces/${ids.restrictedWorkspace}`) {
+        assert.equal(request.token, "fixture-admin-session");
+        return { status: 200, headers: new Headers(), body: { id: ids.restrictedWorkspace } };
+      }
+      throw new Error(`unexpected fake route ${path}`);
+    },
+  };
+  const fakeSql = {
+    async scalar(statement, parameters) {
+      assert.match(statement, /role = 'Admin'/);
+      assert.match(statement, /is_super_admin/);
+      assert.match(statement, /is_active/);
+      assert.equal(parameters.admin_user_id, ids.adminUser);
+      return "1";
+    },
+  };
+
+  await runNamedAssertion("global-admin-restricted-read", context({ http: fakeHttp, sql: fakeSql }));
+  assert.equal(requests.length, 2);
+});
+
+test("a registry failure carries completed and failed assertion names", async () => {
+  const ids = { ...expected.ids, ...expected.relatedIds };
+  const fakeHttp = {
+    async requestJson(request) {
+      const path = new URL(request.url).pathname;
+      if (path === "/health/live" || path === "/health/ready") return { status: 200, headers: new Headers(), body: { status: "Healthy" } };
+      if (path === "/api/v1/workspaces") return { status: 200, headers: new Headers(), body: { items: [{ id: ids.primaryWorkspace }] } };
+      if (path === `/api/v1/workspaces/${ids.primaryWorkspace}`) return { status: 200, headers: new Headers(), body: { id: ids.primaryWorkspace, slug: "upgrade-fixture" } };
+      throw new Error(`unexpected fake route ${path}`);
+    },
+  };
+  const fakeSql = {
+    async scalar(statement) {
+      if (statement.includes('"MigrationId"')) return expected.migrations.join("\n");
+      return "0";
+    },
+  };
+
+  await assert.rejects(
+    () => assertBaseline(context({ http: fakeHttp, sql: fakeSql })),
+    (error) => {
+      assert.deepEqual(error.safeEvidence?.assertions, [
+        { name: "health-live", status: "passed" },
+        { name: "health-ready", status: "passed" },
+        { name: "exact-migration-history", status: "passed" },
+        { name: "primary-and-restricted-exist", status: "failed" },
+      ]);
+      return true;
+    },
+  );
 });
 
 test("historical unpaged template and content version collections remain observable", async () => {

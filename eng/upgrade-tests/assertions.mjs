@@ -260,6 +260,17 @@ async function assertReaderRestrictedHidden(context) {
   await httpJson(context, `/api/v1/workspaces/${ids.restrictedWorkspace}`, { expectedStatuses: [404] });
 }
 
+async function assertGlobalAdminRestrictedRead(context) {
+  const ids = idsOf(context);
+  await expectSqlCount(context, "SELECT count(*) FROM users WHERE id = :'admin_user_id' AND email = :'admin_email' AND role = 'Admin' AND is_active AND is_super_admin AND NOT is_deleted;", {
+    admin_user_id: ids.adminUser,
+    admin_email: context.expected.authentication.adminEmail,
+  }, 1, "the fixture global admin must remain active with Admin and is_super_admin");
+  const token = await adminToken(context);
+  const restricted = await httpJson(context, `/api/v1/workspaces/${ids.restrictedWorkspace}`, { token });
+  ensure(restricted.body?.id === ids.restrictedWorkspace, "the authenticated global admin could not read the restricted workspace");
+}
+
 async function assertTemplateFields(context) {
   const ids = idsOf(context);
   const list = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/templates?page=1&pageSize=50`);
@@ -689,6 +700,7 @@ const COMMON_ASSERTIONS = Object.freeze([
   { name: "exact-migration-history", scenario: "provenance", category: "baseline-manifest-binding", run: assertMigrationHistory },
   { name: "primary-and-restricted-exist", scenario: "workspaces", category: "primary-and-restricted-exist", run: assertWorkspaces },
   { name: "editor-primary-write-grant", scenario: "permissions", category: "editor-primary-write-grant", run: assertEditorGrant },
+  { name: "global-admin-restricted-read", scenario: "permissions", category: "global-admin-restricted-read", run: assertGlobalAdminRestrictedRead },
   { name: "reader-primary-resolve", scenario: "permissions", category: "reader-primary-resolve", run: assertReaderPrimaryResolve },
   { name: "reader-restricted-hidden", scenario: "permissions", category: "reader-restricted-hidden", run: assertReaderRestrictedHidden },
   { name: "published-template-fields", scenario: "templates", category: "published-template-fields", run: assertTemplateFields },
@@ -756,9 +768,20 @@ async function runRegistry(context, definitions) {
   const assertions = [];
   let canaryId;
   for (const definition of definitions) {
-    const result = await executeDefinition(definition, context);
-    assertions.push(result);
-    if (result.canaryId) canaryId = result.canaryId;
+    try {
+      const result = await executeDefinition(definition, context);
+      assertions.push(result);
+      if (result.canaryId) canaryId = result.canaryId;
+    } catch (error) {
+      error.safeEvidence = {
+        ...(error.safeEvidence && typeof error.safeEvidence === "object" && !Array.isArray(error.safeEvidence) ? error.safeEvidence : {}),
+        assertions: [
+          ...assertions.map(({ name }) => ({ name, status: "passed" })),
+          { name: definition.name, status: "failed" },
+        ],
+      };
+      throw error;
+    }
   }
   return Object.freeze({ phase: context.phase, assertions: Object.freeze(assertions), ...(canaryId ? { canaryId } : {}) });
 }

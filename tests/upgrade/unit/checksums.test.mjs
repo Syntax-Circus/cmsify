@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -33,6 +33,42 @@ function temporaryFixture() {
   test.after(() => rmSync(root, { force: true, recursive: true }));
   return root;
 }
+
+test("the checked-in generator writes deterministic manifest and expected-data provenance", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-generation-provenance-"));
+  const fixtureDirectory = resolve(repositoryRoot, "tests", "upgrade", "fixtures", "v0.1.3");
+  const seedDirectory = resolve(repositoryRoot, "tests", "upgrade", "seed");
+  mkdirSync(fixtureDirectory, { recursive: true });
+  mkdirSync(seedDirectory, { recursive: true });
+  writeFileSync(resolve(seedDirectory, "v0.1.3.sql"), "seed\n");
+  writeFileSync(resolve(fixtureDirectory, "manifest.json"), `${JSON.stringify(validManifestDocument(), null, 2)}\n`);
+  writeFileSync(resolve(fixtureDirectory, "expected.json"), `${JSON.stringify(validExpectedDocument(), null, 2)}\n`);
+
+  try {
+    const fixtureModule = await import("../../../eng/upgrade-tests/fixture.mjs");
+    assert.equal(typeof fixtureModule.writeFixtureGenerationMetadata, "function");
+    await fixtureModule.writeFixtureGenerationMetadata({ repositoryRoot, fixtureDirectory });
+    const manifest = JSON.parse(readFileSync(resolve(fixtureDirectory, "manifest.json"), "utf8"));
+    const expected = JSON.parse(readFileSync(resolve(fixtureDirectory, "expected.json"), "utf8"));
+    const generation = {
+      schemaVersion: 1,
+      generatorVersion: "1.0.0",
+      seed: {
+        path: "tests/upgrade/seed/v0.1.3.sql",
+        sha256: "4a6689419b00b11700c9b6246bcfa8936c8f5e1e824db3a7e57030e2d1c1a684",
+      },
+    };
+    assert.deepEqual(manifest.generation, generation);
+    assert.deepEqual(expected.provenance.generation, generation);
+    assert.deepEqual(
+      expected.scenarios.find(({ id }) => id === "permissions").assertions,
+      ["editor-primary-write-grant", "global-admin-restricted-read", "reader-primary-resolve", "reader-restricted-hidden"],
+    );
+    assert.equal(JSON.stringify(generation).includes("generatedAt"), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
 
 function linkedDirectory(target, link) {
   symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
@@ -212,6 +248,25 @@ test("verify-fixture rejects expected provenance that contradicts the manifest",
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /provenance\.apiImageDigest.*manifest/i);
+});
+
+test("verify-fixture rejects checksum-consistent metadata with the wrong checked-in seed hash", async () => {
+  const root = temporaryFixture();
+  await materializeFixture(root);
+  const manifest = manifestDocument();
+  const expected = validExpectedDocument();
+  const wrongHash = "0".repeat(64);
+  manifest.generation.seed.sha256 = wrongHash;
+  expected.provenance.generation.seed.sha256 = wrongHash;
+  writeFileSync(resolve(root, "manifest.json"), JSON.stringify(manifest));
+  writeFileSync(resolve(root, "expected.json"), JSON.stringify(expected));
+  await writeFixtureChecksums(root, manifest.requiredFiles);
+
+  const result = spawnSync(process.execPath, [CLI, "verify-fixture", "--fixture", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /seed\.sha256.*checked-in seed/i);
+  assert.doesNotMatch(result.stderr, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
 });
 
 test("verify-fixture rejects scenarios stripped of assertion categories", async () => {

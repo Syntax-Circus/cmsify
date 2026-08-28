@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 export const REQUIRED_ASSERTIONS_BY_SCENARIO = Object.freeze({
   workspaces: Object.freeze(["primary-and-restricted-exist"]),
-  permissions: Object.freeze(["editor-primary-write-grant", "reader-primary-resolve", "reader-restricted-hidden"]),
+  permissions: Object.freeze(["editor-primary-write-grant", "global-admin-restricted-read", "reader-primary-resolve", "reader-restricted-hidden"]),
   templates: Object.freeze(["published-template-fields"]),
   components: Object.freeze(["inline-acyclic-snapshot"]),
   "choice-revisions": Object.freeze(["immutable-revisions", "published-choice-label-snapshot"]),
@@ -45,7 +45,7 @@ const MEDIA_KEYS = ["text", "image"];
 const MEDIA_ITEM_KEYS = ["storageKey", "fixturePath", "fileName", "contentType", "sizeBytes", "sha256", "lifecycle"];
 const LIFECYCLE_KEYS = ["historicalIsDeleted", "historicalDeletedAt", "historicalVisible", "candidateBlobState", "candidateDeletionIntentReason"];
 const CONTENT_KEYS = ["publishedChoiceValue", "publishedChoiceLabel", "currentChoiceLabel", "scheduledPublishAt", "currentEffectiveStartAt", "currentEffectiveEndAt", "expiredEffectiveStartAt", "expiredEffectiveEndAt"];
-const PROVENANCE_KEYS = ["baselineVersion", "sourceSha", "apiImageDigest", "packageNamespace", "packageId", "packageVersion"];
+const PROVENANCE_KEYS = ["baselineVersion", "sourceSha", "apiImageDigest", "packageNamespace", "packageId", "packageVersion", "generation"];
 const TIMESTAMP_KEYS = [
   "workspaceCreatedAt", "workspaceUpdatedAt", "choiceRevisionOneCreatedAt", "choiceRevisionTwoCreatedAt",
   "componentCreatedAt", "componentUpdatedAt", "templateCreatedAt", "templateUpdatedAt",
@@ -191,6 +191,12 @@ export function validateExpectedData(value, manifest, fixtureDirectory) {
   assert(value.provenance.sourceSha === manifest.baseline.sourceSha, "provenance.sourceSha must equal the manifest source SHA.");
   assert(value.provenance.apiImageDigest === manifest.baseline.apiImage.digest, "provenance.apiImageDigest must equal the manifest API image digest.");
   for (const key of ["packageNamespace", "packageId", "packageVersion"]) assertNonEmptyString(value.provenance[key], `provenance.${key}`);
+  assertExactKeys(value.provenance.generation, ["schemaVersion", "generatorVersion", "seed"], "provenance.generation");
+  assertExactKeys(value.provenance.generation.seed, ["path", "sha256"], "provenance.generation.seed");
+  assert(value.provenance.generation.schemaVersion === manifest.generation.schemaVersion, "provenance.generation.schemaVersion must equal the manifest generation schema version.");
+  assert(value.provenance.generation.generatorVersion === manifest.generation.generatorVersion, "provenance.generation.generatorVersion must equal the manifest generator version.");
+  assert(value.provenance.generation.seed.path === manifest.generation.seed.path, "provenance.generation.seed.path must equal the manifest seed path.");
+  assert(value.provenance.generation.seed.sha256 === manifest.generation.seed.sha256, "provenance.generation.seed.sha256 must equal the manifest seed hash.");
 
   assertExactKeys(value.timestamps, TIMESTAMP_KEYS, "timestamps");
   for (const key of TIMESTAMP_KEYS) assertTimestamp(value.timestamps[key], `timestamps.${key}`);

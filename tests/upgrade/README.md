@@ -27,14 +27,14 @@ The version directory is an immutable, reviewable snapshot of one published base
 
 | File | Purpose |
 | --- | --- |
-| [`manifest.json`](fixtures/v0.1.3/manifest.json) | Schema version, published baseline version and source SHA, exact linux/amd64 API/PostgreSQL/MinIO repository/tag/digest tuples, required payload paths, and required scenario coverage. |
+| [`manifest.json`](fixtures/v0.1.3/manifest.json) | Schema version, published baseline version and source SHA, exact linux/amd64 API/PostgreSQL/MinIO repository/tag/digest tuples, deterministic generator schema/version and checked-in seed path/hash, required payload paths, and required scenario coverage. |
 | [`SHA256SUMS`](fixtures/v0.1.3/SHA256SUMS) | Canonical, sorted SHA-256 inventory for every other fixture payload. The verifier rejects missing, extra, linked, or changed files. |
 | [`database.sql`](fixtures/v0.1.3/database.sql) | Deterministically normalized PostgreSQL dump created through the exact published API and augmented only by the reviewed historical seed. |
 | [`expected.json`](fixtures/v0.1.3/expected.json) | Stable IDs, timestamps, relationships, API expectations, media hashes, authentication fixtures, migration expectations, and package provenance consumed by the shared assertion registry. Its tokens/passwords are synthetic test credentials, not secrets. |
 | [`media/...-fixture.txt`](fixtures/v0.1.3/media/cmsify/media/11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1-fixture.txt) | Exact text media payload used for byte-for-byte retrieval and matched-backup checks. |
 | [`media/...-pixel.png`](fixtures/v0.1.3/media/cmsify/media/11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2-pixel.png) | Exact one-pixel PNG used for binary retrieval and matched-backup checks. |
 
-Other harness inputs are not fixture payloads: [`seed/v0.1.3.sql`](seed/v0.1.3.sql) supplies deterministic historical rows during regeneration, and [`compose.yml`](compose.yml) defines the isolated PostgreSQL, MinIO, published baseline API, and candidate API topology. Unit tests exercise validation and failure behavior without Docker; [`integration/rehearsal.test.mjs`](integration/rehearsal.test.mjs) deliberately runs two clean end-to-end rehearsals when opted in.
+Other harness inputs are not fixture payloads: [`seed/v0.1.3.sql`](seed/v0.1.3.sql) supplies deterministic historical rows during regeneration, and [`compose.yml`](compose.yml) defines the isolated PostgreSQL, MinIO, published baseline API, and candidate API topology. The checked-in generator hashes the exact seed bytes into the strict `manifest.generation` object and copies that object into `expected.json` provenance; `verify-fixture` and rehearsal preflight re-hash the seed and reject drift. The generator schema/version, seed path/hash, expected provenance, fixture payload checksums, and fixture output contain no wall-clock generation field and must never be hand-edited. Unit tests exercise validation and failure behavior without Docker; [`integration/rehearsal.test.mjs`](integration/rehearsal.test.mjs) deliberately runs two clean end-to-end rehearsals when opted in.
 
 The manifest's required scenarios are workspaces, permissions, templates, inline acyclic components, immutable choice revisions, content versions, schedules/effective ranges, media, webhooks, audit, authentication, and provenance. Removing a scenario or weakening expected data is a fixture contract change, not routine regeneration.
 
@@ -142,7 +142,7 @@ The `0.1.3` binary is never started against v1-written state. Rollback is proven
 
 ## Diagnostics and cleanup audit
 
-Each run writes `artifacts/upgrade-tests/<run-id>/report.json` atomically after phase transitions. It contains bounded phase status, exact image identities, safe assertion names, readiness attempt counts, fixture digest, and matched-backup manifest digest. Failures also attempt to retain `docker-diagnostics.json` with bounded, allow-listed summaries. Raw response bodies, tokens, environment dumps, fixture media bytes, and unrestricted service logs are not included in report output.
+Each run writes `artifacts/upgrade-tests/<run-id>/report.json` atomically after phase transitions. It contains bounded phase status, exact image identities, completed/failed safe assertion names, readiness observations, fixture digest, and matched-backup manifest digest. Failures also attempt to retain `docker-diagnostics.json` with capped, allow-listed excerpts grouped by PostgreSQL, MinIO, baseline API, and candidate API plus safe applied migration IDs/state. Raw response bodies, tokens, environment dumps, credentials, raw database rows, fixture media bytes, and unrestricted service logs are never retained.
 
 The run directory also contains the synthetic matched fixture backup used by rollback. Treat the entire directory as test-only controlled data; do not substitute a production backup and do not publish it as general logs. CI uploads `artifacts/upgrade-tests/**` only when the workflow fails and retains it for 14 days. The temporary `.env` file under `tests/upgrade/.runs` is mode-restricted and removed during cleanup.
 
@@ -198,7 +198,7 @@ Refresh the moving baseline only after the newer `0.1.x` GitHub Release and linu
    cp 'tests/upgrade/seed/v0.1.3.sql' "${seed_path}"
    ```
 
-3. Update the generator's version-specific synthetic constants and seed path for `0.1.4`. In `tests/upgrade/fixtures/v0.1.4/manifest.json`, replace the baseline version/source and API, PostgreSQL, and MinIO references with the exact published linux/amd64 digests. Update `expected.json` provenance and scenario expectations. Never hand-edit `database.sql`, generated media output, or `SHA256SUMS` to make comparison pass.
+3. Update the generator's version-specific synthetic constants and seed path for `0.1.4`, including its generator version/schema when the generation contract changes. Supply the exact published baseline version/source and linux/amd64 API, PostgreSQL, and MinIO digests to the checked-in generator inputs, and update its expected scenario inputs. Let the generator write the strict generation/seed provenance into both metadata documents and regenerate `database.sql`, media output, and `SHA256SUMS`; never hand-edit those generated results to make comparison pass.
 4. Update every active authoritative fixture reference—the generator, integration test, branch workflow, dedicated workflow, release workflow/verifier, and operator documentation—from `v0.1.3` to `v0.1.4`. Preserve historical evidence that intentionally describes an older run. Use this inventory to find active references for review:
 
    ```powershell

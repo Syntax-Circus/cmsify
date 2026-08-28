@@ -8,7 +8,7 @@ import { verifyFixtureChecksums } from "./checksums.mjs";
 import { createDockerHarness } from "./docker.mjs";
 import { loadExpectedData } from "./expected.mjs";
 import { createDockerHttpAdapter } from "./http.mjs";
-import { loadFixtureManifest } from "./manifest.mjs";
+import { loadFixtureManifest, verifyFixtureGenerationProvenance } from "./manifest.mjs";
 import { assertTrustedRunScope, createRunScope } from "./paths.mjs";
 import { assertPhysicalPath, ensureSafeDirectory, openSafeRegularFile, readSafeFile, writeSafeAtomically } from "./safe-files.mjs";
 
@@ -156,9 +156,15 @@ async function waitForApi(context, service, description) {
 
 function assertionFailureEvidence(error, readiness = []) {
   const match = messageOf(error).match(/^Invariant ([a-z0-9][a-z0-9-]{0,63}) failed:/);
+  const prior = error?.safeEvidence && typeof error.safeEvidence === "object" && !Array.isArray(error.safeEvidence)
+    ? error.safeEvidence
+    : {};
   return {
+    ...prior,
     ...(readiness.length > 0 ? { readiness } : {}),
-    ...(match ? { assertions: [{ name: match[1], status: "failed" }] } : {}),
+    ...(Array.isArray(prior.assertions)
+      ? { assertions: prior.assertions }
+      : match ? { assertions: [{ name: match[1], status: "failed" }] } : {}),
   };
 }
 
@@ -244,6 +250,7 @@ function assertionContext(context, service, extra = {}) {
 
 function createDefaultOperations(context, dependencies = {}) {
   const loadManifest = dependencies.loadFixtureManifest ?? loadFixtureManifest;
+  const verifyGenerationProvenance = dependencies.verifyFixtureGenerationProvenance ?? verifyFixtureGenerationProvenance;
   const loadExpected = dependencies.loadExpectedData ?? loadExpectedData;
   const verifyChecksums = dependencies.verifyFixtureChecksums ?? verifyFixtureChecksums;
   const makeHarness = dependencies.createDockerHarness ?? createDockerHarness;
@@ -259,6 +266,7 @@ function createDefaultOperations(context, dependencies = {}) {
     async preflight() {
       throwIfCancelled(context.signal);
       context.manifest = loadManifest(context.fixtureDirectory);
+      verifyGenerationProvenance(context.repositoryRoot, context.manifest);
       context.expected = await loadExpected(context.fixtureDirectory, context.manifest);
       const fixtureChecksums = await verifyChecksums(context.fixtureDirectory, context.manifest);
       context.fixtureDigest = verifiedFixtureDigest(fixtureChecksums);

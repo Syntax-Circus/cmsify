@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -16,14 +17,21 @@ export const REQUIRED_SCENARIOS = new Set([
   "provenance",
 ]);
 
-const MANIFEST_KEYS = ["schemaVersion", "baseline", "requiredFiles", "requiredScenarios", "expectedDataFile"];
+export const FIXTURE_GENERATION_SCHEMA_VERSION = 1;
+export const FIXTURE_GENERATOR_VERSION = "1.0.0";
+export const FIXTURE_SEED_PATH = "tests/upgrade/seed/v0.1.3.sql";
+
+const MANIFEST_KEYS = ["schemaVersion", "baseline", "generation", "requiredFiles", "requiredScenarios", "expectedDataFile"];
 const BASELINE_KEYS = ["version", "sourceSha", "apiImage", "postgresImage", "minioImage"];
+const GENERATION_KEYS = ["schemaVersion", "generatorVersion", "seed"];
+const SEED_KEYS = ["path", "sha256"];
 const IMAGE_KEYS = ["repository", "tag", "digest", "platform"];
 const REQUIRED_FILE_NAMES = ["database.sql", "expected.json", "manifest.json"];
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const SOURCE_SHA = /^[0-9a-f]{40}$/;
 const IMAGE_REPOSITORY = /^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/;
 const IMAGE_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
 
 function assert(condition, message) {
   if (!condition) throw new Error(`Invalid fixture manifest: ${message}`);
@@ -77,7 +85,8 @@ function validateImmutableImage(image, name) {
 
 /**
  * @typedef {{repository:string, tag:string, digest:string, platform:"linux/amd64"}} ImmutableImage
- * @typedef {{schemaVersion:1, baseline:{version:"0.1.3", sourceSha:string, apiImage:ImmutableImage, postgresImage:ImmutableImage, minioImage:ImmutableImage}, requiredFiles:string[], requiredScenarios:string[], expectedDataFile:"expected.json"}} FixtureManifest
+ * @typedef {{schemaVersion:1,generatorVersion:"1.0.0",seed:{path:"tests/upgrade/seed/v0.1.3.sql",sha256:string}}} FixtureGeneration
+ * @typedef {{schemaVersion:1, baseline:{version:"0.1.3", sourceSha:string, apiImage:ImmutableImage, postgresImage:ImmutableImage, minioImage:ImmutableImage}, generation:FixtureGeneration, requiredFiles:string[], requiredScenarios:string[], expectedDataFile:"expected.json"}} FixtureManifest
  */
 
 /**
@@ -118,6 +127,21 @@ export function validateFixtureManifest(manifest, fixtureDirectory) {
   };
   assert(baseline.apiImage.tag === baseline.version, "baseline.apiImage.tag must equal baseline.version.");
 
+  assertExactKeys(manifest.generation, GENERATION_KEYS, "generation");
+  assert(manifest.generation.schemaVersion === FIXTURE_GENERATION_SCHEMA_VERSION, "generation.schemaVersion must be 1.");
+  assert(manifest.generation.generatorVersion === FIXTURE_GENERATOR_VERSION, `generation.generatorVersion must be ${FIXTURE_GENERATOR_VERSION}.`);
+  assertExactKeys(manifest.generation.seed, SEED_KEYS, "generation.seed");
+  assert(manifest.generation.seed.path === FIXTURE_SEED_PATH, `generation.seed.path must be ${FIXTURE_SEED_PATH}.`);
+  assert(typeof manifest.generation.seed.sha256 === "string" && SHA256.test(manifest.generation.seed.sha256), "generation.seed.sha256 must be a lowercase SHA-256 digest.");
+  const generation = {
+    schemaVersion: FIXTURE_GENERATION_SCHEMA_VERSION,
+    generatorVersion: FIXTURE_GENERATOR_VERSION,
+    seed: {
+      path: FIXTURE_SEED_PATH,
+      sha256: manifest.generation.seed.sha256,
+    },
+  };
+
   assert(Array.isArray(manifest.requiredFiles) && manifest.requiredFiles.length > 0, "requiredFiles must be a non-empty array.");
   const requiredFiles = manifest.requiredFiles.map((file, index) => canonicalFixturePath(file, fixtureDirectory, `requiredFiles[${index}]`));
   assert(requiredFiles.every((file, index) => index === 0 || requiredFiles[index - 1] < file), "requiredFiles must be sorted and unique.");
@@ -134,8 +158,21 @@ export function validateFixtureManifest(manifest, fixtureDirectory) {
   return freeze({
     schemaVersion: 1,
     baseline,
+    generation,
     requiredFiles: [...requiredFiles],
     requiredScenarios: [...manifest.requiredScenarios],
     expectedDataFile: manifest.expectedDataFile,
   });
+}
+
+/** Verifies the manifest's deterministic seed provenance against the checked-in seed bytes. */
+export function verifyFixtureGenerationProvenance(repositoryRoot, manifest) {
+  assert(typeof repositoryRoot === "string" && repositoryRoot.length > 0, "repositoryRoot must be a non-empty path.");
+  const root = resolve(repositoryRoot);
+  const seedPath = resolve(root, manifest.generation.seed.path);
+  const pathFromRoot = relative(root, seedPath);
+  assert(pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${sep}`) && !isAbsolute(pathFromRoot), "generation.seed.path escapes the repository.");
+  const actual = createHash("sha256").update(readFileSync(seedPath)).digest("hex");
+  assert(actual === manifest.generation.seed.sha256, "generation.seed.sha256 does not match the checked-in seed.");
+  return actual;
 }

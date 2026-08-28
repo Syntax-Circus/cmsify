@@ -192,11 +192,25 @@ expect(/docker load --input artifacts\/oci\/cmsify-api\.oci\.tar/.test(releaseUp
 expect(/verify-release-baseline --fixture tests\/upgrade\/fixtures\/v0\.1\.3 --candidate-version "\$VERSION" --github-token-env GITHUB_TOKEN/.test(releaseUpgrade), "Release upgrade job must enforce the moving baseline before rehearsal.");
 expect(/CANDIDATE_IMAGE:\s*syntaxcircus\/cmsify-api:\$\{\{ needs\.resolve\.outputs\.version \}\}/.test(releaseUpgrade), "Release upgrade job must bind CANDIDATE_IMAGE to the exact versioned image loaded from the OCI archive.");
 expect(/cli\.mjs rehearse[^\n]*--candidate-image "\$CANDIDATE_IMAGE"[^\n]*--candidate-version "\$VERSION"[^\n]*--candidate-source-sha "\$SOURCE_SHA"/.test(releaseUpgrade), "Release upgrade rehearsal must use the exact loaded candidate through $CANDIDATE_IMAGE.");
+expect(/FIXTURE_MANIFEST="tests\/upgrade\/fixtures\/v0\.1\.3\/manifest\.json"/.test(releaseUpgrade), "Release upgrade prerequisite images must be derived from the verified fixture manifest.");
+for (const [variable, manifestPath, description] of [
+  ["BASELINE_API_IMAGE", ".baseline.apiImage", "baseline API"],
+  ["POSTGRES_IMAGE", ".baseline.postgresImage", "PostgreSQL"],
+  ["MINIO_IMAGE", ".baseline.minioImage", "MinIO"],
+]) {
+  const binding = releaseUpgrade.split(/\r?\n/).find((line) => line.includes(`${variable}=`));
+  expect(binding?.includes(manifestPath) && binding.includes(".repository") && binding.includes(".digest") && binding.includes("$FIXTURE_MANIFEST"), `Release upgrade must use a manifest-derived ${description} digest reference.`);
+  const exactPull = `docker pull --platform linux/amd64 "$${variable}"`;
+  expect(releaseUpgrade.split(exactPull).length === 2, `Release upgrade must pull the exact ${description} image once with explicit linux/amd64.`);
+}
 const releaseLoad = releaseUpgrade.indexOf("docker load --input artifacts/oci/cmsify-api.oci.tar");
 const releaseBaseline = releaseUpgrade.indexOf("verify-release-baseline");
 const releaseFixture = releaseUpgrade.indexOf("verify-fixture");
+const releaseBaselinePull = releaseUpgrade.indexOf('docker pull --platform linux/amd64 "$BASELINE_API_IMAGE"');
+const releasePostgresPull = releaseUpgrade.indexOf('docker pull --platform linux/amd64 "$POSTGRES_IMAGE"');
+const releaseMinioPull = releaseUpgrade.indexOf('docker pull --platform linux/amd64 "$MINIO_IMAGE"');
 const releaseRehearsal = releaseUpgrade.indexOf("cli.mjs rehearse");
-expect(releaseLoad >= 0 && releaseBaseline > releaseLoad && releaseFixture > releaseBaseline && releaseRehearsal > releaseFixture, "Release upgrade job must load the exact image, verify the moving baseline and fixture, then rehearse that image.");
+expect(releaseBaseline >= 0 && releaseFixture > releaseBaseline && releaseBaselinePull > releaseFixture && releasePostgresPull > releaseBaselinePull && releaseMinioPull > releasePostgresPull && releaseLoad > releaseMinioPull && releaseRehearsal > releaseLoad, "Release upgrade job must verify the moving baseline and fixture, pull every exact linux/amd64 prerequisite, load the candidate archive, then rehearse that image.");
 const loadedCandidateWindow = releaseLoad >= 0 && releaseRehearsal > releaseLoad ? releaseUpgrade.slice(releaseLoad, releaseRehearsal) : "";
 expect(!/^\s*docker\s+(?:image\s+)?pull\b/im.test(loadedCandidateWindow), "Release upgrade job must not pull between exact archive load and rehearsal.");
 expect(!/^\s*docker\s+(?:image\s+)?tag\b/im.test(loadedCandidateWindow), "Release upgrade job must not re-tag between exact archive load and rehearsal.");

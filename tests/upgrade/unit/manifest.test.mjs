@@ -35,6 +35,14 @@ function validManifest() {
         platform: "linux/amd64",
       },
     },
+    generation: {
+      schemaVersion: 1,
+      generatorVersion: "1.0.0",
+      seed: {
+        path: "tests/upgrade/seed/v0.1.3.sql",
+        sha256: "4a6689419b00b11700c9b6246bcfa8936c8f5e1e824db3a7e57030e2d1c1a684",
+      },
+    },
     requiredFiles: ["database.sql", "expected.json", "manifest.json", "media/sample.txt"],
     requiredScenarios: [...REQUIRED_SCENARIOS],
     expectedDataFile: "expected.json",
@@ -76,6 +84,16 @@ function repeatedSeparator(manifest) {
   return manifest;
 }
 
+function generationWallClock(manifest) {
+  manifest.generation.generatedAt = "2026-08-27T00:00:00Z";
+  return manifest;
+}
+
+function badSeedDigest(manifest) {
+  manifest.generation.seed.sha256 = "A".repeat(64);
+  return manifest;
+}
+
 test("accepts the immutable v0.1.3 fixture contract", () => {
   const manifest = validateFixtureManifest(validManifest(), fixtureDirectory);
 
@@ -87,7 +105,24 @@ test("accepts the immutable v0.1.3 fixture contract", () => {
   assert.deepEqual(new Set(manifest.requiredScenarios), REQUIRED_SCENARIOS);
 });
 
-for (const mutate of [absoluteFile, escapingFile, tagDigestMismatch, missingScenario, duplicateFile, unknownSchema, repeatedSeparator]) {
+test("accepts deterministic generator and seed provenance without wall-clock metadata", () => {
+  const document = validManifest();
+  document.generation = {
+    schemaVersion: 1,
+    generatorVersion: "1.0.0",
+    seed: {
+      path: "tests/upgrade/seed/v0.1.3.sql",
+      sha256: "4a6689419b00b11700c9b6246bcfa8936c8f5e1e824db3a7e57030e2d1c1a684",
+    },
+  };
+
+  const manifest = validateFixtureManifest(document, fixtureDirectory);
+
+  assert.deepEqual(manifest.generation, document.generation);
+  assert.equal(JSON.stringify(manifest.generation).includes("generatedAt"), false);
+});
+
+for (const mutate of [absoluteFile, escapingFile, tagDigestMismatch, missingScenario, duplicateFile, unknownSchema, repeatedSeparator, generationWallClock, badSeedDigest]) {
   test(`rejects ${mutate.name}`, () => {
     assert.throws(() => validateFixtureManifest(mutate(validManifest()), fixtureDirectory));
   });
