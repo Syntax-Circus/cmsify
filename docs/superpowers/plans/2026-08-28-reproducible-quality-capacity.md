@@ -607,7 +607,7 @@ Commit: `Add scheduled capacity trend reports`
 
 - [ ] **Step 1: Add failing workflow/Docker/Dependabot policy tests**
 
-Assert solution restores use `--locked-mode`, .NET setup honors `global.json`, Docker build stages use SDK `10.0.400`, copy central build files and relevant locks before restore, and restore with locked mode. Assert four weekly Dependabot ecosystems: NuGet `/`, npm `/sdk/typescript`, GitHub Actions `/`, and Docker `/`; each groups patch/minor updates and leaves majors separate; no auto-merge workflow exists.
+Assert solution restores use `--locked-mode`, .NET setup honors `global.json`, Docker build stages use SDK `10.0.400`, copy central build files and relevant locks before restore, and restore with locked mode. Assert four weekly Dependabot ecosystems: NuGet `/`, npm `/sdk/typescript`, GitHub Actions `/`, and one Docker update entry with `directories: ["/src/Cmsify.Api", "/src/Cmsify.Admin"]`; each groups patch/minor updates and leaves majors separate; no auto-merge workflow exists.
 
 - [ ] **Step 2: Upgrade the .NET PR workflow in required order**
 

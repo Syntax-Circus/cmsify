@@ -135,7 +135,7 @@ Timing budgets are diagnostic until a production-like runner accumulates a stabl
 
 ## Dependency automation
 
-Add Dependabot configuration for NuGet at the repository root, npm under `sdk/typescript`, GitHub Actions, and the repository's Docker manifests. Run weekly, group compatible patch/minor updates by ecosystem, and keep major updates separate. Dependabot never auto-merges. Every dependency change must regenerate the affected lock, pass locked restore, warning enforcement, focused tests, and the full applicable suite.
+Add Dependabot configuration for NuGet at the repository root, npm under `sdk/typescript`, GitHub Actions, and the Dockerfiles under `src/Cmsify.Api` and `src/Cmsify.Admin` through one Docker ecosystem entry's `directories` list. Run weekly, group compatible patch/minor updates by ecosystem, and keep major updates separate. Dependabot never auto-merges. Every dependency change must regenerate the affected lock, pass locked restore, warning enforcement, focused tests, and the full applicable suite.
 
 Task 12 will pin every workflow action to reviewed commit SHAs and certify release artifacts; Task 11 dependency automation must not weaken that later gate.
 

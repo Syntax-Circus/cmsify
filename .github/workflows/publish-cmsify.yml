@@ -130,13 +130,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
+        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false, path: source }
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.0.0
-        with: { global-json-file: global.json }
+        with: { global-json-file: source/global.json }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
       - run: |
-          mkdir consumer && cd consumer && dotnet new console --framework net10.0 --no-restore
+          CONSUMER_ROOT="$RUNNER_TEMP/cmsify-dotnet-consumer"
+          mkdir -p "$CONSUMER_ROOT"
+          cd "$CONSUMER_ROOT"
+          dotnet new console --framework net10.0 --no-restore
           for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do dotnet add package "$package" --version "${{ needs.resolve.outputs.version }}" --source "$GITHUB_WORKSPACE/artifacts/nuget"; done
           dotnet build --configuration Release
 

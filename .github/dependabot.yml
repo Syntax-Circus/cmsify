@@ -28,7 +28,7 @@ updates:
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "docker"
-    directory: "/"
+    directories: ["/src/Cmsify.Api", "/src/Cmsify.Admin"]
     schedule:
       interval: "weekly"
     groups:

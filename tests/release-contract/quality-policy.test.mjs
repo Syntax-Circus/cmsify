@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parseYamlSubset } from "./yaml-subset.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const readRepositoryFile = (relativePath) =>
@@ -23,16 +24,6 @@ const testProjectPaths = [
   "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj",
 ];
 const pinnedUploadArtifact = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
-
-function assertOrdered(source, markers, sourceName) {
-  let previous = -1;
-  for (const marker of markers) {
-    const current = source.indexOf(marker);
-    assert.notEqual(current, -1, `${sourceName}: missing ${marker}`);
-    assert.equal(current > previous, true, `${sourceName}: ${marker} is out of order`);
-    previous = current;
-  }
-}
 
 function solutionProjectPaths() {
   return [...readRepositoryFile("Cmsify.slnx").matchAll(/<Project Path="([^"]+)"/g)]
@@ -59,19 +50,282 @@ function projectRestoreClosure(entryProject) {
   return [...closure].sort();
 }
 
-function dependabotUpdates(source) {
-  const entries = [];
-  let current = null;
-  for (const line of source.split(/\r?\n/)) {
-    const ecosystem = /^  - package-ecosystem:\s*["']?([^"'\s]+)["']?\s*$/.exec(line);
-    if (ecosystem) {
-      current = { ecosystem: ecosystem[1], source: `${line}\n` };
-      entries.push(current);
-    } else if (current) {
-      current.source += `${line}\n`;
+function workflowDocuments() {
+  return Object.fromEntries(getTrackedFiles(".github/workflows/*.yml", ".github/workflows/*.yaml")
+    .map((workflowPath) => [
+      workflowPath,
+      parseYamlSubset(readRepositoryFile(workflowPath), workflowPath),
+    ]));
+}
+
+function stepLabel(step) {
+  return step.name ?? step.uses ?? step.run;
+}
+
+function validatePullRequestWorkflow(workflow) {
+  const steps = workflow.jobs?.test?.steps;
+  assert.equal(Array.isArray(steps), true, "dotnet-test.yml: jobs.test.steps must be a sequence");
+  assert.deepEqual(steps.map(stepLabel), [
+    "actions/checkout@v4",
+    "actions/setup-dotnet@v4",
+    "Restore locked dependencies",
+    "Build Release binaries",
+    "Run full test suite",
+    "Collect raw coverage",
+    "Summarize coverage",
+    "Publish coverage summary",
+    "Upload raw coverage reports",
+    "Upload coverage summary",
+    "Run API capacity invariants",
+    "Run Infrastructure capacity invariants",
+    "Run .NET client capacity invariants",
+  ]);
+  assert.deepEqual(steps[1], {
+    uses: "actions/setup-dotnet@v4",
+    with: { "global-json-file": "global.json" },
+  });
+  assert.equal(steps[2].run, "dotnet restore Cmsify.slnx --locked-mode");
+  assert.equal(steps[3].run, "dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental");
+  assert.equal(steps[4].run, "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true");
+  assert.equal(steps[5].run, 'dotnet test Cmsify.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage --verbosity minimal');
+  assert.equal(steps[6].run, "node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md");
+  assert.equal(steps[7].run, 'cat artifacts/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"');
+  assert.deepEqual(steps[8], {
+    name: "Upload raw coverage reports",
+    uses: pinnedUploadArtifact,
+    with: {
+      name: "dotnet-coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}",
+      path: "artifacts/coverage/**/coverage.cobertura.xml",
+      "if-no-files-found": "error",
+      "retention-days": 14,
+    },
+  });
+  assert.deepEqual(steps[9], {
+    name: "Upload coverage summary",
+    uses: pinnedUploadArtifact,
+    with: {
+      name: "dotnet-coverage-summary-${{ github.run_id }}-${{ github.run_attempt }}",
+      path: "artifacts/coverage/summary.json\nartifacts/coverage/summary.md\n",
+      "if-no-files-found": "error",
+      "retention-days": 14,
+    },
+  });
+  const capacityCommands = [
+    "dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
+    "dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
+    "dotnet test sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
+  ];
+  assert.deepEqual(steps.slice(10).map((step) => step.run), capacityCommands);
+  assert.equal(workflow.jobs.test.env, undefined);
+  for (const step of steps.slice(10)) {
+    assert.equal(step.env, undefined, `${step.name}: timing/report environment is forbidden`);
+    assert.doesNotMatch(step.run, /CMSIFY_CAPACITY_|run-capacity\.mjs/);
+  }
+}
+
+function validateSetupDotnetStep(step, context) {
+  assert.equal(step.uses?.startsWith("actions/setup-dotnet@"), true, `${context}: setup-dotnet action`);
+  assert.equal(typeof step.with, "object", `${context}: setup-dotnet with mapping`);
+  assert.equal(Object.hasOwn(step.with, "dotnet-version"), false, `${context}: dotnet-version is forbidden`);
+  assert.equal(typeof step.with["global-json-file"], "string", `${context}: setup-dotnet owns global-json-file`);
+}
+
+function validateDotnetSetupAndRestorePolicy(documents) {
+  const setups = [];
+  const restores = [];
+  for (const [workflowPath, workflow] of Object.entries(documents)) {
+    assert.equal(typeof workflow.jobs, "object", `${workflowPath}: jobs mapping`);
+    for (const [jobName, job] of Object.entries(workflow.jobs)) {
+      const steps = job.steps ?? [];
+      assert.equal(Array.isArray(steps), true, `${workflowPath}:${jobName}: steps sequence`);
+      const dotnetRunIndexes = [];
+      const setupIndexes = [];
+      for (const [stepIndex, step] of steps.entries()) {
+        if (step.uses?.startsWith("actions/setup-dotnet@")) {
+          setupIndexes.push(stepIndex);
+          validateSetupDotnetStep(step, `${workflowPath}:${jobName}`);
+          setups.push(`${workflowPath}:${jobName}:${step.with["global-json-file"]}`);
+        }
+        if (typeof step.run === "string") {
+          const commands = step.run.split("\n").map((line) => line.trim()).filter(Boolean);
+          if (commands.some((command) => /(?:^|\s)dotnet(?:\s|$)/.test(command))) dotnetRunIndexes.push(stepIndex);
+          for (const command of commands.filter((command) => command.startsWith("dotnet restore Cmsify.slnx"))) {
+            restores.push(`${workflowPath}:${jobName}:${command}`);
+          }
+        }
+      }
+      if (dotnetRunIndexes.length > 0) {
+        assert.equal(setupIndexes.length, 1, `${workflowPath}:${jobName}: exactly one setup-dotnet step`);
+        assert.equal(setupIndexes[0] < Math.min(...dotnetRunIndexes), true, `${workflowPath}:${jobName}: setup-dotnet precedes dotnet commands`);
+      }
     }
   }
-  return entries;
+  assert.deepEqual(setups.sort(), [
+    ".github/workflows/admin-accessibility.yml:axe:global.json",
+    ".github/workflows/capacity-trends.yml:capacity-trends:global.json",
+    ".github/workflows/dotnet-test.yml:test:global.json",
+    ".github/workflows/openapi-contract.yml:contract:global.json",
+    ".github/workflows/publish-cmsify.yml:build:global.json",
+    ".github/workflows/publish-cmsify.yml:dotnet-consumer:source/global.json",
+    ".github/workflows/publish-cmsify.yml:promote:global.json",
+    ".github/workflows/typescript-sdk.yml:sdk:global.json",
+  ]);
+  assert.deepEqual(restores.sort(), [
+    ".github/workflows/admin-accessibility.yml:axe:dotnet restore Cmsify.slnx --locked-mode",
+    ".github/workflows/capacity-trends.yml:capacity-trends:dotnet restore Cmsify.slnx --locked-mode",
+    ".github/workflows/dotnet-test.yml:test:dotnet restore Cmsify.slnx --locked-mode",
+    ".github/workflows/publish-cmsify.yml:build:dotnet restore Cmsify.slnx --locked-mode",
+  ]);
+}
+
+const expectedReleaseConsumerRun = `CONSUMER_ROOT="$RUNNER_TEMP/cmsify-dotnet-consumer"
+mkdir -p "$CONSUMER_ROOT"
+cd "$CONSUMER_ROOT"
+dotnet new console --framework net10.0 --no-restore
+for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do dotnet add package "$package" --version "\${{ needs.resolve.outputs.version }}" --source "$GITHUB_WORKSPACE/artifacts/nuget"; done
+dotnet build --configuration Release
+`;
+
+function validateReleaseConsumer(workflow) {
+  const steps = workflow.jobs?.["dotnet-consumer"]?.steps;
+  assert.equal(Array.isArray(steps), true, "publish-cmsify.yml: dotnet-consumer steps");
+  assert.equal(steps.length, 4);
+  assert.deepEqual(steps[0], {
+    uses: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+    with: {
+      ref: "${{ needs.resolve.outputs.source_sha }}",
+      "fetch-depth": 1,
+      "persist-credentials": false,
+      path: "source",
+    },
+  });
+  assert.deepEqual(steps[1], {
+    uses: "actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7",
+    with: { "global-json-file": "source/global.json" },
+  });
+  assert.deepEqual(steps[2], {
+    uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+    with: {
+      name: "release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}",
+      path: "artifacts",
+    },
+  });
+  assert.equal(steps[3].run, expectedReleaseConsumerRun);
+  assert.doesNotMatch(steps[3].run, /(?:mkdir|cd)\s+(?:\.\/)?consumer\b|GITHUB_WORKSPACE\/source\/.*consumer/i);
+}
+
+function validateDependabotPolicy(dependabot) {
+  assert.equal(dependabot.version, 2);
+  assert.equal(Array.isArray(dependabot.updates), true);
+  assert.equal(dependabot.updates.length, 4);
+  const identities = [];
+  for (const update of dependabot.updates) {
+    const ecosystem = update["package-ecosystem"];
+    assert.deepEqual(update.schedule, { interval: "weekly" }, ecosystem);
+    assert.notEqual(update["open-pull-requests-limit"], 0, `${ecosystem}: updates cannot be disabled`);
+    const groupNames = Object.keys(update.groups ?? {});
+    assert.equal(groupNames.length, 1, `${ecosystem}: exactly one group`);
+    assert.deepEqual(update.groups[groupNames[0]], {
+      patterns: ["*"],
+      "update-types": ["minor", "patch"],
+    }, ecosystem);
+    if (ecosystem === "docker") {
+      assert.equal(update.directory, undefined);
+      assert.deepEqual(update.directories, ["/src/Cmsify.Api", "/src/Cmsify.Admin"]);
+      identities.push("docker:/src/Cmsify.Api,/src/Cmsify.Admin");
+    } else {
+      assert.equal(update.directories, undefined, `${ecosystem}: directories is Docker-only`);
+      identities.push(`${ecosystem}:${update.directory}`);
+    }
+  }
+  assert.deepEqual(identities.sort(), [
+    "docker:/src/Cmsify.Api,/src/Cmsify.Admin",
+    "github-actions:/",
+    "npm:/sdk/typescript",
+    "nuget:/",
+  ]);
+}
+
+function parseDockerfile(source, sourceName) {
+  const instructions = [];
+  let logical = "";
+  let startLine = null;
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  for (const [lineIndex, rawLine] of lines.entries()) {
+    const trimmed = rawLine.trim();
+    if (logical === "" && (trimmed === "" || trimmed.startsWith("#"))) continue;
+    if (startLine === null) startLine = lineIndex + 1;
+    const continued = /\\\s*$/.test(trimmed);
+    logical += `${logical === "" ? "" : " "}${trimmed.replace(/\\\s*$/, "").trim()}`;
+    if (continued) continue;
+    const match = /^([A-Za-z]+)\s+(.+)$/.exec(logical);
+    assert.notEqual(match, null, `${sourceName}:${startLine}: malformed Docker instruction`);
+    instructions.push({ instruction: match[1].toUpperCase(), arguments: match[2], line: startLine });
+    logical = "";
+    startLine = null;
+  }
+  assert.equal(logical, "", `${sourceName}: unterminated continuation`);
+  return instructions;
+}
+
+function dockerCopy(instruction, sourceName) {
+  assert.equal(instruction.instruction, "COPY");
+  assert.equal(instruction.arguments.startsWith("["), true, `${sourceName}:${instruction.line}: restore COPY must use JSON form`);
+  let values;
+  try {
+    values = JSON.parse(instruction.arguments);
+  } catch {
+    assert.fail(`${sourceName}:${instruction.line}: invalid JSON COPY`);
+  }
+  assert.equal(Array.isArray(values), true);
+  assert.equal(values.length, 2, `${sourceName}:${instruction.line}: COPY requires one source and destination`);
+  assert.equal(values.every((value) => typeof value === "string"), true);
+  return { source: values[0], destination: values[1] };
+}
+
+function validateDockerfilePolicy(source, dockerfile, project) {
+  const instructions = parseDockerfile(source, dockerfile);
+  const buildFrom = instructions.findIndex(({ instruction, arguments: value }) =>
+    instruction === "FROM" && value === "mcr.microsoft.com/dotnet/sdk:10.0.400 AS build");
+  assert.notEqual(buildFrom, -1, `${dockerfile}: exact SDK build stage`);
+  const restoreCommand = `dotnet restore "${project}" --locked-mode`;
+  const restoreIndex = instructions.findIndex(({ instruction, arguments: value }, index) =>
+    index > buildFrom && instruction === "RUN" && value === restoreCommand);
+  assert.notEqual(restoreIndex, -1, `${dockerfile}: exact locked restore`);
+  const sourceCopyIndex = instructions.findIndex(({ instruction, arguments: value }, index) =>
+    index > restoreIndex && instruction === "COPY" && value === ". .");
+  assert.notEqual(sourceCopyIndex, -1, `${dockerfile}: source copy follows restore`);
+
+  const actualCopies = instructions.slice(buildFrom + 1, restoreIndex)
+    .filter(({ instruction }) => instruction === "COPY")
+    .map((instruction) => dockerCopy(instruction, dockerfile))
+    .sort((left, right) => left.source.localeCompare(right.source));
+  const closure = projectRestoreClosure(project);
+  const expectedCopies = [
+    { source: "Directory.Build.props", destination: "./" },
+    { source: "Directory.Build.targets", destination: "./" },
+    { source: "Directory.Packages.props", destination: "./" },
+    ...closure.flatMap((projectPath) => {
+      const destination = `${path.posix.dirname(projectPath)}/`;
+      return [
+        { source: projectPath, destination },
+        { source: path.posix.join(path.posix.dirname(projectPath), "packages.lock.json"), destination },
+      ];
+    }),
+  ].sort((left, right) => left.source.localeCompare(right.source));
+  assert.deepEqual(actualCopies, expectedCopies, dockerfile);
+}
+
+function validateNoDependabotAutoMerge(documents) {
+  for (const [workflowPath, workflow] of Object.entries(documents)) {
+    for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+      for (const step of job.steps ?? []) {
+        assert.doesNotMatch(step.uses ?? "", /auto(?:-|\s*)merge|merge-pull-request/i, `${workflowPath}:${jobName}`);
+        assert.doesNotMatch(step.run ?? "", /gh\s+pr\s+merge\b|enablePullRequestAutoMerge|mergePullRequest/i, `${workflowPath}:${jobName}`);
+        assert.doesNotMatch(`${step.name ?? ""} ${step.if ?? ""}`, /dependabot[\s\S]*auto(?:-|\s*)merge|auto(?:-|\s*)merge[\s\S]*dependabot/i, `${workflowPath}:${jobName}`);
+      }
+    }
+  }
 }
 
 test("pins the SDK used for locked solution restores", () => {
@@ -205,151 +459,117 @@ test("uses Sass modules and limits quieting to Bootstrap dependency diagnostics"
   assert.equal(/(?:^|\s)--quiet(?:\s|$)/.test(sassCompiler.Arguments), false);
 });
 
-test("runs the pull-request .NET quality gates in the required deterministic order", () => {
-  const workflowPath = ".github/workflows/dotnet-test.yml";
-  const workflow = readRepositoryFile(workflowPath);
-
-  assert.match(workflow, /actions\/setup-dotnet@[^\s]+\s*\n\s+with:\s*\n\s+global-json-file:\s*global\.json/);
-  assertOrdered(workflow, [
-    "- uses: actions/checkout@",
-    "- uses: actions/setup-dotnet@",
-    "- name: Restore locked dependencies",
-    "- name: Build Release binaries",
-    "- name: Run full test suite",
-    "- name: Collect raw coverage",
-    "- name: Summarize coverage",
-    "- name: Upload raw coverage reports",
-    "- name: Upload coverage summary",
-    "- name: Run API capacity invariants",
-    "- name: Run Infrastructure capacity invariants",
-    "- name: Run .NET client capacity invariants",
-  ], workflowPath);
-
-  assert.match(workflow, /run:\s*dotnet restore Cmsify\.slnx --locked-mode\s*$/m);
-  assert.match(workflow, /run:\s*dotnet build Cmsify\.slnx --configuration Release --no-restore --no-incremental\s*$/m);
-  assert.match(workflow, /run:\s*dotnet test Cmsify\.slnx --configuration Release --no-build --verbosity minimal(?:\s+-p:DisableGitVersionTask=true)?\s*$/m);
-  assert.match(workflow, /run:\s*dotnet test Cmsify\.slnx --configuration Release --no-build --collect:["']XPlat Code Coverage["'] --results-directory artifacts\/coverage --verbosity minimal\s*$/m);
-  assert.match(workflow, /run:\s*node scripts\/quality\/summarize-coverage\.mjs --input artifacts\/coverage --json artifacts\/coverage\/summary\.json --markdown artifacts\/coverage\/summary\.md\s*$/m);
-
-  const uploadSteps = workflow.match(new RegExp(pinnedUploadArtifact, "g")) ?? [];
-  assert.equal(uploadSteps.length, 2);
-  assert.match(workflow, /name:\s*dotnet-coverage-raw-[^\n]+[\s\S]*?path:\s*artifacts\/coverage\/\*\*\/coverage\.cobertura\.xml/);
-  assert.match(workflow, /name:\s*dotnet-coverage-summary-[^\n]+[\s\S]*?path:\s*\|\s*\n\s+artifacts\/coverage\/summary\.json\s*\n\s+artifacts\/coverage\/summary\.md/);
-
-  const expectedCapacityCommands = [
-    "dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
-    "dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
-    "dotnet test sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
-  ];
-  for (const command of expectedCapacityCommands) {
-    assert.equal(workflow.split(/\r?\n/).some((line) => line.trim() === `run: ${command}`), true, command);
-  }
-  assert.doesNotMatch(workflow, /CMSIFY_CAPACITY_(?:TIMING|REPORT_DIR)/);
-  assert.doesNotMatch(workflow, /scripts\/quality\/run-capacity\.mjs/);
-});
-
-test("uses global.json and locked solution restore in every solution-restoring workflow", () => {
-  const workflows = getTrackedFiles(".github/workflows/*.yml", ".github/workflows/*.yaml");
-  const solutionRestoreWorkflows = workflows.filter((workflowPath) =>
-    readRepositoryFile(workflowPath).includes("dotnet restore Cmsify.slnx"));
-
-  assert.deepEqual(solutionRestoreWorkflows.sort(), [
-    ".github/workflows/admin-accessibility.yml",
-    ".github/workflows/capacity-trends.yml",
-    ".github/workflows/dotnet-test.yml",
-    ".github/workflows/publish-cmsify.yml",
-  ]);
-  const expectedSetupCounts = new Map([
-    [".github/workflows/admin-accessibility.yml", 1],
-    [".github/workflows/capacity-trends.yml", 1],
-    [".github/workflows/dotnet-test.yml", 1],
-    [".github/workflows/publish-cmsify.yml", 3],
-  ]);
-  for (const workflowPath of solutionRestoreWorkflows) {
-    const workflow = readRepositoryFile(workflowPath);
-    const restoreCommands = workflow.match(/^\s*(?:run:\s*)?dotnet restore Cmsify\.slnx.*$/gm) ?? [];
-    const setupDotnetSteps = workflow.match(/actions\/setup-dotnet@/g) ?? [];
-    const globalJsonInputs = workflow.match(/\bglobal-json-file:\s*global\.json\b/g) ?? [];
-
-    assert.deepEqual(restoreCommands.map((command) => command.trim().replace(/^run:\s*/, "")), [
-      "dotnet restore Cmsify.slnx --locked-mode",
-    ], workflowPath);
-    assert.equal(setupDotnetSteps.length, expectedSetupCounts.get(workflowPath), workflowPath);
-    assert.equal(globalJsonInputs.length, setupDotnetSteps.length, workflowPath);
-    assert.doesNotMatch(workflow, /dotnet-version:\s*["']?10\.0\.x/, workflowPath);
-  }
-  assert.match(
-    readRepositoryFile(".github/workflows/admin-accessibility.yml"),
-    /dotnet run --no-restore --no-launch-profile --project src\/Cmsify\.Admin\/Cmsify\.Admin\.csproj/,
+test("strict YAML subset parser returns nested workflow objects and rejects unsupported syntax", () => {
+  const fixture = parseYamlSubset(`jobs:
+  build:
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - name: Run
+        env:
+          FLAG: "true"
+        run: |
+          dotnet --version
+`, "fixture.yml");
+  assert.deepEqual(fixture, {
+    jobs: {
+      build: {
+        steps: [
+          { uses: "actions/setup-dotnet@v4", with: { "global-json-file": "global.json" } },
+          { name: "Run", env: { FLAG: "true" }, run: "dotnet --version\n" },
+        ],
+      },
+    },
+  });
+  assert.throws(
+    () => parseYamlSubset("jobs:\n  build:\n    steps:\n      - uses: one\n        uses: two\n", "duplicate.yml"),
+    /duplicate mapping key uses/,
   );
+  assert.throws(() => parseYamlSubset("jobs:\n\tbuild: {}\n", "tabs.yml"), /tabs are not supported/);
+  assert.throws(() => parseYamlSubset("jobs: &jobs\n", "anchor.yml"), /unsupported YAML construct/);
+  assert.throws(() => parseYamlSubset("jobs: [build\n", "flow.yml"), /unterminated flow sequence/);
 });
 
-test("copies each Docker restore closure and its lock files before locked restore", () => {
-  const containers = [
+test("models the pull-request .NET quality job with exact step-local commands and artifacts", () => {
+  validatePullRequestWorkflow(parseYamlSubset(
+    readRepositoryFile(".github/workflows/dotnet-test.yml"),
+    ".github/workflows/dotnet-test.yml",
+  ));
+});
+
+test("associates every tracked setup-dotnet step with global.json and every solution restore with locked mode", () => {
+  validateDotnetSetupAndRestorePolicy(workflowDocuments());
+});
+
+test("isolates the release consumer from the checked-out repository policy ancestry", () => {
+  validateReleaseConsumer(parseYamlSubset(
+    readRepositoryFile(".github/workflows/publish-cmsify.yml"),
+    ".github/workflows/publish-cmsify.yml",
+  ));
+});
+
+test("models Docker instructions as exact source-destination copies before locked restore", () => {
+  for (const { dockerfile, project } of [
     { dockerfile: "src/Cmsify.Api/Dockerfile", project: "src/Cmsify.Api/Cmsify.Api.csproj" },
     { dockerfile: "src/Cmsify.Admin/Dockerfile", project: "src/Cmsify.Admin/Cmsify.Admin.csproj" },
-  ];
-
-  for (const { dockerfile, project } of containers) {
-    const source = readRepositoryFile(dockerfile);
-    assert.match(source, /^FROM mcr\.microsoft\.com\/dotnet\/sdk:10\.0\.400 AS build\s*$/m, dockerfile);
-    const restoreMarker = `RUN dotnet restore "${project}" --locked-mode`;
-    const restoreIndex = source.indexOf(restoreMarker);
-    assert.notEqual(restoreIndex, -1, `${dockerfile}: locked restore command`);
-    const preRestore = source.slice(0, restoreIndex);
-    const copiedSources = [...preRestore.matchAll(/^COPY \["([^"]+)",\s*"[^"]+"\]\s*$/gm)]
-      .map((match) => match[1]);
-    const closure = projectRestoreClosure(project);
-    const expectedBuildInputs = [
-      "Directory.Build.props",
-      "Directory.Build.targets",
-      "Directory.Packages.props",
-      ...closure.flatMap((projectPath) => [
-        projectPath,
-        path.posix.join(path.posix.dirname(projectPath), "packages.lock.json"),
-      ]),
-    ].sort();
-
-    assert.deepEqual(copiedSources.sort(), expectedBuildInputs, dockerfile);
-    assert.equal(source.indexOf("COPY . .") > restoreIndex, true, `${dockerfile}: source copied after restore`);
+  ]) {
+    validateDockerfilePolicy(readRepositoryFile(dockerfile), dockerfile, project);
   }
 });
 
-test("configures four weekly Dependabot ecosystems with only minor and patch grouping", () => {
-  const dependabot = readRepositoryFile(".github/dependabot.yml");
-  const updates = dependabotUpdates(dependabot);
-  const identities = updates.map(({ ecosystem, source }) => {
-    const directory = /^    directory:\s*["']([^"']+)["']\s*$/m.exec(source)?.[1];
-    return `${ecosystem}:${directory}`;
-  });
-
-  assert.match(dependabot, /^version:\s*2\s*$/m);
-  assert.deepEqual(identities.sort(), [
-    "docker:/",
-    "github-actions:/",
-    "npm:/sdk/typescript",
-    "nuget:/",
-  ]);
-  assert.equal(updates.length, 4);
-  for (const { ecosystem, source } of updates) {
-    assert.match(source, /^    schedule:\s*\n      interval:\s*["']weekly["']\s*$/m, ecosystem);
-    assert.match(
-      source,
-      /^    groups:\s*\n      [a-z0-9-]+:\s*\n        patterns:\s*\["\*"\]\s*\n        update-types:\s*\["minor", "patch"\]\s*$/m,
-      ecosystem,
-    );
-    assert.doesNotMatch(source, /update-types:[^\n]*major|ignore:\s*[\s\S]*update-types:[^\n]*version-update:semver-major/i);
-  }
+test("models four enabled weekly Dependabot ecosystems with real Docker directories", () => {
+  validateDependabotPolicy(parseYamlSubset(
+    readRepositoryFile(".github/dependabot.yml"),
+    ".github/dependabot.yml",
+  ));
 });
 
 test("does not automate Dependabot pull-request merging", () => {
-  const workflows = getTrackedFiles(".github/workflows/*.yml", ".github/workflows/*.yaml");
-  for (const workflowPath of workflows) {
-    const workflow = readRepositoryFile(workflowPath);
-    assert.doesNotMatch(
-      workflow,
-      /(?:dependabot[\s\S]{0,400}auto(?:-|\s*)merge|auto(?:-|\s*)merge[\s\S]{0,400}dependabot|gh\s+pr\s+merge\b|enablePullRequestAutoMerge|mergePullRequest)/i,
-      workflowPath,
-    );
-  }
+  validateNoDependabotAutoMerge(workflowDocuments());
+});
+
+test("semantic policies reject cross-object and review-regression mutations", () => {
+  const pullRequestWorkflow = parseYamlSubset(
+    readRepositoryFile(".github/workflows/dotnet-test.yml"),
+    ".github/workflows/dotnet-test.yml",
+  );
+  const movedStep = structuredClone(pullRequestWorkflow);
+  movedStep.jobs["release-contract"].steps.push(movedStep.jobs.test.steps.splice(9, 1)[0]);
+  assert.throws(() => validatePullRequestWorkflow(movedStep), /Upload coverage summary|deep-equal|Expected values/);
+
+  const orphanedInput = {
+    uses: "actions/setup-dotnet@v4",
+    with: {},
+  };
+  const unrelatedCheckout = { uses: "actions/checkout@v4", with: { "global-json-file": "global.json" } };
+  assert.equal(unrelatedCheckout.with["global-json-file"], "global.json");
+  assert.throws(() => validateSetupDotnetStep(orphanedInput, "orphaned.yml:build"), /owns global-json-file/);
+
+  const validDependabot = parseYamlSubset(readRepositoryFile(".github/dependabot.yml"), ".github/dependabot.yml");
+  const dockerUpdate = validDependabot.updates.find((update) => update["package-ecosystem"] === "docker");
+  delete dockerUpdate.directory;
+  dockerUpdate.directories = ["/src/Cmsify.Api", "/src/Cmsify.Admin"];
+  validDependabot.updates[0]["open-pull-requests-limit"] = 0;
+  assert.throws(() => validateDependabotPolicy(validDependabot), /cannot be disabled/);
+
+  const apiDockerfile = readRepositoryFile("src/Cmsify.Api/Dockerfile");
+  const wrongDestination = apiDockerfile.replace(
+    'COPY ["src/Cmsify.Api/packages.lock.json", "src/Cmsify.Api/"]',
+    'COPY ["src/Cmsify.Api/packages.lock.json", "src/Cmsify.Core/"]',
+  );
+  assert.notEqual(wrongDestination, apiDockerfile);
+  assert.throws(
+    () => validateDockerfilePolicy(wrongDestination, "mutated-api.Dockerfile", "src/Cmsify.Api/Cmsify.Api.csproj"),
+    /mutated-api\.Dockerfile/,
+  );
+
+  const validRelease = parseYamlSubset(readRepositoryFile(".github/workflows/publish-cmsify.yml"), ".github/workflows/publish-cmsify.yml");
+  const consumerSteps = validRelease.jobs["dotnet-consumer"].steps;
+  consumerSteps[0].with.path = "source";
+  consumerSteps[1].with = { "global-json-file": "source/global.json" };
+  consumerSteps[3].run = expectedReleaseConsumerRun.replace(
+    '$RUNNER_TEMP/cmsify-dotnet-consumer',
+    '$GITHUB_WORKSPACE/source/consumer',
+  );
+  assert.throws(() => validateReleaseConsumer(validRelease), /Expected values|GITHUB_WORKSPACE/);
 });
