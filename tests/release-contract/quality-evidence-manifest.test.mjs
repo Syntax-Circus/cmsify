@@ -200,18 +200,14 @@ function expectedEvidenceTuple(manifest) {
 
 function assertNoPositiveReleaseClaim(section, name) {
   const positiveClaims = [
-    /\bfully certified\b/ig,
-    /\bhosted (?:checks|workflows|validation) (?:passed|succeeded|validated|green|certified)\b/ig,
-    /\bpublic(?:\/CI)? restore (?:passed|succeeded|validated|green|certified)\b/ig,
-    /\brelease[- ]ready\b/ig,
-    /\brelease certification (?:is )?(?:complete|completed|passed|certified)\b/ig,
+    /\bfully certified\b/i,
+    /\bhosted (?:checks|workflows|validation) (?:passed|succeeded|validated|green|certified)\b/i,
+    /\bpublic(?:\/CI)? restore (?:passed|succeeded|validated|green|certified)\b/i,
+    /\brelease[- ]ready\b/i,
+    /\b(?:final )?release certification (?:is )?(?:complete|completed|passed|certified)\b/i,
   ];
   for (const pattern of positiveClaims) {
-    for (const match of section.matchAll(pattern)) {
-      const clauseStart = Math.max(section.lastIndexOf(".", match.index) + 1, section.lastIndexOf("\n", match.index) + 1);
-      const prefix = section.slice(clauseStart, match.index);
-      assert.match(prefix, /\b(?:not|no|never)\b/i, `${name} contains a positive release/certification claim: ${match[0]}`);
-    }
+    assert.doesNotMatch(section, pattern, `${name} contains a positive release/certification claim`);
   }
 }
 
@@ -284,6 +280,30 @@ const evidenceMutations = [
   }],
   ["rejects hosted checks passed in handoff evidence", (fixture) => {
     fixture.handoff = fixture.handoff.replace("No hosted run", "Hosted checks passed");
+  }],
+  ["rejects public restore success after a negated contrast clause", (fixture) => {
+    fixture.readiness = fixture.readiness.replace(
+      "## Locked v1 decisions",
+      "Public restore was not available previously, but public restore passed today.\n\n## Locked v1 decisions",
+    );
+  }],
+  ["rejects hosted-check success after a negated contrast clause", (fixture) => {
+    fixture.handoff = fixture.handoff.replace(
+      "No hosted run, public restore, push, merge, tag, publication, or release is claimed here.",
+      "No hosted run passed previously, but hosted checks passed today.",
+    );
+  }],
+  ["rejects final certification success after a negated contrast clause", (fixture) => {
+    fixture.readiness = fixture.readiness.replace(
+      "final release certification remains open",
+      "final release certification was not complete previously, but final release certification is complete today",
+    );
+  }],
+  ["rejects release-ready success after a negated contrast clause", (fixture) => {
+    fixture.readiness = fixture.readiness.replace(
+      "| F-16 |",
+      "| F-16 | Not release-ready previously, but release-ready today.",
+    );
   }],
 ];
 
