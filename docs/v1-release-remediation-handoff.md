@@ -5,7 +5,7 @@ This is a point-in-time resume document for moving the remediation work to anoth
 ## Resume point
 
 - Branch: `feature/readiness-audit`
-- Exact Task 9 executable/workflow/runbook source tested: `56b83a61c430047e31942b8a33421b63e51a73d6` (`Document upgrade rollback operations`).
+- Exact Task 9 executable/workflow/runbook source tested: `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c` (`Close final upgrade rollback review findings`).
 - State: Task 9/F-04 is implemented and fully validated locally; continue with Task 10, “Consolidate HTTP resilience.”
 - The final Task 9 evidence update is documentation-only. It intentionally follows the tested source commit and does not change runtime, workflow, fixture, or harness behavior.
 - No push, merge, tag, package publication, image publication, or release was performed in Task 9.
@@ -18,7 +18,7 @@ git status --short
 git log -5 --oneline
 ```
 
-Expected: a clean worktree with the Task 9 evidence-only documentation commit at `HEAD` and tested source `56b83a61c430047e31942b8a33421b63e51a73d6` in its direct history. Read `AGENTS.md` before changing anything.
+Expected: a clean worktree with the Task 9 evidence-only documentation commit at `HEAD` and tested source `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c` in its direct history. Read `AGENTS.md` before changing anything.
 
 ## Authoritative plans and audit
 
@@ -49,7 +49,7 @@ Tasks 1–9 are complete through local implementation and validation. Key Cmsify
 | Task 7 key rotation | through `643776c` | Versioned keys, online rotation, migration, metrics, config, and runbook complete. |
 | Task 7 final | `64ee4fb` | Reader-first inventory, runtime decrypt telemetry, and actionable diagnostics; combined GO. |
 | Task 8 | `415a6a7` | Durable media reconciliation implemented and independently approved. |
-| Task 9 | through `56b83a6` plus the evidence-only documentation commit | Moving-baseline fixture, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
+| Task 9 | through `26bd204` plus the evidence-only documentation commit | Moving-baseline fixture, final-review compatibility/safety fixes, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
 
 Task 5 also changed sibling packages outside this repository:
 
@@ -143,17 +143,17 @@ Task 9's upgrade/rollback contract is described by the [approved design](superpo
 
 ## Task 9 final validation and evidence
 
-Task 9/F-04 passed the complete local validation from a clean committed source state. This proves only the exact local candidate below; the release workflow must repeat certification for the exact OCI artifact associated with any proposed tag before protected promotion.
+Task 9/F-04 passed the complete local validation from a clean committed source state after the consolidated six-finding final review fix. This proves only the exact local candidate below; the release workflow must repeat certification for the exact OCI artifact associated with any proposed tag before protected promotion.
 
 ### Exact candidate and baseline identities
 
-- Tested source SHA: `56b83a61c430047e31942b8a33421b63e51a73d6`.
-- Candidate reference: `syntaxcircus/cmsify-api:1.0.0-task9` (a mutable local alias used only to select the image once).
-- Immutable local image ID: `sha256:eeb4da7b70826bfdef21ded9c093e6324a08a912b27f31b5d8bf9ecf5fd52c58`.
+- Tested source SHA: `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c`.
+- Candidate reference: `syntaxcircus/cmsify-api:1.0.0-task9-final` (a mutable local alias used only to select the image once).
+- Immutable local image ID: `sha256:5bf4175b8c81140ad57f441d7b3d27018479c831f7188b840893ee96fc8103a0`.
 - Candidate platform: `linux/amd64`.
-- OCI version/revision: `1.0.0-task9` / `56b83a61c430047e31942b8a33421b63e51a73d6`.
-- Build informational version: `1.0.0-task9+56b83a61c430047e31942b8a33421b63e51a73d6`.
-- The image was built from [`src/Cmsify.Api/Dockerfile`](../src/Cmsify.Api/Dockerfile) with its normal public NuGet restore. It has no registry `RepoDigest` because Task 9 did not push or publish it.
+- OCI version/revision: `1.0.0-task9-final` / `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c`.
+- Build informational version: `1.0.0-task9-final+26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c`.
+- The image was built without cache from [`src/Cmsify.Api/Dockerfile`](../src/Cmsify.Api/Dockerfile) with its normal public NuGet restore and stable `SyntaxCircus.Storage` `0.2.0`. It has no registry `RepoDigest` because Task 9 did not push or publish it.
 
 The checked-in baseline remained:
 
@@ -163,7 +163,7 @@ The checked-in baseline remained:
 | PostgreSQL | `docker.io/library/postgres:17-alpine@sha256:7456ef82e5f5bc43d997f4781bbd7c0d6389bff397564649a356e206ba473aee`, linux/amd64 |
 | MinIO | `docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2`, linux/amd64 |
 
-`verify-fixture` passed. Docker-backed deterministic regeneration was byte-identical with aggregate `81c9291f324691dce421292c14901c4811b82321295a645b2ed46f2a4dcfbcb6`. Both rehearsal reports bound the SHA-256 of the canonical verified `SHA256SUMS` inventory as fixture digest `6936f9f530aa21b5e547b840fc0c6823280dcfc6a34ee5c99cce0fbd67645855`.
+`verify-fixture` passed. The strict generation contract records generator schema/version `1`/`1.0.0` and checked-in seed `tests/upgrade/seed/v0.1.3.sql` at SHA-256 `d4f985494d9da184ee5a3473b40b8fd1b366c28fb288b0331eb2aa1a1f0408de`; `expected.json` provenance is identical. Docker-backed deterministic regeneration was byte-identical with aggregate `81c9291f324691dce421292c14901c4811b82321295a645b2ed46f2a4dcfbcb6`. Both rehearsal reports bound the SHA-256 of the canonical verified `SHA256SUMS` inventory as fixture digest `ecdc40680f97a74535ab08a22532fa8d2656598f9606b8b0cb071f31377f725d`.
 
 ### Two clean rehearsal passes
 
@@ -171,24 +171,24 @@ The opt-in integration command passed 1/1 after running two complete rehearsals:
 
 | Run | Result and assertion counts | Matched-backup manifest | Canary |
 | --- | --- | --- | --- |
-| `cmsify-upgrade-08c59f324ba2` | All eleven phases passed; baseline 26, candidate 29, rollback 27 | `9da81f71eec90637b6bdd4cd5b5b4d877a4469200c6ba85714f17fe81ef4a2e2`; 2 media objects | `01a045a5-cbfd-7024-9521-70cf6f792489`, absent after rollback |
-| `cmsify-upgrade-e03997c30374` | All eleven phases passed; baseline 26, candidate 29, rollback 27 | `38c41f4fb20d7749ec3afb49568f4fd316bfe21dd9bd773794cd0635194043e0`; 2 media objects | `01a045a7-bc47-74b2-a590-bed9d7bb4ab3`, absent after rollback |
+| `cmsify-upgrade-8e310004e422` | All eleven phases passed; baseline 27, candidate 30, rollback 28 | `240c0ae3cf8089081b4c173661cffbd942c1371ef8e1e076f62d7a7881513587`; 2 media objects | `01a045f6-6d90-73b9-9c0b-c6e592025527`, absent after rollback |
+| `cmsify-upgrade-6c97c20e0382` | All eleven phases passed; baseline 27, candidate 30, rollback 28 | `32fb0ae056fe2570d6385c44ab7e85f70c43f5fb2fe6c91a440c0c705beb5099`; 2 media objects | `01a045f8-71b0-74cf-ac67-c84aa12f260b`, absent after rollback |
 
-Each run re-verified its original backup before discarding v1-written volumes, restored database and media into fresh storage, and started exact `0.1.3` only after restore. The immediate post-run and final ownership-label audits each found zero containers, zero volumes, and zero networks.
+Each run re-verified its original backup, re-discovered and re-inspected exact data container/volume identity and both ownership labels after the final fence before any removal, restored database and media into fresh storage, and started exact `0.1.3` only after restore. Both reports include the shared `global-admin-restricted-read` assertion in baseline/candidate/rollback alongside the unchanged reader 404 invariant. The retained diagnostics for both runs contained only allow-listed PostgreSQL/MinIO markers and the exact 11 safe rollback migration IDs. The immediate post-run and final ownership-label audits each found zero containers, zero volumes, and zero networks.
 
 ### Commands and pass counts
 
-- Complete upgrade/release-contract Node set: 335/335 passed, 0 failed/skipped.
+- Complete upgrade/release-contract Node set: 352/352 passed, 0 failed/skipped.
 - `verify-fixture`: passed for `0.1.3`.
 - `generate-fixture --check`: passed byte-identically.
 - `verify-release-contract.mjs`: passed.
 - Fresh production Dockerfile candidate build/inspect: passed with the exact identity above.
 - Opt-in `tests/upgrade/integration/rehearsal.test.mjs`: 1/1 passed, containing the two runs above.
 - Focused Infrastructure PostgreSQL/MinIO Testcontainers: 292/292 passed.
-- Focused API PostgreSQL Testcontainers: 70/70 passed.
+- Focused API PostgreSQL Testcontainers: 71/71 passed, including matching legacy full-tick ETag acceptance, normalized emission, and stale-validator rejection.
 - TypeScript: `npm ci`, live OpenAPI/generation check, typecheck, 40/40 tests, and ESM/CommonJS/declaration build passed.
 - Release solution build: passed with 0 errors and 45 existing Admin nullable warnings assigned to Task 11.
-- Release solution test: 495/495 passed: Core 66, Infrastructure 292, API 70, Admin 29, and .NET client 38.
+- Release solution test: 496/496 passed: Core 66, Infrastructure 292, API 71, Admin 29, and .NET client 38.
 - Final fixture diff, `git diff --check`, and the requirement-by-requirement design audit passed; final clean-worktree evidence is recorded in the Task 9.8 execution report after the documentation-only commit.
 
 The exact command forms are in the [harness runbook](../tests/upgrade/README.md). The dedicated [upgrade workflow](../.github/workflows/upgrade-rollback.yml) and [release workflow](../.github/workflows/publish-cmsify.yml) run the same public CLI contract; the structural release-contract tests passed in this run.
@@ -205,11 +205,11 @@ node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v
 node eng/upgrade-tests/cli.mjs generate-fixture --fixture tests/upgrade/fixtures/v0.1.3 --check
 node scripts/release/verify-release-contract.mjs
 
-$sourceSha = '56b83a61c430047e31942b8a33421b63e51a73d6'
-docker build --platform linux/amd64 --provenance=false --build-arg BUILD_VERSION=1.0.0-task9 --build-arg "BUILD_INFORMATIONAL_VERSION=1.0.0-task9+$sourceSha" --build-arg "BUILD_SOURCE_REVISION=$sourceSha" --tag syntaxcircus/cmsify-api:1.0.0-task9 --file src/Cmsify.Api/Dockerfile .
+$sourceSha = '26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c'
+docker build --platform linux/amd64 --pull --no-cache --provenance=false --build-arg BUILD_VERSION=1.0.0-task9-final --build-arg "BUILD_INFORMATIONAL_VERSION=1.0.0-task9-final+$sourceSha" --build-arg "BUILD_SOURCE_REVISION=$sourceSha" --tag syntaxcircus/cmsify-api:1.0.0-task9-final --file src/Cmsify.Api/Dockerfile .
 $env:CMSIFY_UPGRADE_TEST = '1'
-$env:CMSIFY_UPGRADE_CANDIDATE_IMAGE = 'syntaxcircus/cmsify-api:1.0.0-task9'
-$env:CMSIFY_UPGRADE_CANDIDATE_VERSION = '1.0.0-task9'
+$env:CMSIFY_UPGRADE_CANDIDATE_IMAGE = 'syntaxcircus/cmsify-api:1.0.0-task9-final'
+$env:CMSIFY_UPGRADE_CANDIDATE_VERSION = '1.0.0-task9-final'
 $env:CMSIFY_UPGRADE_CANDIDATE_SOURCE_SHA = $sourceSha
 node --test tests/upgrade/integration/rehearsal.test.mjs
 
@@ -237,4 +237,4 @@ dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
 
 ## Next task: Task 10
 
-Resume with Task 10, “Consolidate HTTP resilience,” in [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md). Preserve tested source `56b83a61c430047e31942b8a33421b63e51a73d6`, the evidence-only documentation commit above it, and all completed Tasks 1–9. Do not push, merge, tag, publish, or release without explicit approval.
+Resume with Task 10, “Consolidate HTTP resilience,” in [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md). Preserve tested source `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c`, the evidence-only documentation commit above it, and all completed Tasks 1–9. Do not push, merge, tag, publish, or release without explicit approval.
