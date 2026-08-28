@@ -221,8 +221,14 @@ function validateDependabotPolicy(dependabot) {
   const identities = [];
   for (const update of dependabot.updates) {
     const ecosystem = update["package-ecosystem"];
+    if (Object.hasOwn(update, "open-pull-requests-limit")) {
+      assert.fail(`${ecosystem}: open-pull-requests-limit is not an allowed key; updates cannot be disabled`);
+    }
+    const allowedKeys = ecosystem === "docker"
+      ? ["directories", "groups", "package-ecosystem", "schedule"]
+      : ["directory", "groups", "package-ecosystem", "schedule"];
+    assert.deepEqual(Object.keys(update).sort(), allowedKeys, `${ecosystem}: exact allowed keys; ignore and allow are forbidden`);
     assert.deepEqual(update.schedule, { interval: "weekly" }, ecosystem);
-    assert.notEqual(update["open-pull-requests-limit"], 0, `${ecosystem}: updates cannot be disabled`);
     const groupNames = Object.keys(update.groups ?? {});
     assert.equal(groupNames.length, 1, `${ecosystem}: exactly one group`);
     assert.deepEqual(update.groups[groupNames[0]], {
@@ -288,15 +294,18 @@ function validateDockerfilePolicy(source, dockerfile, project) {
   const buildFrom = instructions.findIndex(({ instruction, arguments: value }) =>
     instruction === "FROM" && value === "mcr.microsoft.com/dotnet/sdk:10.0.400 AS build");
   assert.notEqual(buildFrom, -1, `${dockerfile}: exact SDK build stage`);
+  const nextFrom = instructions.findIndex(({ instruction }, index) => index > buildFrom && instruction === "FROM");
+  const buildStageEnd = nextFrom === -1 ? instructions.length : nextFrom;
+  const buildStage = instructions.slice(buildFrom, buildStageEnd);
   const restoreCommand = `dotnet restore "${project}" --locked-mode`;
-  const restoreIndex = instructions.findIndex(({ instruction, arguments: value }, index) =>
-    index > buildFrom && instruction === "RUN" && value === restoreCommand);
+  const restoreIndex = buildStage.findIndex(({ instruction, arguments: value }, index) =>
+    index > 0 && instruction === "RUN" && value === restoreCommand);
   assert.notEqual(restoreIndex, -1, `${dockerfile}: exact locked restore`);
-  const sourceCopyIndex = instructions.findIndex(({ instruction, arguments: value }, index) =>
+  const sourceCopyIndex = buildStage.findIndex(({ instruction, arguments: value }, index) =>
     index > restoreIndex && instruction === "COPY" && value === ". .");
   assert.notEqual(sourceCopyIndex, -1, `${dockerfile}: source copy follows restore`);
 
-  const actualCopies = instructions.slice(buildFrom + 1, restoreIndex)
+  const actualCopies = buildStage.slice(1, restoreIndex)
     .filter(({ instruction }) => instruction === "COPY")
     .map((instruction) => dockerCopy(instruction, dockerfile))
     .sort((left, right) => left.source.localeCompare(right.source));
@@ -316,14 +325,61 @@ function validateDockerfilePolicy(source, dockerfile, project) {
   assert.deepEqual(actualCopies, expectedCopies, dockerfile);
 }
 
+function nestedScalars(value, path = []) {
+  if (typeof value === "string") return [{ path, value }];
+  if (Array.isArray(value)) return value.flatMap((item, index) => nestedScalars(item, [...path, index]));
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, item]) => nestedScalars(item, [...path, key]));
+  }
+  return [];
+}
+
+function mergeCapability(value) {
+  if (/(?:^|\/)(?:auto-?merge(?:-action)?|merge-pull-request|enable-pull-request-auto-?merge)(?:@|\/|$)/i.test(value)) {
+    return "merge-capable action";
+  }
+  if (/\b(?:github|octokit)(?:\.rest)?\.pulls\.merge\s*\(/i.test(value)) return "pulls.merge API";
+  if (/\b(?:enablePullRequestAutoMerge|mergePullRequest)\b/.test(value)) return "GraphQL merge API";
+  if (/(?:^|[\n;&|]\s*)gh\s+pr\s+merge\b/im.test(value)) return "gh pr merge command";
+  if (/\bgh\s+api\b[^\n]*\bpulls\/[^\s/]+\/merge\b/i.test(value)) return "GitHub merge REST command";
+  if (/\bcurl\b[^\n]*\b(?:POST|PUT)\b[^\n]*\/pulls\/[^\s/]+\/merge\b/i.test(value)) return "GitHub merge REST command";
+  return null;
+}
+
+function pullRequestTrigger(workflow) {
+  if (typeof workflow.on === "string") return ["pull_request", "pull_request_target"].includes(workflow.on);
+  if (Array.isArray(workflow.on)) return workflow.on.some((trigger) => ["pull_request", "pull_request_target"].includes(trigger));
+  return workflow.on !== null && typeof workflow.on === "object"
+    && (Object.hasOwn(workflow.on, "pull_request") || Object.hasOwn(workflow.on, "pull_request_target"));
+}
+
+function grantsWrite(permissions) {
+  if (permissions === "write-all") return true;
+  return permissions !== null && typeof permissions === "object"
+    && Object.values(permissions).some((permission) => permission === "write");
+}
+
 function validateNoDependabotAutoMerge(documents) {
   for (const [workflowPath, workflow] of Object.entries(documents)) {
     for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
-      for (const step of job.steps ?? []) {
-        assert.doesNotMatch(step.uses ?? "", /auto(?:-|\s*)merge|merge-pull-request/i, `${workflowPath}:${jobName}`);
-        assert.doesNotMatch(step.run ?? "", /gh\s+pr\s+merge\b|enablePullRequestAutoMerge|mergePullRequest/i, `${workflowPath}:${jobName}`);
-        assert.doesNotMatch(`${step.name ?? ""} ${step.if ?? ""}`, /dependabot[\s\S]*auto(?:-|\s*)merge|auto(?:-|\s*)merge[\s\S]*dependabot/i, `${workflowPath}:${jobName}`);
-      }
+      const jobScalars = nestedScalars(job, ["jobs", jobName]);
+      const mergeEntry = jobScalars.find(({ value }) => mergeCapability(value) !== null);
+      const dependabotTriggered = pullRequestTrigger(workflow)
+        && jobScalars.some(({ value }) => /\bdependabot(?:\[bot\])?\b/i.test(value));
+      const writeCapable = grantsWrite(job.permissions ?? workflow.permissions);
+      assert.equal(
+        dependabotTriggered && writeCapable && mergeEntry !== undefined,
+        false,
+        `${workflowPath}:${jobName}: Dependabot-triggered write-capable merge job`,
+      );
+    }
+    for (const { path: scalarPath, value } of nestedScalars(workflow)) {
+      const capability = mergeCapability(value);
+      assert.equal(
+        capability,
+        null,
+        `${workflowPath}:${scalarPath.join(".")}: merge-capable scalar (${capability})`,
+      );
     }
   }
 }
@@ -488,6 +544,20 @@ test("strict YAML subset parser returns nested workflow objects and rejects unsu
   assert.throws(() => parseYamlSubset("jobs:\n\tbuild: {}\n", "tabs.yml"), /tabs are not supported/);
   assert.throws(() => parseYamlSubset("jobs: &jobs\n", "anchor.yml"), /unsupported YAML construct/);
   assert.throws(() => parseYamlSubset("jobs: [build\n", "flow.yml"), /unterminated flow sequence/);
+  assert.deepEqual(parseYamlSubset("x: 'a''b'\n", "single-quote.yml"), { x: "a'b" });
+  assert.deepEqual(parseYamlSubset("x: a#b\n", "plain-hash.yml"), { x: "a#b" });
+  assert.deepEqual(parseYamlSubset("x: a # trailing comment\n", "plain-comment.yml"), { x: "a" });
+  assert.deepEqual(parseYamlSubset("x: a 'b # trailing comment\n", "plain-quote-comment.yml"), { x: "a 'b" });
+  assert.deepEqual(
+    parseYamlSubset("x: https://example.test/a#fragment\n", "plain-url.yml"),
+    { x: "https://example.test/a#fragment" },
+  );
+  assert.throws(
+    () => parseYamlSubset("x: 'a' junk 'b'\n", "single-quote-junk.yml"),
+    /invalid single-quoted scalar/,
+  );
+  assert.throws(() => parseYamlSubset("x: a: b\n", "plain-colon.yml"), /invalid plain scalar/);
+  assert.throws(() => parseYamlSubset("x: a:\n", "plain-colon-end.yml"), /invalid plain scalar/);
 });
 
 test("models the pull-request .NET quality job with exact step-local commands and artifacts", () => {
@@ -572,4 +642,68 @@ test("semantic policies reject cross-object and review-regression mutations", ()
     '$GITHUB_WORKSPACE/source/consumer',
   );
   assert.throws(() => validateReleaseConsumer(validRelease), /Expected values|GITHUB_WORKSPACE/);
+});
+
+test("Dependabot policy rejects ignored major and all-package updates", () => {
+  const dependabot = parseYamlSubset(readRepositoryFile(".github/dependabot.yml"), ".github/dependabot.yml");
+  const ignoredAllUpdates = structuredClone(dependabot);
+  ignoredAllUpdates.updates[0].ignore = [{ "dependency-name": "*" }];
+  assert.throws(() => validateDependabotPolicy(ignoredAllUpdates), /allowed keys|ignore/);
+
+  const ignoredMajors = structuredClone(dependabot);
+  ignoredMajors.updates[0].ignore = [{
+    "dependency-name": "*",
+    "update-types": ["version-update:semver-major"],
+  }];
+  assert.throws(() => validateDependabotPolicy(ignoredMajors), /allowed keys|ignore/);
+});
+
+test("auto-merge policy recursively rejects a Dependabot-triggered write-capable github-script merge", () => {
+  const mergeWorkflow = {
+    ".github/workflows/mutated-auto-merge.yml": {
+      on: { pull_request_target: { types: ["opened", "synchronize"] } },
+      permissions: { contents: "write", "pull-requests": "write" },
+      jobs: {
+        merge: {
+          if: "github.actor == 'dependabot[bot]'",
+          steps: [{
+            uses: "actions/github-script@pinned",
+            with: { script: "await github.rest.pulls.merge({ owner, repo, pull_number });" },
+          }],
+        },
+      },
+    },
+  };
+  assert.throws(
+    () => validateNoDependabotAutoMerge(mergeWorkflow),
+    /Dependabot-triggered write-capable merge job|merge-capable scalar/,
+  );
+  assert.doesNotThrow(() => validateNoDependabotAutoMerge({
+    ".github/workflows/ordinary-words.yml": {
+      on: "pull_request",
+      permissions: { contents: "read" },
+      jobs: {
+        check: {
+          steps: [{
+            name: "Merge coverage summaries",
+            env: { NOTE: "Dependabot updates remain individual pull requests" },
+            run: "echo checked",
+          }],
+        },
+      },
+    },
+  }));
+});
+
+test("Docker policy rejects restore inputs moved outside the selected SDK stage", () => {
+  const dockerfile = readRepositoryFile("src/Cmsify.Api/Dockerfile");
+  const wrongStage = dockerfile.replace(
+    "FROM mcr.microsoft.com/dotnet/sdk:10.0.400 AS build",
+    "FROM mcr.microsoft.com/dotnet/sdk:10.0.400 AS build\nFROM scratch AS misplaced-restore",
+  );
+  assert.notEqual(wrongStage, dockerfile);
+  assert.throws(
+    () => validateDockerfilePolicy(wrongStage, "wrong-stage.Dockerfile", "src/Cmsify.Api/Cmsify.Api.csproj"),
+    /wrong-stage\.Dockerfile/,
+  );
 });

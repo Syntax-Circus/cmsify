@@ -29,6 +29,22 @@ function stripComment(value, sourceName, lineNumber) {
   return value.trimEnd();
 }
 
+function stripPlainComment(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "#" && (index === 0 || /\s/.test(value[index - 1]))) {
+      return value.slice(0, index).trimEnd();
+    }
+  }
+  return value.trimEnd();
+}
+
+function stripScalarComment(value, sourceName, lineNumber) {
+  const token = value.trim();
+  return /^["'\[{]/.test(token)
+    ? stripComment(token, sourceName, lineNumber)
+    : stripPlainComment(token);
+}
+
 function splitFlow(value, sourceName, lineNumber) {
   const parts = [];
   let start = 0;
@@ -111,7 +127,8 @@ function setUnique(target, key, value, sourceName, lineNumber) {
 }
 
 function parseScalar(value, sourceName, lineNumber) {
-  const scalar = stripComment(value.trim(), sourceName, lineNumber).trim();
+  const token = value.trim();
+  const scalar = stripScalarComment(token, sourceName, lineNumber).trim();
   if (scalar === "") fail(sourceName, lineNumber, "empty scalar");
   if (scalar.startsWith('"')) {
     try {
@@ -123,7 +140,7 @@ function parseScalar(value, sourceName, lineNumber) {
     }
   }
   if (scalar.startsWith("'")) {
-    if (!scalar.endsWith("'") || scalar.length < 2) fail(sourceName, lineNumber, "invalid single-quoted scalar");
+    if (!/^'(?:[^']|'')*'$/.test(scalar)) fail(sourceName, lineNumber, "invalid single-quoted scalar");
     return scalar.slice(1, -1).replaceAll("''", "'");
   }
   if (scalar.startsWith("[")) {
@@ -150,6 +167,7 @@ function parseScalar(value, sourceName, lineNumber) {
   if (/^(?:[&*!]|<<\s*:|---$|\.\.\.$)/.test(scalar)) {
     fail(sourceName, lineNumber, `unsupported YAML construct ${JSON.stringify(scalar)}`);
   }
+  if (/:(?:\s|$)/.test(scalar)) fail(sourceName, lineNumber, "invalid plain scalar colon");
   return scalar;
 }
 
@@ -165,11 +183,11 @@ export function parseYamlSubset(source, sourceName = "<yaml>") {
   const lines = rawLines.map((raw, index) => {
     const indent = raw.length - raw.trimStart().length;
     if (indent % 2 !== 0) fail(sourceName, index + 1, "indentation must use two-space levels");
-    const content = stripComment(raw.slice(indent), sourceName, index + 1).trimEnd();
+    const content = raw.slice(indent).trimEnd();
     return { raw, indent, content, number: index + 1 };
   });
 
-  const isBlank = (line) => line.content.trim() === "";
+  const isBlank = (line) => line.content.trim() === "" || line.content.trimStart().startsWith("#");
   const nextMeaningful = (start) => {
     let index = start;
     while (index < lines.length && isBlank(lines[index])) index += 1;
@@ -182,8 +200,9 @@ export function parseYamlSubset(source, sourceName = "<yaml>") {
     const content = [];
     while (index < lines.length) {
       const line = lines[index];
-      if (!isBlank(line) && line.indent <= parentIndent) break;
-      if (isBlank(line)) content.push("");
+      const physicallyBlank = line.raw.trim() === "";
+      if (!physicallyBlank && line.indent <= parentIndent) break;
+      if (physicallyBlank) content.push("");
       else {
         if (line.indent < parentIndent + 2) fail(sourceName, line.number, "invalid block scalar indentation");
         content.push(line.raw.slice(parentIndent + 2));
@@ -196,7 +215,7 @@ export function parseYamlSubset(source, sourceName = "<yaml>") {
   };
 
   const parseValue = (rawValue, index, parentIndent) => {
-    const value = stripComment(rawValue, sourceName, lines[index].number).trim();
+    const value = stripScalarComment(rawValue, sourceName, lines[index].number).trim();
     if (value === "|" || value === "|-") return parseBlockScalar(index + 1, parentIndent, value);
     if (value !== "") return { value: parseScalar(value, sourceName, lines[index].number), next: index + 1 };
     const childIndex = nextMeaningful(index + 1);
