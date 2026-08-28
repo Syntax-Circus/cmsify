@@ -193,10 +193,14 @@ Each run re-verified its original backup before discarding v1-written volumes, r
 
 The exact command forms are in the [harness runbook](../tests/upgrade/README.md). The dedicated [upgrade workflow](../.github/workflows/upgrade-rollback.yml) and [release workflow](../.github/workflows/publish-cmsify.yml) run the same public CLI contract; the structural release-contract tests passed in this run.
 
-The final run used these command contracts. On local PowerShell, the two Node globs were expanded to their complete file lists and Node commands were invoked with the Node 24.19.0 executable described below:
+The final run used these command contracts. On local PowerShell, the two Node globs were expanded with the following exact passing `Get-ChildItem`/file-array invocation; Node commands used the Node 24.19.0 executable described below:
 
 ```powershell
-node --test tests/upgrade/unit/*.test.mjs tests/release-contract/*.test.mjs
+$nodeTests = @(
+  (Get-ChildItem 'tests/upgrade/unit/*.test.mjs'),
+  (Get-ChildItem 'tests/release-contract/*.test.mjs')
+) | ForEach-Object { $_.FullName }
+node --test $nodeTests
 node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v0.1.3
 node eng/upgrade-tests/cli.mjs generate-fixture --fixture tests/upgrade/fixtures/v0.1.3 --check
 node scripts/release/verify-release-contract.mjs

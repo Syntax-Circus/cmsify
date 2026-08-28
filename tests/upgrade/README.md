@@ -166,20 +166,91 @@ Headers with no rows are the expected result. If resources remain, record their 
 
 ## Refresh after a stable `0.1.x` publication
 
-Refresh the moving baseline only after the newer `0.1.x` GitHub Release and linux/amd64 Docker image are actually published. Do not create a fixture from an unpublished build, a prerelease, `latest`, or the candidate currently being certified.
+Refresh the moving baseline only after the newer `0.1.x` GitHub Release and linux/amd64 Docker image are actually published. Do not create a fixture from an unpublished build, a prerelease, `latest`, or the candidate currently being certified. The commands below use published `0.1.4` and `tests/upgrade/fixtures/v0.1.4` as the concrete example; do not run them until `0.1.4` is a real stable publication.
 
 1. Record the published version, peeled tag source SHA, and immutable linux/amd64 API digest. Resolve and record exact PostgreSQL and MinIO linux/amd64 digests as well.
-2. Copy the prior versioned fixture and seed to new versioned paths as a review starting point. Update the generator's version-specific synthetic constants/seed path, the manifest provenance and required files, and `expected.json`. Never hand-edit `database.sql`, media payload output, or `SHA256SUMS` to make comparison pass.
-3. Extend tests and expected assertions for schema/domain changes while preserving every required scenario and the shared baseline/rollback assertion strength.
-4. Generate the new fixture once, then prove deterministic regeneration and integrity:
+2. Copy the prior versioned fixture and seed to new versioned paths as a review starting point. The following commands fail rather than overwrite an existing `v0.1.4` fixture or seed.
+
+   PowerShell:
 
    ```powershell
-   node eng/upgrade-tests/cli.mjs generate-fixture --fixture tests/upgrade/fixtures/v0.1.<next>
-   node eng/upgrade-tests/cli.mjs generate-fixture --fixture tests/upgrade/fixtures/v0.1.<next> --check
-   node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v0.1.<next>
+   $publishedBaselineVersion = '0.1.4'
+   $fixturePath = "tests/upgrade/fixtures/v$publishedBaselineVersion"
+   $seedPath = "tests/upgrade/seed/v$publishedBaselineVersion.sql"
+   if ((Test-Path -LiteralPath $fixturePath) -or (Test-Path -LiteralPath $seedPath)) {
+     throw "Refusing to overwrite the $publishedBaselineVersion fixture or seed."
+   }
+   Copy-Item -LiteralPath 'tests/upgrade/fixtures/v0.1.3' -Destination $fixturePath -Recurse
+   Copy-Item -LiteralPath 'tests/upgrade/seed/v0.1.3.sql' -Destination $seedPath
    ```
 
-5. Run the complete unit/release-contract set and two-pass exact-image rehearsal against the next candidate. Confirm the post-run ownership-label audit is empty.
-6. Use `verify-release-baseline` during certification to prove the checked-in fixture still matches the latest already-published stable `0.1.x` release. Commit the regenerated fixture, harness changes, and reviewable provenance together.
+   POSIX shell:
+
+   ```sh
+   published_baseline_version='0.1.4'
+   fixture_path="tests/upgrade/fixtures/v${published_baseline_version}"
+   seed_path="tests/upgrade/seed/v${published_baseline_version}.sql"
+   if [ -e "${fixture_path}" ] || [ -e "${seed_path}" ]; then
+     echo "Refusing to overwrite the ${published_baseline_version} fixture or seed." >&2
+     exit 1
+   fi
+   cp -R 'tests/upgrade/fixtures/v0.1.3' "${fixture_path}"
+   cp 'tests/upgrade/seed/v0.1.3.sql' "${seed_path}"
+   ```
+
+3. Update the generator's version-specific synthetic constants and seed path for `0.1.4`. In `tests/upgrade/fixtures/v0.1.4/manifest.json`, replace the baseline version/source and API, PostgreSQL, and MinIO references with the exact published linux/amd64 digests. Update `expected.json` provenance and scenario expectations. Never hand-edit `database.sql`, generated media output, or `SHA256SUMS` to make comparison pass.
+4. Update every active authoritative fixture reference—the generator, integration test, branch workflow, dedicated workflow, release workflow/verifier, and operator documentation—from `v0.1.3` to `v0.1.4`. Preserve historical evidence that intentionally describes an older run. Use this inventory to find active references for review:
+
+   ```powershell
+   rg -n 'v0\.1\.3|0\.1\.3' eng/upgrade-tests tests/upgrade .github/workflows scripts/release docs/operations.md
+   ```
+
+   ```sh
+   rg -n 'v0\.1\.3|0\.1\.3' eng/upgrade-tests tests/upgrade .github/workflows scripts/release docs/operations.md
+   ```
+
+5. Extend tests and expected assertions for schema/domain changes while preserving every required scenario and the shared baseline/rollback assertion strength.
+6. Generate the concrete `v0.1.4` fixture once, then prove deterministic regeneration and integrity.
+
+   PowerShell:
+
+   ```powershell
+   $publishedBaselineVersion = '0.1.4'
+   $fixturePath = "tests/upgrade/fixtures/v$publishedBaselineVersion"
+   node eng/upgrade-tests/cli.mjs generate-fixture --fixture $fixturePath
+   node eng/upgrade-tests/cli.mjs generate-fixture --fixture $fixturePath --check
+   node eng/upgrade-tests/cli.mjs verify-fixture --fixture $fixturePath
+   ```
+
+   POSIX shell:
+
+   ```sh
+   published_baseline_version='0.1.4'
+   fixture_path="tests/upgrade/fixtures/v${published_baseline_version}"
+   node eng/upgrade-tests/cli.mjs generate-fixture --fixture "${fixture_path}"
+   node eng/upgrade-tests/cli.mjs generate-fixture --fixture "${fixture_path}" --check
+   node eng/upgrade-tests/cli.mjs verify-fixture --fixture "${fixture_path}"
+   ```
+
+7. Run the complete unit/release-contract set and two-pass exact-image rehearsal against the next candidate. Confirm the post-run ownership-label audit is empty.
+8. Use `verify-release-baseline` during certification to prove the refreshed `v0.1.4` fixture matches the latest already-published stable `0.1.x` GitHub release, peeled source commit, and Docker Hub linux/amd64 API digest.
+
+   PowerShell:
+
+   ```powershell
+   $fixturePath = 'tests/upgrade/fixtures/v0.1.4'
+   $candidateVersion = '1.0.0-rc.1'
+   node eng/upgrade-tests/cli.mjs verify-release-baseline --fixture $fixturePath --candidate-version $candidateVersion
+   ```
+
+   POSIX shell:
+
+   ```sh
+   fixture_path='tests/upgrade/fixtures/v0.1.4'
+   candidate_version='1.0.0-rc.1'
+   node eng/upgrade-tests/cli.mjs verify-release-baseline --fixture "${fixture_path}" --candidate-version "${candidate_version}"
+   ```
+
+   Commit the regenerated fixture, updated authoritative references/digests, harness changes, and reviewable provenance together. Once `0.1.4` is published, no later `0.1.x` or v1 candidate may promote while the authoritative fixture still records `0.1.3`.
 
 The dedicated [upgrade workflow](../../.github/workflows/upgrade-rollback.yml) performs the same fixture verification, deterministic regeneration check, exact candidate build, two-pass rehearsal, and failure-only diagnostics upload. The release workflow loads its already-built OCI archive, verifies the current published baseline, and requires this rehearsal before protected promotion.
