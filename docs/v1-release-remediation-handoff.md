@@ -5,8 +5,8 @@ This is a point-in-time resume document for moving the remediation work to anoth
 ## Resume point
 
 - Branch: `feature/readiness-audit`
-- Exact Task 10 Cmsify implementation source tested: `3cb1855c1d882bac977576c985e066f20e954de6` (`Forward HTTP timeout telemetry`); full implementation range `29ba5a8^..3cb1855`.
-- Exact sibling source tested: `017051edfe17cbf33460e80def72cb7445800bbc` on `feature/cmsify-resilience`; full change range `5216a18..017051e`.
+- Exact Task 10 Cmsify implementation source tested: `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` (`Snapshot Cmsify retry configuration`); full implementation range `29ba5a8^..b68172d`.
+- Exact sibling source tested: `af04bef1566b175a3a859d399b68f5bd6c840a1f` (`Harden request resilience guarantees`) on `feature/cmsify-resilience`; full change range `5216a18..af04bef`.
 - State: Task 10/F-13 is implemented and validated locally. Release consumption is still blocked on the user-owned stable publication/replacement gate described below. Tasks 11–12 remain untouched.
 - The final Task 10 documentation commit follows the tested implementation commit and changes no runtime, tests, generated output, or package bytes.
 - No push, merge, tag, package publication, image publication, or release was performed in Task 10.
@@ -19,7 +19,7 @@ git status --short
 git log -5 --oneline
 ```
 
-Expected: a clean worktree with the Task 10 documentation commit at `HEAD` and tested implementation source `3cb1855c1d882bac977576c985e066f20e954de6` in its direct history. Read `AGENTS.md` before changing anything.
+Expected: a clean worktree with the Task 10 documentation commit at `HEAD` and tested implementation source `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` in its direct history. Read `AGENTS.md` before changing anything.
 
 ## Authoritative plans and audit
 
@@ -53,7 +53,7 @@ Tasks 1–10 are complete through local implementation and validation. Key Cmsif
 | Task 7 final | `64ee4fb` | Reader-first inventory, runtime decrypt telemetry, and actionable diagnostics; combined GO. |
 | Task 8 | `415a6a7` | Durable media reconciliation implemented and independently approved. |
 | Task 9 | through `26bd204` plus the evidence-only documentation commit | Moving-baseline fixture, final-review compatibility/safety fixes, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
-| Task 10 | `29ba5a8^..3cb1855` plus the documentation commit containing this handoff | Shared request-factory resilience, direct/DI/Admin parity, configurable retry/circuit classification, timeout telemetry, retry ownership, cancellation/observer preservation, and final local package validation complete; stable publication/replacement remains gated. |
+| Task 10 | `29ba5a8^..b68172d` plus the documentation commit containing this handoff; sibling `5216a18..af04bef` | Shared request-factory resilience, direct/DI/Admin parity, construction-time configuration, private logical breaker, hard non-cooperative deadline, retry ownership, cancellation/observer exclusion, and final local package validation complete; stable publication/replacement remains gated. |
 
 Task 5 also changed sibling packages outside this repository:
 
@@ -89,7 +89,7 @@ These are explicitly non-blocking and must remain visible for final release adju
 - Task 4's Syft relationship-only `DESCRIBES` handling and smoke cleanup trap requirement.
 - Task 5 package publication and all external release evidence remain explicit-approval gates.
 - Task 10's `SyntaxCircus.Http.Resilience` stable publication/replacement and clean public restore remain explicit user-owned gates.
-- The default multi-project full-test command exposed the existing Media API fixture/initial reconciliation race twice; the isolated failing test passed, and the final strict-serial `-m:1` full solution passed 526/526 after the two timeout-forwarding regressions were added. Keep this visible for Task 12 rather than attributing it to Task 10.
+- The default multi-project full-test command historically exposed the existing Media API fixture/initial reconciliation race twice; the isolated failing test passed, and the final strict-serial `-m:1` full solution passed 527/527 after the final resilience regressions were added. Keep this visible for Task 12 rather than attributing it to Task 10.
 
 ## Historical Task 8 start point
 
@@ -236,12 +236,14 @@ dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
 
 ### Exact source and package identity
 
-- Sibling repository: `feature/cmsify-resilience`, baseline `5216a18` (`v0.1.6`), Task 10 range `5216a18..017051e`, final HEAD `017051edfe17cbf33460e80def72cb7445800bbc`.
-- Cmsify: `feature/readiness-audit`, implementation range `29ba5a8^..3cb1855`, tested implementation HEAD `3cb1855c1d882bac977576c985e066f20e954de6`.
+- Sibling repository: `feature/cmsify-resilience`, baseline `5216a18` (`v0.1.6`), Task 10 range `5216a18..af04bef`, final HEAD `af04bef1566b175a3a859d399b68f5bd6c840a1f`.
+- Cmsify: `feature/readiness-audit`, implementation range `29ba5a8^..b68172d`, tested implementation HEAD `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42`.
 - Package: `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1`.
-- Final authoritative `.nupkg` SHA-256: `F1603F4AFD717117A7133FAABA03B825193604275D97FA69C8F321DBB47A2111` (37,605 bytes).
-- NuGet content hash: `C5d5DxGurnl6Scz3VYD/fhVZitkmVw+RG7/gM+ishTwrLpcskHoFWzPxExD4swiEHS5CPm+2hJr92eoEpFlDEg==`.
+- Final authoritative `.nupkg` SHA-256: `2E3CC9F084E26FC6EDE44B422C9852D326711F0EBC532A6CEF4E25E8FACBDF74` (42,300 bytes).
+- NuGet content hash: `+h1IcaouivPC3qfKww+qikAdVnaK0YV0tuHjHk5izMOtyZaF2Num+e1wbEJX3Ylbe38qHg8UCMdl2Ofzoya3GA==`.
 - The nuspec records MIT, `README.md`, repository branch/commit, and net10.0 dependencies on `Microsoft.Extensions.Http.Resilience` 9.9.0, `Microsoft.Extensions.DependencyInjection` 10.0.0, and `Microsoft.Extensions.Http` 10.0.0. The main package contains only NuGet metadata, `README.md`, `lib/net10.0/SyntaxCircus.Http.Resilience.dll`, and its XML documentation; the audit found no source, project, configuration, PDB, solution, credential, secret, token, `bin`, or `obj` asset.
+
+The final audit intentionally follows the binding design/ledger over the earlier plan's Polly-circuit detail. Polly retry primitives remain, but the Polly circuit strategy and `CircuitTimeProvider` were removed. A private locked logical-request breaker now uses the caller's monotonic `TimeProvider` directly, preserves exact rolling-window/break durations (including timestamp zero and extreme accepted values), admits one half-open probe, and excludes caller cancellation and observer failures entirely. A monotonic deadline with chunked timers supports every positive finite timeout plus infinity, races non-cooperative factories/senders/observers, and safely observes/disposes late work without duplicate telemetry or circuit mutation. This is an intentional architecture correction, not a public API/default change; the legacy helper and its AI-mode `429` exclusion remain source-compatible.
 
 The final sibling commands were:
 
@@ -256,15 +258,16 @@ Get-FileHash artifacts/local-nuget/http-resilience/SyntaxCircus.Http.Resilience.
 
 ### Clean consumer and local restore
 
-A unique .NET 10 console consumer was created at `C:\Users\jon\AppData\Local\Temp\cmsify-resilience-round2-3d1d7e6dcf704189bcbc4597bb64d92d`. Its only direct package reference was exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1`; its NuGet configuration placed the final local package feed before NuGet.org, which supplied only transitive dependencies. The executed commands were:
+A unique .NET 10 console consumer was created at `C:\Users\jon\AppData\Local\Temp\cmsify-http-resilience-consumer-d7880a7314be45ef802e8da4934a25a9`. Its only direct package reference was exact `SyntaxCircus.Http.Resilience` `[0.2.0-cmsify.1]`; its private feed contained only the final nupkg and NuGet.org supplied public transitive dependencies. The executed commands were:
 
 ```powershell
 dotnet new console --framework net10.0 --no-restore --output $tempConsumer
 dotnet restore --configfile NuGet.Config --packages packages --force --no-cache --verbosity minimal
-dotnet run --configuration Release --no-restore
+dotnet build --configuration Release --no-restore --verbosity minimal
+dotnet run --configuration Release --no-build --no-restore
 ```
 
-Result: `PASS direct=2; keyed=2; custom=2; timeoutEvents=1; callerCancellationTokenPreserved=true; observerCalls=1; cancellationAttempts=1; notReplayableAttempts=1`. This proves direct and keyed `503 -> 200`, custom-included `501 -> 200`, exact once-only timeout fields, caller-token identity when a sender cancels then returns `503`, once-per-response observation, best-effort canceled-response disposal, no retry, and the `NotReplayable` fence. The consumer's restored `.nupkg` SHA-256 matched the final hash, its target/library asset types were `package`, and no sibling project path appeared. After verification, only that resolved exact OS-temp directory was recursively removed and its absence was confirmed.
+Result: `CLEAN_CONSUMER_PASS direct keyed custom-classification cancellation-circuit hard-late-timeout timeout-telemetry not-replayable`. This proves direct `503 -> 200`, two distinct executed keyed configurations (two and three attempts), custom-included `501 -> 200`, caller-token identity and cancellation exclusion from circuit throughput, a prompt hard timeout against a non-cooperative sender, exactly one timeout event, late once-only response observation with safe deferred ownership cleanup, and the `NotReplayable` fence. The consumer's restored `.nupkg` SHA-256 matched the final hash, its target/library asset types were `package`, and no sibling project path appeared. After verification, only that resolved exact OS-temp directory was recursively removed and its absence was confirmed.
 
 The final package was copied into Cmsify's ignored `artifacts/local-nuget/http-resilience` feed. Only `artifacts/local-nuget/packages/syntaxcircus.http.resilience/0.2.0-cmsify.1` was cleared before this forced restore:
 
@@ -277,12 +280,12 @@ Five `project.assets.json` graphs—client, distributed-cache add-on, client tes
 ### Fresh validation
 
 - Sibling Release build: passed, 0 warnings/errors.
-- Sibling tests: 145/145 passed, 0 failed/skipped.
-- Clean consumer: all required behaviors passed (direct/keyed `503 -> 200`, custom classifier, exact timeout telemetry, cancellation-first canceled-response observer/cleanup, and `NotReplayable`).
-- Focused .NET client: 66/66 passed, 0 failed/skipped.
+- Sibling tests: 168/168 passed, 0 failed/skipped.
+- Clean consumer: all required behaviors passed (direct, both keyed configurations, custom classifier, cancellation/circuit accounting, hard late timeout, exact timeout telemetry, deferred observer/ownership cleanup, and `NotReplayable`).
+- Focused .NET client: 67/67 passed, 0 failed/skipped.
 - Focused Admin: 31/31 passed with Docker-backed Redis coverage, 0 failed/skipped.
-- Full Release build: the ordinary incremental command passed with 0 warnings/errors. The forced non-incremental command passed with 45 existing Task 11 Admin nullable warnings and 0 errors: 40 `CS8602`, one `CS8601`, one `CS8603`, and three `CS8604`. Nothing was suppressed.
-- Strict-serial full solution (`dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -m:1`): 526/526 passed—client 66, Admin 31, API 71, Core 66, Infrastructure 292—with PostgreSQL, MinIO, and Redis Testcontainers.
+- Full Release build: the forced non-incremental command passed with 45 existing Task 11 Admin nullable warnings and 0 errors: 40 `CS8602`, one `CS8601`, one `CS8603`, and three `CS8604`. Nothing was suppressed.
+- Strict-serial full solution (`dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -m:1`): 527/527 passed—client 67, Admin 31, API 71, Core 66, Infrastructure 292—with PostgreSQL, MinIO, and Redis Testcontainers.
 
 Two preceding full-solution attempts without `-m:1` each produced one Media API failure while every other test passed. The failing test changed between runs, and the originally failing test passed 1/1 in isolation. Investigation found the default `MediaApiTests` factory leaves `MediaReconciliationService` running; its initial cycle can mark a deliberately missing or newly seeded blob `Missing` before the endpoint assertion. Task 10 did not change this source/test path, and the required serial run passed. Preserve this concern for final adjudication rather than hiding it.
 
@@ -302,4 +305,4 @@ Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1`
 
 ## Next task: user publication gate, then Task 11
 
-Task 10 implementation is complete locally. First complete the explicit user-owned stable `SyntaxCircus.Http.Resilience` publication/replacement and public-restore validation above; publication itself is not authorized by this handoff. Then resume Task 11 from [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md), preserving tested Cmsify source `3cb1855c1d882bac977576c985e066f20e954de6`, sibling source `017051edfe17cbf33460e80def72cb7445800bbc`, and all completed Tasks 1–10. Tasks 11–12 have not begun. Do not push, merge, tag, publish, or release without explicit approval.
+Task 10 implementation is complete locally. First complete the explicit user-owned stable `SyntaxCircus.Http.Resilience` publication/replacement and public-restore validation above; publication itself is not authorized by this handoff. Then resume Task 11 from [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md), preserving tested Cmsify source `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42`, sibling source `af04bef1566b175a3a859d399b68f5bd6c840a1f`, and all completed Tasks 1–10. Tasks 11–12 have not begun. Do not push, merge, tag, publish, or release without explicit approval.
