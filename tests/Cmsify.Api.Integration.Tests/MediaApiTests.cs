@@ -91,6 +91,10 @@ public sealed class MediaApiTests : IAsyncLifetime
         Assert.Equal("File is too large", problem.GetProperty("title").GetString());
         Assert.Equal((int)HttpStatusCode.RequestEntityTooLarge, problem.GetProperty("status").GetInt32());
         Assert.False(string.IsNullOrWhiteSpace(problem.GetProperty("traceId").GetString()));
+        var committedObjects = await storage.ListAsync(
+            new ListStorageObjectsRequest(string.Empty, null, 100),
+            TestContext.Current.CancellationToken);
+        Assert.Empty(committedObjects.Items);
         Assert.Empty(storage.StoredKeys);
 
         await using var scope = factory.Services.CreateAsyncScope();
@@ -99,6 +103,37 @@ public sealed class MediaApiTests : IAsyncLifetime
             asset => asset.FileName == fileName,
             TestContext.Current.CancellationToken));
         Assert.False(await db.MediaDeletionIntents.AnyAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task TestStorageProvider_TracksSuccessfulStoreExistenceListingAndDelete()
+    {
+        const string key = "cmsify/media/stateful.bin";
+        var storage = new TestStorageProvider();
+        await using var content = new MemoryStream([1, 2, 3]);
+
+        var stored = await storage.StoreAsync(
+            new StoreObjectRequest(key, content, "application/octet-stream"),
+            TestContext.Current.CancellationToken);
+        var existsAfterStore = await storage.ExistsAsync(key, TestContext.Current.CancellationToken);
+        var afterStore = await storage.ListAsync(
+            new ListStorageObjectsRequest("cmsify/media/", null, 100),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, stored.SizeBytes);
+        Assert.True(existsAfterStore);
+        var listed = Assert.Single(afterStore.Items);
+        Assert.Equal(key, listed.Key);
+        Assert.Equal(3, listed.SizeBytes);
+        Assert.Equal("application/octet-stream", listed.ContentType);
+
+        await storage.DeleteAsync(key, TestContext.Current.CancellationToken);
+
+        Assert.False(await storage.ExistsAsync(key, TestContext.Current.CancellationToken));
+        Assert.Empty((await storage.ListAsync(
+            new ListStorageObjectsRequest("cmsify/media/", null, 100),
+            TestContext.Current.CancellationToken)).Items);
     }
 
     [Fact]
@@ -578,6 +613,8 @@ public sealed class MediaApiTests : IAsyncLifetime
 
     private sealed class TestStorageProvider : SyntaxCircus.Storage.IStorageProvider
     {
+        private readonly Dictionary<string, StorageObjectMetadata> committedObjects = new(StringComparer.Ordinal);
+
         public bool FailStoreAfterCapture { get; init; }
         public Func<string, Task>? AfterStoreAsync { get; set; }
         public List<string> StoredKeys { get; } = [];
@@ -589,8 +626,14 @@ public sealed class MediaApiTests : IAsyncLifetime
         {
             StoredKeys.Add(request.Key);
             if (FailStoreAfterCapture) throw new IOException("simulated partial write");
+            var sizeBytes = request.Content.CanSeek ? request.Content.Length : 0;
+            committedObjects[request.Key] = new StorageObjectMetadata(
+                request.Key,
+                sizeBytes,
+                request.ContentType,
+                DateTimeOffset.UtcNow);
             if (AfterStoreAsync is not null) await AfterStoreAsync(request.Key);
-            return new StoredObject(request.Key, request.Content.CanSeek ? request.Content.Length : 0);
+            return new StoredObject(request.Key, sizeBytes);
         }
 
         public Task<StorageReadResult?> ReadAsync(string key, CancellationToken cancellationToken = default)
@@ -608,19 +651,40 @@ public sealed class MediaApiTests : IAsyncLifetime
         }
 
         public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) =>
-            Task.FromResult(ReadResults.ContainsKey(key) || StreamingReadResults.ContainsKey(key));
+            Task.FromResult(
+                committedObjects.ContainsKey(key)
+                || ReadResults.ContainsKey(key)
+                || StreamingReadResults.ContainsKey(key));
 
-        public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DeleteAsync(string key, CancellationToken cancellationToken = default)
+        {
+            committedObjects.Remove(key);
+            return Task.CompletedTask;
+        }
 
         public Task<StorageObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default) =>
-            Task.FromResult(ReadResults.TryGetValue(key, out var bytes)
-                ? new StorageObjectMetadata(key, bytes.Length, "text/plain", DateTimeOffset.UtcNow)
-                : StreamingReadResults.TryGetValue(key, out var stream)
-                    ? new StorageObjectMetadata(key, stream.Length, "text/plain", DateTimeOffset.UtcNow)
-                : null);
+            Task.FromResult(committedObjects.TryGetValue(key, out var committed)
+                ? committed
+                : ReadResults.TryGetValue(key, out var bytes)
+                    ? new StorageObjectMetadata(key, bytes.Length, "text/plain", DateTimeOffset.UtcNow)
+                    : StreamingReadResults.TryGetValue(key, out var stream)
+                        ? new StorageObjectMetadata(key, stream.Length, "text/plain", DateTimeOffset.UtcNow)
+                    : null);
 
         public Task<StorageObjectPage> ListAsync(ListStorageObjectsRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new StorageObjectPage([], null));
+            Task.FromResult(ListObjects(request));
+
+        private StorageObjectPage ListObjects(ListStorageObjectsRequest request)
+        {
+            var matches = committedObjects.Values
+                .Where(item => item.Key.StartsWith(request.Prefix, StringComparison.Ordinal))
+                .Where(item => request.AfterKey is null || string.CompareOrdinal(item.Key, request.AfterKey) > 0)
+                .OrderBy(item => item.Key, StringComparer.Ordinal)
+                .ToArray();
+            var items = matches.Take(request.PageSize).ToArray();
+            var nextAfterKey = matches.Length > items.Length && items.Length > 0 ? items[^1].Key : null;
+            return new StorageObjectPage(items, nextAfterKey);
+        }
     }
 
     private sealed class TrackingStream(Stream inner) : Stream
