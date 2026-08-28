@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const reportFileName = "coverage.cobertura.xml";
 const nameStart = /[A-Za-z_:]/;
@@ -386,7 +387,9 @@ function parsePackage(element, reportPath) {
     const branch = (line.attributes.get("branch") ?? "false").toLowerCase();
     if (branch !== "true" && branch !== "false") malformed(reportPath);
     if (branch === "true") {
-      const branchCounts = /\(\s*(\d+)\s*\/\s*(\d+)\s*\)/.exec(line.attributes.get("condition-coverage") ?? "");
+      const branchCounts = /^\s*\d+(?:\.\d+)?%\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)\s*$/.exec(
+        line.attributes.get("condition-coverage") ?? "",
+      );
       if (!branchCounts) malformed(reportPath);
       const covered = nonNegativeInteger(branchCounts[1], reportPath);
       const valid = nonNegativeInteger(branchCounts[2], reportPath);
@@ -445,50 +448,117 @@ function renderMarkdown(sourceSha, assemblies) {
   ].join("\n");
 }
 
-function stagedFile(destination, contents) {
-  mkdirSync(path.dirname(destination), { recursive: true });
-  const temporary = path.join(
-    path.dirname(destination),
-    `.${path.basename(destination)}.${process.pid}.${randomUUID()}.tmp`,
-  );
-  writeFileSync(temporary, contents, { encoding: "utf8", flag: "wx" });
-  return temporary;
+const defaultOutputOperations = {
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  temporaryPath(destination, purpose) {
+    return path.join(
+      path.dirname(destination),
+      `.${path.basename(destination)}.${process.pid}.${randomUUID()}.${purpose}`,
+    );
+  },
+};
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function replaceOutputs(outputs) {
-  const staged = [];
-  const backups = [];
-  const installed = [];
+function transactionFailure(primary, rollbackFailures) {
+  const detail = rollbackFailures.length === 0
+    ? "rollback completed"
+    : `rollback failures: ${rollbackFailures.map(errorMessage).join("; ")}`;
+  return new AggregateError(
+    [primary, ...rollbackFailures],
+    `Coverage output transaction failed before commit: ${errorMessage(primary)}; ${detail}`,
+    { cause: primary },
+  );
+}
+
+export function replaceOutputs(outputs, operations = defaultOutputOperations) {
+  const states = outputs.map((output) => ({
+    ...output,
+    stage: operations.temporaryPath(output.destination, "stage"),
+    backup: operations.temporaryPath(output.destination, "backup"),
+    staged: false,
+    backedUp: false,
+    installed: false,
+  }));
+  let committed = false;
+
   try {
-    for (const output of outputs) {
-      staged.push({ ...output, temporary: stagedFile(output.destination, output.contents) });
+    for (const state of states) {
+      operations.mkdirSync(path.dirname(state.destination), { recursive: true });
+      operations.writeFileSync(state.stage, state.contents, { encoding: "utf8", flag: "wx" });
+      state.staged = true;
     }
-    for (const output of staged) {
-      if (existsSync(output.destination)) {
-        const backup = `${output.temporary}.previous`;
-        renameSync(output.destination, backup);
-        backups.push({ backup, destination: output.destination });
+    for (const state of states) {
+      if (operations.existsSync(state.destination)) {
+        operations.renameSync(state.destination, state.backup);
+        state.backedUp = true;
       }
     }
-    for (const output of staged) {
-      renameSync(output.temporary, output.destination);
-      installed.push(output.destination);
+    for (const state of states) {
+      operations.renameSync(state.stage, state.destination);
+      state.staged = false;
+      state.installed = true;
     }
-    for (const { backup } of backups) rmSync(backup, { force: true });
-  } catch (error) {
-    for (const destination of installed.reverse()) rmSync(destination, { force: true });
-    for (const { backup, destination } of backups.reverse()) {
-      if (existsSync(backup)) renameSync(backup, destination);
+    committed = true;
+  } catch (primary) {
+    const rollbackFailures = [];
+    for (const state of [...states].reverse()) {
+      if (!state.installed) continue;
+      try {
+        operations.rmSync(state.destination, { force: true });
+        state.installed = false;
+      } catch (error) {
+        rollbackFailures.push(error);
+      }
     }
-    throw error;
-  } finally {
-    for (const output of staged) rmSync(output.temporary, { force: true });
-    for (const { backup } of backups) rmSync(backup, { force: true });
+    for (const state of [...states].reverse()) {
+      if (!state.backedUp) continue;
+      try {
+        operations.renameSync(state.backup, state.destination);
+        state.backedUp = false;
+      } catch (error) {
+        rollbackFailures.push(error);
+      }
+    }
+    for (const state of states) {
+      if (!state.staged) continue;
+      try {
+        operations.rmSync(state.stage, { force: true });
+        state.staged = false;
+      } catch (error) {
+        rollbackFailures.push(error);
+      }
+    }
+    throw transactionFailure(primary, rollbackFailures);
+  }
+
+  if (!committed) fail("Coverage output transaction did not reach a commit point.");
+  const cleanupFailures = [];
+  for (const state of states) {
+    if (!state.backedUp) continue;
+    try {
+      operations.rmSync(state.backup, { force: true });
+      state.backedUp = false;
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      cleanupFailures,
+      `Coverage outputs committed, but backup cleanup failed: ${cleanupFailures.map(errorMessage).join("; ")}`,
+    );
   }
 }
 
-try {
-  const options = parseArguments(process.argv.slice(2));
+export function main(arguments_) {
+  const options = parseArguments(arguments_);
   const reports = findReports(options.input);
   validateOutputPaths(options, reports);
   const grouped = new Map();
@@ -519,7 +589,13 @@ try {
     { destination: options.json, contents: renderJson(sourceSha, assemblies) },
     { destination: options.markdown, contents: renderMarkdown(sourceSha, assemblies) },
   ]);
-} catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  try {
+    main(process.argv.slice(2));
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
 }

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync as fsRenameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -13,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { replaceOutputs } from "../../scripts/quality/summarize-coverage.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const summarizer = path.join(repositoryRoot, "scripts/quality/summarize-coverage.mjs");
@@ -65,6 +67,72 @@ function withTemporaryDirectory(callback) {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+function faultingOutputOperations(shouldFail) {
+  const occurrences = new Map();
+  const classifyRename = (source, destination) => {
+    if (source.endsWith(".stage")) return "install";
+    if (destination.endsWith(".backup")) return "backup";
+    if (source.endsWith(".backup")) return "restore";
+    return "rename";
+  };
+  const classifyRemoval = (target) => {
+    if (target.endsWith(".backup")) return "backup-cleanup";
+    if (target.endsWith(".stage")) return "stage-cleanup";
+    return "installed-removal";
+  };
+  const failIfRequested = (operation) => {
+    const occurrence = (occurrences.get(operation.kind) ?? 0) + 1;
+    occurrences.set(operation.kind, occurrence);
+    if (shouldFail({ ...operation, occurrence })) {
+      throw new Error(`injected ${operation.kind} failure for ${operation.destination ?? operation.target}`);
+    }
+  };
+  return {
+    existsSync,
+    mkdirSync,
+    temporaryPath: (destination, purpose) => `${destination}.${purpose}`,
+    writeFileSync,
+    renameSync(source, destination) {
+      failIfRequested({ kind: classifyRename(source, destination), source, destination });
+      fsRenameSync(source, destination);
+    },
+    rmSync(target, options) {
+      failIfRequested({ kind: classifyRemoval(target), target });
+      rmSync(target, options);
+    },
+  };
+}
+
+function captureFailure(callback) {
+  let failure;
+  try {
+    callback();
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure instanceof Error, "expected output transaction to fail");
+  return failure;
+}
+
+function readIfPresent(filePath) {
+  return existsSync(filePath) ? readFileSync(filePath, "utf8") : null;
+}
+
+function outputTransactionFixture(root) {
+  const json = path.join(root, "summary.json");
+  const markdown = path.join(root, "summary.md");
+  writeFileSync(json, "old JSON\n");
+  writeFileSync(markdown, "old Markdown\n");
+  return {
+    json,
+    markdown,
+    outputs: [
+      { destination: json, contents: "new JSON\n" },
+      { destination: markdown, contents: "new Markdown\n" },
+    ],
+  };
 }
 
 test("recursively groups exact Cobertura reports by assembly into stable trend summaries", () => {
@@ -344,6 +412,7 @@ test("rejects malformed attributes, entities, comments, and document structure",
     `<coverage><packages><package name="Broken"line-rate="1">${lineTree}</package></packages></coverage>`,
     `<?xml version="1.0"encoding="utf-8"?>\n<coverage><packages><package name="Broken">${lineTree}</package></packages></coverage>`,
     `<coverage><!-- invalid ---><packages><package name="Broken">${lineTree}</package></packages></coverage>`,
+    `<coverage><packages><package name="Broken"><classes><class name="Example"><lines><line number="1" hits="1" branch="True" condition-coverage="50% (1/2) trailing" /></lines></class></classes></package></packages></coverage>`,
   ];
 
   for (const [index, xml] of malformedReports.entries()) {
@@ -433,5 +502,76 @@ test("escapes Markdown table delimiters and backslashes in assembly names", () =
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(readFileSync(markdown, "utf8"), /\| Pipe\\\|Back\\\\Slash \|/);
+  });
+});
+
+test("restores both previous outputs when the second install fails", () => {
+  withTemporaryDirectory((root) => {
+    const fixture = outputTransactionFixture(root);
+    const operations = faultingOutputOperations(({ kind, destination }) =>
+      kind === "install" && destination === fixture.markdown);
+
+    const failure = captureFailure(() => replaceOutputs(fixture.outputs, operations));
+
+    assert.match(failure.message, /before commit.*injected install failure/i);
+    assert.equal(readFileSync(fixture.json, "utf8"), "old JSON\n");
+    assert.equal(readFileSync(fixture.markdown, "utf8"), "old Markdown\n");
+    assert.equal(existsSync(`${fixture.json}.backup`), false);
+    assert.equal(existsSync(`${fixture.markdown}.backup`), false);
+    assert.equal(existsSync(`${fixture.json}.stage`), false);
+    assert.equal(existsSync(`${fixture.markdown}.stage`), false);
+  });
+});
+
+test("preserves recoverable old bytes when installed-output removal fails during rollback", () => {
+  withTemporaryDirectory((root) => {
+    const fixture = outputTransactionFixture(root);
+    const operations = faultingOutputOperations(({ kind, destination, target }) =>
+      (kind === "install" && destination === fixture.markdown)
+      || (kind === "installed-removal" && target === fixture.json));
+
+    const failure = captureFailure(() => replaceOutputs(fixture.outputs, operations));
+
+    assert.match(failure.message, /injected install failure/i);
+    assert.match(failure.message, /rollback.*injected installed-removal failure/i);
+    assert.ok(
+      [readIfPresent(fixture.json), readIfPresent(`${fixture.json}.backup`)].includes("old JSON\n"),
+      "old JSON must remain at its destination or recoverable backup",
+    );
+    assert.equal(readFileSync(fixture.markdown, "utf8"), "old Markdown\n");
+  });
+});
+
+test("retains a backup and continues rollback when restoration rename fails", () => {
+  withTemporaryDirectory((root) => {
+    const fixture = outputTransactionFixture(root);
+    const operations = faultingOutputOperations(({ kind, destination }) =>
+      (kind === "install" && destination === fixture.markdown)
+      || (kind === "restore" && destination === fixture.json));
+
+    const failure = captureFailure(() => replaceOutputs(fixture.outputs, operations));
+
+    assert.match(failure.message, /injected install failure/i);
+    assert.match(failure.message, /rollback.*injected restore failure/i);
+    assert.equal(existsSync(fixture.json), false);
+    assert.equal(readFileSync(`${fixture.json}.backup`, "utf8"), "old JSON\n");
+    assert.equal(readFileSync(fixture.markdown, "utf8"), "old Markdown\n");
+    assert.equal(existsSync(`${fixture.markdown}.backup`), false);
+  });
+});
+
+test("keeps committed outputs when post-commit backup cleanup fails", () => {
+  withTemporaryDirectory((root) => {
+    const fixture = outputTransactionFixture(root);
+    const operations = faultingOutputOperations(({ kind, occurrence }) =>
+      kind === "backup-cleanup" && occurrence === 2);
+
+    const failure = captureFailure(() => replaceOutputs(fixture.outputs, operations));
+
+    assert.match(failure.message, /outputs committed.*backup cleanup.*injected backup-cleanup failure/i);
+    assert.equal(readFileSync(fixture.json, "utf8"), "new JSON\n");
+    assert.equal(readFileSync(fixture.markdown, "utf8"), "new Markdown\n");
+    assert.equal(existsSync(`${fixture.json}.backup`), false);
+    assert.equal(readFileSync(`${fixture.markdown}.backup`, "utf8"), "old Markdown\n");
   });
 });
