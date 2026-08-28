@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using SyntaxCircus.Http.Resilience;
 
 namespace SyntaxCircus.Cmsify.Client.Tests;
@@ -557,6 +559,31 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task MultipartUpload_ReadsNonSeekableCallerStreamIncrementallyWithoutDisposingIt()
+    {
+        const int payloadBytes = (512 * 1024) + 37;
+        var source = new GuardedNonSeekableReadStream(payloadBytes, 128 * 1024);
+        var client = CreateResilientClient(async (request, cancellationToken) =>
+        {
+            await request.Content!.CopyToAsync(Stream.Null, cancellationToken);
+            return Json(HttpStatusCode.OK, new { });
+        });
+
+        await client.Media.UploadAsync(
+            Guid.NewGuid(),
+            source,
+            "incremental.bin",
+            "application/octet-stream",
+            ct: TestContext.Current.CancellationToken);
+
+        source.BytesRead.ShouldBe(payloadBytes);
+        source.ReadOperationCount.ShouldBeGreaterThan(1);
+        source.MaximumObservedReadRequest.ShouldBeLessThanOrEqualTo(128 * 1024);
+        source.WasDisposed.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task ListAllAsync_TraversesPages()
     {
         var page = 0;
@@ -802,6 +829,152 @@ public sealed class CmsifyClientTests
 
         calls.ShouldBe(2);
         destination.ToArray().ShouldBe([1, 2, 3]);
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task DownloadToAsync_StreamsBeforeFullResponseAndRetainsCallerDestination()
+    {
+        var responseContent = new CoordinatedStreamingContent(chunkBytes: 64 * 1024, chunkCount: 8);
+        var destination = new GuardedWriteStream(128 * 1024);
+        var client = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = responseContent
+        });
+
+        var download = client.DownloadToAsync(
+            "/incremental-download",
+            destination,
+            TestContext.Current.CancellationToken);
+        await responseContent.FirstChunkProduced.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        var firstWriteCompleted = await Task.WhenAny(
+            destination.FirstWrite,
+            Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)) == destination.FirstWrite;
+
+        responseContent.ProductionCompleted.ShouldBeFalse();
+        responseContent.ReleaseRemainingChunks();
+        await download;
+
+        firstWriteCompleted.ShouldBeTrue("ResponseHeadersRead must allow destination writes before response production completes.");
+        responseContent.ProductionCompleted.ShouldBeTrue();
+        destination.BytesWritten.ShouldBe(8L * 64 * 1024);
+        destination.WriteOperationCount.ShouldBeGreaterThan(1);
+        destination.MaximumObservedWriteRequest.ShouldBeLessThanOrEqualTo(128 * 1024);
+        destination.WasDisposed.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task MediaStreamingTiming_WritesOptInFiftyMebibyteSample()
+    {
+        if (!string.Equals(
+            Environment.GetEnvironmentVariable("CMSIFY_CAPACITY_TIMING"),
+            "true",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        const int payloadBytes = 50 * 1024 * 1024;
+        var reportDirectory = Environment.GetEnvironmentVariable("CMSIFY_CAPACITY_REPORT_DIR");
+        reportDirectory.ShouldNotBeNullOrWhiteSpace(
+            "CMSIFY_CAPACITY_REPORT_DIR is required when CMSIFY_CAPACITY_TIMING=true.");
+        var uploadSource = new GuardedNonSeekableReadStream(payloadBytes, 128 * 1024);
+        var responseContent = new CoordinatedStreamingContent(chunkBytes: 64 * 1024, chunkCount: 800);
+        responseContent.ReleaseRemainingChunks();
+        var client = CreateResilientClient(async (request, cancellationToken) =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                await request.Content!.CopyToAsync(Stream.Null, cancellationToken);
+                return Json(HttpStatusCode.OK, new { });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = responseContent };
+        });
+        var workspaceId = Guid.NewGuid();
+
+        await client.Media.UploadAsync(
+            workspaceId,
+            uploadSource,
+            "fifty-mib.bin",
+            "application/octet-stream",
+            ct: TestContext.Current.CancellationToken);
+        var destination = new GuardedWriteStream(128 * 1024);
+        var total = Stopwatch.StartNew();
+        await client.Media.DownloadToAsync(
+            workspaceId,
+            Guid.NewGuid(),
+            destination,
+            TestContext.Current.CancellationToken);
+        total.Stop();
+
+        uploadSource.BytesRead.ShouldBe(payloadBytes);
+        uploadSource.ReadOperationCount.ShouldBeGreaterThan(1);
+        uploadSource.MaximumObservedReadRequest.ShouldBeLessThanOrEqualTo(128 * 1024);
+        uploadSource.WasDisposed.ShouldBeFalse();
+        destination.BytesWritten.ShouldBe(payloadBytes);
+        destination.WriteOperationCount.ShouldBeGreaterThan(1);
+        destination.MaximumObservedWriteRequest.ShouldBeLessThanOrEqualTo(128 * 1024);
+        destination.WasDisposed.ShouldBeFalse();
+        var timeToFirstByteMilliseconds = destination.TimeToFirstWrite!.Value.TotalMilliseconds;
+        var timeToFirstByteAtOrBelow500Milliseconds = timeToFirstByteMilliseconds <= 500;
+
+        await ClientCapacityReportFragmentWriter.WriteAsync(
+            reportDirectory!,
+            "media-streaming.json",
+            new
+            {
+                bytes = payloadBytes,
+                sampleCount = 1,
+                timeToFirstByteMilliseconds = Math.Round(timeToFirstByteMilliseconds, 3),
+                totalDurationMilliseconds = Math.Round(total.Elapsed.TotalMilliseconds, 3),
+                maximumObservedReadRequestBytes = uploadSource.MaximumObservedReadRequest,
+                maximumObservedWriteRequestBytes = destination.MaximumObservedWriteRequest,
+                timeToFirstByteAtOrBelow500Milliseconds,
+                blockingInvariantsPassed = true
+            },
+            TestContext.Current.CancellationToken);
+
+        if (!timeToFirstByteAtOrBelow500Milliseconds)
+        {
+            var warning =
+                $"::warning::Media streaming timing missed the diagnostic TTFB budget " +
+                $"({timeToFirstByteMilliseconds:F3} ms > 500 ms).";
+            TestContext.Current.SendDiagnosticMessage(warning);
+            Console.Error.WriteLine(warning);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task ClientCapacityReportFragmentWriter_AtomicallyReplacesFragment()
+    {
+        var reportDirectory = Path.Combine(Path.GetTempPath(), $"cmsify-client-capacity-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(reportDirectory);
+        var reportPath = Path.Combine(reportDirectory, "media-streaming.json");
+        try
+        {
+            await File.WriteAllTextAsync(reportPath, "stale", TestContext.Current.CancellationToken);
+
+            await ClientCapacityReportFragmentWriter.WriteAsync(
+                reportDirectory,
+                "media-streaming.json",
+                new { bytes = 50 * 1024 * 1024, sampleCount = 1 },
+                TestContext.Current.CancellationToken);
+
+            using var document = JsonDocument.Parse(
+                await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken));
+            document.RootElement.GetProperty("bytes").GetInt32().ShouldBe(50 * 1024 * 1024);
+            document.RootElement.GetProperty("sampleCount").GetInt32().ShouldBe(1);
+            Directory.GetFiles(reportDirectory).ShouldBe([reportPath]);
+        }
+        finally
+        {
+            Directory.Delete(reportDirectory, recursive: true);
+        }
     }
 
     [Fact]

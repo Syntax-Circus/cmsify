@@ -3,16 +3,24 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Interfaces.Services;
+using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using NSubstitute;
 using SyntaxCircus.Storage;
 using Testcontainers.PostgreSql;
 
@@ -54,6 +62,57 @@ public sealed class MediaApiTests : IAsyncLifetime
         }
 
         ClearEnvironment();
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task ConfiguredUploadLimit_RejectsOneByteOverWithoutSideEffects()
+    {
+        const string fileName = "one-byte-over.txt";
+        var storage = new TestStorageProvider();
+        await using var factory = CreateFactory(storage);
+        using var client = factory.CreateClient();
+        var workspaceId = await SeedApiClientAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+        using var upload = new MultipartFormDataContent();
+        using var file = new ByteArrayContent(new byte[(1024 * 1024) + 1]);
+        file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        upload.Add(file, "file", fileName);
+
+        using var response = await client.PostAsync(
+            $"/api/v1/workspaces/{workspaceId}/media",
+            upload,
+            TestContext.Current.CancellationToken);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal("https://cmsify.dev/errors/bad-request", problem.GetProperty("type").GetString());
+        Assert.Equal("File is too large", problem.GetProperty("title").GetString());
+        Assert.Equal((int)HttpStatusCode.RequestEntityTooLarge, problem.GetProperty("status").GetInt32());
+        Assert.False(string.IsNullOrWhiteSpace(problem.GetProperty("traceId").GetString()));
+        Assert.Empty(storage.StoredKeys);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        Assert.False(await db.MediaAssets.IgnoreQueryFilters().AnyAsync(
+            asset => asset.FileName == fileName,
+            TestContext.Current.CancellationToken));
+        Assert.False(await db.MediaDeletionIntents.AnyAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public void DefaultUploadLimit_IsFiftyMebibytes()
+    {
+        var apiAssemblyDirectory = Path.GetDirectoryName(typeof(Program).Assembly.Location)
+            ?? throw new InvalidOperationException("Cmsify API assembly location is unavailable.");
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(apiAssemblyDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+
+        Assert.Equal(50, configuration.GetValue<int>("Media:MaxFileSizeMb"));
     }
 
     [Fact]
@@ -245,7 +304,8 @@ public sealed class MediaApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task FileResponse_DisposesSharedStorageReadResult()
+    [Trait("Category", "Capacity")]
+    public async Task FileResponse_StreamsStorageObjectIncrementallyAndDisposesIt()
     {
         var storage = new TestStorageProvider();
         await using var factory = CreateFactory(storage);
@@ -261,15 +321,73 @@ public sealed class MediaApiTests : IAsyncLifetime
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             assetId = asset.Id;
         }
-        storage.ReadResults["default/disposal.txt"] = Encoding.UTF8.GetBytes("dispose me");
+        var storedContent = new GuardedStorageReadStream(
+            length: (512 * 1024) + 29,
+            maximumReadRequest: 128 * 1024);
+        storage.StreamingReadResults["default/disposal.txt"] = storedContent;
 
-        using (var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file", TestContext.Current.CancellationToken))
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/v1/workspaces/{workspaceId}/media/{assetId}/file");
+        using (var response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            TestContext.Current.CancellationToken))
         {
             response.EnsureSuccessStatusCode();
-            Assert.Equal("dispose me", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            await using var destination = new GuardedStorageWriteStream(128 * 1024);
+            await response.Content.CopyToAsync(destination, TestContext.Current.CancellationToken);
+            Assert.Equal(storedContent.Length, destination.BytesWritten);
+            Assert.True(destination.WriteOperationCount > 1);
+            Assert.True(destination.MaximumObservedWriteRequest <= 128 * 1024);
         }
 
+        Assert.Equal(storedContent.Length, storedContent.BytesRead);
+        Assert.True(storedContent.ReadOperationCount > 1);
+        Assert.True(storedContent.MaximumObservedReadRequest <= 128 * 1024);
         Assert.True(storage.LastReadStream!.WasDisposed);
+        Assert.True(storedContent.WasDisposed);
+    }
+
+    [Fact]
+    [Trait("Category", "Capacity")]
+    public async Task GetFile_ReturnsExactStorageStreamWithoutBuffering()
+    {
+        var storage = new TestStorageProvider();
+        await using var factory = CreateFactory(storage);
+        var workspaceId = await SeedApiClientAsync(factory);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var asset = NewAsset(workspaceId, "passthrough.txt", MediaBlobState.Available);
+        db.MediaAssets.Add(asset);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var storedContent = new GuardedStorageReadStream(
+            length: (512 * 1024) + 31,
+            maximumReadRequest: 128 * 1024);
+        storage.StreamingReadResults[asset.StorageKey] = storedContent;
+        var authorization = Substitute.For<IWorkspaceAuthorizationService>();
+        authorization.CanReadWorkspaceAsync(workspaceId, Arg.Any<CancellationToken>()).Returns(true);
+        var controller = new MediaController(
+            db,
+            storage,
+            Substitute.For<ICurrentActor>(),
+            authorization,
+            scope.ServiceProvider.GetRequiredService<IConfiguration>(),
+            scope.ServiceProvider.GetRequiredService<IOptions<MediaOperationalOptions>>())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var result = await controller.GetFile(workspaceId, asset.Id, TestContext.Current.CancellationToken);
+        var fileResult = Assert.IsType<FileStreamResult>(result);
+        await using var returnedStream = fileResult.FileStream;
+
+        Assert.Same(storage.LastReadStream, returnedStream);
+        Assert.Equal(0, storedContent.BytesRead);
+        Assert.False(storage.LastReadStream!.WasDisposed);
     }
 
     [Fact]
@@ -464,6 +582,7 @@ public sealed class MediaApiTests : IAsyncLifetime
         public Func<string, Task>? AfterStoreAsync { get; set; }
         public List<string> StoredKeys { get; } = [];
         public Dictionary<string, byte[]> ReadResults { get; } = [];
+        public Dictionary<string, Stream> StreamingReadResults { get; } = [];
         public TrackingStream? LastReadStream { get; private set; }
 
         public async Task<StoredObject> StoreAsync(StoreObjectRequest request, CancellationToken cancellationToken = default)
@@ -476,32 +595,173 @@ public sealed class MediaApiTests : IAsyncLifetime
 
         public Task<StorageReadResult?> ReadAsync(string key, CancellationToken cancellationToken = default)
         {
+            if (StreamingReadResults.TryGetValue(key, out var stream))
+            {
+                LastReadStream = new TrackingStream(stream);
+                return Task.FromResult<StorageReadResult?>(
+                    new StorageReadResult(LastReadStream, "text/plain", stream.Length));
+            }
+
             if (!ReadResults.TryGetValue(key, out var bytes)) return Task.FromResult<StorageReadResult?>(null);
-            LastReadStream = new TrackingStream(bytes);
+            LastReadStream = new TrackingStream(new MemoryStream(bytes));
             return Task.FromResult<StorageReadResult?>(new StorageReadResult(LastReadStream, "text/plain", bytes.Length));
         }
 
         public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) =>
-            Task.FromResult(ReadResults.ContainsKey(key));
+            Task.FromResult(ReadResults.ContainsKey(key) || StreamingReadResults.ContainsKey(key));
 
         public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task<StorageObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default) =>
             Task.FromResult(ReadResults.TryGetValue(key, out var bytes)
                 ? new StorageObjectMetadata(key, bytes.Length, "text/plain", DateTimeOffset.UtcNow)
+                : StreamingReadResults.TryGetValue(key, out var stream)
+                    ? new StorageObjectMetadata(key, stream.Length, "text/plain", DateTimeOffset.UtcNow)
                 : null);
 
         public Task<StorageObjectPage> ListAsync(ListStorageObjectsRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(new StorageObjectPage([], null));
     }
 
-    private sealed class TrackingStream(byte[] bytes) : MemoryStream(bytes)
+    private sealed class TrackingStream(Stream inner) : Stream
     {
         public bool WasDisposed { get; private set; }
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            inner.ReadAsync(buffer, offset, count, cancellationToken);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.ReadAsync(buffer, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        protected override void Dispose(bool disposing)
+        {
+            WasDisposed = true;
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            WasDisposed = true;
+            await inner.DisposeAsync();
+            GC.SuppressFinalize(this);
+        }
+    }
+
+    private sealed class GuardedStorageReadStream(long length, int maximumReadRequest) : Stream
+    {
+        private long position;
+
+        public long BytesRead => position;
+        public int ReadOperationCount { get; private set; }
+        public int MaximumObservedReadRequest { get; private set; }
+        public bool WasDisposed { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => length;
+        public override long Position { get => position; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadCore(buffer.AsSpan(offset, count));
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(ReadCore(buffer.Span));
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
         protected override void Dispose(bool disposing)
         {
             WasDisposed = true;
             base.Dispose(disposing);
+        }
+
+        private int ReadCore(Span<byte> buffer)
+        {
+            if (buffer.Length > maximumReadRequest)
+            {
+                throw new IOException(
+                    $"Read request of {buffer.Length} bytes exceeded the {maximumReadRequest}-byte ceiling.");
+            }
+
+            MaximumObservedReadRequest = Math.Max(MaximumObservedReadRequest, buffer.Length);
+            ReadOperationCount++;
+            var count = (int)Math.Min(buffer.Length, length - position);
+            buffer[..count].Fill(0x5a);
+            position += count;
+            return count;
+        }
+    }
+
+    private sealed class GuardedStorageWriteStream(int maximumWriteRequest) : Stream
+    {
+        public long BytesWritten { get; private set; }
+        public int WriteOperationCount { get; private set; }
+        public int MaximumObservedWriteRequest { get; private set; }
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => BytesWritten; set => throw new NotSupportedException(); }
+
+        public override void Write(byte[] buffer, int offset, int count) => ObserveWrite(count);
+        public override void Write(ReadOnlySpan<byte> buffer) => ObserveWrite(buffer.Length);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ObserveWrite(buffer.Length);
+            return ValueTask.CompletedTask;
+        }
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        public override void Flush()
+        {
+        }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        private void ObserveWrite(int count)
+        {
+            if (count > maximumWriteRequest)
+            {
+                throw new IOException(
+                    $"Write of {count} bytes exceeded the {maximumWriteRequest}-byte ceiling.");
+            }
+
+            BytesWritten += count;
+            WriteOperationCount++;
+            MaximumObservedWriteRequest = Math.Max(MaximumObservedWriteRequest, count);
         }
     }
 }
