@@ -23,6 +23,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Components.Authorization;
 using SyntaxCircus.Blazor.Auth;
+using SyntaxCircus.Http.Resilience;
 
 namespace Cmsify.Admin.Integration.Tests;
 
@@ -40,6 +41,7 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     public string? OidcRedisInstanceName { get; set; }
     public bool UseCircuitAuthenticationStateProvider { get; set; }
     public bool UseRecordingApiTokenAccessor { get; set; }
+    public HttpRequestResilienceOptions? ResiliencePipelineOptions { get; set; }
 
     public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } =
         _ => new HttpResponseMessage(HttpStatusCode.NotImplemented);
@@ -84,6 +86,11 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
         builder.ConfigureTestServices(services =>
         {
             services.AddLogging(logging => logging.ClearProviders());
+            if (ResiliencePipelineOptions is { } resiliencePipelineOptions)
+            {
+                services.RemoveAll<HttpRequestResiliencePipeline>();
+                services.AddSingleton(new HttpRequestResiliencePipeline("CmsifyApi", resiliencePipelineOptions));
+            }
             if (UseCircuitAuthenticationStateProvider)
             {
                 services.RemoveAll<AuthenticationStateProvider>();

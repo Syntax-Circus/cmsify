@@ -37,24 +37,42 @@ public sealed class AdminHttpResilienceTests
     [Fact]
     public async Task CancellingOneCircuitDuringRetryDelay_DoesNotCancelOrPoisonAnotherCircuit()
     {
+        var retryScheduled = new TaskCompletionSource<HttpRetryTelemetry>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var factory = new AdminAuthTestFactory
         {
             UseCircuitAuthenticationStateProvider = true,
-            UseRecordingApiTokenAccessor = true
-        };
-        var cancelledAttemptSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        factory.AsyncResponder = (request, _) =>
-        {
-            var response = new HttpResponseMessage(
-                request.RequestUri!.AbsolutePath == "/test/cancelled-circuit"
-                    ? HttpStatusCode.ServiceUnavailable
-                    : HttpStatusCode.NoContent);
-            if (request.RequestUri.AbsolutePath == "/test/cancelled-circuit")
+            UseRecordingApiTokenAccessor = true,
+            ResiliencePipelineOptions = new HttpRequestResilienceOptions
             {
-                cancelledAttemptSent.TrySetResult();
+                MaxAttempts = 3,
+                TotalRequestTimeout = TimeSpan.FromMinutes(1),
+                BackoffBaseDelay = TimeSpan.FromSeconds(30),
+                MaximumDelay = TimeSpan.FromSeconds(30),
+                JitterProvider = static () => 0,
+                OnRetry = (telemetry, _) =>
+                {
+                    retryScheduled.TrySetResult(telemetry);
+                    return ValueTask.CompletedTask;
+                }
+            }
+        };
+        var transportAttemptStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transportAttemptToken = default(CancellationToken);
+        factory.AsyncResponder = async (request, attemptToken) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/test/cancelled-circuit")
+            {
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
             }
 
-            return Task.FromResult(response);
+            if (request.RequestUri.AbsolutePath == "/test/cancelled-transport")
+            {
+                transportAttemptToken = attemptToken;
+                transportAttemptStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, attemptToken);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
         };
 
         _ = factory.CreateClient();
@@ -67,17 +85,31 @@ public sealed class AdminHttpResilienceTests
 
         using var cancellation = new CancellationTokenSource();
         var cancelledCall = cancelledClient.GetAsync<object>("/test/cancelled-circuit", cancellation.Token);
-        await cancelledAttemptSent.Task.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None);
+        var retry = await retryScheduled.Task.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None);
+        retry.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        retry.AttemptNumber.ShouldBe(1);
+        retry.Delay.ShouldBe(TimeSpan.FromSeconds(30));
+        var transportCall = cancelledClient.GetAsync<object>("/test/cancelled-transport", cancellation.Token);
+        await transportAttemptStarted.Task.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None);
+        transportAttemptToken.CanBeCanceled.ShouldBeTrue();
+        transportAttemptToken.IsCancellationRequested.ShouldBeFalse();
         cancellation.Cancel();
-        await Should.ThrowAsync<OperationCanceledException>(() => cancelledCall);
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            cancelledCall.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            transportCall.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
+        transportAttemptToken.IsCancellationRequested.ShouldBeTrue();
 
         await healthyClient.GetAsync<object>("/test/healthy-circuit");
         await healthyClient.GetAsync<object>("/test/healthy-circuit");
 
         var cancelledRequests = factory.ObservedApiRequests.Where(request => request.Path == "/test/cancelled-circuit").ToArray();
+        var cancelledTransportRequests = factory.ObservedApiRequests.Where(request => request.Path == "/test/cancelled-transport").ToArray();
         var healthyRequests = factory.ObservedApiRequests.Where(request => request.Path == "/test/healthy-circuit").ToArray();
         cancelledRequests.Length.ShouldBe(1);
         cancelledRequests.ShouldAllBe(request => request.Authorization == "Bearer cancelled-token");
+        cancelledTransportRequests.Length.ShouldBe(1);
+        cancelledTransportRequests.ShouldAllBe(request => request.Authorization == "Bearer cancelled-token");
         healthyRequests.Length.ShouldBe(2);
         healthyRequests.ShouldAllBe(request => request.Authorization == "Bearer healthy-token");
         healthyRequests.Select(request => request.CorrelationId).Distinct().Count().ShouldBe(2);
