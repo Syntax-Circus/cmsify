@@ -597,6 +597,7 @@ Commit: `Add scheduled capacity trend reports`
 
 **Files:**
 
+- Binding spec: `docs/superpowers/specs/2026-08-28-reproducible-quality-capacity-design.md`
 - Create: `.github/dependabot.yml`
 - Modify: `.github/workflows/dotnet-test.yml`
 - Modify: `.github/workflows/admin-accessibility.yml`
@@ -652,7 +653,7 @@ Commit: `Automate locked dependency maintenance`
 
 - [ ] **Step 1: Document exact local commands**
 
-Include SDK verification, approved local-feed restore, normal public locked restore after publication, lock regeneration, forced warning build, focused capacity filters, coverage aggregation, scheduled capacity runner, and strict-serial full tests.
+Include SDK verification, approved local-feed restore, normal public locked restore after publication, lock regeneration, forced warning build, focused capacity filters, coverage aggregation, scheduled capacity runner, and the single-MSBuild-node full test command. State explicitly that `-m:1` does not serialize xUnit test cases.
 
 - [ ] **Step 2: Document evidence interpretation**
 
@@ -686,15 +687,15 @@ Run the forced Release build and all five test projects. Record exact pass total
 
 From `sdk/typescript`, run `npm ci`, `npm run generate:check`, `npm run typecheck`, `npm test`, and `npm run build`. Generate fresh coverage and a fresh capacity report; validate both schemas.
 
-- [ ] **Step 4: Run strict-serial full validation**
+- [ ] **Step 4: Run single-MSBuild-node full validation**
 
 Run:
 
 ```powershell
-dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -- RunConfiguration.MaxCpuCount=1
+dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -m:1
 ```
 
-Use PostgreSQL, MinIO, and Redis Testcontainers. If Docker is unavailable, report the exact limitation rather than skipping or claiming success.
+This limits MSBuild project orchestration to one node; it does not serialize xUnit test cases within a project. Use PostgreSQL, MinIO, and Redis Testcontainers. If Docker is unavailable, report the exact limitation rather than skipping or claiming success.
 
 - [ ] **Step 5: Perform change hygiene and independent review**
 

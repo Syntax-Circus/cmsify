@@ -237,7 +237,7 @@ npm test
 npm run build
 ```
 
-See [Quality and capacity operations](docs/performance.md) for lock regeneration, warning enforcement, deterministic capacity filters, coverage summaries, scheduled timing reports, and the strict-serial final command. See [`AGENTS.md`](AGENTS.md) for generated-file rules and architecture conventions.
+See [Quality and capacity operations](docs/performance.md) for lock regeneration, warning enforcement, deterministic capacity filters, coverage summaries, scheduled timing reports, and the single-MSBuild-node final command. See [`AGENTS.md`](AGENTS.md) for generated-file rules and architecture conventions.
 
 ## Contributing
 

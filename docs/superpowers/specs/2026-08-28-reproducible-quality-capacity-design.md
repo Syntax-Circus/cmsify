@@ -165,7 +165,7 @@ Task 11 is complete only when all of the following are fresh on the committed im
 - coverage and capacity report generation succeeds and its schema/identity fields are verified;
 - Core, Infrastructure, API, Admin, and .NET client focused suites pass;
 - TypeScript generation check, typecheck, tests, and build pass if workflow/dependency files affect it;
-- strict-serial full solution tests pass with PostgreSQL, MinIO, and Redis Testcontainers;
+- single-MSBuild-node full solution tests pass with PostgreSQL, MinIO, and Redis Testcontainers; `-m:1` limits project orchestration and does not serialize xUnit test cases;
 - `git diff --check`, lock inventory, generated-file checks, and an independent task review are clean.
 
 No push, merge, tag, package publication, release, or public-feed mutation is part of Task 11.

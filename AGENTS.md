@@ -31,7 +31,7 @@ dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --locked-mode
 ```
 
-Never track that feed configuration, package bytes, or package cache. Use [`docs/performance.md`](docs/performance.md) for safe `--force-evaluate` lock regeneration, focused capacity filters, XPlat coverage aggregation, the scheduled timing runner, and the strict-serial final command. Latency and coverage are trends; query counts, database paging, batch/lease bounds, upload rejection, and streaming/ownership assertions are blocking.
+Never track that feed configuration, package bytes, or package cache. Use [`docs/performance.md`](docs/performance.md) for safe `--force-evaluate` lock regeneration, focused capacity filters, XPlat coverage aggregation, the scheduled timing runner, and the single-MSBuild-node final command. Latency and coverage are trends; query counts, database paging, batch/lease bounds, upload rejection, and streaming/ownership assertions are blocking.
 
 Useful focused commands:
 

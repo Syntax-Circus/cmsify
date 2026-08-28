@@ -49,11 +49,13 @@ dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental -
 dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```
 
-For the final local serial check, use the VSTest run-setting form documented by the implementation plan:
+For the final local reduced-concurrency check, use one MSBuild node:
 
 ```powershell
-dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -- RunConfiguration.MaxCpuCount=1
+dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -m:1
 ```
+
+`-m:1` limits MSBuild project orchestration to a single MSBuild node. It does not serialize xUnit test cases inside each project; use project-level xUnit runner settings only when test-case serialization is specifically required.
 
 The API, Infrastructure, and Admin suites require Docker for PostgreSQL, MinIO, and Redis Testcontainers. Run the command and report an unavailable Docker environment rather than skipping those tests.
 
