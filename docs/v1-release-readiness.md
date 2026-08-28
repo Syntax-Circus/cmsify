@@ -6,6 +6,8 @@
 
 This report is a release gate, not a public delivery commitment. It covers the HTTP API, the handwritten .NET contracts and clients, `@cmsify/client`, published containers, production operation, and reuse of sibling `SyntaxCircus.*` packages.
 
+**Remediation update (2026-08-27):** Tasks 1–10 are implemented and validated locally on `feature/readiness-audit`. F-13 is closed at the source/test level, but its release dependency remains gated: `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` exists only in the ignored local feed. Public/CI restore cannot consume it until the user publishes or otherwise replaces it with an exact stable version and the restore/build/test gates are rerun. No publication occurred. Tasks 11–12 remain untouched, so this report's overall v1 decision remains **not ready**.
+
 ## Locked v1 decisions
 
 - **Promise:** v1 covers a SemVer-stable HTTP API, both first-party SDKs, production containers, documented operation, and upgrades.
@@ -175,8 +177,10 @@ Priority uses `(Impact + Risk) × (6 - Effort)`, where each input is 1–5. High
 #### F-13 — .NET SDK resilience is incomplete and duplicated
 
 - **Score:** Impact 4, Risk 3, Effort 3 → **21**
-- **Evidence:** The client manually retries idempotent responses but not transport failures/timeouts; direct construction and DI use the same one-off loop. `SyntaxCircus.Http.Resilience` is centrally versioned but not referenced by any project.
+- **Status:** Remediated locally on `feature/readiness-audit`; stable shared-package publication/replacement remains a user-owned release gate.
+- **Evidence:** Cmsify implementation commits `29ba5a8`, `dff5818`, `7fbe107`, and `24997ec` replace the manual retry loop with one `HttpRequestResiliencePipeline` for direct, DI, and Admin paths. The sibling `feature/cmsify-resilience` range `5216a18..712ac2f` adds the reusable request factory, keyed DI registration, bounded retry/timeout/circuit behavior, safe telemetry, ownership rules, and regression coverage. The final local `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package SHA-256 is `3F2F56B2483F5E06AA00FF3EA3BD27C63E46404AE27111260BAF4AE336FE6F40`; all five Cmsify asset graphs resolve that exact package/hash as type `package` from the ignored feed with no sibling project path. Fresh validation passed 129 shared-package tests, the direct/keyed clean consumer, 64 .NET client tests, 31 Admin tests, and the strict-serial 524-test full solution. A non-incremental Release build retained 45 existing Admin nullable warnings assigned to Task 11.
 - **Required outcome:** Extend the shared resilience package with a reusable handler/pipeline suitable for typed and directly constructed clients, then preserve `CmsifyApiException`, ProblemDetails extensions, correlation IDs, ETags, streaming, timeout budgets, and idempotency rules while removing duplicate policy code.
+- **Remaining release action:** The user must publish/replace the prerelease with an exact stable public package, replace the `0.2.0-cmsify.1` central pin, remove the local-feed dependency, force a clean public restore, and rerun the focused/full gates. This task did not push, tag, publish, or release anything.
 
 ### Medium findings and enhancements
 

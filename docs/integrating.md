@@ -32,7 +32,7 @@ The workspace slug is useful for discovery and configuration, but requests to wo
 - List responses are paginated; send `page` and `pageSize` and follow the returned totals.
 - Non-success responses use RFC 7807 `application/problem+json` with a Cmsify error type and a `traceId` extension.
 - Mutable resources use `ETag` and require a matching `If-Match` value when the endpoint enforces optimistic concurrency.
-- Respect `429` responses and `Retry-After`; the published client handles this automatically.
+- Respect `429` responses and `Retry-After`; the .NET client behavior described below handles this automatically, while direct HTTP consumers must implement it themselves.
 - Send and store timestamps as UTC/ISO 8601 values.
 
 ## Webhook consumers
@@ -86,7 +86,13 @@ builder.Services.AddCmsifyClient(options =>
 });
 ```
 
-For delegated credentials, set `TokenProvider` instead of `ApiToken`. The client forwards correlation IDs, retries transient failures and `429 Retry-After`, serializes enum values as strings, and throws `CmsifyApiException` containing ProblemDetails for non-success responses. See the [.NET SDK README](../sdk/dotnet/README.md) and [focused sample](../examples/dotnet/CmsifyClientSample.cs).
+For delegated credentials, set `TokenProvider` instead of `ApiToken`. Direct construction and `AddCmsifyClient` use the same single shared resilience pipeline; Admin also passes one pipeline to its scoped clients and does not add a retry handler beneath them. This prevents stacked retries.
+
+Automatic replay is deliberately conservative: only `GET`, `HEAD`, and `OPTIONS` are eligible. `POST`, `PUT`, `PATCH`, `DELETE`, multipart uploads, and arbitrary or caller-owned stream bodies remain single-attempt. Every eligible retry rebuilds the request, repeatable JSON body, token lookup, and correlation ID. The transient set is `408`, `429`, `500`, `502`, `503`, and `504`, plus transport failures and handler timeouts that are not caller cancellation. Both delta and HTTP-date `Retry-After` values are honored; otherwise the client uses bounded jittered exponential backoff.
+
+`RequestTimeout` is the total logical budget across attempts and waits, while the underlying `HttpClient.Timeout` remains infinite. `Timeout.InfiniteTimeSpan` keeps an unbounded deadline. Caller cancellation retains the caller token and is never retried. Budget exhaustion, final transport failure, circuit-open state, and final HTTP responses remain distinguishable; final HTTP responses still become `CmsifyApiException` with ProblemDetails extensions, trace/correlation IDs, and existing ETag/JSON behavior.
+
+The response observer runs before classification for every received response. Retry/circuit callbacks are best-effort and expose only bounded safe fields—never bodies, credentials, query values, URLs, or raw exception messages. Safe downloads may retry only before the final response is handed to the copy stage; copy failures are not replayed or appended. See the [client package README](../sdk/dotnet/src/SyntaxCircus.Cmsify.Client/README.md) and [focused sample](../examples/dotnet/CmsifyClientSample.cs).
 
 ### Cached content reads
 

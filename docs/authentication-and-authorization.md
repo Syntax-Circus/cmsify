@@ -32,9 +32,9 @@ The Admin cookie is `HttpOnly`, `Secure`, and `SameSite=Lax`; ASP.NET Core Data 
 
 ### Calls through the .NET SDK
 
-The Admin registers one scoped `CmsifyClient`. Before every API call its token provider reads the current user's bearer token from the Admin cookie (for an HTTP endpoint) or from the Blazor circuit's authentication state. The SDK adds the bearer header and an `X-Correlation-Id` header.
+The Admin registers one scoped `CmsifyClient` and one shared request-resilience pipeline. Before every attempt—not merely before the first logical call—its token provider reads the current user's bearer token from the Admin cookie (for an HTTP endpoint) or from the Blazor circuit's authentication state. The SDK builds a fresh request with that bearer token and a new `X-Correlation-Id`. Per-circuit token/session callbacks remain scoped to the client; the pooled named transport does not capture them, and it contains no second retry handler.
 
-For a valid local session, the API periodically extends its expiry and returns `X-Session-Expires-At`. The Admin's SDK response observer records the newest value for the active circuit. Cookie expiration is separately governed by Admin configuration:
+For a valid local session, the API periodically extends its expiry and returns `X-Session-Expires-At`. The Admin's SDK response observer records the newest value for the active circuit. The observer runs once for every received response before retry classification, so an intermediate response can safely renew session metadata. An observer failure is preserved and is not retried; cleanup and telemetry callback failures cannot replace it or caller cancellation. Concurrent Blazor circuits retain isolated bearer tokens and observers even while sharing circuit-breaker state. Cookie expiration is separately governed by Admin configuration:
 
 - `Admin:Auth:Session:SlidingWindowMinutes` controls cookie sliding expiration.
 - `Admin:Auth:Session:MaxLifetimeHours` is a hard limit measured from the cookie's original issue time.
@@ -118,6 +118,6 @@ After authentication, controllers apply role checks and workspace authorization.
 
 Workspace list and detail responses include `canWrite`, an actor-specific capability suitable for client-side affordances. It does not replace API authorization. API JSON property names are camel case, and enum values use their string names (for example, `"Editor"`, `"Write"`, and `"Text"`).
 
-The .NET SDK maps non-success responses to `CmsifyApiException`, preserving RFC 7807 ProblemDetails, the API `traceId`, and the correlation ID. It retries only safe read requests, honors `Retry-After`, and never automatically replays writes.
+The .NET SDK maps non-success responses to `CmsifyApiException`, preserving RFC 7807 ProblemDetails, the API `traceId`, and the correlation ID. It retries only `GET`, `HEAD`, and `OPTIONS` for the documented transient statuses, transport failures, and non-caller timeouts; it honors delta and HTTP-date `Retry-After` and never automatically replays writes, uploads, or caller-owned streams. Caller cancellation keeps the original token and is not retried.
 
 See [Integrating with the API](integrating.md) for request conventions and integration examples, and [Operating Cmsify](operations.md) for production secret-management and rotation guidance.
