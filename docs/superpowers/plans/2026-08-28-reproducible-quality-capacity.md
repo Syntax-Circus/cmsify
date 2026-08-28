@@ -649,7 +649,9 @@ Commit: `Automate locked dependency maintenance`
 - Modify: `AGENTS.md`
 - Modify: `docs/v1-release-readiness.md`
 - Modify: `docs/v1-release-remediation-handoff.md`
+- Create: `docs/evidence/task-11-local-verification.json`
 - Create: `tests/release-contract/quality-documentation.test.mjs`
+- Create: `tests/release-contract/quality-evidence-manifest.test.mjs`
 
 - [ ] **Step 1: Document exact local commands**
 

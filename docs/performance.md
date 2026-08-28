@@ -86,7 +86,7 @@ node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json ar
 node --test tests/release-contract/coverage-summary.test.mjs
 ```
 
-Raw reports and summaries remain ignored under `artifacts/coverage`. The JSON schema is `cmsify.coverage.v1` with top-level `schema`, full lowercase `sourceSha`, and ordinal `assemblies`. Each assembly entry contains `assembly`, plus `lines` and `branches`, each with integer `valid`, integer `covered`, and `percentage`. Coverage percentages are trend data: the schema has no threshold or pass/fail field, and no release-critical behavior is waived by a percentage.
+Raw reports and summaries remain ignored under `artifacts/coverage`. The exact report fields, capacity fields, four budget names/thresholds, representative dataset constants, command identities, and committed local evidence tuple are machine-readable in the [checked Task 11 evidence manifest](evidence/task-11-local-verification.json); release contracts generate report shapes from the summarizer/merger and read the C# fixture constants before accepting that manifest. The JSON schema is `cmsify.coverage.v1` with top-level `schema`, full lowercase `sourceSha`, and ordinal `assemblies`. Each assembly entry contains `assembly`, plus `lines` and `branches`, each with integer `valid`, integer `covered`, and `percentage`. Coverage percentages are trend data: the schema has no threshold or pass/fail field, and no release-critical behavior is waived by a percentage.
 
 ## Scheduled capacity trends
 

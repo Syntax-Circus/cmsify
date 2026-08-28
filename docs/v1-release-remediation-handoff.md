@@ -109,6 +109,7 @@ These are explicitly non-blocking and must remain visible for final release adju
 
 The exact operating commands, report schemas, blocking/trend distinction, datasets, budgets, and index decision are in [Quality and capacity operations](performance.md). The evidence is local and commit-bound; it does not certify hosted or public restore.
 
+- The [checked Task 11 evidence manifest](evidence/task-11-local-verification.json) is the machine-readable authority for the local verification tuple and report contracts. Evidence tuple: source SHA `e72b4681158cf687f0462bb2aa29f9ed47771e49`; SDK `10.0.400`; Core 66, .NET client 71, Admin 35, Infrastructure 303, API 112; full 587; coverage 587; coverage reports 5; coverage schema `cmsify.coverage.v1`.
 - SDK selection returned `10.0.400`. The approved ignored-feed locked restore accepted all twelve project-adjacent lock files. No local feed, package, cache, generated CSS, coverage output, or capacity output is tracked.
 - At final implementation `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`, the semantic quality policy passed 17/17, the complete release-contract set passed 232/232, the forced non-incremental Release build passed with 0 warnings and 0 errors, and both Dockerfile BuildKit static checks reported no warnings. That final fix was policy-test-only and did not change the compiled product or lock graph.
 - Fresh documentation-review validation ran from committed source `e72b4681158cf687f0462bb2aa29f9ed47771e49`, whose direct history contains the tested Task 11 implementation. Fresh committed-tree full solution: 587/587 passed (Core 66 + .NET client 71 + Admin 35 + Infrastructure 303 + API 112 = 587). A separate XPlat run passed the same 587/587 tests and emitted exactly five fresh Cobertura reports; the summarizer wrote `cmsify.coverage.v1` with `sourceSha` `e72b4681158cf687f0462bb2aa29f9ed47771e49`. The direct deterministic capacity filters passed API 10/10, Infrastructure 6/6, and client 4/4 at workflow implementation `ce9629417b794c9828a0e686dca6e1f846609877`.
@@ -139,7 +140,6 @@ Before implementation on the new computer:
 
 ## Environment and workflow notes
 
-- `AGENTS.md` requires `rtk` command prefixes. On the old computer RTK failed with `Cannot determine home directory. Is $HOME set?`; native commands were used without repurposing `HOME`. Re-test RTK normally on the new computer rather than assuming it is broken there.
 - The tag workflow remains: branch/main builds validate only; an explicit reviewed `vX.Y.Z` tag starts certification; the protected `release` approval promotes the exact artifacts. Post-PR builds do not auto-tag.
 - Run one heavy process at a time. Before killing a suspected stale process, verify its command line and that its parent has exited; do not touch IDE, Docker, or unrelated session processes.
 - Do not push, merge, tag, publish, or release without explicit user approval.
