@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,6 +42,10 @@ ${lines.map((line) => `            ${line}`).join("\n")}
 }
 
 function run(input, json, markdown, environment = {}) {
+  const env = { ...process.env, GITHUB_SHA: sourceSha, ...environment };
+  for (const [name, value] of Object.entries(env)) {
+    if (value === null) delete env[name];
+  }
   return spawnSync(process.execPath, [
     summarizer,
     "--input", input,
@@ -48,7 +54,7 @@ function run(input, json, markdown, environment = {}) {
   ], {
     cwd: repositoryRoot,
     encoding: "utf8",
-    env: { ...process.env, GITHUB_SHA: sourceSha, ...environment },
+    env,
   });
 }
 
@@ -217,5 +223,215 @@ test("fails on malformed Cobertura without writing summaries", () => {
     assert.equal(result.stdout, "");
     assert.throws(() => readFileSync(json));
     assert.throws(() => readFileSync(markdown));
+  });
+});
+
+test("rejects colliding JSON and Markdown paths before changing an existing output", () => {
+  withTemporaryDirectory((root) => {
+    const input = path.join(root, "raw");
+    mkdirSync(input, { recursive: true });
+    writeFileSync(path.join(input, "coverage.cobertura.xml"), cobertura([
+      assembly("Assembly", ['<line number="1" hits="1" branch="False" />']),
+    ]));
+    const output = path.join(root, "summary.out");
+    const sentinel = Buffer.from("existing summary\n");
+    writeFileSync(output, sentinel);
+
+    const result = run(input, output, path.join(root, ".", "summary.out"));
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /JSON.*Markdown.*distinct|output paths.*distinct/i);
+    assert.deepEqual(readFileSync(output), sentinel);
+  });
+});
+
+test("rejects output aliases of a raw report without modifying the report", (context) => {
+  withTemporaryDirectory((root) => {
+    const input = path.join(root, "raw");
+    mkdirSync(input, { recursive: true });
+    const report = path.join(input, "coverage.cobertura.xml");
+    const reportContents = cobertura([
+      assembly("Assembly", ['<line number="1" hits="1" branch="False" />']),
+    ]);
+    const aliases = [
+      report,
+      path.join(input, "nested", "..", "coverage.cobertura.xml"),
+    ];
+
+    const link = path.join(root, "raw-link");
+    try {
+      symlinkSync(input, link, process.platform === "win32" ? "junction" : "dir");
+      aliases.push(path.join(link, "coverage.cobertura.xml"));
+    } catch (error) {
+      context.diagnostic(`Symlink alias case unavailable on this platform: ${error.message}`);
+    }
+    if (process.platform === "win32") aliases.push(report.toUpperCase());
+
+    for (const [index, alias] of aliases.entries()) {
+      writeFileSync(report, reportContents);
+      const before = readFileSync(report);
+      const markdown = path.join(root, `summary-${index}.md`);
+
+      const result = run(input, alias, markdown);
+
+      assert.notEqual(result.status, 0, alias);
+      assert.match(result.stderr, /output.*raw.*coverage|raw.*report/i, alias);
+      assert.deepEqual(readFileSync(report), before, alias);
+      assert.equal(existsSync(markdown), false, alias);
+    }
+  });
+});
+
+test("does not replace either summary when an output destination is invalid", () => {
+  withTemporaryDirectory((root) => {
+    const input = path.join(root, "raw");
+    mkdirSync(input, { recursive: true });
+    writeFileSync(path.join(input, "coverage.cobertura.xml"), cobertura([
+      assembly("Assembly", ['<line number="1" hits="1" branch="False" />']),
+    ]));
+    const json = path.join(root, "summary.json");
+    const sentinel = Buffer.from("existing JSON\n");
+    writeFileSync(json, sentinel);
+    const invalidMarkdown = path.join(root, "summary-directory");
+    mkdirSync(invalidMarkdown);
+
+    const result = run(input, json, invalidMarkdown);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /output.*file|destination/i);
+    assert.deepEqual(readFileSync(json), sentinel);
+  });
+});
+
+test("counts only real XML elements and ignores markup-shaped lexical content", () => {
+  withTemporaryDirectory((root) => {
+    const input = path.join(root, "raw");
+    mkdirSync(input, { recursive: true });
+    writeFileSync(path.join(input, "coverage.cobertura.xml"), `<?xml version="1.0"?>
+<?audit <package name="Processing.Assembly"><classes><class><lines><line hits="1" /></lines></class></classes></package>?>
+<!DOCTYPE coverage SYSTEM "coverage.dtd">
+<coverage>
+  <!-- <package name="Comment.Assembly"><classes><class><lines><line hits="1" /></lines></class></classes></package> -->
+  <packages>
+    <![CDATA[<package name="Cdata.Assembly"><classes><class><lines><line hits="1" /></lines></class></classes></package>]]>
+    ${assembly("Real.Assembly", ['<line number="1" hits="1" branch="False" />'])}
+  </packages>
+</coverage>
+`);
+    const json = path.join(root, "summary.json");
+
+    const result = run(input, json, path.join(root, "summary.md"));
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(json, "utf8")).assemblies, [{
+      assembly: "Real.Assembly",
+      lines: { valid: 1, covered: 1, percentage: 100 },
+      branches: { valid: 0, covered: 0, percentage: 100 },
+    }]);
+  });
+});
+
+test("rejects malformed attributes, entities, comments, and document structure", () => {
+  const lineTree = '<classes><class name="Example"><lines><line number="1" hits="1" branch="False" /></lines></class></classes>';
+  const malformedReports = [
+    `<coverage><packages><package name=Broken>${lineTree}</package></packages></coverage>`,
+    `<coverage><packages><package name="Broken&unknown;">${lineTree}</package></packages></coverage>`,
+    `<coverage><!-- invalid -- comment --><packages><package name="Broken">${lineTree}</package></packages></coverage>`,
+    `<coverage><packages><package name="First">${lineTree}</package></packages></coverage><coverage />`,
+    `<coverage><packages><package name="Broken">${lineTree}<line number="2" hits="1" /junk></package></packages></coverage>`,
+    `<?audit<data?>\n<coverage><packages><package name="Broken">${lineTree}</package></packages></coverage>`,
+    `<?xml version="1.0" unexpected="value"?>\n<coverage><packages><package name="Broken">${lineTree}</package></packages></coverage>`,
+    `<coverage><packages><package name="Broken"line-rate="1">${lineTree}</package></packages></coverage>`,
+    `<?xml version="1.0"encoding="utf-8"?>\n<coverage><packages><package name="Broken">${lineTree}</package></packages></coverage>`,
+    `<coverage><!-- invalid ---><packages><package name="Broken">${lineTree}</package></packages></coverage>`,
+  ];
+
+  for (const [index, xml] of malformedReports.entries()) {
+    withTemporaryDirectory((root) => {
+      const input = path.join(root, "raw");
+      mkdirSync(input, { recursive: true });
+      writeFileSync(path.join(input, "coverage.cobertura.xml"), xml);
+      const json = path.join(root, `summary-${index}.json`);
+      const markdown = path.join(root, `summary-${index}.md`);
+
+      const result = run(input, json, markdown);
+
+      assert.notEqual(result.status, 0, `fixture ${index}`);
+      assert.match(result.stderr, /malformed.*Cobertura/i, `fixture ${index}`);
+      assert.equal(existsSync(json), false, `fixture ${index}`);
+      assert.equal(existsSync(markdown), false, `fixture ${index}`);
+    });
+  }
+});
+
+test("counts class lines once when method lines duplicate them", () => {
+  withTemporaryDirectory((root) => {
+    const input = path.join(root, "raw");
+    mkdirSync(input, { recursive: true });
+    const duplicatedLines = [
+      '<line number="1" hits="1" branch="True" condition-coverage="50% (1/2)" />',
+      '<line number="2" hits="0" branch="False" />',
+    ].join("\n");
+    writeFileSync(path.join(input, "coverage.cobertura.xml"), `<coverage><packages>
+      <package name="Method.Assembly"><classes><class name="Example">
+        <methods><method name="Run"><lines>${duplicatedLines}</lines></method></methods>
+        <lines>${duplicatedLines}</lines>
+      </class></classes></package>
+    </packages></coverage>`);
+    const json = path.join(root, "summary.json");
+
+    const result = run(input, json, path.join(root, "summary.md"));
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(json, "utf8")).assemblies, [{
+      assembly: "Method.Assembly",
+      lines: { valid: 2, covered: 1, percentage: 50 },
+      branches: { valid: 2, covered: 1, percentage: 50 },
+    }]);
+  });
+});
+
+test("uses local Git HEAD when GITHUB_SHA is absent and rejects an invalid explicit SHA", () => {
+  withTemporaryDirectory((root) => {
+    const input = path.join(root, "raw");
+    mkdirSync(input, { recursive: true });
+    writeFileSync(path.join(input, "coverage.cobertura.xml"), cobertura([
+      assembly("Assembly", ['<line number="1" hits="1" branch="False" />']),
+    ]));
+    const json = path.join(root, "summary.json");
+    const localHead = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    }).trim();
+
+    const localResult = run(input, json, path.join(root, "summary.md"), { GITHUB_SHA: null });
+
+    assert.equal(localResult.status, 0, localResult.stderr);
+    assert.equal(JSON.parse(readFileSync(json, "utf8")).sourceSha, localHead);
+
+    const invalidJson = path.join(root, "invalid.json");
+    const invalidResult = run(input, invalidJson, path.join(root, "invalid.md"), {
+      GITHUB_SHA: "not-a-commit",
+    });
+
+    assert.notEqual(invalidResult.status, 0);
+    assert.match(invalidResult.stderr, /40-character source SHA/i);
+    assert.equal(existsSync(invalidJson), false);
+  });
+});
+
+test("escapes Markdown table delimiters and backslashes in assembly names", () => {
+  withTemporaryDirectory((root) => {
+    const input = path.join(root, "raw");
+    mkdirSync(input, { recursive: true });
+    writeFileSync(path.join(input, "coverage.cobertura.xml"), cobertura([
+      assembly("Pipe|Back\\Slash", ['<line number="1" hits="1" branch="False" />']),
+    ]));
+    const markdown = path.join(root, "summary.md");
+
+    const result = run(input, path.join(root, "summary.json"), markdown);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(readFileSync(markdown, "utf8"), /\| Pipe\\\|Back\\\\Slash \|/);
   });
 });
