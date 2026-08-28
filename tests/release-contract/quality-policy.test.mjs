@@ -130,3 +130,26 @@ test("treats Release warnings as errors without broadening suppression policy", 
     );
   }
 });
+
+test("uses Sass modules and limits quieting to Bootstrap dependency diagnostics", () => {
+  const sassFiles = getTrackedFiles("src/Cmsify.Admin/wwwroot/scss/**/*.scss");
+  const sassCompiler = JSON.parse(readRepositoryFile("src/Cmsify.Admin/sasscompiler.json"));
+
+  for (const sassFile of sassFiles) {
+    const source = readRepositoryFile(sassFile);
+
+    assert.equal(/@import\s+/i.test(source), false, `${sassFile}: @import is not allowed`);
+    assert.equal(
+      /(?<![-\w.])(?:red|green|blue|mix|adjust-color|scale-color|change-color|lighten|darken|saturate|desaturate|adjust-hue|transparentize|opacify)\s*\(/i.test(source),
+      false,
+      `${sassFile}: deprecated global color helpers are not allowed`,
+    );
+    assert.equal(/\bif\s*\(/i.test(source), false, `${sassFile}: legacy Sass if() is not allowed`);
+  }
+
+  assert.equal(
+    sassCompiler.Arguments,
+    "--style=compressed --load-path=wwwroot/lib/bootstrap/scss --quiet-deps",
+  );
+  assert.equal(/(?:^|\s)--quiet(?:\s|$)/.test(sassCompiler.Arguments), false);
+});
