@@ -80,6 +80,44 @@ public sealed class CmsifyClientDependencyInjectionTests
         handler.SendCount.ShouldBe(2);
     }
 
+    [Fact]
+    public async Task AddCmsifyClient_ForwardsSafeTimeoutCallback()
+    {
+        var timeout = TimeSpan.FromMilliseconds(50);
+        var events = new List<HttpTimeoutTelemetry>();
+        var handler = new CountingHandler(async (_, _, attemptToken) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, attemptToken);
+            return Response(HttpStatusCode.OK);
+        });
+        var services = new ServiceCollection();
+        services.AddCmsifyClient(options =>
+        {
+            options.BaseUrl = new Uri("https://cms.test");
+            options.MaxRetryAttempts = 1;
+            options.RequestTimeout = timeout;
+            options.OnTimeout = (telemetry, _) =>
+            {
+                events.Add(telemetry);
+                return ValueTask.FromException(new InvalidOperationException("telemetry"));
+            };
+        }).ConfigurePrimaryHttpMessageHandler(() => handler);
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<CmsifyClient>();
+
+        var exception = await Should.ThrowAsync<HttpRequestTimeoutException>(() =>
+            client.GetAsync<JsonValue>("/timeout-telemetry", TestContext.Current.CancellationToken));
+
+        exception.Timeout.ShouldBe(timeout);
+        events.ShouldBe([
+            new HttpTimeoutTelemetry(
+                "CmsifyClient",
+                HttpResilienceFailureCategory.Timeout,
+                timeout),
+        ]);
+        handler.SendCount.ShouldBe(1);
+    }
+
     private static CountingHandler TransportThenSuccessHandler() => new((attempt, _, _) =>
         attempt == 1
             ? Task.FromException<HttpResponseMessage>(new HttpRequestException("transport"))

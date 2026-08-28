@@ -32,5 +32,7 @@ public sealed class CmsifyClientOptions
 
     public Func<HttpRetryTelemetry, CancellationToken, ValueTask>? OnRetry { get; set; }
 
+    public Func<HttpTimeoutTelemetry, CancellationToken, ValueTask>? OnTimeout { get; set; }
+
     public Func<HttpCircuitTelemetry, CancellationToken, ValueTask>? OnCircuitStateChanged { get; set; }
 }

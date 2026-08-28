@@ -328,6 +328,7 @@ public sealed class CmsifyClient
             CircuitSamplingDuration = options.CircuitSamplingDuration,
             CircuitBreakDuration = options.CircuitBreakDuration,
             OnRetry = options.OnRetry,
+            OnTimeout = options.OnTimeout,
             OnCircuitStateChanged = options.OnCircuitStateChanged,
         });
     }

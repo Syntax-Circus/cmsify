@@ -222,6 +222,40 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task ClientOptions_ForwardTimeoutCallbackAndCallbackFailureDoesNotReplaceTimeout()
+    {
+        var timeout = TimeSpan.FromMilliseconds(50);
+        var events = new List<HttpTimeoutTelemetry>();
+        var options = new CmsifyClientOptions
+        {
+            BaseUrl = new Uri("https://cms.test"),
+            MaxRetryAttempts = 1,
+            RequestTimeout = timeout,
+            OnTimeout = (telemetry, _) =>
+            {
+                events.Add(telemetry);
+                return ValueTask.FromException(new InvalidOperationException("telemetry"));
+            },
+        };
+        var client = new CmsifyClient(new HttpClient(new AsyncStubHandler(async (_, attemptToken) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, attemptToken);
+            return Response(HttpStatusCode.OK);
+        })), options);
+
+        var exception = await Should.ThrowAsync<HttpRequestTimeoutException>(() =>
+            client.GetAsync<JsonValue>("/timeout-telemetry", TestContext.Current.CancellationToken));
+
+        exception.Timeout.ShouldBe(timeout);
+        events.ShouldBe([
+            new HttpTimeoutTelemetry(
+                "CmsifyClient",
+                HttpResilienceFailureCategory.Timeout,
+                timeout),
+        ]);
+    }
+
+    [Fact]
     public async Task DirectClient_CallerCancellationIsNotRetriedAndKeepsCallerToken()
     {
         var attempts = 0;
