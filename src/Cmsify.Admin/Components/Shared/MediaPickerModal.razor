@@ -57,8 +57,7 @@
 
     private async Task LoadAsync()
     {
-        var page = await MediaClient.ListAsync(WorkspaceId, MimePrefix, search);
-        assets = page.Items;
+        assets = ApiResponse.ItemsOrEmpty(await MediaClient.ListAsync(WorkspaceId, MimePrefix, search));
     }
 
     private async Task UploadAsync(InputFileChangeEventArgs args)

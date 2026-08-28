@@ -38,7 +38,7 @@ public sealed class OidcCircuitTokenForwardingTests : IAsyncLifetime
         using var renderScope = factory.Services.CreateScope();
         renderScope.ServiceProvider.GetRequiredService<CircuitIdentitySlot>().Principal = OidcUser("oidc-admin");
         renderScope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext.ShouldBeNull();
-        (await renderScope.ServiceProvider.GetRequiredService<IApiTokenAccessor>().GetTokenAsync()).ShouldBeNull();
+        (await renderScope.ServiceProvider.GetRequiredService<IApiTokenAccessor>().GetTokenAsync(TestContext.Current.CancellationToken)).ShouldBeNull();
         using (var handlerScope = factory.Services.CreateScope())
         {
             handlerScope.ServiceProvider.GetRequiredService<CircuitIdentitySlot>().Principal.Identity!.IsAuthenticated.ShouldBeFalse();

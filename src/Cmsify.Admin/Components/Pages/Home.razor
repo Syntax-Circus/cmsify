@@ -8,8 +8,7 @@
     private WorkspaceClient Workspaces => Cmsify.Workspaces;
     protected override async Task OnInitializedAsync()
     {
-        var workspaces = await Workspaces.ListAsync();
-        var first = workspaces.Items.FirstOrDefault();
+        var first = ApiResponse.ItemsOrEmpty(await Workspaces.ListAsync()).FirstOrDefault();
         Navigation.NavigateTo(first is null ? "/workspaces" : $"/workspaces/{first.Id}", replace: true);
     }
 }

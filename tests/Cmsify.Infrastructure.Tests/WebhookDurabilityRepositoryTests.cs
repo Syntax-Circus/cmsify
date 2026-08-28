@@ -54,7 +54,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             };
             endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
             setup.AddRange(workspace, user, endpoint);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         var options = Options.Create(new SecretProtectionOptions
@@ -80,7 +80,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         await using var worker = await CreateContextAsync();
         var repository = new WebhookRepository(worker, CurrentActorInfo.Anonymous, protector, options);
 
-        await Assert.ThrowsAnyAsync<System.Security.Cryptography.CryptographicException>(() => repository.GetActiveEndpointsForEventAsync("workspace.updated", null));
+        await Assert.ThrowsAnyAsync<System.Security.Cryptography.CryptographicException>(() => repository.GetActiveEndpointsForEventAsync("workspace.updated", null, TestContext.Current.CancellationToken));
 
         var tags = Assert.Single(failures);
         Assert.Equal(["version", "key_id", "reason"], tags.Select(tag => tag.Key));
@@ -102,7 +102,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Claim telemetry endpoint", Url = "https://example.test/hook", Secret = ciphertext, CreatedByUserId = user.Id };
             setup.AddRange(workspace, user, endpoint);
             setup.WebhookDeliveryLogs.Add(new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = now });
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         var options = Options.Create(new SecretProtectionOptions
@@ -127,7 +127,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         await using var worker = await CreateContextAsync();
         var repository = new WebhookRepository(worker, CurrentActorInfo.Anonymous, new AesSecretProtector(options), options);
 
-        await Assert.ThrowsAnyAsync<System.Security.Cryptography.CryptographicException>(() => repository.ClaimPendingDeliveryLogsAsync("worker", now, TimeSpan.FromMinutes(1), 1));
+        await Assert.ThrowsAnyAsync<System.Security.Cryptography.CryptographicException>(() => repository.ClaimPendingDeliveryLogsAsync("worker", now, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         var tags = Assert.Single(failures);
         Assert.Equal(["unknown", "unknown", "unknown_version"], tags.Select(tag => tag.Value));
@@ -150,16 +150,16 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             Payload = JsonDocument.Parse("{}").RootElement.Clone(),
             NextRetryAt = DateTimeOffset.Parse("2026-08-26T00:00:00Z")
         });
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var workerContext = await CreateContextAsync();
         var protector = Substitute.For<ISecretProtector>();
         protector.Unprotect(Arg.Any<string>()).Returns(call => call.Arg<string>());
         var repository = new WebhookRepository(workerContext, CurrentActorInfo.Anonymous, protector, SecretProtectionOptions());
-        var claims = await repository.ClaimPendingDeliveryLogsAsync("worker-a", DateTimeOffset.Parse("2026-08-26T00:01:00Z"), TimeSpan.FromMinutes(5), 10);
+        var claims = await repository.ClaimPendingDeliveryLogsAsync("worker-a", DateTimeOffset.Parse("2026-08-26T00:01:00Z"), TimeSpan.FromMinutes(5), 10, TestContext.Current.CancellationToken);
 
         Assert.Single(claims);
-        var owner = await workerContext.Database.SqlQueryRaw<string>("SELECT lease_owner AS \"Value\" FROM webhook_delivery_logs LIMIT 1").SingleAsync();
+        var owner = await workerContext.Database.SqlQueryRaw<string>("SELECT lease_owner AS \"Value\" FROM webhook_delivery_logs LIMIT 1").SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("worker-a", owner);
     }
 
@@ -180,23 +180,23 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             NextRetryAt = claimedAt
         };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var firstWorkerContext = await CreateContextAsync();
         var firstWorker = CreateRepository(firstWorkerContext);
-        var firstClaim = Assert.Single(await firstWorker.ClaimPendingDeliveryLogsAsync("worker-a", claimedAt, TimeSpan.FromMinutes(1), 1));
+        var firstClaim = Assert.Single(await firstWorker.ClaimPendingDeliveryLogsAsync("worker-a", claimedAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         await using var secondWorkerContext = await CreateContextAsync();
         var secondWorker = CreateRepository(secondWorkerContext);
-        var secondClaim = Assert.Single(await secondWorker.ClaimPendingDeliveryLogsAsync("worker-b", claimedAt.AddMinutes(1), TimeSpan.FromMinutes(1), 1));
+        var secondClaim = Assert.Single(await secondWorker.ClaimPendingDeliveryLogsAsync("worker-b", claimedAt.AddMinutes(1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         Assert.NotEqual(firstClaim.LeaseToken, secondClaim.LeaseToken);
 
         var completedAt = claimedAt.AddMinutes(1).AddSeconds(30);
-        Assert.False(await firstWorker.CompleteDeliverySucceededAsync(new WebhookDeliveryCompletionDto(firstClaim.Id, firstClaim.LeaseOwner, firstClaim.LeaseToken, completedAt), 204));
-        Assert.True(await secondWorker.CompleteDeliverySucceededAsync(new WebhookDeliveryCompletionDto(secondClaim.Id, secondClaim.LeaseOwner, secondClaim.LeaseToken, completedAt), 204));
+        Assert.False(await firstWorker.CompleteDeliverySucceededAsync(new WebhookDeliveryCompletionDto(firstClaim.Id, firstClaim.LeaseOwner, firstClaim.LeaseToken, completedAt), 204, TestContext.Current.CancellationToken));
+        Assert.True(await secondWorker.CompleteDeliverySucceededAsync(new WebhookDeliveryCompletionDto(secondClaim.Id, secondClaim.LeaseOwner, secondClaim.LeaseToken, completedAt), 204, TestContext.Current.CancellationToken));
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(persisted.IsDelivered);
         Assert.Equal(1, persisted.AttemptCount);
         Assert.Equal(completedAt, persisted.LastAttemptAt);
@@ -224,17 +224,17 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             NextRetryAt = claimedAt
         };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var workerContext = await CreateContextAsync();
         var worker = CreateRepository(workerContext);
-        var claim = Assert.Single(await worker.ClaimPendingDeliveryLogsAsync("worker-a", claimedAt, TimeSpan.FromMinutes(1), 1));
+        var claim = Assert.Single(await worker.ClaimPendingDeliveryLogsAsync("worker-a", claimedAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         var attemptedAt = claimedAt.AddSeconds(10);
         var error = "upstream unavailable " + new string('x', 4_000);
-        Assert.True(await worker.CompleteDeliveryFailedAsync(new WebhookDeliveryCompletionDto(claim.Id, claim.LeaseOwner, claim.LeaseToken, attemptedAt), 503, error, retryAt, false));
+        Assert.True(await worker.CompleteDeliveryFailedAsync(new WebhookDeliveryCompletionDto(claim.Id, claim.LeaseOwner, claim.LeaseToken, attemptedAt), 503, error, retryAt, false, TestContext.Current.CancellationToken));
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, persisted.AttemptCount);
         Assert.Equal(attemptedAt, persisted.LastAttemptAt);
         Assert.Equal(503, persisted.StatusCode);
@@ -248,9 +248,9 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         Assert.Null(persisted.LeaseExpiresAt);
 
         await using var beforeRetry = await CreateContextAsync();
-        Assert.Empty(await CreateRepository(beforeRetry).ClaimPendingDeliveryLogsAsync("worker-b", retryAt.AddTicks(-1), TimeSpan.FromMinutes(1), 1));
+        Assert.Empty(await CreateRepository(beforeRetry).ClaimPendingDeliveryLogsAsync("worker-b", retryAt.AddTicks(-1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         await using var retryWorker = await CreateContextAsync();
-        Assert.Single(await CreateRepository(retryWorker).ClaimPendingDeliveryLogsAsync("worker-b", retryAt, TimeSpan.FromMinutes(1), 1));
+        Assert.Single(await CreateRepository(retryWorker).ClaimPendingDeliveryLogsAsync("worker-b", retryAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -264,21 +264,21 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
         var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = claimedAt };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var firstContext = await CreateContextAsync();
         var first = CreateRepository(firstContext);
-        var firstClaim = Assert.Single(await first.ClaimPendingDeliveryLogsAsync("worker-a", claimedAt, TimeSpan.FromMinutes(1), 1));
+        var firstClaim = Assert.Single(await first.ClaimPendingDeliveryLogsAsync("worker-a", claimedAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         await using var secondContext = await CreateContextAsync();
         var second = CreateRepository(secondContext);
-        var secondClaim = Assert.Single(await second.ClaimPendingDeliveryLogsAsync("worker-b", claimedAt.AddMinutes(1), TimeSpan.FromMinutes(1), 1));
+        var secondClaim = Assert.Single(await second.ClaimPendingDeliveryLogsAsync("worker-b", claimedAt.AddMinutes(1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         var attemptedAt = claimedAt.AddMinutes(1).AddSeconds(30);
 
-        Assert.False(await first.CompleteDeliveryFailedAsync(new WebhookDeliveryCompletionDto(firstClaim.Id, firstClaim.LeaseOwner, firstClaim.LeaseToken, attemptedAt), 503, "stale", attemptedAt.AddMinutes(1), false));
-        Assert.True(await second.CompleteDeliveryFailedAsync(new WebhookDeliveryCompletionDto(secondClaim.Id, secondClaim.LeaseOwner, secondClaim.LeaseToken, attemptedAt), 503, "current", attemptedAt.AddMinutes(1), false));
+        Assert.False(await first.CompleteDeliveryFailedAsync(new WebhookDeliveryCompletionDto(firstClaim.Id, firstClaim.LeaseOwner, firstClaim.LeaseToken, attemptedAt), 503, "stale", attemptedAt.AddMinutes(1), false, TestContext.Current.CancellationToken));
+        Assert.True(await second.CompleteDeliveryFailedAsync(new WebhookDeliveryCompletionDto(secondClaim.Id, secondClaim.LeaseOwner, secondClaim.LeaseToken, attemptedAt), 503, "current", attemptedAt.AddMinutes(1), false, TestContext.Current.CancellationToken));
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, persisted.AttemptCount);
         Assert.Equal("current", persisted.LastError);
         Assert.Equal(attemptedAt.AddMinutes(1), persisted.NextRetryAt);
@@ -295,7 +295,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
         var intent = new WebhookDeliveryLog { WebhookEventId = Guid.CreateVersion7(), WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), AttemptCount = 1, NextRetryAt = attemptedAt };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var handler = new CapturingHandler(HttpStatusCode.InternalServerError);
         var factory = Substitute.For<IHttpClientFactory>();
@@ -304,12 +304,12 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("8.8.8.8")]));
         await using var workerContext = await CreateContextAsync();
         var worker = CreateRepository(workerContext);
-        var claim = Assert.Single(await worker.ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1));
+        var claim = Assert.Single(await worker.ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         await new WebhookDeliveryProcessor(factory, worker, validator, new MutableTimeProvider(attemptedAt)).DeliverRetryAsync(claim, 2, CancellationToken.None);
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, persisted.AttemptCount);
         Assert.Equal(attemptedAt, persisted.LastAttemptAt);
         Assert.Equal(500, persisted.StatusCode);
@@ -321,7 +321,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         Assert.Null(persisted.LeaseOwner);
         Assert.Null(persisted.LeaseToken);
         Assert.Null(persisted.LeaseExpiresAt);
-        Assert.Empty(await CreateRepository(verification).ClaimPendingDeliveryLogsAsync("another-worker", attemptedAt.AddDays(1), TimeSpan.FromMinutes(1), 1));
+        Assert.Empty(await CreateRepository(verification).ClaimPendingDeliveryLogsAsync("another-worker", attemptedAt.AddDays(1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -335,19 +335,19 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
         var intent = new WebhookDeliveryLog { WebhookEventId = Guid.CreateVersion7(), WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = attemptedAt };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var factory = Substitute.For<IHttpClientFactory>();
         var validator = Substitute.For<IWebhookDestinationValidator>();
         validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(Task.FromException<WebhookDestinationValidationResult>(new InvalidOperationException("resolver unavailable")));
         await using var workerContext = await CreateContextAsync();
         var worker = CreateRepository(workerContext);
-        var claim = Assert.Single(await worker.ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1));
+        var claim = Assert.Single(await worker.ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         await new WebhookDeliveryProcessor(factory, worker, validator, new MutableTimeProvider(attemptedAt)).DeliverRetryAsync(claim, 2, CancellationToken.None);
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(persisted.LeaseOwner);
         Assert.Null(persisted.LeaseToken);
         Assert.Null(persisted.LeaseExpiresAt);
@@ -363,9 +363,9 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var repository = CreateRepository(context);
         var completion = new WebhookDeliveryCompletionDto(Guid.CreateVersion7(), "worker", Guid.CreateVersion7(), attemptedAt);
 
-        await Assert.ThrowsAsync<ArgumentException>(() => repository.CompleteDeliveryFailedAsync(completion, 503, "failure", attemptedAt, true));
-        await Assert.ThrowsAsync<ArgumentException>(() => repository.CompleteDeliveryFailedAsync(completion, 503, "failure", null, false));
-        await Assert.ThrowsAsync<ArgumentException>(() => repository.CompleteDeliveryFailedAsync(completion, 503, "failure", attemptedAt.AddTicks(-1), false));
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.CompleteDeliveryFailedAsync(completion, 503, "failure", attemptedAt, true, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.CompleteDeliveryFailedAsync(completion, 503, "failure", null, false, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.CompleteDeliveryFailedAsync(completion, 503, "failure", attemptedAt.AddTicks(-1), false, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -387,7 +387,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             NextRetryAt = firstAttemptAt
         };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var handler = new CapturingHandler(HttpStatusCode.ServiceUnavailable, HttpStatusCode.NoContent);
         var clientFactory = Substitute.For<IHttpClientFactory>();
@@ -397,7 +397,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var timeProvider = new MutableTimeProvider(firstAttemptAt);
         await using var firstWorkerContext = await CreateContextAsync();
         var firstWorker = CreateRepository(firstWorkerContext);
-        var firstClaim = Assert.Single(await firstWorker.ClaimPendingDeliveryLogsAsync("worker-a", firstAttemptAt, TimeSpan.FromMinutes(1), 1));
+        var firstClaim = Assert.Single(await firstWorker.ClaimPendingDeliveryLogsAsync("worker-a", firstAttemptAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         var processor = new WebhookDeliveryProcessor(clientFactory, firstWorker, validator, timeProvider);
 
         await processor.DeliverRetryAsync(firstClaim, 2, CancellationToken.None);
@@ -405,7 +405,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var retryAt = firstAttemptAt.AddSeconds(30);
         await using var retryWorkerContext = await CreateContextAsync();
         var retryWorker = CreateRepository(retryWorkerContext);
-        var secondClaim = Assert.Single(await retryWorker.ClaimPendingDeliveryLogsAsync("worker-b", retryAt, TimeSpan.FromMinutes(1), 1));
+        var secondClaim = Assert.Single(await retryWorker.ClaimPendingDeliveryLogsAsync("worker-b", retryAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         timeProvider.UtcNow = retryAt;
         await new WebhookDeliveryProcessor(clientFactory, retryWorker, validator, timeProvider).DeliverRetryAsync(secondClaim, 2, CancellationToken.None);
 
@@ -416,7 +416,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         Assert.Equal(WebhookSigner.Sign("secret", handler.Payloads[0]), handler.Signatures[0]);
         Assert.Equal(WebhookSigner.Sign("secret", handler.Payloads[1]), handler.Signatures[1]);
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, persisted.AttemptCount);
         Assert.True(persisted.IsDelivered);
         Assert.Equal(204, persisted.StatusCode);
@@ -435,7 +435,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Active", Url = "https://hooks.example.test/rebinding", Secret = "secret", CreatedByUserId = user.Id };
         var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = attemptedAt };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var resolver = Substitute.For<IWebhookDnsResolver>();
         resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>()).Returns(
@@ -447,7 +447,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(client);
         await using var worker = await CreateContextAsync();
-        var claim = Assert.Single(await CreateRepository(worker).ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1));
+        var claim = Assert.Single(await CreateRepository(worker).ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         await new WebhookDeliveryProcessor(factory, CreateRepository(worker), new WebhookDestinationValidator(resolver, new ConfigurationBuilder().Build()), new MutableTimeProvider(attemptedAt))
             .DeliverRetryAsync(claim, 2, CancellationToken.None);
@@ -467,7 +467,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Active", Url = "https://hooks.example.test/retry", Secret = "secret", CreatedByUserId = user.Id };
         var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = firstAttemptAt };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var firstDestination = WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("8.8.8.8")]);
         var secondDestination = WebhookDestinationValidationResult.Valid(new Uri(endpoint.Url), [IPAddress.Parse("1.1.1.1")]);
@@ -479,11 +479,11 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var clock = new MutableTimeProvider(firstAttemptAt);
 
         await using var firstWorker = await CreateContextAsync();
-        var firstClaim = Assert.Single(await CreateRepository(firstWorker).ClaimPendingDeliveryLogsAsync("worker-a", firstAttemptAt, TimeSpan.FromMinutes(1), 1));
+        var firstClaim = Assert.Single(await CreateRepository(firstWorker).ClaimPendingDeliveryLogsAsync("worker-a", firstAttemptAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         await new WebhookDeliveryProcessor(factory, CreateRepository(firstWorker), validator, clock).DeliverRetryAsync(firstClaim, 2, CancellationToken.None);
 
         await using var retryWorker = await CreateContextAsync();
-        var secondClaim = Assert.Single(await CreateRepository(retryWorker).ClaimPendingDeliveryLogsAsync("worker-b", secondAttemptAt, TimeSpan.FromMinutes(1), 1));
+        var secondClaim = Assert.Single(await CreateRepository(retryWorker).ClaimPendingDeliveryLogsAsync("worker-b", secondAttemptAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         clock.UtcNow = secondAttemptAt;
         await new WebhookDeliveryProcessor(factory, CreateRepository(retryWorker), validator, clock).DeliverRetryAsync(secondClaim, 2, CancellationToken.None);
 
@@ -502,12 +502,12 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Active", Url = "https://hooks.example.test/rejected", Secret = "secret", CreatedByUserId = user.Id };
         var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = attemptedAt };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var validator = Substitute.For<IWebhookDestinationValidator>();
         validator.ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Invalid("blocked"));
         await using var worker = await CreateContextAsync();
-        var claim = Assert.Single(await CreateRepository(worker).ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1));
+        var claim = Assert.Single(await CreateRepository(worker).ClaimPendingDeliveryLogsAsync("worker", attemptedAt, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         await new WebhookDeliveryProcessor(new ThrowingHttpClientFactory(), CreateRepository(worker), validator, new MutableTimeProvider(attemptedAt))
             .DeliverRetryAsync(claim, 2, CancellationToken.None);
@@ -524,11 +524,11 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "Completion retry", Url = "https://example.test/completion-retry", Secret = "secret", CreatedByUserId = user.Id };
         var intent = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = startedAt };
         setup.AddRange(workspace, user, endpoint, intent);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var worker = await CreateContextAsync();
         var repository = CreateRepository(worker);
-        var claim = Assert.Single(await repository.ClaimPendingDeliveryLogsAsync("worker", startedAt, TimeSpan.FromMinutes(5), 1));
+        var claim = Assert.Single(await repository.ClaimPendingDeliveryLogsAsync("worker", startedAt, TimeSpan.FromMinutes(5), 1, TestContext.Current.CancellationToken));
         var clock = new MutableTimeProvider(startedAt);
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(new AdvancingHandler(clock, completedAt, HttpStatusCode.ServiceUnavailable)));
@@ -538,7 +538,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         await new WebhookDeliveryProcessor(factory, repository, validator, clock).DeliverRetryAsync(claim, 3, CancellationToken.None);
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == intent.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, persisted.AttemptCount);
         Assert.Equal(completedAt, persisted.LastAttemptAt);
         Assert.Equal(completedAt.AddSeconds(30), persisted.NextRetryAt);
@@ -558,7 +558,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options);
         var migrator = context.GetService<IMigrator>();
-        await migrator.MigrateAsync("20260821005219_AddPackageProvenanceToReusableModels");
+        await migrator.MigrateAsync("20260821005219_AddPackageProvenanceToReusableModels", TestContext.Current.CancellationToken);
 
         var workspaceId = Guid.CreateVersion7();
         var userId = Guid.CreateVersion7();
@@ -573,11 +573,11 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             VALUES ({endpointId}, {workspaceId}, 'Legacy endpoint', 'https://example.test/hook', 'secret', true, {userId}, {now}, {now}, false);
             INSERT INTO webhook_delivery_logs (id, webhook_endpoint_id, event_type, payload, attempt_count, is_delivered, is_failed, created_at)
             VALUES ({deliveryId}, {endpointId}, 'workspace.updated', jsonb_build_object(), 1, false, true, {now});
-            """);
+            """, cancellationToken: TestContext.Current.CancellationToken);
 
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
         context.ChangeTracker.Clear();
-        var migrated = await context.WebhookDeliveryLogs.SingleAsync(log => log.Id == deliveryId);
+        var migrated = await context.WebhookDeliveryLogs.SingleAsync(log => log.Id == deliveryId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEqual(Guid.Empty, migrated.WebhookEventId);
 
         // This is the state created by the operator's manual retry: preserve
@@ -585,14 +585,14 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         migrated.IsFailed = false;
         migrated.IsDeadLetter = false;
         migrated.NextRetryAt = now;
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var handler = new CapturingHandler(HttpStatusCode.NoContent);
         var clientFactory = Substitute.For<IHttpClientFactory>();
         clientFactory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(handler));
         var validator = Substitute.For<IWebhookDestinationValidator>();
         validator.ValidateAsync("https://example.test/hook", Arg.Any<CancellationToken>()).Returns(WebhookDestinationValidationResult.Valid(new Uri("https://example.test/hook"), [IPAddress.Parse("8.8.8.8")]));
-        var claim = Assert.Single(await CreateRepository(context).ClaimPendingDeliveryLogsAsync("legacy-worker", now, TimeSpan.FromMinutes(1), 1));
+        var claim = Assert.Single(await CreateRepository(context).ClaimPendingDeliveryLogsAsync("legacy-worker", now, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         await new WebhookDeliveryProcessor(clientFactory, CreateRepository(context), validator, new MutableTimeProvider(now))
             .DeliverRetryAsync(claim, 2, CancellationToken.None);
@@ -606,7 +606,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var now = DateTimeOffset.Parse("2026-08-26T01:00:00Z");
         await using var setup = await CreateContextAsync();
         setup.WebhookOutboxEvents.AddRange(CreateOutboxEvent(), CreateOutboxEvent());
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var firstContext = await CreateContextAsync();
         await using var secondContext = await CreateContextAsync();
@@ -620,8 +620,8 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
 
         Assert.Equal(2, claims.SelectMany(batch => batch).Select(claim => claim.Id).Distinct().Count());
         var firstClaim = claims.SelectMany(batch => batch).First();
-        Assert.Empty(await CreateRepository(secondContext).ClaimOutboxEventsAsync("worker-two", now.AddMinutes(1), TimeSpan.FromMinutes(5), 2));
-        var recovered = await CreateRepository(secondContext).ClaimOutboxEventsAsync("worker-two", now.AddMinutes(6), TimeSpan.FromMinutes(5), 2);
+        Assert.Empty(await CreateRepository(secondContext).ClaimOutboxEventsAsync("worker-two", now.AddMinutes(1), TimeSpan.FromMinutes(5), 2, TestContext.Current.CancellationToken));
+        var recovered = await CreateRepository(secondContext).ClaimOutboxEventsAsync("worker-two", now.AddMinutes(6), TimeSpan.FromMinutes(5), 2, TestContext.Current.CancellationToken);
         Assert.Contains(recovered, claim => claim.Id == firstClaim.Id && claim.LeaseToken != firstClaim.LeaseToken && claim.LeaseOwner == "worker-two");
     }
 
@@ -640,20 +640,20 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         other.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = other.Id, EventType = "content.published" });
         var evt = CreateOutboxEvent(workspace.Id);
         setup.AddRange(workspace, user, active, inactive, other, evt);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var workerContext = await CreateContextAsync();
         var repository = CreateRepository(workerContext);
-        var claim = Assert.Single(await repository.ClaimOutboxEventsAsync("materializer", now, TimeSpan.FromMinutes(5), 10));
-        Assert.True(await repository.MaterializeOutboxEventAsync(claim, now));
-        Assert.False(await repository.MaterializeOutboxEventAsync(claim, now));
+        var claim = Assert.Single(await repository.ClaimOutboxEventsAsync("materializer", now, TimeSpan.FromMinutes(5), 10, TestContext.Current.CancellationToken));
+        Assert.True(await repository.MaterializeOutboxEventAsync(claim, now, TestContext.Current.CancellationToken));
+        Assert.False(await repository.MaterializeOutboxEventAsync(claim, now, TestContext.Current.CancellationToken));
 
         await using var verification = await CreateContextAsync();
-        var intents = await verification.WebhookDeliveryLogs.Where(log => log.WebhookEventId == evt.Id).ToListAsync();
+        var intents = await verification.WebhookDeliveryLogs.Where(log => log.WebhookEventId == evt.Id).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Single(intents);
         Assert.Equal(active.Id, intents[0].WebhookEndpointId);
         Assert.Equal(evt.Id, intents[0].WebhookEventId);
-        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync());
+        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -671,16 +671,16 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         evt.LeaseExpiresAt = now.AddMinutes(-1);
         setup.AddRange(workspace, user, endpoint, evt);
         setup.WebhookDeliveryLogs.Add(new WebhookDeliveryLog { WebhookEventId = evt.Id, WebhookEndpointId = endpoint.Id, EventType = evt.EventType, Payload = evt.Payload, NextRetryAt = evt.OccurredAt });
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var workerContext = await CreateContextAsync();
         var repository = CreateRepository(workerContext);
-        var claim = Assert.Single(await repository.ClaimOutboxEventsAsync("recovery-worker", now, TimeSpan.FromMinutes(5), 10));
-        Assert.True(await repository.MaterializeOutboxEventAsync(claim, now));
+        var claim = Assert.Single(await repository.ClaimOutboxEventsAsync("recovery-worker", now, TimeSpan.FromMinutes(5), 10, TestContext.Current.CancellationToken));
+        Assert.True(await repository.MaterializeOutboxEventAsync(claim, now, TestContext.Current.CancellationToken));
 
         await using var verification = await CreateContextAsync();
-        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id));
-        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync());
+        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -694,17 +694,17 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
         var evt = CreateOutboxEvent(workspace.Id);
         setup.AddRange(workspace, user, endpoint, evt);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (services, service) = CreateDispatchService(now, "dispatcher-worker");
         using (services)
         {
-            await service.RunOnceAsync();
+            await service.RunOnceAsync(TestContext.Current.CancellationToken);
         }
 
         await using var verification = await CreateContextAsync();
-        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync());
-        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id));
+        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -718,21 +718,21 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
         var evt = CreateOutboxEvent(workspace.Id);
         setup.AddRange(workspace, user, endpoint, evt);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (firstServices, first) = CreateDispatchService(now, "dispatcher-one");
         using (firstServices)
         {
-            await first.RunOnceAsync();
+            await first.RunOnceAsync(TestContext.Current.CancellationToken);
         }
         var (secondServices, second) = CreateDispatchService(now, "dispatcher-two");
         using (secondServices)
         {
-            await second.RunOnceAsync();
+            await second.RunOnceAsync(TestContext.Current.CancellationToken);
         }
 
         await using var verification = await CreateContextAsync();
-        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id));
+        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -749,26 +749,26 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         evt.LeaseToken = Guid.CreateVersion7();
         evt.LeaseExpiresAt = now.AddMinutes(1);
         setup.AddRange(workspace, user, endpoint, evt);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (earlyServices, early) = CreateDispatchService(now, "recovery-worker");
         using (earlyServices)
         {
-            await early.RunOnceAsync();
+            await early.RunOnceAsync(TestContext.Current.CancellationToken);
         }
         await using (var beforeExpiry = await CreateContextAsync())
         {
-            Assert.Null(await beforeExpiry.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync());
+            Assert.Null(await beforeExpiry.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
         }
 
         var (recoveryServices, recovery) = CreateDispatchService(now.AddMinutes(1), "recovery-worker");
         using (recoveryServices)
         {
-            await recovery.RunOnceAsync();
+            await recovery.RunOnceAsync(TestContext.Current.CancellationToken);
         }
         await using var verification = await CreateContextAsync();
-        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync());
-        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id));
+        Assert.NotNull(await verification.WebhookOutboxEvents.Where(candidate => candidate.Id == evt.Id).Select(candidate => candidate.ProcessedAt).SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Theory]
@@ -777,10 +777,10 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
     public async Task OutboxClaim_RejectsInvalidWorkerId(string workerId)
     {
         await using var context = await CreateContextAsync();
-        await Assert.ThrowsAsync<ArgumentException>(() => CreateRepository(context).ClaimOutboxEventsAsync(workerId, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1), 1));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CreateRepository(context).ClaimOutboxEventsAsync("worker", DateTimeOffset.UtcNow, TimeSpan.Zero, 1));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CreateRepository(context).ClaimOutboxEventsAsync("worker", DateTimeOffset.UtcNow, TimeSpan.FromHours(1), 1));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CreateRepository(context).ClaimOutboxEventsAsync("worker", DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1), 0));
+        await Assert.ThrowsAsync<ArgumentException>(() => CreateRepository(context).ClaimOutboxEventsAsync(workerId, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CreateRepository(context).ClaimOutboxEventsAsync("worker", DateTimeOffset.UtcNow, TimeSpan.Zero, 1, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CreateRepository(context).ClaimOutboxEventsAsync("worker", DateTimeOffset.UtcNow, TimeSpan.FromHours(1), 1, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CreateRepository(context).ClaimOutboxEventsAsync("worker", DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1), 0, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -802,19 +802,19 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var secondOldDelivered = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), IsDelivered = true, LastAttemptAt = cutoff.AddDays(-1), CreatedAt = cutoff.AddDays(-1) };
         var oldDeadLetter = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), IsFailed = true, IsDeadLetter = true, DeadLetteredAt = cutoff.AddDays(-2), CreatedAt = cutoff.AddDays(-2) };
         setup.AddRange(workspace, user, endpoint, oldProcessed, secondOldProcessed, recentProcessed, pending, oldDelivered, secondOldDelivered, oldDeadLetter);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var cleanupContext = await CreateContextAsync();
-        var result = await CreateRepository(cleanupContext).CleanupRetentionAsync(cutoff, 1);
+        var result = await CreateRepository(cleanupContext).CleanupRetentionAsync(cutoff, 1, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, result.ProcessedOutboxEventsDeleted);
         Assert.Equal(1, result.DeliveredLogsDeleted);
         await using var verification = await CreateContextAsync();
-        Assert.Equal(3, await verification.WebhookOutboxEvents.CountAsync());
-        Assert.Equal(2, await verification.WebhookDeliveryLogs.CountAsync());
-        Assert.True(await verification.WebhookOutboxEvents.AnyAsync(evt => evt.Id == recentProcessed.Id));
-        Assert.True(await verification.WebhookOutboxEvents.AnyAsync(evt => evt.Id == pending.Id));
-        Assert.True(await verification.WebhookDeliveryLogs.AnyAsync(log => log.Id == oldDeadLetter.Id));
+        Assert.Equal(3, await verification.WebhookOutboxEvents.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(2, await verification.WebhookDeliveryLogs.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.True(await verification.WebhookOutboxEvents.AnyAsync(evt => evt.Id == recentProcessed.Id, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.True(await verification.WebhookOutboxEvents.AnyAsync(evt => evt.Id == pending.Id, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.True(await verification.WebhookDeliveryLogs.AnyAsync(log => log.Id == oldDeadLetter.Id, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -838,15 +838,14 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
             LeaseExpiresAt = now.AddTicks(-1)
         };
         setup.AddRange(workspace, user, endpoint, delivery);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var worker = await CreateContextAsync();
-        var completed = await CreateRepository(worker).CompleteDeliverySucceededAsync(
-            new WebhookDeliveryCompletionDto(delivery.Id, "expired-worker", leaseToken, now), 204);
+        var completed = await CreateRepository(worker).CompleteDeliverySucceededAsync(new WebhookDeliveryCompletionDto(delivery.Id, "expired-worker", leaseToken, now), 204, TestContext.Current.CancellationToken);
 
         Assert.False(completed);
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == delivery.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == delivery.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(persisted.IsDelivered);
         Assert.Equal("expired-worker", persisted.LeaseOwner);
         Assert.Equal(leaseToken, persisted.LeaseToken);
@@ -862,11 +861,11 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         var endpoint = new WebhookEndpoint { WorkspaceId = workspace.Id, Name = "HTTP lease fence", Url = "https://example.test/http-lease-fence", Secret = "secret", CreatedByUserId = user.Id };
         var delivery = new WebhookDeliveryLog { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated", Payload = JsonDocument.Parse("{}").RootElement.Clone(), NextRetryAt = now };
         setup.AddRange(workspace, user, endpoint, delivery);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var worker = await CreateContextAsync();
         var repository = CreateRepository(worker);
-        var claim = Assert.Single(await repository.ClaimPendingDeliveryLogsAsync("worker", now, TimeSpan.FromSeconds(1), 1));
+        var claim = Assert.Single(await repository.ClaimPendingDeliveryLogsAsync("worker", now, TimeSpan.FromSeconds(1), 1, TestContext.Current.CancellationToken));
         var clock = new MutableTimeProvider(now);
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(nameof(WebhookDeliveryProcessor)).Returns(new HttpClient(new AdvancingHandler(clock, now.AddSeconds(2))));
@@ -876,7 +875,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         await new WebhookDeliveryProcessor(factory, repository, validator, clock).DeliverRetryAsync(claim, 2, CancellationToken.None);
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == delivery.Id);
+        var persisted = await verification.WebhookDeliveryLogs.SingleAsync(log => log.Id == delivery.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(persisted.IsDelivered);
         Assert.Equal("worker", persisted.LeaseOwner);
         Assert.Equal(claim.LeaseToken, persisted.LeaseToken);
@@ -893,15 +892,14 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         evt.LeaseToken = leaseToken;
         evt.LeaseExpiresAt = now.AddTicks(-1);
         setup.WebhookOutboxEvents.Add(evt);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var worker = await CreateContextAsync();
-        var materialized = await CreateRepository(worker).MaterializeOutboxEventAsync(
-            new ClaimedWebhookOutboxEventDto(evt.Id, evt.EventType, evt.WorkspaceId, evt.EntityId, evt.Payload, evt.OccurredAt, "expired-worker", leaseToken), now);
+        var materialized = await CreateRepository(worker).MaterializeOutboxEventAsync(new ClaimedWebhookOutboxEventDto(evt.Id, evt.EventType, evt.WorkspaceId, evt.EntityId, evt.Payload, evt.OccurredAt, "expired-worker", leaseToken), now, TestContext.Current.CancellationToken);
 
         Assert.False(materialized);
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookOutboxEvents.SingleAsync(candidate => candidate.Id == evt.Id);
+        var persisted = await verification.WebhookOutboxEvents.SingleAsync(candidate => candidate.Id == evt.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(persisted.ProcessedAt);
         Assert.Equal("expired-worker", persisted.LeaseOwner);
         Assert.Equal(leaseToken, persisted.LeaseToken);
@@ -918,27 +916,27 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         endpoint.Subscriptions.Add(new WebhookSubscription { WebhookEndpointId = endpoint.Id, EventType = "workspace.updated" });
         var evt = CreateOutboxEvent(workspace.Id);
         setup.AddRange(workspace, user, endpoint, evt);
-        await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using var claimantContext = await CreateContextAsync();
-        var claim = Assert.Single(await CreateRepository(claimantContext).ClaimOutboxEventsAsync("worker-a", now, TimeSpan.FromSeconds(1), 1));
+        var claim = Assert.Single(await CreateRepository(claimantContext).ClaimOutboxEventsAsync("worker-a", now, TimeSpan.FromSeconds(1), 1, TestContext.Current.CancellationToken));
         var pause = new PauseAfterForUpdateInterceptor("webhook_outbox_events");
         await using var completionContext = await CreateContextAsync(pause);
         var completing = CreateRepository(completionContext).MaterializeOutboxEventAsync(claim, now, CancellationToken.None);
-        await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         await using var reclaimerContext = await CreateContextAsync();
-        var reclaimed = await CreateRepository(reclaimerContext).ClaimOutboxEventsAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1);
+        var reclaimed = await CreateRepository(reclaimerContext).ClaimOutboxEventsAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken);
         Assert.Empty(reclaimed);
 
         pause.Release.TrySetResult();
         Assert.True(await completing);
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.WebhookOutboxEvents.SingleAsync(candidate => candidate.Id == evt.Id);
+        var persisted = await verification.WebhookOutboxEvents.SingleAsync(candidate => candidate.Id == evt.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(persisted.ProcessedAt);
         Assert.Null(persisted.LeaseOwner);
         Assert.Null(persisted.LeaseToken);
-        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id));
+        Assert.Equal(1, await verification.WebhookDeliveryLogs.CountAsync(log => log.WebhookEventId == evt.Id && log.WebhookEndpointId == endpoint.Id, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     private static WebhookOutboxEvent CreateOutboxEvent(Guid? workspaceId = null) => new()

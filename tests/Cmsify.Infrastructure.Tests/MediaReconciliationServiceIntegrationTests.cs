@@ -43,20 +43,20 @@ public sealed class MediaReconciliationServiceIntegrationTests(MediaPostgresFixt
                 BlobStateChangedAt = now.AddMinutes(-30)
             };
             context.AddRange(workspace, asset);
-            await context.SaveChangesAsync();
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
             assetId = asset.Id;
             storageKey = asset.StorageKey;
             var repository = scope.ServiceProvider.GetRequiredService<IMediaReconciliationRepository>();
-            (await repository.FailStaleUploadsAsync(now.AddMinutes(-30), now, 100)).ShouldBe(1);
+            (await repository.FailStaleUploadsAsync(now.AddMinutes(-30), now, 100, TestContext.Current.CancellationToken)).ShouldBe(1);
         }
 
         await using (var restartedHost = BuildServices(connectionString, storage))
         {
-            await CreateService(restartedHost, now, "worker-after-restart").RunOnceAsync();
+            await CreateService(restartedHost, now, "worker-after-restart").RunOnceAsync(TestContext.Current.CancellationToken);
             await using var scope = restartedHost.CreateAsyncScope();
             var context = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var asset = await context.MediaAssets.IgnoreQueryFilters().SingleAsync(item => item.Id == assetId);
-            var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == assetId);
+            var asset = await context.MediaAssets.IgnoreQueryFilters().SingleAsync(item => item.Id == assetId, cancellationToken: TestContext.Current.CancellationToken);
+            var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == assetId, cancellationToken: TestContext.Current.CancellationToken);
             asset.BlobState.ShouldBe(MediaBlobState.Deleted);
             intent.CompletedAt.ShouldBe(now);
         }
@@ -84,7 +84,7 @@ public sealed class MediaReconciliationServiceIntegrationTests(MediaPostgresFixt
                 CreatedAt = now
             };
             setup.MediaDeletionIntents.Add(intent);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
             intentId = intent.Id;
         }
 
@@ -92,11 +92,13 @@ public sealed class MediaReconciliationServiceIntegrationTests(MediaPostgresFixt
         var first = CreateService(services, now, "replica-a");
         var second = CreateService(services, now, "replica-b");
 
-        await Task.WhenAll(first.RunOnceAsync(), second.RunOnceAsync());
+        await Task.WhenAll(
+            first.RunOnceAsync(TestContext.Current.CancellationToken),
+            second.RunOnceAsync(TestContext.Current.CancellationToken));
 
         storage.DeleteCount(storageKey).ShouldBe(1);
         await using var verification = CreateContext(connectionString);
-        (await verification.MediaDeletionIntents.SingleAsync(item => item.Id == intentId)).CompletedAt.ShouldBe(now);
+        (await verification.MediaDeletionIntents.SingleAsync(item => item.Id == intentId, cancellationToken: TestContext.Current.CancellationToken)).CompletedAt.ShouldBe(now);
     }
 
     private async Task<string> CreateDatabaseAsync()

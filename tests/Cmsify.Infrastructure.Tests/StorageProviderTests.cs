@@ -78,19 +78,19 @@ public sealed class StorageProviderTests
         var provider = new LocalFileStorageProvider(Options.Create(new LocalStorageOptions { RootPath = basePath }));
 
         await using var input = new MemoryStream(Encoding.UTF8.GetBytes("hello cmsify"));
-        var stored = await provider.StoreAsync(new StoreObjectRequest("default/hello.txt", input, "text/plain"));
+        var stored = await provider.StoreAsync(new StoreObjectRequest("default/hello.txt", input, "text/plain"), TestContext.Current.CancellationToken);
 
         Assert.Equal("default/hello.txt", stored.Key);
-        Assert.NotNull(await provider.GetMetadataAsync(stored.Key));
+        Assert.NotNull(await provider.GetMetadataAsync(stored.Key, TestContext.Current.CancellationToken));
 
-        await using (var output = await provider.ReadAsync(stored.Key))
+        await using (var output = await provider.ReadAsync(stored.Key, TestContext.Current.CancellationToken))
         using (var reader = new StreamReader(output!.Content, Encoding.UTF8))
         {
-            Assert.Equal("hello cmsify", await reader.ReadToEndAsync());
+            Assert.Equal("hello cmsify", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
         }
 
-        await provider.DeleteAsync(stored.Key);
-        Assert.Null(await provider.GetMetadataAsync(stored.Key));
+        await provider.DeleteAsync(stored.Key, TestContext.Current.CancellationToken);
+        Assert.Null(await provider.GetMetadataAsync(stored.Key, TestContext.Current.CancellationToken));
 
         if (Directory.Exists(basePath))
         {

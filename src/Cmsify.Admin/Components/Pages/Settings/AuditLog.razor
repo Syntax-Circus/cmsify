@@ -15,5 +15,6 @@
     private string? entityType;
     private string? action;
     protected override async Task OnInitializedAsync() => await LoadAsync();
-    private async Task LoadAsync() => logs = (await Audit.QueryAsync(Workspace.Current?.Id, entityType, action)).Items.ToList();
+    private async Task LoadAsync() =>
+        logs = ApiResponse.ItemsOrEmpty(await Audit.QueryAsync(Workspace.Current?.Id, entityType, action)).ToList();
 }

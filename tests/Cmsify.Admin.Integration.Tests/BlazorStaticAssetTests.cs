@@ -15,7 +15,7 @@ public sealed class BlazorStaticAssetTests : IAsyncLifetime
     public async Task Root_ReferencesTheStaticAssetBootScript()
     {
         using var client = factory.CreateClient();
-        var markup = await client.GetStringAsync("/");
+        var markup = await client.GetStringAsync("/", TestContext.Current.CancellationToken);
 
         markup.ShouldContain("blazor.web", Case.Insensitive);
     }

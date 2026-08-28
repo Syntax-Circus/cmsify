@@ -64,10 +64,10 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(Issuer, Audience, "Editor", Guid.Parse("11111111-1111-1111-1111-111111111111")));
 
-        using var response = await client.GetAsync("/api/v1/auth/me");
+        using var response = await client.GetAsync("/api/v1/auth/me", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var actor = await response.Content.ReadFromJsonAsync<ActorResponse>();
+        var actor = await response.Content.ReadFromJsonAsync<ActorResponse>(cancellationToken: TestContext.Current.CancellationToken);
         actor!.Role.ShouldBe(Cmsify.Core.Domain.Enums.UserRole.Editor.ToString());
         actor.WorkspaceId.ShouldBe(Guid.Parse("11111111-1111-1111-1111-111111111111"));
     }
@@ -79,13 +79,11 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(Issuer, Audience, "Admin", null));
 
-        using var meResponse = await client.GetAsync("/api/v1/auth/me");
-        using var createResponse = await client.PostAsJsonAsync(
-            "/api/v1/workspaces",
-            new WorkspaceRequest("OIDC Admin Workspace", $"oidc-admin-{Guid.NewGuid():N}", null));
+        using var meResponse = await client.GetAsync("/api/v1/auth/me", TestContext.Current.CancellationToken);
+        using var createResponse = await client.PostAsJsonAsync("/api/v1/workspaces", new WorkspaceRequest("OIDC Admin Workspace", $"oidc-admin-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
 
         meResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var actor = await meResponse.Content.ReadFromJsonAsync<ActorResponse>();
+        var actor = await meResponse.Content.ReadFromJsonAsync<ActorResponse>(cancellationToken: TestContext.Current.CancellationToken);
         actor!.IsSuperAdmin.ShouldBeFalse();
         createResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
@@ -99,7 +97,7 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(issuer, audience, "Reader", null));
 
-        using var response = await client.GetAsync("/api/v1/auth/me");
+        using var response = await client.GetAsync("/api/v1/auth/me", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }

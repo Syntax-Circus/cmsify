@@ -104,7 +104,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        templates = (await Templates.ListAsync(WorkspaceId)).Items;
+        templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(WorkspaceId));
         if (ContentId.HasValue)
         {
             await LoadContentAsync();
@@ -125,19 +125,21 @@
         multiPickValues.Clear();
         componentValues.Clear();
 
-        var loaded = await Content.GetAsync(WorkspaceId, ContentId.Value);
+        var loaded = ApiResponse.Required(
+            await Content.GetAsync(WorkspaceId, ContentId.Value),
+            "loading content");
         item = loaded;
-        slug = item.Slug;
-        locale = item.LocaleCode;
-        tags = string.Join(",", item.Tags);
-        var template = templates.FirstOrDefault(t => t.CurrentVersionId == item.TemplateVersionId);
+        slug = loaded.Slug;
+        locale = loaded.LocaleCode;
+        tags = string.Join(",", loaded.Tags);
+        var template = templates.FirstOrDefault(t => t.CurrentVersionId == loaded.TemplateVersionId);
         if (template is not null)
         {
             selectedTemplateId = template.Id;
             await LoadTemplateVersionAsync(template.Id);
         }
 
-        foreach (var value in item.Fields)
+        foreach (var value in loaded.Fields)
         {
             textValues[value.FieldId] = value.TextValue;
             boolValues[value.FieldId] = value.BoolValue ?? false;
@@ -176,8 +178,12 @@
 
     private async Task LoadTemplateVersionAsync(Guid templateId)
     {
-        var template = await Templates.GetAsync(WorkspaceId, templateId);
-        templateVersion = template.CurrentVersion ?? await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version");
+        var template = ApiResponse.Required(
+            await Templates.GetAsync(WorkspaceId, templateId),
+            "loading a template");
+        templateVersion = template.CurrentVersion ?? ApiResponse.Required(
+            await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version"),
+            "creating a template draft");
         await LoadPicklistsForFieldsAsync();
         await LoadReferenceOptionsForFieldsAsync();
     }
@@ -207,8 +213,14 @@
             var binding = templateVersion.Fields.Select(GetPicklistBinding).First(binding => binding.RevisionId == id);
             try
             {
-                var loaded = await PickLists.GetRevisionAsync(WorkspaceId, binding.PicklistId!.Value, id);
-                picklistCache[id] = loaded;
+                if (binding.PicklistId is not { } picklistId)
+                {
+                    continue;
+                }
+
+                picklistCache[id] = ApiResponse.Required(
+                    await PickLists.GetRevisionAsync(WorkspaceId, picklistId, id),
+                    "loading a picklist revision");
             }
             catch (CmsifyApiException) { }
         }
@@ -258,8 +270,8 @@
                 continue;
             }
 
-            var content = await Content.ListAsync(WorkspaceId, null, templateId, null, null, null);
-            referenceOptionsByTemplateId[templateId] = content.Items;
+            referenceOptionsByTemplateId[templateId] = ApiResponse.ItemsOrEmpty(
+                await Content.ListAsync(WorkspaceId, null, templateId, null, null, null));
         }
     }
 
@@ -595,14 +607,19 @@
             error = null;
             if (ContentId.HasValue)
             {
-                item = await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values));
+                item = ApiResponse.Required(
+                    await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values)),
+                    "updating content");
                 Toasts.Success("Draft saved");
             }
             else
             {
-                item = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values));
+                var created = ApiResponse.Required(
+                    await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values)),
+                    "creating content");
+                item = created;
                 Toasts.Success("Draft created");
-                Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
+                Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{created.Id}");
             }
         }
         catch (CmsifyApiException ex)

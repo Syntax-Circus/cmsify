@@ -100,8 +100,8 @@ public sealed class AdminHttpResilienceTests
             transportCall.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
         transportAttemptToken.IsCancellationRequested.ShouldBeTrue();
 
-        await healthyClient.GetAsync<object>("/test/healthy-circuit");
-        await healthyClient.GetAsync<object>("/test/healthy-circuit");
+        await healthyClient.GetAsync<object>("/test/healthy-circuit", TestContext.Current.CancellationToken);
+        await healthyClient.GetAsync<object>("/test/healthy-circuit", TestContext.Current.CancellationToken);
 
         var cancelledRequests = factory.ObservedApiRequests.Where(request => request.Path == "/test/cancelled-circuit").ToArray();
         var cancelledTransportRequests = factory.ObservedApiRequests.Where(request => request.Path == "/test/cancelled-transport").ToArray();

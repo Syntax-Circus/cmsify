@@ -47,9 +47,9 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var database = $"media_upgrade_{Guid.NewGuid():N}";
         await using (var admin = new NpgsqlConnection(fixture.ConnectionString))
         {
-            await admin.OpenAsync();
+            await admin.OpenAsync(TestContext.Current.CancellationToken);
             await using var create = new NpgsqlCommand($"CREATE DATABASE {database}", admin);
-            await create.ExecuteNonQueryAsync();
+            await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
 
         var connection = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = database }.ConnectionString;
@@ -58,7 +58,7 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
             .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options);
         var migrator = context.GetService<IMigrator>();
-        await migrator.MigrateAsync("20260826215147_ExpandWebhookSecretCiphertext");
+        await migrator.MigrateAsync("20260826215147_ExpandWebhookSecretCiphertext", TestContext.Current.CancellationToken);
         var now = DateTimeOffset.UtcNow;
         var workspaceId = Guid.CreateVersion7();
         var activeId = Guid.CreateVersion7();
@@ -72,25 +72,25 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
             INSERT INTO media_assets
                 (id, workspace_id, file_name, mime_type, size_bytes, storage_key, storage_provider, created_at, updated_at, is_deleted, deleted_at)
             VALUES ({deletedId}, {workspaceId}, 'deleted.png', 'image/png', 1, 'default/deleted.png', 'local', {now}, {now}, true, {now.AddDays(-10)});
-            """);
+            """, cancellationToken: TestContext.Current.CancellationToken);
         var beforeMigration = DateTimeOffset.UtcNow;
 
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var rollingReplicaId = Guid.CreateVersion7();
         await context.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO media_assets
                 (id, workspace_id, file_name, mime_type, size_bytes, storage_key, storage_provider, created_at, updated_at, is_deleted)
             VALUES ({rollingReplicaId}, {workspaceId}, 'rolling.png', 'image/png', 1, 'default/rolling.png', 'local', {now}, {now}, false);
-            """);
+            """, cancellationToken: TestContext.Current.CancellationToken);
 
         var afterMigration = DateTimeOffset.UtcNow;
         context.ChangeTracker.Clear();
-        var assets = await context.MediaAssets.IgnoreQueryFilters().Where(asset => asset.WorkspaceId == workspaceId).ToDictionaryAsync(asset => asset.Id);
+        var assets = await context.MediaAssets.IgnoreQueryFilters().Where(asset => asset.WorkspaceId == workspaceId).ToDictionaryAsync(asset => asset.Id, cancellationToken: TestContext.Current.CancellationToken);
         assets[activeId].BlobState.ShouldBe(MediaBlobState.Available);
         assets[deletedId].BlobState.ShouldBe(MediaBlobState.DeletePending);
         assets[rollingReplicaId].BlobState.ShouldBe(MediaBlobState.Available);
-        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == deletedId);
+        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == deletedId, cancellationToken: TestContext.Current.CancellationToken);
         intent.Reason.ShouldBe("migration_deleted");
         intent.NotBefore.ShouldBeGreaterThanOrEqualTo(beforeMigration.AddDays(30).AddSeconds(-1));
         intent.NotBefore.ShouldBeLessThanOrEqualTo(afterMigration.AddDays(30).AddSeconds(1));
@@ -107,8 +107,8 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var second = new MediaReconciliationRepository(secondContext);
 
         var results = await Task.WhenAll(
-            first.ClaimDeletionIntentsAsync("worker-a", now, TimeSpan.FromMinutes(5), 1),
-            second.ClaimDeletionIntentsAsync("worker-b", now, TimeSpan.FromMinutes(5), 1));
+            first.ClaimDeletionIntentsAsync("worker-a", now, TimeSpan.FromMinutes(5), 1, TestContext.Current.CancellationToken),
+            second.ClaimDeletionIntentsAsync("worker-b", now, TimeSpan.FromMinutes(5), 1, TestContext.Current.CancellationToken));
 
         results.SelectMany(claims => claims).Select(claim => claim.Id).ShouldBe([intentId]);
     }
@@ -120,18 +120,18 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var intentId = await SeedIntentAsync(now);
         await using var firstContext = await CreateContextAsync();
         var first = new MediaReconciliationRepository(firstContext);
-        var firstClaim = Assert.Single(await first.ClaimDeletionIntentsAsync("worker-a", now, TimeSpan.FromMinutes(5), 10));
+        var firstClaim = Assert.Single(await first.ClaimDeletionIntentsAsync("worker-a", now, TimeSpan.FromMinutes(5), 10, TestContext.Current.CancellationToken));
 
         await using var secondContext = await CreateContextAsync();
         var second = new MediaReconciliationRepository(secondContext);
-        Assert.Empty(await second.ClaimDeletionIntentsAsync("worker-b", now.AddMinutes(4), TimeSpan.FromMinutes(5), 10));
-        var reclaimed = Assert.Single(await second.ClaimDeletionIntentsAsync("worker-b", now.AddMinutes(5), TimeSpan.FromMinutes(5), 10));
+        Assert.Empty(await second.ClaimDeletionIntentsAsync("worker-b", now.AddMinutes(4), TimeSpan.FromMinutes(5), 10, TestContext.Current.CancellationToken));
+        var reclaimed = Assert.Single(await second.ClaimDeletionIntentsAsync("worker-b", now.AddMinutes(5), TimeSpan.FromMinutes(5), 10, TestContext.Current.CancellationToken));
 
         reclaimed.Id.ShouldBe(intentId);
         reclaimed.WasReclaimed.ShouldBeTrue();
         reclaimed.LeaseToken.ShouldNotBe(firstClaim.LeaseToken);
-        (await first.CompleteDeletionAsync(firstClaim, now.AddMinutes(5))).ShouldBeFalse();
-        (await second.CompleteDeletionAsync(reclaimed, now.AddMinutes(5))).ShouldBeTrue();
+        (await first.CompleteDeletionAsync(firstClaim, now.AddMinutes(5), TestContext.Current.CancellationToken)).ShouldBeFalse();
+        (await second.CompleteDeletionAsync(reclaimed, now.AddMinutes(5), TestContext.Current.CancellationToken)).ShouldBeTrue();
     }
 
     [Fact]
@@ -141,12 +141,12 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var intentId = await SeedIntentAsync(now);
         await using var context = await CreateContextAsync();
         var repository = new MediaReconciliationRepository(context);
-        var claim = Assert.Single(await repository.ClaimDeletionIntentsAsync("worker", now, TimeSpan.FromMinutes(5), 1));
+        var claim = Assert.Single(await repository.ClaimDeletionIntentsAsync("worker", now, TimeSpan.FromMinutes(5), 1, TestContext.Current.CancellationToken));
 
-        (await repository.RetryDeletionAsync(claim, now, now.AddSeconds(30), new string('x', 3_000))).ShouldBeTrue();
+        (await repository.RetryDeletionAsync(claim, now, now.AddSeconds(30), new string('x', 3_000), TestContext.Current.CancellationToken)).ShouldBeTrue();
 
         context.ChangeTracker.Clear();
-        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.Id == intentId);
+        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.Id == intentId, cancellationToken: TestContext.Current.CancellationToken);
         intent.AttemptCount.ShouldBe(1);
         intent.NextAttemptAt.ShouldBe(now.AddSeconds(30));
         intent.LastError!.Length.ShouldBe(2_000);
@@ -171,13 +171,13 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
                 NextAttemptAt = now,
                 CreatedAt = now
             });
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         await using var workerContext = await CreateContextAsync();
         var repository = new MediaReconciliationRepository(workerContext);
         var claim = Assert.Single(
-            await repository.ClaimDeletionIntentsAsync("worker", now, TimeSpan.FromMinutes(5), 1_000),
+            await repository.ClaimDeletionIntentsAsync("worker", now, TimeSpan.FromMinutes(5), 1_000, TestContext.Current.CancellationToken),
             item => item.StorageKey == storageKey);
 
         await using (var apiContext = await CreateContextAsync())
@@ -187,19 +187,18 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
             asset.StorageKey = storageKey;
             asset.BlobState = MediaBlobState.PendingUpload;
             apiContext.AddRange(workspace, asset);
-            await apiContext.SaveChangesAsync();
+            await apiContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         claim.Reason.ShouldBe("orphan");
-        (await workerContext.MediaAssets.IgnoreQueryFilters().AnyAsync(
-            asset => asset.StorageProvider == "local" && asset.StorageKey == storageKey && asset.BlobState != MediaBlobState.Deleted))
+        (await workerContext.MediaAssets.IgnoreQueryFilters().AnyAsync(asset => asset.StorageProvider == "local" && asset.StorageKey == storageKey && asset.BlobState != MediaBlobState.Deleted, cancellationToken: TestContext.Current.CancellationToken))
             .ShouldBeTrue();
 
-        var result = await repository.PrepareDeletionAsync(claim, now.AddSeconds(1), TimeSpan.FromMinutes(5));
+        var result = await repository.PrepareDeletionAsync(claim, now.AddSeconds(1), TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
 
         result.ShouldBe(DeletionPreparationResult.Owned);
         workerContext.ChangeTracker.Clear();
-        var intent = await workerContext.MediaDeletionIntents.SingleAsync(item => item.Id == claim.Id);
+        var intent = await workerContext.MediaDeletionIntents.SingleAsync(item => item.Id == claim.Id, cancellationToken: TestContext.Current.CancellationToken);
         intent.CompletedAt.ShouldBe(now.AddSeconds(1));
         intent.LeaseOwner.ShouldBeNull();
     }
@@ -214,25 +213,25 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
             // FailStaleUploadsAsync is global, so isolate its candidate set from prior collection tests.
             await setup.MediaAssets
                 .Where(asset => asset.BlobState == MediaBlobState.PendingUpload && asset.BlobStateChangedAt <= cutoff)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(asset => asset.BlobState, MediaBlobState.Available));
+                .ExecuteUpdateAsync(setters => setters.SetProperty(asset => asset.BlobState, MediaBlobState.Available), cancellationToken: TestContext.Current.CancellationToken);
             var workspace = new Workspace { Name = "Media", Slug = $"media-{Guid.NewGuid():N}" };
             setup.Workspaces.Add(workspace);
             setup.MediaAssets.AddRange(
                 Asset(workspace.Id, "stale", cutoff),
                 Asset(workspace.Id, "recent", cutoff.AddMilliseconds(1)));
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         await using var context = await CreateContextAsync();
-        var count = await new MediaReconciliationRepository(context).FailStaleUploadsAsync(cutoff, now, 100);
+        var count = await new MediaReconciliationRepository(context).FailStaleUploadsAsync(cutoff, now, 100, TestContext.Current.CancellationToken);
 
         count.ShouldBe(1);
         context.ChangeTracker.Clear();
-        var stale = await context.MediaAssets.SingleAsync(asset => asset.FileName == "stale");
-        var recent = await context.MediaAssets.SingleAsync(asset => asset.FileName == "recent");
+        var stale = await context.MediaAssets.SingleAsync(asset => asset.FileName == "stale", cancellationToken: TestContext.Current.CancellationToken);
+        var recent = await context.MediaAssets.SingleAsync(asset => asset.FileName == "recent", cancellationToken: TestContext.Current.CancellationToken);
         stale.BlobState.ShouldBe(MediaBlobState.UploadFailed);
         recent.BlobState.ShouldBe(MediaBlobState.PendingUpload);
-        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == stale.Id);
+        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == stale.Id, cancellationToken: TestContext.Current.CancellationToken);
         intent.NextAttemptAt.ShouldBe(now);
         intent.Reason.ShouldBe("abandoned_upload");
     }
@@ -243,19 +242,19 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var now = DateTimeOffset.Parse("2026-08-27T15:00:00Z");
         await using var firstContext = await CreateContextAsync();
         var first = new MediaReconciliationRepository(firstContext);
-        var claim = await first.ClaimCheckpointAsync("local", "cmsify/media/", "worker-a", now, TimeSpan.FromMinutes(5));
+        var claim = await first.ClaimCheckpointAsync("local", "cmsify/media/", "worker-a", now, TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
         claim.ShouldNotBeNull();
 
         await using var secondContext = await CreateContextAsync();
         var second = new MediaReconciliationRepository(secondContext);
-        (await second.ClaimCheckpointAsync("local", "cmsify/media/", "worker-b", now.AddMinutes(4), TimeSpan.FromMinutes(5))).ShouldBeNull();
-        var reclaimed = await second.ClaimCheckpointAsync("local", "cmsify/media/", "worker-b", now.AddMinutes(5), TimeSpan.FromMinutes(5));
+        (await second.ClaimCheckpointAsync("local", "cmsify/media/", "worker-b", now.AddMinutes(4), TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken)).ShouldBeNull();
+        var reclaimed = await second.ClaimCheckpointAsync("local", "cmsify/media/", "worker-b", now.AddMinutes(5), TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
         reclaimed.ShouldNotBeNull();
-        (await first.CompleteCheckpointAsync(claim, "cmsify/media/a", false, now.AddMinutes(5))).ShouldBeFalse();
-        (await second.CompleteCheckpointAsync(reclaimed, "cmsify/media/b", false, now.AddMinutes(5))).ShouldBeTrue();
+        (await first.CompleteCheckpointAsync(claim, "cmsify/media/a", false, now.AddMinutes(5), TestContext.Current.CancellationToken)).ShouldBeFalse();
+        (await second.CompleteCheckpointAsync(reclaimed, "cmsify/media/b", false, now.AddMinutes(5), TestContext.Current.CancellationToken)).ShouldBeTrue();
 
         await using var verification = await CreateContextAsync();
-        var checkpoint = await verification.MediaReconciliationCheckpoints.SingleAsync();
+        var checkpoint = await verification.MediaReconciliationCheckpoints.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         checkpoint.AfterKey.ShouldBe("cmsify/media/b");
         checkpoint.LeaseOwner.ShouldBeNull();
     }
@@ -272,21 +271,21 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
             asset.BlobState = MediaBlobState.Available;
             asset.BlobVerifiedAt = now.AddDays(-1);
             setup.AddRange(workspace, asset);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
             assetId = asset.Id;
         }
 
         await using var context = await CreateContextAsync();
         var repository = new MediaReconciliationRepository(context);
-        await repository.RecordBlobMissingAsync(assetId, now);
+        await repository.RecordBlobMissingAsync(assetId, now, TestContext.Current.CancellationToken);
         context.ChangeTracker.Clear();
-        var missing = await context.MediaAssets.SingleAsync(asset => asset.Id == assetId);
+        var missing = await context.MediaAssets.SingleAsync(asset => asset.Id == assetId, cancellationToken: TestContext.Current.CancellationToken);
         missing.BlobState.ShouldBe(MediaBlobState.Missing);
         missing.BlobVerifiedAt.ShouldBe(now);
 
-        await repository.RecordBlobPresentAsync(assetId, now.AddMinutes(1));
+        await repository.RecordBlobPresentAsync(assetId, now.AddMinutes(1), TestContext.Current.CancellationToken);
         context.ChangeTracker.Clear();
-        var present = await context.MediaAssets.SingleAsync(asset => asset.Id == assetId);
+        var present = await context.MediaAssets.SingleAsync(asset => asset.Id == assetId, cancellationToken: TestContext.Current.CancellationToken);
         present.BlobState.ShouldBe(MediaBlobState.Available);
         present.MissingDetectedAt.ShouldBeNull();
         present.BlobVerifiedAt.ShouldBe(now.AddMinutes(1));
@@ -313,11 +312,11 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
             local.BlobState = MediaBlobState.Available;
             local.BlobVerifiedAt = now.AddDays(-1);
             setup.MediaAssets.Add(local);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         await using var context = await CreateContextAsync();
-        var candidates = await new MediaReconciliationRepository(context).GetVerificationBatchAsync("local", 1);
+        var candidates = await new MediaReconciliationRepository(context).GetVerificationBatchAsync("local", 1, TestContext.Current.CancellationToken);
 
         var candidate = Assert.Single(candidates);
         candidate.Provider.ShouldBe("local");
@@ -339,10 +338,10 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
             hidden.BlobState = state;
             context.MediaAssets.Add(hidden);
         }
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         var repository = CreateMediaAssetRepository(context, workspace.Id);
 
-        var page = await repository.ListByWorkspaceAsync(workspace.Id, new PageRequest(0, 100));
+        var page = await repository.ListByWorkspaceAsync(workspace.Id, new PageRequest(0, 100), TestContext.Current.CancellationToken);
 
         Assert.Equal([available.Id], page.Items.Select(item => item.Id));
     }
@@ -353,12 +352,12 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         await using var context = await CreateContextAsync();
         var workspace = new Workspace { Name = "Repository create", Slug = $"repository-create-{Guid.NewGuid():N}" };
         context.Workspaces.Add(workspace);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         var repository = CreateMediaAssetRepository(context, workspace.Id);
         var command = new CreateMediaAssetCommand(
             workspace.Id, "missing.txt", "text/plain", 1, $"cmsify/media/{workspace.Id}/missing.txt", "local", null);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.CreateAsync(command));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.CreateAsync(command, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -368,7 +367,7 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         await using var context = await CreateContextAsync();
         var workspace = new Workspace { Name = "Repository verified create", Slug = $"repository-verified-{Guid.NewGuid():N}" };
         context.Workspaces.Add(workspace);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         var key = $"cmsify/media/{workspace.Id}/verified.txt";
         var storage = Substitute.For<IStorageProvider>();
         storage.GetMetadataAsync(key, Arg.Any<CancellationToken>())
@@ -376,10 +375,10 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var repository = CreateMediaAssetRepository(context, workspace.Id, storage, new FixedTimeProvider(now));
 
         var created = await repository.CreateAsync(new CreateMediaAssetCommand(
-            workspace.Id, "verified.txt", "text/plain", 1, key, "local", null));
+            workspace.Id, "verified.txt", "text/plain", 1, key, "local", null), TestContext.Current.CancellationToken);
 
         context.ChangeTracker.Clear();
-        var persisted = await context.MediaAssets.SingleAsync(item => item.Id == created.Id);
+        var persisted = await context.MediaAssets.SingleAsync(item => item.Id == created.Id, cancellationToken: TestContext.Current.CancellationToken);
         persisted.BlobState.ShouldBe(MediaBlobState.Available);
         persisted.SizeBytes.ShouldBe(42);
         persisted.UploadCompletedAt.ShouldBe(now);
@@ -393,7 +392,7 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         await using var context = await CreateContextAsync();
         var workspace = new Workspace { Name = "Canonical provider", Slug = $"canonical-provider-{Guid.NewGuid():N}" };
         context.Workspaces.Add(workspace);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         var key = $"cmsify/media/{workspace.Id}/canonical.txt";
         var storage = Substitute.For<IStorageProvider>();
         storage.GetMetadataAsync(key, Arg.Any<CancellationToken>())
@@ -401,11 +400,11 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var repository = CreateMediaAssetRepository(context, workspace.Id, storage, new FixedTimeProvider(now));
 
         var created = await repository.CreateAsync(new CreateMediaAssetCommand(
-            workspace.Id, "canonical.txt", "text/plain", 1, key, "LOCAL", null));
+            workspace.Id, "canonical.txt", "text/plain", 1, key, "LOCAL", null), TestContext.Current.CancellationToken);
 
         context.ChangeTracker.Clear();
-        (await context.MediaAssets.SingleAsync(item => item.Id == created.Id)).StorageProvider.ShouldBe("local");
-        (await new MediaReconciliationRepository(context).StorageKeyExistsAsync("local", key)).ShouldBeTrue();
+        (await context.MediaAssets.SingleAsync(item => item.Id == created.Id, cancellationToken: TestContext.Current.CancellationToken)).StorageProvider.ShouldBe("local");
+        (await new MediaReconciliationRepository(context).StorageKeyExistsAsync("local", key, TestContext.Current.CancellationToken)).ShouldBeTrue();
     }
 
     [Fact]
@@ -417,14 +416,14 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var asset = Asset(workspace.Id, "delete", now);
         asset.BlobState = MediaBlobState.Available;
         context.AddRange(workspace, asset);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         var repository = CreateMediaAssetRepository(context, workspace.Id);
 
-        await repository.SoftDeleteAsync(asset.Id, Guid.NewGuid());
+        await repository.SoftDeleteAsync(asset.Id, Guid.NewGuid(), TestContext.Current.CancellationToken);
 
         context.ChangeTracker.Clear();
-        var deleted = await context.MediaAssets.IgnoreQueryFilters().SingleAsync(item => item.Id == asset.Id);
-        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == asset.Id);
+        var deleted = await context.MediaAssets.IgnoreQueryFilters().SingleAsync(item => item.Id == asset.Id, cancellationToken: TestContext.Current.CancellationToken);
+        var intent = await context.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == asset.Id, cancellationToken: TestContext.Current.CancellationToken);
         deleted.BlobState.ShouldBe(MediaBlobState.DeletePending);
         intent.Reason.ShouldBe("user_delete");
         intent.NotBefore.ShouldBe(deleted.PurgeAfter!.Value);

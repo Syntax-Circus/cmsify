@@ -49,7 +49,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = string.Empty,
             ["password"] = string.Empty,
             ["returnUrl"] = "/workspaces"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldContain("error=missing-credentials");
@@ -70,7 +70,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "wrong",
             ["returnUrl"] = "/workspaces"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldContain("error=invalid-credentials");
@@ -90,7 +90,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces/abc"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldBe("/workspaces/abc");
@@ -114,7 +114,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldStartWith("/account/change-password?returnUrl=");
@@ -134,7 +134,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "//evil.example.com/path"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldBe("/workspaces");
@@ -146,7 +146,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
         factory.OidcEnabled = true;
         var client = CreateClient();
 
-        using var response = await client.GetAsync("/admin-auth/oidc-login?returnUrl=%2Fworkspaces");
+        using var response = await client.GetAsync("/admin-auth/oidc-login?returnUrl=%2Fworkspaces", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/");
@@ -169,7 +169,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             cookie.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal));
         factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "authorization_code");
 
-        using var apiCall = await client.GetAsync("/test/api-call");
+        using var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken);
         apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         factory.ObservedRequests.Any(request =>
             request.Headers.Authorization is { Scheme: "Bearer", Parameter: "initial-access-token" }).ShouldBeTrue();
@@ -188,7 +188,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             callback.StatusCode.ShouldBe(HttpStatusCode.Found);
         }
 
-        using var apiCall = await client.GetAsync("/test/api-call");
+        using var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken);
         apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "refresh_token" && request.RefreshToken == "refresh-token");
         factory.ObservedRequests.Any(request =>
@@ -209,12 +209,12 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             callback.StatusCode.ShouldBe(HttpStatusCode.Found);
         }
 
-        using var apiCall = await client.GetAsync("/test/api-call");
+        using var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken);
         apiCall.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "refresh_token");
         factory.ObservedRequests.Last().Headers.Authorization.ShouldBeNull();
         var cache = factory.Services.GetRequiredService<IServerTokenCache>();
-        (await cache.GetAsync("user:oidc-admin")).ShouldBeNull();
+        (await cache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldBeNull();
     }
 
     [Fact]
@@ -229,21 +229,21 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             callback.StatusCode.ShouldBe(HttpStatusCode.Found);
         }
 
-        using (var apiCall = await client.GetAsync("/test/api-call"))
+        using (var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken))
         {
             apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         }
 
         var cache = factory.Services.GetRequiredService<IServerTokenCache>();
-        (await cache.GetAsync("user:oidc-admin")).ShouldNotBeNull();
+        (await cache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldNotBeNull();
 
         var token = await FetchAntiforgeryTokenAsync(client);
         using var logout = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["__RequestVerificationToken"] = token
-        }));
+        }), TestContext.Current.CancellationToken);
 
-        (await cache.GetAsync("user:oidc-admin")).ShouldBeNull();
+        (await cache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldBeNull();
     }
 
     [Fact]
@@ -258,7 +258,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
 
         var token = await FetchAntiforgeryTokenAsync(client);
         using var response = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(
-            [new KeyValuePair<string, string>("__RequestVerificationToken", token)]));
+            [new KeyValuePair<string, string>("__RequestVerificationToken", token)]), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/connect/logout");
@@ -302,7 +302,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces"
-        }))) { }
+        }), TestContext.Current.CancellationToken)) { }
 
         // Refresh antiforgery token (the auth cookie change may invalidate the prior token tied to the unauthenticated identity).
         var logoutToken = await FetchAntiforgeryTokenAsync(client);
@@ -310,7 +310,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
         using var response = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["__RequestVerificationToken"] = logoutToken
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldBe("/login");
@@ -331,7 +331,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
     {
         var client = CreateClient();
 
-        using var response = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
+        using var response = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
@@ -350,9 +350,9 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces"
-        }))) { }
+        }), TestContext.Current.CancellationToken)) { }
 
-        using var refresh = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
+        using var refresh = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()), TestContext.Current.CancellationToken);
 
         refresh.StatusCode.ShouldBe(HttpStatusCode.OK);
         refresh.Headers.ShouldContain(h => h.Key == "Set-Cookie"

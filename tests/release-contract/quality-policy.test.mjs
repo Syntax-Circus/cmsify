@@ -82,3 +82,35 @@ test("standardizes every test project on the xUnit v3 host", () => {
     assert.equal(project.includes('<PackageReference Include="xunit"'), false, projectPath);
   }
 });
+
+test("treats Release warnings as errors without broadening suppression policy", () => {
+  const directoryBuildProps = readRepositoryFile("Directory.Build.props");
+  const buildPolicyPaths = getTrackedFiles(
+    ":(glob)**/*.csproj",
+    ":(glob)**/*.props",
+    ":(glob)**/*.targets",
+  );
+  const noWarnEntries = buildPolicyPaths.flatMap((filePath) =>
+    [...readRepositoryFile(filePath).matchAll(/<NoWarn>(.*?)<\/NoWarn>/g)]
+      .map((match) => `${filePath}:${match[1]}`));
+
+  assert.equal(
+    directoryBuildProps.includes(
+      '<TreatWarningsAsErrors Condition="\'$(Configuration)\' == \'Release\'">true</TreatWarningsAsErrors>',
+    ),
+    true,
+  );
+  assert.deepEqual(noWarnEntries.sort(), [
+    "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj:$(NoWarn);1591",
+    "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj:$(NoWarn);1591",
+    "src/Cmsify.Api/Cmsify.Api.csproj:$(NoWarn);1591",
+    "src/Cmsify.Contracts/Cmsify.Contracts.csproj:$(NoWarn);1591",
+  ]);
+
+  for (const filePath of buildPolicyPaths) {
+    const project = readRepositoryFile(filePath);
+
+    assert.equal(project.includes("<WarningsNotAsErrors>"), false, filePath);
+    assert.equal(/<Nullable>\s*disable\s*<\/Nullable>/i.test(project), false, filePath);
+  }
+});

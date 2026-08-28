@@ -58,10 +58,10 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
 
         var (workspaceId, contentId) = await SeedContentWithRangesAsync(factory);
 
-        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/seasonal?asOf=2026-12-24T12:00:00Z");
+        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/seasonal?asOf=2026-12-24T12:00:00Z", TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ContentItemDetailResponse>(ApiJsonOptions);
+        var body = await response.Content.ReadFromJsonAsync<ContentItemDetailResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(body);
         Assert.Equal(contentId, body.Id);
         Assert.Equal("seasonal", body.Slug);

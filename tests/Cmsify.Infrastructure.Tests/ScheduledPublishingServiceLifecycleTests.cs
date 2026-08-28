@@ -46,7 +46,7 @@ public sealed class ScheduledPublishingServiceLifecycleTests
         var logger = new CapturingLogger();
         var service = new ScheduledPublishingService(scopeFactory, Configuration(), logger, new FixedTimeProvider(now), "worker");
 
-        await service.RunOnceAsync();
+        await service.RunOnceAsync(TestContext.Current.CancellationToken);
 
         await successfulDispatcher.Received(1).CompleteClaimAsync(second, now, Arg.Any<CancellationToken>());
         Assert.Single(logger.Messages);
@@ -74,7 +74,7 @@ public sealed class ScheduledPublishingServiceLifecycleTests
         var secondScope = ScopeFor(secondDispatcher);
         scopeFactory.CreateScope().Returns(claimScope, firstScope, secondScope);
 
-        await new ScheduledPublishingService(scopeFactory, Configuration(), new CapturingLogger(), new SequenceTimeProvider(claimedAt, firstCompletedAt, secondCompletedAt), "worker").RunOnceAsync();
+        await new ScheduledPublishingService(scopeFactory, Configuration(), new CapturingLogger(), new SequenceTimeProvider(claimedAt, firstCompletedAt, secondCompletedAt), "worker").RunOnceAsync(TestContext.Current.CancellationToken);
 
         await firstDispatcher.Received(1).CompleteClaimAsync(first, firstCompletedAt, Arg.Any<CancellationToken>());
         await secondDispatcher.Received(1).CompleteClaimAsync(second, secondCompletedAt, Arg.Any<CancellationToken>());

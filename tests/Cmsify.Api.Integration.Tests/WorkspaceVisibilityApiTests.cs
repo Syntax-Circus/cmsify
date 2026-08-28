@@ -47,7 +47,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "reader@example.test", "reader-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10");
+        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(response);
         Assert.Collection(
@@ -69,7 +69,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "writer@example.test", "writer-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10");
+        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(response);
         Assert.Equal(1, response.Page);
@@ -83,7 +83,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
                 Assert.True(workspace.CanWrite);
             });
 
-        var workspace = await client.GetFromJsonAsync<WorkspaceDto>($"/api/v1/workspaces/{workspaceId}");
+        var workspace = await client.GetFromJsonAsync<WorkspaceDto>($"/api/v1/workspaces/{workspaceId}", cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(workspace);
         Assert.True(workspace.CanWrite);
     }
@@ -97,8 +97,8 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "reader@example.test", "reader-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        using var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}");
-        using var templatesResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}/templates");
+        using var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}", TestContext.Current.CancellationToken);
+        using var templatesResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}/templates", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, workspaceResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, templatesResponse.StatusCode);
@@ -116,7 +116,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
             """{"email":"editor@example.test","displayName":"Editor","role":"Editor","temporaryPassword":"temporary-password","isSuperAdmin":false,"workspaceAccesses":[]}""",
             Encoding.UTF8,
             "application/json");
-        using var response = await client.PostAsync("/api/v1/users", request);
+        using var response = await client.PostAsync("/api/v1/users", request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
@@ -133,7 +133,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
             """{"email":"reader-without-grants@example.test","displayName":"Reader without grants","role":"Reader","temporaryPassword":"temporary-password","isSuperAdmin":false}""",
             Encoding.UTF8,
             "application/json");
-        using var response = await client.PostAsync("/api/v1/users", request);
+        using var response = await client.PostAsync("/api/v1/users", request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }

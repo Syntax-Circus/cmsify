@@ -40,13 +40,15 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        var loaded = await Workspaces.GetAsync(WorkspaceId);
+        var loaded = ApiResponse.Required(
+            await Workspaces.GetAsync(WorkspaceId),
+            "loading a workspace");
         workspace = loaded;
         await WorkspaceState.SelectAsync(loaded);
-        templateCount = (await Templates.ListAsync(WorkspaceId)).TotalCount;
+        templateCount = (await Templates.ListAsync(WorkspaceId))?.TotalCount ?? 0;
         var content = await Content.ListAsync(WorkspaceId, null, null, null, null, null);
-        contentCount = content.TotalCount;
-        publishedCount = content.Items.Count(item => item.Status == ContentStatus.Published);
-        mediaCount = (await Media.ListAsync(WorkspaceId, null, null)).TotalCount;
+        contentCount = content?.TotalCount ?? 0;
+        publishedCount = ApiResponse.ItemsOrEmpty(content).Count(item => item.Status == ContentStatus.Published);
+        mediaCount = (await Media.ListAsync(WorkspaceId, null, null))?.TotalCount ?? 0;
     }
 }

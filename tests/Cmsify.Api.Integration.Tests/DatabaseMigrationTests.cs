@@ -39,10 +39,10 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
         await using var context = new CmsifyDbContext(options);
         var migrator = new CmsifyDatabaseMigrator(context, new DbSeeder(context, configuration));
 
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync(TestContext.Current.CancellationToken);
 
         await using var connection = new NpgsqlConnection(postgres.GetConnectionString());
-        await connection.OpenAsync();
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         var migrations = await QueryStringsAsync(connection, "SELECT \"MigrationId\" FROM \"__EFMigrationsHistory\" ORDER BY \"MigrationId\";");
         Assert.Contains(migrations, migration => migration.EndsWith("_InitialSchema", StringComparison.Ordinal));

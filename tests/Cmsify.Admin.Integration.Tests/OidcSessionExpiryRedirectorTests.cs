@@ -31,20 +31,20 @@ public sealed class OidcSessionExpiryRedirectorTests
         var root = await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<OidcSessionExpiryRedirector>());
 
         broker.Publish("user:another-user");
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
         js.CallCount.ShouldBe(0);
 
         broker.Publish("user:oidc-admin");
-        await js.Invoked.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await js.Invoked.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         js.CallCount.ShouldBe(1);
 
         broker.Publish("user:oidc-admin");
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
         js.CallCount.ShouldBe(1);
 
         await renderer.DisposeAsync();
         broker.Publish("user:oidc-admin");
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
         js.CallCount.ShouldBe(1);
     }
 

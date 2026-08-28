@@ -36,8 +36,28 @@ else
     private string events = "content.published";
 
     protected override async Task OnInitializedAsync() { if (Workspace.Current is not null) await LoadAsync(); }
-    private async Task LoadAsync() { hooks = (await WebhooksClient.ListAsync(Workspace.Current!.Id)).Items.ToList(); }
-    private async Task CreateAsync() { await WebhooksClient.CreateAsync(Workspace.Current!.Id, new CreateWebhookEndpointRequest(name, url, null, events.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))); creating = false; await LoadAsync(); Toasts.Success("Webhook saved"); }
-    private async Task LoadDeliveriesAsync(WebhookEndpointResponse hook) { selected = hook; deliveries = (await WebhooksClient.ListDeliveriesAsync(hook.WorkspaceId, hook.Id)).Items.ToList(); }
-    private async Task RetryAsync(WebhookDeliveryResponse delivery) { if (selected is not null) await WebhooksClient.RetryAsync(selected.WorkspaceId, selected.Id, delivery.Id); await LoadDeliveriesAsync(selected!); }
+    private async Task LoadAsync()
+    {
+        if (Workspace.Current is not { } workspace) return;
+        hooks = ApiResponse.ItemsOrEmpty(await WebhooksClient.ListAsync(workspace.Id)).ToList();
+    }
+    private async Task CreateAsync()
+    {
+        if (Workspace.Current is not { } workspace) return;
+        await WebhooksClient.CreateAsync(workspace.Id, new CreateWebhookEndpointRequest(name, url, null, events.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+        creating = false;
+        await LoadAsync();
+        Toasts.Success("Webhook saved");
+    }
+    private async Task LoadDeliveriesAsync(WebhookEndpointResponse hook)
+    {
+        selected = hook;
+        deliveries = ApiResponse.ItemsOrEmpty(await WebhooksClient.ListDeliveriesAsync(hook.WorkspaceId, hook.Id)).ToList();
+    }
+    private async Task RetryAsync(WebhookDeliveryResponse delivery)
+    {
+        if (selected is not { } hook) return;
+        await WebhooksClient.RetryAsync(hook.WorkspaceId, hook.Id, delivery.Id);
+        await LoadDeliveriesAsync(hook);
+    }
 }

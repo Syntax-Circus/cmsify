@@ -57,7 +57,7 @@ public sealed class WebhookDispatchServiceLifecycleTests
         var logger = new CapturingLogger();
         var service = new WebhookDispatchService(scopeFactory, Configuration(), logger, new FixedTimeProvider(now), "worker");
 
-        await service.RunOnceAsync();
+        await service.RunOnceAsync(TestContext.Current.CancellationToken);
 
         await successfulRepository.Received(1).MaterializeOutboxEventAsync(second, now, Arg.Any<CancellationToken>());
         Assert.Single(logger.Messages);
@@ -85,7 +85,7 @@ public sealed class WebhookDispatchServiceLifecycleTests
         var secondScope = ScopeFor(secondRepository);
         scopeFactory.CreateScope().Returns(claimScope, firstScope, secondScope);
 
-        await new WebhookDispatchService(scopeFactory, Configuration(), new CapturingLogger(), new SequenceTimeProvider(claimedAt, firstCompletedAt, secondCompletedAt), "worker").RunOnceAsync();
+        await new WebhookDispatchService(scopeFactory, Configuration(), new CapturingLogger(), new SequenceTimeProvider(claimedAt, firstCompletedAt, secondCompletedAt), "worker").RunOnceAsync(TestContext.Current.CancellationToken);
 
         await firstRepository.Received(1).MaterializeOutboxEventAsync(first, firstCompletedAt, Arg.Any<CancellationToken>());
         await secondRepository.Received(1).MaterializeOutboxEventAsync(second, secondCompletedAt, Arg.Any<CancellationToken>());

@@ -46,19 +46,19 @@ public sealed class HealthCheckApiTests : IAsyncLifetime
         await using var factory = new WebApplicationFactory<Program>();
         using var client = factory.CreateClient();
 
-        using var liveness = await client.GetAsync("/health/live");
-        using var readiness = await client.GetAsync("/health/ready");
-        using var dashboard = await client.GetAsync("/health/dashboard");
+        using var liveness = await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
+        using var readiness = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        using var dashboard = await client.GetAsync("/health/dashboard", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, liveness.StatusCode);
         Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, dashboard.StatusCode);
 
-        using var livenessJson = JsonDocument.Parse(await liveness.Content.ReadAsStringAsync());
+        using var livenessJson = JsonDocument.Parse(await liveness.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         Assert.Equal("Healthy", livenessJson.RootElement.GetProperty("status").GetString());
         Assert.Equal(0, livenessJson.RootElement.GetProperty("checks").GetArrayLength());
 
-        using var readinessJson = JsonDocument.Parse(await readiness.Content.ReadAsStringAsync());
+        using var readinessJson = JsonDocument.Parse(await readiness.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         Assert.Equal("Healthy", readinessJson.RootElement.GetProperty("status").GetString());
         Assert.Contains(readinessJson.RootElement.GetProperty("checks").EnumerateArray(), check => check.GetProperty("name").GetString() == "database");
         Assert.Contains(readinessJson.RootElement.GetProperty("checks").EnumerateArray(), check => check.GetProperty("name").GetString() == "storage");
@@ -74,12 +74,12 @@ public sealed class HealthCheckApiTests : IAsyncLifetime
         await using var factory = new WebApplicationFactory<Program>();
         using var client = factory.CreateClient();
 
-        using var response = await client.GetAsync("/health/dashboard");
+        using var response = await client.GetAsync("/health/dashboard", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Cmsify API", body);
         Assert.Contains("database", body);
         Assert.Contains("storage", body);

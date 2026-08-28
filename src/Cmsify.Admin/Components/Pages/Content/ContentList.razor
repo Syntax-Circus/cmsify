@@ -121,11 +121,12 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        templates = (await Templates.ListAsync(WorkspaceId)).Items;
+        templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(WorkspaceId));
         await LoadAsync();
     }
 
-    private async Task LoadAsync() => items = (await Content.ListAsync(WorkspaceId, status, templateId, locale, null, q)).Items.ToList();
+    private async Task LoadAsync() =>
+        items = ApiResponse.ItemsOrEmpty(await Content.ListAsync(WorkspaceId, status, templateId, locale, null, q)).ToList();
 
     private void NewContent() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/new");
 
@@ -161,7 +162,9 @@
                 ParseUtcDateTimeOffset(publishAtInput),
                 boundedOverride ? ParseUtcDateTimeOffset(effectiveStartInput) : null,
                 boundedOverride ? ParseUtcDateTimeOffset(effectiveEndInput) : null);
-            var response = await Content.PublishAsync(WorkspaceId, publishContentId.Value, request);
+            var response = ApiResponse.Required(
+                await Content.PublishAsync(WorkspaceId, publishContentId.Value, request),
+                "publishing content");
             publishWarnings = response.Warnings;
             await LoadAsync();
             if (publishWarnings.Count == 0)

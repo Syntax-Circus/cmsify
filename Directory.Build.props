@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
     <!-- Local source builds are deliberately non-publishable. The release workflow supplies a validated tag version. -->
     <Version Condition="'$(Version)' == ''">0.0.0-local</Version>
     <PackageVersion Condition="'$(PackageVersion)' == ''">$(Version)</PackageVersion>

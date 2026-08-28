@@ -45,7 +45,7 @@ public sealed class QueryApiTests : IAsyncLifetime
         var seed = await SeedContentAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content?templateId={seed.TemplateId}&status=Published&localeCode=en&tags=featured&q=welcome&sortBy=publishedAt&page=1&pageSize=10");
+        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content?templateId={seed.TemplateId}&status=Published&localeCode=en&tags=featured&q=welcome&sortBy=publishedAt&page=1&pageSize=10", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, response.GetProperty("page").GetInt32());
         Assert.Equal(10, response.GetProperty("pageSize").GetInt32());
@@ -63,8 +63,8 @@ public sealed class QueryApiTests : IAsyncLifetime
         var seed = await SeedContentAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var bySlug = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content/by-slug/welcome-post");
-        var translations = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content/{seed.PublishedContentId}/translations");
+        var bySlug = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content/by-slug/welcome-post", cancellationToken: TestContext.Current.CancellationToken);
+        var translations = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content/{seed.PublishedContentId}/translations", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(seed.PublishedContentId, bySlug.GetProperty("id").GetGuid());
         Assert.Equal(1, translations.GetProperty("page").GetInt32());
@@ -80,7 +80,7 @@ public sealed class QueryApiTests : IAsyncLifetime
         await SeedContentAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var response = await client.GetFromJsonAsync<JsonElement>("/api/v1/workspaces?page=1&pageSize=1");
+        var response = await client.GetFromJsonAsync<JsonElement>("/api/v1/workspaces?page=1&pageSize=1", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, response.GetProperty("page").GetInt32());
         Assert.Equal(1, response.GetProperty("pageSize").GetInt32());
@@ -101,8 +101,8 @@ public sealed class QueryApiTests : IAsyncLifetime
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
         client.DefaultRequestHeaders.Add("X-Correlation-Id", "pagination-contract-test");
 
-        var response = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content?{query}");
-        var body = await response.Content.ReadAsStringAsync();
+        var response = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content?{query}", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var problem = JsonSerializer.Deserialize<JsonElement>(body);
 
         Assert.True(response.StatusCode == System.Net.HttpStatusCode.BadRequest, body);
@@ -124,8 +124,8 @@ public sealed class QueryApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Correlation-Id", "unauthenticated-contract-test");
 
-        var response = await client.GetAsync("/api/v1/workspaces");
-        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var response = await client.GetAsync("/api/v1/workspaces", TestContext.Current.CancellationToken);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
@@ -143,11 +143,11 @@ public sealed class QueryApiTests : IAsyncLifetime
         await SeedContentAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var response = await client.PostAsync("/api/v1/auth/refresh", null);
+        var response = await client.PostAsync("/api/v1/auth/refresh", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
-        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("https://cmsify.dev/errors/bad-request", problem.GetProperty("type").GetString());
     }
 
@@ -171,7 +171,7 @@ public sealed class QueryApiTests : IAsyncLifetime
 
         foreach (var endpoint in endpoints)
         {
-            var response = await client.GetFromJsonAsync<JsonElement>(endpoint);
+            var response = await client.GetFromJsonAsync<JsonElement>(endpoint, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(1, response.GetProperty("page").GetInt32());
             Assert.Equal(10, response.GetProperty("pageSize").GetInt32());
             Assert.True(response.TryGetProperty("totalPages", out _));
@@ -186,7 +186,7 @@ public sealed class QueryApiTests : IAsyncLifetime
         var seed = await SeedContentAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content?page={int.MaxValue}&pageSize=100");
+        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content?page={int.MaxValue}&pageSize=100", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(int.MaxValue, response.GetProperty("page").GetInt32());
         Assert.Equal(100, response.GetProperty("pageSize").GetInt32());

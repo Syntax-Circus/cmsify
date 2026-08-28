@@ -17,7 +17,7 @@ public sealed class WebhookDestinationValidatorTests
         var resolver = Substitute.For<IWebhookDnsResolver>();
         resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>()).Returns([IPAddress.Parse("8.8.8.8")]);
 
-        var result = await CreateValidator(resolver).ValidateAsync("HTTPS://hooks.example.test/a");
+        var result = await CreateValidator(resolver).ValidateAsync("HTTPS://hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.True(result.IsValid);
         Assert.Equal("https://hooks.example.test/a", result.NormalizedUrl);
@@ -31,7 +31,7 @@ public sealed class WebhookDestinationValidatorTests
     {
         var resolver = Substitute.For<IWebhookDnsResolver>();
 
-        var result = await CreateValidator(resolver).ValidateAsync("http://hooks.example.test/a");
+        var result = await CreateValidator(resolver).ValidateAsync("http://hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Null(result.DestinationUri);
@@ -44,7 +44,7 @@ public sealed class WebhookDestinationValidatorTests
         var resolver = Substitute.For<IWebhookDnsResolver>();
         resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>()).Returns([IPAddress.Parse("8.8.8.8")]);
 
-        var result = await CreateValidator(resolver, allowHttp: true).ValidateAsync("http://hooks.example.test/a");
+        var result = await CreateValidator(resolver, allowHttp: true).ValidateAsync("http://hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.True(result.IsValid);
         Assert.Equal("http://hooks.example.test/a", result.NormalizedUrl);
@@ -55,7 +55,7 @@ public sealed class WebhookDestinationValidatorTests
     {
         var resolver = Substitute.For<IWebhookDnsResolver>();
 
-        var result = await CreateValidator(resolver).ValidateAsync("https://user:password@hooks.example.test/a");
+        var result = await CreateValidator(resolver).ValidateAsync("https://user:password@hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         await resolver.DidNotReceive().ResolveAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -66,7 +66,7 @@ public sealed class WebhookDestinationValidatorTests
     {
         var resolver = Substitute.For<IWebhookDnsResolver>();
 
-        var result = await CreateValidator(resolver).ValidateAsync("https://8.8.8.8/hooks");
+        var result = await CreateValidator(resolver).ValidateAsync("https://8.8.8.8/hooks", TestContext.Current.CancellationToken);
 
         Assert.True(result.IsValid);
         Assert.Equal([IPAddress.Parse("8.8.8.8")], result.Addresses);
@@ -79,7 +79,7 @@ public sealed class WebhookDestinationValidatorTests
         var resolver = Substitute.For<IWebhookDnsResolver>();
         resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>()).Returns([]);
 
-        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a");
+        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
     }
@@ -91,7 +91,7 @@ public sealed class WebhookDestinationValidatorTests
         resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>())
             .Returns<Task<IPAddress[]>>(_ => throw new SocketException());
 
-        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a");
+        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Equal("Webhook host could not be resolved.", result.Error);
@@ -104,7 +104,7 @@ public sealed class WebhookDestinationValidatorTests
         resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>())
             .Returns<Task<IPAddress[]>>(_ => throw new InvalidOperationException());
 
-        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a");
+        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Equal("Webhook host could not be resolved.", result.Error);
@@ -173,7 +173,7 @@ public sealed class WebhookDestinationValidatorTests
         resolver.ResolveAsync("hooks.example.test", Arg.Any<CancellationToken>())
             .Returns([IPAddress.Parse("8.8.8.8"), IPAddress.Parse("10.0.0.1")]);
 
-        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a");
+        var result = await CreateValidator(resolver).ValidateAsync("https://hooks.example.test/a", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Equal("Webhook URLs must not resolve to private, loopback, or reserved addresses.", result.Error);

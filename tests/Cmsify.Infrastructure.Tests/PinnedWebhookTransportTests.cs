@@ -18,7 +18,7 @@ public sealed class PinnedWebhookTransportTests
         using var handler = PinnedWebhookTransport.CreateHandler(connector, TimeSpan.FromSeconds(1));
         using var client = new HttpClient(handler);
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("https://hooks.example.test:8443/hook"));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("https://hooks.example.test:8443/hook", TestContext.Current.CancellationToken));
 
         Assert.Equal(0, connector.CallCount);
     }
@@ -33,7 +33,7 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(requestUrl, CreateValidated(validatedUrl, IPAddress.Loopback));
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request, TestContext.Current.CancellationToken));
 
         Assert.Equal(0, connector.CallCount);
     }
@@ -47,7 +47,7 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Parse("192.0.2.10")));
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request, TestContext.Current.CancellationToken));
 
         Assert.Equal(1, connector.CallCount);
         Assert.Equal("xn--tst-qla.de", uri.IdnHost);
@@ -62,7 +62,7 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest("https://hooks.example.test:8443/hook", CreateValidated("https://hooks.example.test:8443/hook", approved));
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request, TestContext.Current.CancellationToken));
 
         Assert.Equal(1, connector.CallCount);
         Assert.Equal(approved, connector.LastAddresses);
@@ -86,7 +86,7 @@ public sealed class PinnedWebhookTransportTests
             }
 
             peerClosed.SetResult();
-        });
+        }, TestContext.Current.CancellationToken);
 
         using var handler = PinnedWebhookTransport.CreateHandler(new SocketWebhookConnector(), TimeSpan.FromSeconds(1));
         using var client = new HttpClient(handler);
@@ -94,7 +94,7 @@ public sealed class PinnedWebhookTransportTests
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.SendAsync(request, cancellation.Token));
-        await peerClosed.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await peerClosed.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
         await server;
     }
 
@@ -109,13 +109,13 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
 
         using (var first = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback)))
-        using (var firstResponse = await client.SendAsync(first))
+        using (var firstResponse = await client.SendAsync(first, TestContext.Current.CancellationToken))
         {
             Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
         }
 
         using (var second = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback)))
-        using (var secondResponse = await client.SendAsync(second))
+        using (var secondResponse = await client.SendAsync(second, TestContext.Current.CancellationToken))
         {
             Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
         }
@@ -139,10 +139,10 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback));
 
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("hooks.example.test", await observedServerName.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal("hooks.example.test", await observedServerName.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
         await server;
     }
 
@@ -160,9 +160,9 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback));
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request, TestContext.Current.CancellationToken));
 
-        Assert.Equal("hooks.example.test", await observedServerName.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal("hooks.example.test", await observedServerName.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
         await Assert.ThrowsAnyAsync<Exception>(() => server);
     }
 
@@ -178,11 +178,11 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback));
 
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         await server;
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
         Assert.False(proxy.Pending());
     }
 
@@ -198,11 +198,11 @@ public sealed class PinnedWebhookTransportTests
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback));
 
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         await server;
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
         Assert.False(target.Pending());
     }
 

@@ -54,8 +54,8 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         Assert.Equal(1, second.Selected);
         Assert.True(second.ReachedEnd);
         await using var verification = await CreateContextAsync();
-        Assert.Equal(activeBefore, await verification.WebhookEndpoints.Where(endpoint => endpoint.Name == "active").Select(endpoint => endpoint.Secret).SingleAsync());
-        Assert.True(await verification.WebhookEndpoints.IgnoreQueryFilters().Where(endpoint => endpoint.Name == "deleted").Select(endpoint => endpoint.Secret).SingleAsync() is { } deleted && deleted.StartsWith("v2.key_current.", StringComparison.Ordinal));
+        Assert.Equal(activeBefore, await verification.WebhookEndpoints.Where(endpoint => endpoint.Name == "active").Select(endpoint => endpoint.Secret).SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.True(await verification.WebhookEndpoints.IgnoreQueryFilters().Where(endpoint => endpoint.Name == "deleted").Select(endpoint => endpoint.Secret).SingleAsync(cancellationToken: TestContext.Current.CancellationToken) is { } deleted && deleted.StartsWith("v2.key_current.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         Assert.True(finalPass.ReachedEnd);
 
         await using var verification = await CreateContextAsync();
-        var secrets = await verification.WebhookEndpoints.IgnoreQueryFilters().OrderBy(endpoint => endpoint.Name).Select(endpoint => endpoint.Secret).ToListAsync();
+        var secrets = await verification.WebhookEndpoints.IgnoreQueryFilters().OrderBy(endpoint => endpoint.Name).Select(endpoint => endpoint.Secret).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(["active", "deleted", "legacy", "old"], secrets.Select(protector.Unprotect).OrderBy(value => value).ToArray());
     }
 
@@ -117,7 +117,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         Assert.Equal(1, first.Rotated);
         Assert.Equal(1, second.Rotated);
         await using var verification = await CreateContextAsync();
-        var values = await verification.WebhookEndpoints.OrderBy(endpoint => endpoint.Id).Select(endpoint => endpoint.Secret).ToListAsync();
+        var values = await verification.WebhookEndpoints.OrderBy(endpoint => endpoint.Id).Select(endpoint => endpoint.Secret).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal([maximumLegacyPlaintext, "later"], values.Select(protector.Unprotect).ToArray());
     }
 
@@ -146,7 +146,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         SecretRotationBatchResult? secondResult = null;
         try
         {
-            await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
             secondResult = await second.RotateBatchAsync(null, CancellationToken.None);
         }
         finally
@@ -176,14 +176,14 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         await using var observerContext = await CreateContextAsync();
         var worker = CreateProcessor(rotationContext, protector, batchSize: 1);
         var rotating = worker.RotateBatchAsync(null, CancellationToken.None);
-        await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         Task update = Task.CompletedTask;
         Exception? primaryFailure = null;
         SecretRotationBatchResult? rotation = null;
         try
         {
-            await updateContext.Database.OpenConnectionAsync();
-            var updaterBackendPid = await updateContext.Database.SqlQuery<int>($"SELECT pg_backend_pid() AS \"Value\"").SingleAsync();
+            await updateContext.Database.OpenConnectionAsync(cancellationToken: TestContext.Current.CancellationToken);
+            var updaterBackendPid = await updateContext.Database.SqlQuery<int>($"SELECT pg_backend_pid() AS \"Value\"").SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
             update = Task.Run(async () =>
             {
                 await updateContext.Database.ExecuteSqlInterpolatedAsync($"""
@@ -191,7 +191,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
                     SET secret = {protector.Protect("new-secret")}, updated_at = CURRENT_TIMESTAMP
                     WHERE id = {endpointId}
                     """);
-            });
+            }, TestContext.Current.CancellationToken);
             await WaitForLockWaitAsync(observerContext, updaterBackendPid, update);
             Assert.False(update.IsCompleted);
         }
@@ -208,7 +208,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         Assert.Equal(new SecretRotationBatchResult(endpointId, 1, 1, 0, 0, false), rotation);
 
         await using var verification = await CreateContextAsync();
-        var ciphertext = await verification.WebhookEndpoints.Where(endpoint => endpoint.Id == endpointId).Select(endpoint => endpoint.Secret).SingleAsync();
+        var ciphertext = await verification.WebhookEndpoints.Where(endpoint => endpoint.Id == endpointId).Select(endpoint => endpoint.Secret).SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("new-secret", protector.Unprotect(ciphertext));
     }
 
@@ -237,7 +237,7 @@ public sealed class WebhookSecretRotationTests : IAsyncLifetime
         Assert.Equal(validId, later.NextCursor);
         Assert.Equal(1, later.Rotated);
         await using var verification = await CreateContextAsync();
-        Assert.Equal("valid-secret", protector.Unprotect(await verification.WebhookEndpoints.Where(endpoint => endpoint.Id == validId).Select(endpoint => endpoint.Secret).SingleAsync()));
+        Assert.Equal("valid-secret", protector.Unprotect(await verification.WebhookEndpoints.Where(endpoint => endpoint.Id == validId).Select(endpoint => endpoint.Secret).SingleAsync(cancellationToken: TestContext.Current.CancellationToken)));
     }
 
     [Fact]

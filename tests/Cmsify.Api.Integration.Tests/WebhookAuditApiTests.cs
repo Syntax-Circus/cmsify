@@ -59,9 +59,9 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             var template = new Template { WorkspaceId = seed.WorkspaceId, Name = "Outbox content", Slug = "outbox-content" };
             var version = new TemplateVersion { TemplateId = template.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published, PublishedAt = DateTimeOffset.UtcNow };
             setup.AddRange(template, version);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
             template.CurrentVersionId = version.Id;
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
             templateVersionId = version.Id;
         }
 
@@ -71,14 +71,14 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             slug = "durable-content",
             tags = Array.Empty<string>(),
             fields = Array.Empty<object>()
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         createResponse.EnsureSuccessStatusCode();
-        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var contentId = created.GetProperty("id").GetGuid();
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var evt = await verification.WebhookOutboxEvents.AsNoTracking().SingleAsync(item => item.EntityId == contentId && item.EventType == "content.created");
+        var evt = await verification.WebhookOutboxEvents.AsNoTracking().SingleAsync(item => item.EntityId == contentId && item.EventType == "content.created", cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEqual(Guid.Empty, evt.Id);
         Assert.Equal(seed.WorkspaceId, evt.WorkspaceId);
         Assert.Equal(contentId, evt.EntityId);
@@ -97,24 +97,24 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
         var templateVersionId = await SeedPublishedTemplateVersionAsync(factory, seed.WorkspaceId, "content-mutations");
 
-        var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new { templateVersionId, slug = "mutation-content", tags = Array.Empty<string>(), fields = Array.Empty<object>() });
+        var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new { templateVersionId, slug = "mutation-content", tags = Array.Empty<string>(), fields = Array.Empty<object>() }, cancellationToken: TestContext.Current.CancellationToken);
         create.EnsureSuccessStatusCode();
-        var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
-        var current = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}");
+        var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken)).GetProperty("id").GetGuid();
+        var current = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}", TestContext.Current.CancellationToken);
         current.EnsureSuccessStatusCode();
         using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
         {
             Content = JsonContent.Create(new { slug = "mutation-content-updated", tags = Array.Empty<string>(), fields = Array.Empty<object>() })
         };
         updateRequest.Headers.TryAddWithoutValidation("If-Match", current.Headers.ETag?.ToString());
-        (await client.SendAsync(updateRequest)).EnsureSuccessStatusCode();
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/submit", null)).EnsureSuccessStatusCode();
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/approve", null)).EnsureSuccessStatusCode();
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/publish", null)).EnsureSuccessStatusCode();
+        (await client.SendAsync(updateRequest, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var events = await verification.WebhookOutboxEvents.AsNoTracking().Where(item => item.EntityId == contentId).ToListAsync();
+        var events = await verification.WebhookOutboxEvents.AsNoTracking().Where(item => item.EntityId == contentId).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(6, events.Count);
         Assert.Equal(6, events.Select(item => item.Id).Distinct().Count());
         Assert.Contains(events, item => item.EventType == "content.created");
@@ -148,7 +148,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                 CompositionMode = CompositionMode.Inline,
                 PrimitiveType = PrimitiveType.Text
             });
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new
@@ -157,9 +157,9 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             slug = "create-etag",
             tags = Array.Empty<string>(),
             fields = new[] { new { fieldId, order = 0, valueKind = "Text", textValue = "Created" } }
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         create.EnsureSuccessStatusCode();
-        var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken)).GetProperty("id").GetGuid();
         Assert.NotNull(create.Headers.ETag);
         var updateBody = new
         {
@@ -167,7 +167,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             tags = Array.Empty<string>(),
             fields = new[] { new { fieldId, order = 0, valueKind = "Text", textValue = "Updated" } }
         };
-        var missing = await client.PutAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}", updateBody);
+        var missing = await client.PutAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}", updateBody, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.PreconditionFailed, missing.StatusCode);
         using (var staleRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
         {
@@ -175,7 +175,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         })
         {
             staleRequest.Headers.TryAddWithoutValidation("If-Match", "\"stale-etag\"");
-            Assert.Equal(HttpStatusCode.PreconditionFailed, (await client.SendAsync(staleRequest)).StatusCode);
+            Assert.Equal(HttpStatusCode.PreconditionFailed, (await client.SendAsync(staleRequest, TestContext.Current.CancellationToken)).StatusCode);
         }
         using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
         {
@@ -183,10 +183,10 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         };
         updateRequest.Headers.TryAddWithoutValidation("If-Match", create.Headers.ETag.ToString());
 
-        var update = await client.SendAsync(updateRequest);
+        var update = await client.SendAsync(updateRequest, TestContext.Current.CancellationToken);
 
         update.EnsureSuccessStatusCode();
-        var updatedContent = await update.Content.ReadFromJsonAsync<JsonElement>();
+        var updatedContent = await update.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("create-etag-updated", updatedContent.GetProperty("slug").GetString());
         var updatedField = Assert.Single(updatedContent.GetProperty("fields").EnumerateArray());
         Assert.Equal(fieldId, updatedField.GetProperty("fieldId").GetGuid());
@@ -207,9 +207,9 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             slug = "legacy-full-tick-etag",
             tags = Array.Empty<string>(),
             fields = Array.Empty<object>()
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         create.EnsureSuccessStatusCode();
-        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var contentId = created.GetProperty("id").GetGuid();
         var updatedAt = created.GetProperty("updatedAt").GetDateTimeOffset();
         var normalizedEtag = $"\"{updatedAt.UtcTicks / TimeSpan.TicksPerMicrosecond}\"";
@@ -229,7 +229,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         })
         {
             updateRequest.Headers.TryAddWithoutValidation("If-Match", legacyEtag);
-            using var update = await client.SendAsync(updateRequest);
+            using var update = await client.SendAsync(updateRequest, TestContext.Current.CancellationToken);
             update.EnsureSuccessStatusCode();
         }
 
@@ -238,7 +238,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             Content = JsonContent.Create(updateBody)
         };
         staleRequest.Headers.TryAddWithoutValidation("If-Match", legacyEtag);
-        using var stale = await client.SendAsync(staleRequest);
+        using var stale = await client.SendAsync(staleRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.PreconditionFailed, stale.StatusCode);
     }
 
@@ -249,18 +249,18 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         var seed = await SeedApiClientAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
-        var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/templates", new { name = "Publish outbox", slug = "publish-outbox" });
+        var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/templates", new { name = "Publish outbox", slug = "publish-outbox" }, cancellationToken: TestContext.Current.CancellationToken);
         create.EnsureSuccessStatusCode();
-        var template = await create.Content.ReadFromJsonAsync<JsonElement>();
+        var template = await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var templateId = template.GetProperty("id").GetGuid();
         var versionNumber = template.GetProperty("currentVersion").GetProperty("versionNumber").GetInt32();
 
-        (await client.PutAsync($"/api/v1/workspaces/{seed.WorkspaceId}/templates/{templateId}/versions/{versionNumber}/publish", null)).EnsureSuccessStatusCode();
+        (await client.PutAsync($"/api/v1/workspaces/{seed.WorkspaceId}/templates/{templateId}/versions/{versionNumber}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var version = await verification.TemplateVersions.AsNoTracking().SingleAsync(item => item.TemplateId == templateId && item.VersionNumber == versionNumber);
-        var evt = await verification.WebhookOutboxEvents.AsNoTracking().SingleAsync(item => item.EntityId == version.Id && item.EventType == "template.version_published");
+        var version = await verification.TemplateVersions.AsNoTracking().SingleAsync(item => item.TemplateId == templateId && item.VersionNumber == versionNumber, cancellationToken: TestContext.Current.CancellationToken);
+        var evt = await verification.WebhookOutboxEvents.AsNoTracking().SingleAsync(item => item.EntityId == version.Id && item.EventType == "template.version_published", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(TemplateVersionStatus.Published, version.Status);
         Assert.Equal(seed.WorkspaceId, evt.WorkspaceId);
         Assert.Equal(version.Id, evt.Payload.GetProperty("templateVersionId").GetGuid());
@@ -277,16 +277,16 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         using (var setupScope = factory.Services.CreateScope())
         {
             var setup = setupScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            await setup.Database.ExecuteSqlRawAsync("ALTER TABLE webhook_outbox_events ADD CONSTRAINT reject_content_created CHECK (event_type <> 'content.created')");
+            await setup.Database.ExecuteSqlRawAsync("ALTER TABLE webhook_outbox_events ADD CONSTRAINT reject_content_created CHECK (event_type <> 'content.created')", cancellationToken: TestContext.Current.CancellationToken);
         }
 
-        var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new { templateVersionId, slug = "rolled-back-content", tags = Array.Empty<string>(), fields = Array.Empty<object>() });
+        var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new { templateVersionId, slug = "rolled-back-content", tags = Array.Empty<string>(), fields = Array.Empty<object>() }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.InternalServerError, response.StatusCode);
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        Assert.False(await verification.ContentItems.AnyAsync(item => item.WorkspaceId == seed.WorkspaceId && item.Slug == "rolled-back-content"));
-        Assert.False(await verification.WebhookOutboxEvents.AnyAsync(item => item.EventType == "content.created"));
+        Assert.False(await verification.ContentItems.AnyAsync(item => item.WorkspaceId == seed.WorkspaceId && item.Slug == "rolled-back-content", cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await verification.WebhookOutboxEvents.AnyAsync(item => item.EventType == "content.created", cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -314,15 +314,15 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                 PublishLeaseExpiresAt = DateTimeOffset.Parse("2026-08-27T00:05:00Z")
             };
             setup.ContentItems.Add(content);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
             contentId = content.Id;
         }
 
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/publish", null)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var persisted = await verification.ContentItems.AsNoTracking().SingleAsync(item => item.Id == contentId);
+        var persisted = await verification.ContentItems.AsNoTracking().SingleAsync(item => item.Id == contentId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ContentStatus.Published, persisted.Status);
         Assert.Null(persisted.PublishLeaseOwner);
         Assert.Null(persisted.PublishLeaseToken);
@@ -367,19 +367,17 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                     PublishLeaseToken = Guid.CreateVersion7(),
                     PublishLeaseExpiresAt = DateTimeOffset.Parse("2026-08-27T00:05:00Z")
                 });
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        (await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{seed.WorkspaceId}/content/{sourceId}/link-translation",
-            new { targetContentItemId = targetId })).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{sourceId}/link-translation", new { targetContentItemId = targetId }, cancellationToken: TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
         var persisted = await verification.ContentItems.AsNoTracking()
             .Where(item => item.Id == sourceId || item.Id == targetId)
             .OrderBy(item => item.Id)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, persisted.Count);
         Assert.All(persisted, item =>
         {
@@ -403,7 +401,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         using (var scope = factory.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var userId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+            var userId = await dbContext.Users.Select(user => user.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
             var endpoint = new WebhookEndpoint
             {
                 WorkspaceId = seed.WorkspaceId,
@@ -424,11 +422,11 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                 IsDeadLetter = true,
                 DeadLetteredAt = deadLetteredAt
             });
-            await dbContext.SaveChangesAsync();
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
             endpointId = endpoint.Id;
         }
 
-        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries?isFailed=true");
+        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries?isFailed=true", cancellationToken: TestContext.Current.CancellationToken);
 
         var item = response.GetProperty("items")[0];
         Assert.Equal(eventId, item.GetProperty("eventId").GetGuid());
@@ -451,16 +449,16 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             url = "https://8.8.8.8/revalidate",
             secret = "plain-secret",
             events = new[] { "content.published" }
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
-        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var endpointId = created.GetProperty("endpoint").GetProperty("id").GetGuid();
         Assert.Equal("plain-secret", created.GetProperty("secret").GetString());
 
         using (var scope = factory.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var storedSecret = await dbContext.WebhookEndpoints.Where(endpoint => endpoint.Id == endpointId).Select(endpoint => endpoint.Secret).FirstAsync();
+            var storedSecret = await dbContext.WebhookEndpoints.Where(endpoint => endpoint.Id == endpointId).Select(endpoint => endpoint.Secret).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
             Assert.NotEqual("plain-secret", storedSecret);
 
             dbContext.WebhookDeliveryLogs.Add(new WebhookDeliveryLog
@@ -473,19 +471,19 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                 IsFailed = true,
                 CreatedAt = DateTimeOffset.UtcNow
             });
-            await dbContext.SaveChangesAsync();
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        var getResponse = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}");
+        var getResponse = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}", TestContext.Current.CancellationToken);
         getResponse.EnsureSuccessStatusCode();
-        var rotateResponse = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/rotate-secret", null);
+        var rotateResponse = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/rotate-secret", null, TestContext.Current.CancellationToken);
         rotateResponse.EnsureSuccessStatusCode();
-        var rotated = await rotateResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var rotated = await rotateResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.StartsWith("whsec_", rotated.GetProperty("secret").GetString());
 
-        var deliveries = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries?isFailed=true");
+        var deliveries = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries?isFailed=true", cancellationToken: TestContext.Current.CancellationToken);
         var deliveryId = deliveries.GetProperty("items")[0].GetProperty("id").GetGuid();
-        var retryResponse = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries/{deliveryId}/retry", null);
+        var retryResponse = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries/{deliveryId}/retry", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.Accepted, retryResponse.StatusCode);
     }
@@ -506,7 +504,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         using (var scope = factory.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var userId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+            var userId = await dbContext.Users.Select(user => user.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
             var endpoint = new WebhookEndpoint { WorkspaceId = seed.WorkspaceId, Name = "Manual retry", Url = "https://example.test/retry", Secret = "secret", CreatedByUserId = userId };
             var delivery = new WebhookDeliveryLog
             {
@@ -524,17 +522,17 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                 LeaseExpiresAt = attemptedAt.AddMinutes(10)
             };
             dbContext.AddRange(endpoint, delivery);
-            await dbContext.SaveChangesAsync();
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
             endpointId = endpoint.Id;
             deliveryId = delivery.Id;
         }
 
-        var response = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries/{deliveryId}/retry", null);
+        var response = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries/{deliveryId}/retry", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.Accepted, response.StatusCode);
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var persisted = await verification.WebhookDeliveryLogs.AsNoTracking().SingleAsync(log => log.Id == deliveryId);
+        var persisted = await verification.WebhookDeliveryLogs.AsNoTracking().SingleAsync(log => log.Id == deliveryId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(persisted.IsFailed);
         Assert.False(persisted.IsDeadLetter);
         Assert.Null(persisted.DeadLetteredAt);
@@ -561,7 +559,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         using (var scope = factory.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var userId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+            var userId = await dbContext.Users.Select(user => user.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
             var endpoint = new WebhookEndpoint { WorkspaceId = seed.WorkspaceId, Name = "In flight", Url = "https://example.test/in-flight", Secret = "secret", CreatedByUserId = userId };
             var delivery = new WebhookDeliveryLog
             {
@@ -574,17 +572,17 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                 NextRetryAt = now
             };
             dbContext.AddRange(endpoint, delivery);
-            await dbContext.SaveChangesAsync();
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
             endpointId = endpoint.Id;
             deliveryId = delivery.Id;
         }
 
-        var response = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries/{deliveryId}/retry", null);
+        var response = await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks/{endpointId}/deliveries/{deliveryId}/retry", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var persisted = await verification.WebhookDeliveryLogs.AsNoTracking().SingleAsync(log => log.Id == deliveryId);
+        var persisted = await verification.WebhookDeliveryLogs.AsNoTracking().SingleAsync(log => log.Id == deliveryId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("active-worker", persisted.LeaseOwner);
         Assert.NotNull(persisted.LeaseToken);
         Assert.Equal(now.AddMinutes(5), persisted.LeaseExpiresAt);
@@ -603,7 +601,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             name = "Unsafe",
             url = "https://127.0.0.1/hooks",
             events = new[] { "content.published" }
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
     }
@@ -616,17 +614,17 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         var seed = await SeedApiClientAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}");
+        var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}", TestContext.Current.CancellationToken);
         workspaceResponse.EnsureSuccessStatusCode();
         using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}")
         {
             Content = JsonContent.Create(new { name = "Updated Default", slug = "updated-default", description = "Updated" })
         };
         updateRequest.Headers.TryAddWithoutValidation("If-Match", workspaceResponse.Headers.ETag?.ToString());
-        var updateResponse = await client.SendAsync(updateRequest);
+        var updateResponse = await client.SendAsync(updateRequest, TestContext.Current.CancellationToken);
         updateResponse.EnsureSuccessStatusCode();
 
-        var audit = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/audit?entityType=Workspace&action=Updated&pageSize=10");
+        var audit = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/audit?entityType=Workspace&action=Updated&pageSize=10", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(audit.GetProperty("totalCount").GetInt32() >= 1);
         var item = audit.GetProperty("items")[0];
@@ -643,14 +641,14 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         var seed = await SeedApiClientAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}");
+        var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}", TestContext.Current.CancellationToken);
         workspaceResponse.EnsureSuccessStatusCode();
         using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}")
         {
             Content = JsonContent.Create(new { name = "Outbox durable workspace", slug = "outbox-durable-workspace", description = "Durable webhook event" })
         };
         updateRequest.Headers.TryAddWithoutValidation("If-Match", workspaceResponse.Headers.ETag?.ToString());
-        (await client.SendAsync(updateRequest)).EnsureSuccessStatusCode();
+        (await client.SendAsync(updateRequest, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
@@ -658,7 +656,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             SELECT COUNT(*)::integer AS "Value"
             FROM webhook_outbox_events
             WHERE event_type = 'workspace.updated'
-            """).SingleAsync();
+            """).SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, eventCount);
     }

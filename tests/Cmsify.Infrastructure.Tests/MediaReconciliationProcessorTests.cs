@@ -25,7 +25,7 @@ public sealed class MediaReconciliationProcessorTests
         storage.DeleteAsync("failed", Arg.Any<CancellationToken>()).Returns<Task>(_ => throw new IOException("provider detail"));
         var processor = CreateProcessor(repository, storage, new FixedTimeProvider(now));
 
-        await processor.RunCycleAsync("worker", now);
+        await processor.RunCycleAsync("worker", now, TestContext.Current.CancellationToken);
 
         await storage.Received(1).DeleteAsync("success", Arg.Any<CancellationToken>());
         await repository.Received(1).CompleteDeletionAsync(success, now, Arg.Any<CancellationToken>());
@@ -45,7 +45,7 @@ public sealed class MediaReconciliationProcessorTests
         repository.PrepareDeletionAsync(orphan, now, TimeSpan.FromSeconds(300), Arg.Any<CancellationToken>())
             .Returns(DeletionPreparationResult.Owned);
 
-        await CreateProcessor(repository, storage, new FixedTimeProvider(now)).RunCycleAsync("worker", now);
+        await CreateProcessor(repository, storage, new FixedTimeProvider(now)).RunCycleAsync("worker", now, TestContext.Current.CancellationToken);
 
         await storage.DidNotReceive().DeleteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
         await repository.DidNotReceive().CompleteDeletionAsync(Arg.Any<MediaDeletionClaim>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
@@ -67,7 +67,7 @@ public sealed class MediaReconciliationProcessorTests
             .Returns(DeletionPreparationResult.Ready);
         repository.CompleteDeletionAsync(claim, afterDelete, Arg.Any<CancellationToken>()).Returns(false);
 
-        await CreateProcessor(repository, storage, timeProvider).RunCycleAsync("worker", cycleStarted);
+        await CreateProcessor(repository, storage, timeProvider).RunCycleAsync("worker", cycleStarted, TestContext.Current.CancellationToken);
 
         await repository.Received(1).PrepareDeletionAsync(claim, beforeDelete, TimeSpan.FromSeconds(300), Arg.Any<CancellationToken>());
         await repository.Received(1).CompleteDeletionAsync(claim, afterDelete, Arg.Any<CancellationToken>());
@@ -86,7 +86,7 @@ public sealed class MediaReconciliationProcessorTests
         storage.GetMetadataAsync("present", Arg.Any<CancellationToken>()).Returns(
             new StorageObjectMetadata("present", 1, null, now));
 
-        await CreateProcessor(repository, storage).RunCycleAsync("worker", now);
+        await CreateProcessor(repository, storage).RunCycleAsync("worker", now, TestContext.Current.CancellationToken);
 
         await repository.Received(1).RecordBlobMissingAsync(available.Id, now, Arg.Any<CancellationToken>());
         await repository.Received(1).RecordBlobPresentAsync(missing.Id, now, Arg.Any<CancellationToken>());
@@ -114,7 +114,7 @@ public sealed class MediaReconciliationProcessorTests
         repository.StorageKeyExistsAsync("local", "cmsify/media/young", Arg.Any<CancellationToken>()).Returns(false);
         repository.StorageKeyExistsAsync("local", "cmsify/media/tracked", Arg.Any<CancellationToken>()).Returns(true);
 
-        await CreateProcessor(repository, storage).RunCycleAsync("worker", now);
+        await CreateProcessor(repository, storage).RunCycleAsync("worker", now, TestContext.Current.CancellationToken);
 
         await repository.Received(1).EnqueueOrphanDeletionAsync("local", "cmsify/media/old", now, Arg.Any<CancellationToken>());
         await repository.DidNotReceive().EnqueueOrphanDeletionAsync("local", "cmsify/media/young", now, Arg.Any<CancellationToken>());
@@ -149,7 +149,7 @@ public sealed class MediaReconciliationProcessorTests
             repository,
             storage,
             new SequenceTimeProvider(claimedAt, completedAt, secondPrefixClaimedAt))
-            .RunCycleAsync("worker", cycleStarted);
+            .RunCycleAsync("worker", cycleStarted, TestContext.Current.CancellationToken);
 
         await repository.Received(1).CompleteCheckpointAsync(
             checkpoint, null, true, completedAt, Arg.Any<CancellationToken>());

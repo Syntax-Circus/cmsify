@@ -16,7 +16,7 @@ public sealed class ReconnectModalRenderingTests : IAsyncLifetime
     {
         var client = factory.CreateClient();
 
-        var markup = await client.GetStringAsync("/");
+        var markup = await client.GetStringAsync("/", TestContext.Current.CancellationToken);
 
         markup.ShouldContain("id=\"components-reconnect-modal\"");
         markup.ShouldContain("class=\"cms-reconnect-modal\"");

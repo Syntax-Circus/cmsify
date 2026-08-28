@@ -43,9 +43,9 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
                 PublishAt = dueAt
             };
             setup.AddRange(workspace, template, version, content);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
             template.CurrentVersionId = version.Id;
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         await using var firstContext = await CreateContextAsync();
@@ -57,11 +57,11 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
         var results = await Task.WhenAll(RunAsync(first, "worker-a", dueAt, release), RunAsync(second, "worker-b", dueAt, release));
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.ContentItems.SingleAsync(item => item.Slug == "due-content");
+        var persisted = await verification.ContentItems.SingleAsync(item => item.Slug == "due-content", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ContentStatus.Published, persisted.Status);
         Assert.Null(persisted.PublishAt);
-        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == persisted.Id));
-        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == persisted.Id && item.EventType == "content.published"));
+        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == persisted.Id, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == persisted.Id && item.EventType == "content.published", cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(1, results.Count(result => result));
     }
 
@@ -72,24 +72,24 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
         var contentId = await SeedDueContentAsync("lease-content", now);
         await using var firstContext = await CreateContextAsync();
         var first = CreateDispatcher(firstContext);
-        var firstClaim = Assert.Single(await first.ClaimDueAsync("worker-a", now, TimeSpan.FromMinutes(1), 1));
+        var firstClaim = Assert.Single(await first.ClaimDueAsync("worker-a", now, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
 
         await using var secondContext = await CreateContextAsync();
         var second = CreateDispatcher(secondContext);
-        Assert.Empty(await second.ClaimDueAsync("worker-b", now.AddSeconds(30), TimeSpan.FromMinutes(1), 1));
-        var secondClaim = Assert.Single(await second.ClaimDueAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1));
+        Assert.Empty(await second.ClaimDueAsync("worker-b", now.AddSeconds(30), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
+        var secondClaim = Assert.Single(await second.ClaimDueAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         Assert.NotEqual(firstClaim.LeaseToken, secondClaim.LeaseToken);
-        Assert.False(await first.CompleteClaimAsync(firstClaim, now.AddMinutes(1)));
-        Assert.True(await second.CompleteClaimAsync(secondClaim, now.AddMinutes(1)));
+        Assert.False(await first.CompleteClaimAsync(firstClaim, now.AddMinutes(1), TestContext.Current.CancellationToken));
+        Assert.True(await second.CompleteClaimAsync(secondClaim, now.AddMinutes(1), TestContext.Current.CancellationToken));
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.ContentItems.SingleAsync(item => item.Id == contentId);
+        var persisted = await verification.ContentItems.SingleAsync(item => item.Id == contentId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ContentStatus.Published, persisted.Status);
         Assert.Null(persisted.PublishLeaseOwner);
         Assert.Null(persisted.PublishLeaseToken);
         Assert.Null(persisted.PublishLeaseExpiresAt);
-        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == contentId));
-        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId && item.EventType == "content.published"));
+        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == contentId, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId && item.EventType == "content.published", cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -99,30 +99,30 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
         var contentId = await SeedDueContentAsync("rollback-content", now);
         await using var firstContext = await CreateContextAsync();
         var first = CreateDispatcher(firstContext);
-        var firstClaim = Assert.Single(await first.ClaimDueAsync("worker-a", now, TimeSpan.FromMinutes(1), 1));
-        await firstContext.Database.ExecuteSqlRawAsync("ALTER TABLE webhook_outbox_events ADD CONSTRAINT reject_scheduled_publish CHECK (event_type <> 'content.published')");
+        var firstClaim = Assert.Single(await first.ClaimDueAsync("worker-a", now, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
+        await firstContext.Database.ExecuteSqlRawAsync("ALTER TABLE webhook_outbox_events ADD CONSTRAINT reject_scheduled_publish CHECK (event_type <> 'content.published')", cancellationToken: TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<DbUpdateException>(() => first.CompleteClaimAsync(firstClaim, now));
+        await Assert.ThrowsAsync<DbUpdateException>(() => first.CompleteClaimAsync(firstClaim, now, TestContext.Current.CancellationToken));
 
         await using (var rolledBack = await CreateContextAsync())
         {
-            var persisted = await rolledBack.ContentItems.SingleAsync(item => item.Id == contentId);
+            var persisted = await rolledBack.ContentItems.SingleAsync(item => item.Id == contentId, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(ContentStatus.Approved, persisted.Status);
             Assert.Equal(now, persisted.PublishAt);
             Assert.Equal("worker-a", persisted.PublishLeaseOwner);
             Assert.Equal(firstClaim.LeaseToken, persisted.PublishLeaseToken);
-            Assert.Equal(0, await rolledBack.ContentVersions.CountAsync(item => item.ContentItemId == contentId));
-            Assert.Equal(0, await rolledBack.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId));
+            Assert.Equal(0, await rolledBack.ContentVersions.CountAsync(item => item.ContentItemId == contentId, cancellationToken: TestContext.Current.CancellationToken));
+            Assert.Equal(0, await rolledBack.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId, cancellationToken: TestContext.Current.CancellationToken));
         }
 
-        await firstContext.Database.ExecuteSqlRawAsync("ALTER TABLE webhook_outbox_events DROP CONSTRAINT reject_scheduled_publish");
+        await firstContext.Database.ExecuteSqlRawAsync("ALTER TABLE webhook_outbox_events DROP CONSTRAINT reject_scheduled_publish", cancellationToken: TestContext.Current.CancellationToken);
         await using var recoveryContext = await CreateContextAsync();
         var recovery = CreateDispatcher(recoveryContext);
-        var recoveryClaim = Assert.Single(await recovery.ClaimDueAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1));
-        Assert.True(await recovery.CompleteClaimAsync(recoveryClaim, now.AddMinutes(1)));
+        var recoveryClaim = Assert.Single(await recovery.ClaimDueAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
+        Assert.True(await recovery.CompleteClaimAsync(recoveryClaim, now.AddMinutes(1), TestContext.Current.CancellationToken));
         await using var verification = await CreateContextAsync();
-        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == contentId));
-        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId && item.EventType == "content.published"));
+        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == contentId, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId && item.EventType == "content.published", cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -133,20 +133,19 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
         var leaseToken = Guid.CreateVersion7();
         await using (var setup = await CreateContextAsync())
         {
-            var content = await setup.ContentItems.SingleAsync(item => item.Id == contentId);
+            var content = await setup.ContentItems.SingleAsync(item => item.Id == contentId, cancellationToken: TestContext.Current.CancellationToken);
             content.PublishLeaseOwner = "expired-worker";
             content.PublishLeaseToken = leaseToken;
             content.PublishLeaseExpiresAt = now.AddTicks(-1);
-            await setup.SaveChangesAsync();
+            await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         await using var worker = await CreateContextAsync();
-        var completed = await CreateDispatcher(worker).CompleteClaimAsync(
-            new ScheduledContentClaimDto(contentId, "expired-worker", leaseToken), now);
+        var completed = await CreateDispatcher(worker).CompleteClaimAsync(new ScheduledContentClaimDto(contentId, "expired-worker", leaseToken), now, TestContext.Current.CancellationToken);
 
         Assert.False(completed);
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.ContentItems.SingleAsync(item => item.Id == contentId);
+        var persisted = await verification.ContentItems.SingleAsync(item => item.Id == contentId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ContentStatus.Approved, persisted.Status);
         Assert.Equal("expired-worker", persisted.PublishLeaseOwner);
         Assert.Equal(leaseToken, persisted.PublishLeaseToken);
@@ -158,23 +157,23 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
         var now = DateTimeOffset.Parse("2026-08-26T12:40:00Z");
         var contentId = await SeedDueContentAsync("schedule-lock", now);
         await using var claimantContext = await CreateContextAsync();
-        var claim = Assert.Single(await CreateDispatcher(claimantContext).ClaimDueAsync("worker-a", now, TimeSpan.FromSeconds(1), 1));
+        var claim = Assert.Single(await CreateDispatcher(claimantContext).ClaimDueAsync("worker-a", now, TimeSpan.FromSeconds(1), 1, TestContext.Current.CancellationToken));
         var pause = new PauseAfterForUpdateInterceptor();
         await using var completionContext = await CreateContextAsync(pause);
-        var completing = CreateDispatcher(completionContext).CompleteClaimAsync(claim, now);
-        await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var completing = CreateDispatcher(completionContext).CompleteClaimAsync(claim, now, TestContext.Current.CancellationToken);
+        await pause.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         await using var reclaimerContext = await CreateContextAsync();
-        Assert.Empty(await CreateDispatcher(reclaimerContext).ClaimDueAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1));
+        Assert.Empty(await CreateDispatcher(reclaimerContext).ClaimDueAsync("worker-b", now.AddMinutes(1), TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
         pause.Release.TrySetResult();
         Assert.True(await completing);
 
         await using var verification = await CreateContextAsync();
-        var persisted = await verification.ContentItems.SingleAsync(item => item.Id == contentId);
+        var persisted = await verification.ContentItems.SingleAsync(item => item.Id == contentId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ContentStatus.Published, persisted.Status);
         Assert.Null(persisted.PublishLeaseOwner);
-        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == contentId));
-        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId && item.EventType == "content.published"));
+        Assert.Equal(1, await verification.ContentVersions.CountAsync(item => item.ContentItemId == contentId, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == contentId && item.EventType == "content.published", cancellationToken: TestContext.Current.CancellationToken));
     }
 
     private static async Task<bool> RunAsync(IScheduledPublishingDispatcher dispatcher, string workerId, DateTimeOffset now, ConcurrentStartGate? release = null)

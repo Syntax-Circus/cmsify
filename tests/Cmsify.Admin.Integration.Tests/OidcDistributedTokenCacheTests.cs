@@ -53,8 +53,8 @@ public sealed class OidcDistributedTokenCacheTests : IAsyncLifetime
         firstCache.ShouldNotBeSameAs(secondCache);
 
         var entry = new ServerTokenCacheEntry("distributed-access", "distributed-refresh", "distributed-id", DateTimeOffset.UtcNow.AddMinutes(5));
-        await firstCache.SetAsync("user:oidc-admin", entry);
-        var shared = await secondCache.GetAsync("user:oidc-admin");
+        await firstCache.SetAsync("user:oidc-admin", entry, TestContext.Current.CancellationToken);
+        var shared = await secondCache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken);
         shared.ShouldBe(entry);
 
         await using var connection = await ConnectionMultiplexer.ConnectAsync(redis.GetConnectionString());
@@ -68,8 +68,8 @@ public sealed class OidcDistributedTokenCacheTests : IAsyncLifetime
         payload.RootElement.GetProperty("idToken").GetString().ShouldBe("distributed-id");
         payload.RootElement.TryGetProperty("expiresAtUtc", out _).ShouldBeTrue();
 
-        await firstCache.RemoveAsync("user:oidc-admin");
-        (await secondCache.GetAsync("user:oidc-admin")).ShouldBeNull();
+        await firstCache.RemoveAsync("user:oidc-admin", TestContext.Current.CancellationToken);
+        (await secondCache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldBeNull();
         (await database.KeyExistsAsync(prefix + "user:oidc-admin")).ShouldBeFalse();
     }
 
@@ -103,9 +103,7 @@ public sealed class OidcDistributedTokenCacheTests : IAsyncLifetime
         first.Services.ShouldNotBeSameAs(second.Services);
         firstDistributed.ShouldNotBeSameAs(secondDistributed);
         firstCache.ShouldNotBeSameAs(secondCache);
-        await firstCache.SetAsync(
-            "user:oidc-admin",
-            new ServerTokenCacheEntry("expired-access", "distributed-refresh", "distributed-id", DateTimeOffset.UtcNow.AddMinutes(-1)));
+        await firstCache.SetAsync("user:oidc-admin", new ServerTokenCacheEntry("expired-access", "distributed-refresh", "distributed-id", DateTimeOffset.UtcNow.AddMinutes(-1)), TestContext.Current.CancellationToken);
 
         await RenderAsync<DistributedRefreshCircuitProbe>(second);
 
@@ -113,7 +111,7 @@ public sealed class OidcDistributedTokenCacheTests : IAsyncLifetime
             request.GrantType == "refresh_token" && request.RefreshToken == "distributed-refresh");
         (second.ObservedRequests.Single(request => request.RequestUri!.AbsolutePath == "/test/distributed-refresh")
             .Headers.Authorization?.ToString()).ShouldBe("Bearer refreshed-access-token");
-        var replacement = await firstCache.GetAsync("user:oidc-admin");
+        var replacement = await firstCache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken);
         replacement.ShouldNotBeNull();
         replacement.AccessToken.ShouldBe("refreshed-access-token");
         replacement.RefreshToken.ShouldBe("refresh-token");
@@ -128,8 +126,8 @@ public sealed class OidcDistributedTokenCacheTests : IAsyncLifetime
         payload.RootElement.GetProperty("refreshToken").GetString().ShouldBe("refresh-token");
         payload.RootElement.TryGetProperty("expiresAtUtc", out _).ShouldBeTrue();
 
-        await firstCache.RemoveAsync("user:oidc-admin");
-        (await secondCache.GetAsync("user:oidc-admin")).ShouldBeNull();
+        await firstCache.RemoveAsync("user:oidc-admin", TestContext.Current.CancellationToken);
+        (await secondCache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldBeNull();
         (await database.KeyExistsAsync(prefix + "user:oidc-admin")).ShouldBeFalse();
 
         var requestCountAfterEviction = second.ObservedRequests.Count;

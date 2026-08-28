@@ -69,40 +69,40 @@ public sealed class MediaApiTests : IAsyncLifetime
         upload.Add(file, "file", "hello.txt");
         upload.Add(new StringContent("Alt text"), "altText");
 
-        var createResponse = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload);
+        var createResponse = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload, TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
-        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var assetId = created.GetProperty("id").GetGuid();
 
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var persisted = await db.MediaAssets.SingleAsync(asset => asset.Id == assetId);
+            var persisted = await db.MediaAssets.SingleAsync(asset => asset.Id == assetId, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(MediaBlobState.Available, persisted.BlobState);
             Assert.StartsWith($"cmsify/media/{workspaceId}/", persisted.StorageKey, StringComparison.Ordinal);
             Assert.Contains($"/{assetId}_hello.txt", persisted.StorageKey, StringComparison.Ordinal);
         }
 
-        var fileResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file");
+        var fileResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file", TestContext.Current.CancellationToken);
         fileResponse.EnsureSuccessStatusCode();
         Assert.Equal("text/plain", fileResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal("hello media", await fileResponse.Content.ReadAsStringAsync());
+        Assert.Equal("hello media", await fileResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
 
-        var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}");
+        var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}", TestContext.Current.CancellationToken);
         getResponse.EnsureSuccessStatusCode();
         var etag = getResponse.Headers.ETag?.ToString();
         Assert.False(string.IsNullOrWhiteSpace(etag));
 
         using var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/workspaces/{workspaceId}/media/{assetId}");
         deleteRequest.Headers.TryAddWithoutValidation("If-Match", etag);
-        var deleteResponse = await client.SendAsync(deleteRequest);
+        var deleteResponse = await client.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var deleted = await db.MediaAssets.IgnoreQueryFilters().SingleAsync(asset => asset.Id == assetId);
-            var intent = await db.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == assetId);
+            var deleted = await db.MediaAssets.IgnoreQueryFilters().SingleAsync(asset => asset.Id == assetId, cancellationToken: TestContext.Current.CancellationToken);
+            var intent = await db.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == assetId, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(MediaBlobState.DeletePending, deleted.BlobState);
             Assert.True(deleted.IsDeleted);
             Assert.Equal("user_delete", intent.Reason);
@@ -129,16 +129,16 @@ public sealed class MediaApiTests : IAsyncLifetime
                 db.MediaAssets.Add(asset);
                 ids.Add(asset.Id);
             }
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        var list = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{workspaceId}/media?page=1&pageSize=100");
+        var list = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{workspaceId}/media?page=1&pageSize=100", cancellationToken: TestContext.Current.CancellationToken);
         var listedIds = list.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetGuid()).ToArray();
         Assert.DoesNotContain(listedIds, id => ids.Contains(id));
         foreach (var id in ids)
         {
-            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{id}")).StatusCode);
-            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{id}/file")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{id}", TestContext.Current.CancellationToken)).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{id}/file", TestContext.Current.CancellationToken)).StatusCode);
         }
     }
 
@@ -155,12 +155,12 @@ public sealed class MediaApiTests : IAsyncLifetime
             var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
             var asset = NewAsset(workspaceId, "missing.txt", MediaBlobState.Available);
             db.MediaAssets.Add(asset);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             assetId = asset.Id;
         }
 
-        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file");
-        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file", TestContext.Current.CancellationToken);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.EndsWith("/media-blob-missing", problem.GetProperty("type").GetString(), StringComparison.Ordinal);
@@ -180,13 +180,13 @@ public sealed class MediaApiTests : IAsyncLifetime
         file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         upload.Add(file, "file", "partial.txt");
 
-        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload);
+        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var failed = await db.MediaAssets.SingleAsync(asset => asset.FileName == "partial.txt");
-        var intent = await db.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == failed.Id);
+        var failed = await db.MediaAssets.SingleAsync(asset => asset.FileName == "partial.txt", cancellationToken: TestContext.Current.CancellationToken);
+        var intent = await db.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == failed.Id, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(MediaBlobState.UploadFailed, failed.BlobState);
         Assert.Equal("upload_failed", intent.Reason);
         Assert.True(intent.NextAttemptAt <= DateTimeOffset.UtcNow);
@@ -206,7 +206,7 @@ public sealed class MediaApiTests : IAsyncLifetime
         file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         upload.Add(file, "file", $"{new string('x', 256)}.txt");
 
-        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload);
+        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Empty(storage.StoredKeys);
@@ -233,14 +233,14 @@ public sealed class MediaApiTests : IAsyncLifetime
         file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         upload.Add(file, "file", "concurrent.txt");
 
-        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload);
+        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         await using var scope = factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var failed = await db.MediaAssets.SingleAsync(asset => asset.FileName == "concurrent.txt");
+        var failed = await db.MediaAssets.SingleAsync(asset => asset.FileName == "concurrent.txt", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(MediaBlobState.UploadFailed, failed.BlobState);
-        Assert.Equal("upload_failed", (await db.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == failed.Id)).Reason);
+        Assert.Equal("upload_failed", (await db.MediaDeletionIntents.SingleAsync(item => item.MediaAssetId == failed.Id, cancellationToken: TestContext.Current.CancellationToken)).Reason);
         Assert.Equal(failed.StorageKey, Assert.Single(storage.StoredKeys));
     }
 
@@ -258,15 +258,15 @@ public sealed class MediaApiTests : IAsyncLifetime
             var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
             var asset = NewAsset(workspaceId, "disposal.txt", MediaBlobState.Available);
             db.MediaAssets.Add(asset);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             assetId = asset.Id;
         }
         storage.ReadResults["default/disposal.txt"] = Encoding.UTF8.GetBytes("dispose me");
 
-        using (var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file"))
+        using (var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file", TestContext.Current.CancellationToken))
         {
             response.EnsureSuccessStatusCode();
-            Assert.Equal("dispose me", await response.Content.ReadAsStringAsync());
+            Assert.Equal("dispose me", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         }
 
         Assert.True(storage.LastReadStream!.WasDisposed);
@@ -281,11 +281,11 @@ public sealed class MediaApiTests : IAsyncLifetime
         var assetId = await SeedReferencedMediaAsync(factory, workspaceId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
-        var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}");
+        var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}", TestContext.Current.CancellationToken);
         getResponse.EnsureSuccessStatusCode();
         using var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/workspaces/{workspaceId}/media/{assetId}");
         deleteRequest.Headers.TryAddWithoutValidation("If-Match", getResponse.Headers.ETag?.ToString());
-        var deleteResponse = await client.SendAsync(deleteRequest);
+        var deleteResponse = await client.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Conflict, deleteResponse.StatusCode);
     }
@@ -303,19 +303,19 @@ public sealed class MediaApiTests : IAsyncLifetime
             var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
             var asset = NewAsset(workspaceId, "etag.txt", MediaBlobState.Available);
             db.MediaAssets.Add(asset);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             assetId = asset.Id;
         }
         using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/workspaces/{workspaceId}/media/{assetId}");
         request.Headers.TryAddWithoutValidation("If-Match", "\"stale\"");
 
-        var response = await client.SendAsync(request);
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.PreconditionFailed, response.StatusCode);
         await using var verificationScope = factory.Services.CreateAsyncScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        Assert.False((await verification.MediaAssets.SingleAsync(asset => asset.Id == assetId)).IsDeleted);
-        Assert.False(await verification.MediaDeletionIntents.AnyAsync(item => item.MediaAssetId == assetId));
+        Assert.False((await verification.MediaAssets.SingleAsync(asset => asset.Id == assetId, cancellationToken: TestContext.Current.CancellationToken)).IsDeleted);
+        Assert.False(await verification.MediaDeletionIntents.AnyAsync(item => item.MediaAssetId == assetId, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -331,7 +331,7 @@ public sealed class MediaApiTests : IAsyncLifetime
             var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
             var other = new Workspace { Name = "Other media", Slug = $"other-media-{Guid.NewGuid():N}" };
             db.Workspaces.Add(other);
-            var adminUserId = await db.Users.Select(user => user.Id).FirstAsync();
+            var adminUserId = await db.Users.Select(user => user.Id).FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
             db.ApiClients.Add(new ApiClient
             {
                 Name = $"Media reader {Guid.NewGuid():N}",
@@ -340,18 +340,18 @@ public sealed class MediaApiTests : IAsyncLifetime
                 WorkspaceId = workspaceId,
                 CreatedByUserId = adminUserId
             });
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             otherWorkspaceId = other.Id;
         }
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", readerToken);
 
-        var assigned = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media?page=1&pageSize=10");
+        var assigned = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media?page=1&pageSize=10", TestContext.Current.CancellationToken);
         using var upload = new MultipartFormDataContent();
         using var file = new ByteArrayContent(Encoding.UTF8.GetBytes("forbidden"));
         file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         upload.Add(file, "file", "forbidden.txt");
-        var write = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload);
-        var isolated = await client.GetAsync($"/api/v1/workspaces/{otherWorkspaceId}/media?page=1&pageSize=10");
+        var write = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/media", upload, TestContext.Current.CancellationToken);
+        var isolated = await client.GetAsync($"/api/v1/workspaces/{otherWorkspaceId}/media?page=1&pageSize=10", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, assigned.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, write.StatusCode);
