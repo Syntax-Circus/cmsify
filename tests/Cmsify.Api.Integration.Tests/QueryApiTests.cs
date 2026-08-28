@@ -269,6 +269,70 @@ public sealed class QueryApiTests : IAsyncLifetime
         Assert.Equal([Guid.Parse(first), Guid.Parse(second), Guid.Parse(third)], ids);
     }
 
+    [Theory]
+    [InlineData("under_score")]
+    [InlineData("percent%value")]
+    [InlineData("back\\slash")]
+    public async Task ResolvedContentList_SearchTreatsLikeMetacharactersAsLiterals(string search)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedLiteralSearchAsync(factory, search);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&q={Uri.EscapeDataString(search)}&asOf=2026-06-15T12:00:00Z",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, response.GetProperty("totalCount").GetInt32());
+        Assert.Equal(seed.ExpectedContentId, response.GetProperty("items")[0].GetProperty("id").GetGuid());
+    }
+
+    [Theory]
+    [InlineData("templateVersionId")]
+    [InlineData("templateId")]
+    [InlineData("localeCode")]
+    [InlineData("translationGroupId")]
+    [InlineData("slug")]
+    [InlineData("tags")]
+    [InlineData("publishedAfter")]
+    [InlineData("publishedBefore")]
+    public async Task ResolvedContentList_EachCandidateFilterIndependentlyPrecedesSelection(string filter)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedFilterDiscriminatorAsync(factory, filter);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z&{seed.Query}",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, response.GetProperty("totalCount").GetInt32());
+        Assert.Equal(seed.ExpectedSlug, response.GetProperty("items")[0].GetProperty("slug").GetString());
+    }
+
+    [Theory]
+    [InlineData("boundedness")]
+    [InlineData("duration")]
+    [InlineData("publishedAt")]
+    [InlineData("versionNumber")]
+    [InlineData("effectiveEnd")]
+    public async Task ResolvedContentList_EachWinnerRankAndEndBoundaryIndependentlySelectsTheExpectedVersion(string discriminator)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedRankDiscriminatorAsync(factory, discriminator);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, response.GetProperty("totalCount").GetInt32());
+        Assert.Equal(seed.ExpectedSlug, response.GetProperty("items")[0].GetProperty("slug").GetString());
+    }
+
     private WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>();
 
@@ -472,6 +536,172 @@ public sealed class QueryApiTests : IAsyncLifetime
             PublishedAt = DateTimeOffset.Parse(publishedAt)
         };
 
+    private static async Task<LiteralSearchSeed> SeedLiteralSearchAsync(WebApplicationFactory<Program> factory, string search)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var workspaceId = await dbContext.Workspaces.Select(workspace => workspace.Id).FirstAsync();
+        var adminUserId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+        AddResolvedReader(dbContext, workspaceId, adminUserId, "Literal Search Test");
+
+        var template = new Template { WorkspaceId = workspaceId, Name = "Literal", Slug = $"literal-{Guid.NewGuid():N}" };
+        var templateVersion = new TemplateVersion { TemplateId = template.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
+        template.Versions.Add(templateVersion);
+        dbContext.Templates.Add(template);
+        await dbContext.SaveChangesAsync();
+        template.CurrentVersionId = templateVersion.Id;
+
+        var expectedSlug = $"prefix-{search}-suffix";
+        var falsePositiveSlug = search switch
+        {
+            "under_score" => "prefix-underXscore-suffix",
+            "percent%value" => "prefix-percentXvalue-suffix",
+            "back\\slash" => "prefix-backslash-suffix",
+            _ => throw new ArgumentOutOfRangeException(nameof(search))
+        };
+        var expected = ResolvedOwner(Guid.CreateVersion7().ToString(), workspaceId, templateVersion.Id, "literal-expected-owner");
+        var falsePositive = ResolvedOwner(Guid.CreateVersion7().ToString(), workspaceId, templateVersion.Id, "literal-false-positive-owner");
+        dbContext.ContentItems.AddRange(expected, falsePositive);
+        dbContext.ContentVersions.AddRange(
+            ResolvedVersion(expected, 1, templateVersion.Id, expectedSlug, "2026-06-01T00:00:00Z"),
+            ResolvedVersion(falsePositive, 1, templateVersion.Id, falsePositiveSlug, "2026-06-01T00:00:00Z"));
+        await dbContext.SaveChangesAsync();
+        return new LiteralSearchSeed(workspaceId, expected.Id);
+    }
+
+    private static async Task<FilterDiscriminatorSeed> SeedFilterDiscriminatorAsync(
+        WebApplicationFactory<Program> factory,
+        string filter)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var workspaceId = await dbContext.Workspaces.Select(workspace => workspace.Id).FirstAsync();
+        var adminUserId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+        AddResolvedReader(dbContext, workspaceId, adminUserId, $"Filter {filter}");
+
+        var article = new Template { WorkspaceId = workspaceId, Name = "Article", Slug = $"filter-article-{Guid.NewGuid():N}" };
+        var articleVersion1 = new TemplateVersion { TemplateId = article.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
+        var articleVersion2 = new TemplateVersion { TemplateId = article.Id, VersionNumber = 2, Status = TemplateVersionStatus.Published };
+        article.Versions.Add(articleVersion1);
+        article.Versions.Add(articleVersion2);
+        var page = new Template { WorkspaceId = workspaceId, Name = "Page", Slug = $"filter-page-{Guid.NewGuid():N}" };
+        var pageVersion = new TemplateVersion { TemplateId = page.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
+        page.Versions.Add(pageVersion);
+        dbContext.Templates.AddRange(article, page);
+        await dbContext.SaveChangesAsync();
+        article.CurrentVersionId = articleVersion2.Id;
+        page.CurrentVersionId = pageVersion.Id;
+
+        var matchingGroup = Guid.CreateVersion7();
+        var competingGroup = Guid.CreateVersion7();
+        var owner = ResolvedOwner(Guid.CreateVersion7().ToString(), workspaceId, articleVersion1.Id, "filter-owner");
+        var matching = ResolvedVersion(
+            owner,
+            1,
+            articleVersion1.Id,
+            filter == "slug" ? "filter-exact" : "filter-lower",
+            "2026-06-10T00:00:00Z",
+            localeCode: "en",
+            translationGroupId: matchingGroup,
+            tags: ["featured", "news"]);
+        var competing = ResolvedVersion(
+            owner,
+            2,
+            filter == "templateVersionId" ? articleVersion2.Id : filter == "templateId" ? pageVersion.Id : articleVersion1.Id,
+            filter == "slug" ? "filter-other" : "filter-higher",
+            filter == "publishedAfter" ? "2026-06-08T00:00:00Z" : filter == "publishedBefore" ? "2026-06-12T00:00:00Z" : "2026-06-11T00:00:00Z",
+            "2026-06-14T00:00:00Z",
+            "2026-06-16T00:00:00Z",
+            filter == "localeCode" ? "fr" : "en",
+            filter == "translationGroupId" ? competingGroup : matchingGroup,
+            filter == "tags" ? ["featured"] : ["featured", "news"]);
+        dbContext.ContentItems.Add(owner);
+        dbContext.ContentVersions.AddRange(matching, competing);
+        await dbContext.SaveChangesAsync();
+
+        var query = filter switch
+        {
+            "templateVersionId" => $"templateVersionId={articleVersion1.Id}",
+            "templateId" => $"templateId={article.Id}",
+            "localeCode" => "localeCode=en",
+            "translationGroupId" => $"translationGroupId={matchingGroup}",
+            "slug" => "slug=filter-exact",
+            "tags" => "tags=%20Featured%20,NEWS,featured",
+            "publishedAfter" => "publishedAfter=2026-06-09T00:00:00Z",
+            "publishedBefore" => "publishedBefore=2026-06-11T00:00:00Z",
+            _ => throw new ArgumentOutOfRangeException(nameof(filter))
+        };
+        return new FilterDiscriminatorSeed(workspaceId, query, matching.Slug!);
+    }
+
+    private static async Task<RankDiscriminatorSeed> SeedRankDiscriminatorAsync(
+        WebApplicationFactory<Program> factory,
+        string discriminator)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var workspaceId = await dbContext.Workspaces.Select(workspace => workspace.Id).FirstAsync();
+        var adminUserId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+        AddResolvedReader(dbContext, workspaceId, adminUserId, $"Rank {discriminator}");
+
+        var template = new Template { WorkspaceId = workspaceId, Name = "Rank", Slug = $"rank-{Guid.NewGuid():N}" };
+        var templateVersion = new TemplateVersion { TemplateId = template.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
+        template.Versions.Add(templateVersion);
+        dbContext.Templates.Add(template);
+        await dbContext.SaveChangesAsync();
+        template.CurrentVersionId = templateVersion.Id;
+
+        var owner = ResolvedOwner(Guid.CreateVersion7().ToString(), workspaceId, templateVersion.Id, "rank-owner");
+        ContentVersion first;
+        ContentVersion second;
+        string expectedSlug;
+        switch (discriminator)
+        {
+            case "boundedness":
+                first = ResolvedVersion(owner, 1, templateVersion.Id, "bounded-expected", "2026-06-01T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z");
+                second = ResolvedVersion(owner, 2, templateVersion.Id, "unbounded-newer", "2026-06-02T00:00:00Z");
+                expectedSlug = first.Slug!;
+                break;
+            case "duration":
+                first = ResolvedVersion(owner, 1, templateVersion.Id, "short-expected", "2026-06-01T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z");
+                second = ResolvedVersion(owner, 2, templateVersion.Id, "long-newer", "2026-06-02T00:00:00Z", "2026-06-10T00:00:00Z", "2026-06-20T00:00:00Z");
+                expectedSlug = first.Slug!;
+                break;
+            case "publishedAt":
+                first = ResolvedVersion(owner, 1, templateVersion.Id, "published-expected", "2026-06-02T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z");
+                second = ResolvedVersion(owner, 2, templateVersion.Id, "version-higher", "2026-06-01T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z");
+                expectedSlug = first.Slug!;
+                break;
+            case "versionNumber":
+                first = ResolvedVersion(owner, 1, templateVersion.Id, "version-lower", "2026-06-01T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z");
+                second = ResolvedVersion(owner, 2, templateVersion.Id, "version-expected", "2026-06-01T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z");
+                expectedSlug = second.Slug!;
+                break;
+            case "effectiveEnd":
+                first = ResolvedVersion(owner, 1, templateVersion.Id, "fallback-expected", "2026-06-01T00:00:00Z");
+                second = ResolvedVersion(owner, 2, templateVersion.Id, "ending-at-asof", "2026-06-02T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-15T12:00:00Z");
+                expectedSlug = first.Slug!;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(discriminator));
+        }
+
+        dbContext.ContentItems.Add(owner);
+        dbContext.ContentVersions.AddRange(first, second);
+        await dbContext.SaveChangesAsync();
+        return new RankDiscriminatorSeed(workspaceId, expectedSlug);
+    }
+
+    private static void AddResolvedReader(CmsifyDbContext dbContext, Guid workspaceId, Guid adminUserId, string name) =>
+        dbContext.ApiClients.Add(new ApiClient
+        {
+            Name = name,
+            TokenHash = BCrypt.Net.BCrypt.HashPassword(ApiToken, 4),
+            Role = UserRole.Reader,
+            WorkspaceId = workspaceId,
+            CreatedByUserId = adminUserId
+        });
+
     private sealed record QuerySeed(Guid WorkspaceId, Guid TemplateId, Guid PublishedContentId);
 
     private sealed record ResolvedQuerySeed(
@@ -484,6 +714,12 @@ public sealed class QueryApiTests : IAsyncLifetime
         Guid DeletedContentId,
         Guid FilterContentId,
         Guid SearchMatchContentId);
+
+    private sealed record LiteralSearchSeed(Guid WorkspaceId, Guid ExpectedContentId);
+
+    private sealed record FilterDiscriminatorSeed(Guid WorkspaceId, string Query, string ExpectedSlug);
+
+    private sealed record RankDiscriminatorSeed(Guid WorkspaceId, string ExpectedSlug);
 
     private static void ClearEnvironment()
     {

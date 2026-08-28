@@ -113,7 +113,8 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
 
         if (!string.IsNullOrWhiteSpace(query.Q))
         {
-            winners = winners.Where(version => EF.Functions.ILike(version.Slug ?? string.Empty, $"%{query.Q}%"));
+            var escapedSearch = EscapeLikePattern(query.Q);
+            winners = winners.Where(version => EF.Functions.ILike(version.Slug ?? string.Empty, $"%{escapedSearch}%", "\\"));
         }
 
         var totalCount = await winners.CountAsync(ct);
@@ -181,6 +182,11 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
     }
 
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
+
+    private static string EscapeLikePattern(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     private sealed record ResolvedContentListProjection(
         Guid ContentItemId,

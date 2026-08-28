@@ -145,6 +145,26 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
         Assert.DoesNotContain("featured", string.Join(' ', commands.Commands), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task SearchFilteredResolvedList_UsesAParameterizedPatternAndTwoCommands()
+    {
+        var commands = new ContentCommandRecorder();
+        await using var factory = CreateFactory(commands);
+        using var client = factory.CreateClient();
+        var workspaceId = await SeedTwoResolvedItemsAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+        commands.Start();
+
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{workspaceId}/content?resolve=true&q=first_value&asOf=2026-06-15T12:00:00Z",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, response.GetProperty("totalCount").GetInt32());
+        Assert.Equal(2, commands.Commands.Count);
+        Assert.All(commands.Commands, command => Assert.Contains(" ilike ", command, StringComparison.Ordinal));
+        Assert.DoesNotContain("first_value", string.Join(' ', commands.Commands), StringComparison.Ordinal);
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(ContentCommandRecorder commands) =>
         new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.ConfigureServices(services =>
@@ -167,8 +187,8 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             Status = TemplateVersionStatus.Published
         };
         template.Versions.Add(templateVersion);
-        var first = PublishedItem(workspace.Id, templateVersion.Id, "first", DateTimeOffset.Parse("2026-06-01T00:00:00Z"), ["featured", "news"]);
-        var second = PublishedItem(workspace.Id, templateVersion.Id, "second", DateTimeOffset.Parse("2026-06-02T00:00:00Z"));
+        var first = PublishedItem(workspace.Id, templateVersion.Id, "first_value", DateTimeOffset.Parse("2026-06-01T00:00:00Z"), ["featured", "news"]);
+        var second = PublishedItem(workspace.Id, templateVersion.Id, "firstXvalue", DateTimeOffset.Parse("2026-06-02T00:00:00Z"));
 
         dbContext.Workspaces.Add(workspace);
         dbContext.Templates.Add(template);
