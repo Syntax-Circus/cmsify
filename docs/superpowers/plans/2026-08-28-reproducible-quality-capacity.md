@@ -22,7 +22,7 @@
 
 ---
 
-## Work Package 11.1: Pin the SDK and Define the Locked-Restore Contract
+## Task 1: Pin the SDK and Define the Locked-Restore Contract
 
 **Files:**
 
@@ -102,7 +102,7 @@ Commit: `Pin SDK and lock the solution restore graph`
 
 ---
 
-## Work Package 11.2: Standardize Every Test Project on xUnit v3
+## Task 2: Standardize Every Test Project on xUnit v3
 
 **Files:**
 
@@ -188,7 +188,7 @@ Commit: `Standardize tests on xUnit v3`
 
 ---
 
-## Work Package 11.3: Enforce Warning-Free First-Party Release Builds
+## Task 3: Enforce Warning-Free First-Party Release Builds
 
 **Files:**
 
@@ -277,7 +277,7 @@ Commit: `Enforce warning-free Release builds`
 
 ---
 
-## Work Package 11.4: Move Cmsify Sass to the Module System
+## Task 4: Move Cmsify Sass to the Module System
 
 **Files:**
 
@@ -324,7 +324,7 @@ Commit: `Adopt Sass modules for Admin styles`
 
 ---
 
-## Work Package 11.5: Extract and Specify the Resolved-Content Database Query
+## Task 5: Extract and Specify the Resolved-Content Database Query
 
 **Files:**
 
@@ -407,7 +407,7 @@ Commit: `Bound resolved content listing in PostgreSQL`
 
 ---
 
-## Work Package 11.6: Add Representative Resolved-Content Capacity Invariants
+## Task 6: Add Representative Resolved-Content Capacity Invariants
 
 **Files:**
 
@@ -438,7 +438,7 @@ Commit: `Add resolved content capacity invariants`
 
 ---
 
-## Work Package 11.7: Enforce Media Limits and Incremental Streaming
+## Task 7: Enforce Media Limits and Incremental Streaming
 
 **Files:**
 
@@ -468,7 +468,7 @@ Commit: `Verify bounded media upload and streaming`
 
 ---
 
-## Work Package 11.8: Prove Webhook Claim Batch Bounds
+## Task 8: Prove Webhook Claim Batch Bounds
 
 **Files:**
 
@@ -494,7 +494,7 @@ Commit: `Add bounded webhook claim capacity tests`
 
 ---
 
-## Work Package 11.9: Collect Open Coverage and Produce a Stable Trend Summary
+## Task 9: Collect Open Coverage and Produce a Stable Trend Summary
 
 **Files:**
 
@@ -541,7 +541,7 @@ Commit: `Publish open coverage trend summaries`
 
 ---
 
-## Work Package 11.10: Build the Scheduled Capacity Report Runner
+## Task 10: Build the Scheduled Capacity Report Runner
 
 **Files:**
 
@@ -593,7 +593,7 @@ Commit: `Add scheduled capacity trend reports`
 
 ---
 
-## Work Package 11.11: Add Dependency Automation and Apply Locked Restore Everywhere
+## Task 11: Add Dependency Automation and Apply Locked Restore Everywhere
 
 **Files:**
 
@@ -636,7 +636,7 @@ Commit: `Automate locked dependency maintenance`
 
 ---
 
-## Work Package 11.12: Document the Quality and Capacity Operating Contract
+## Task 12: Document the Quality and Capacity Operating Contract
 
 **Files:**
 
@@ -664,7 +664,7 @@ Commit: `Document quality and capacity operations`
 
 ---
 
-## Work Package 11.13: Fresh Final Verification and Independent Review
+## Task 13: Fresh Final Verification and Independent Review
 
 **Files:**
 
