@@ -28,6 +28,7 @@
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="SyntaxCircus.Http.Resilience" />
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\..\..\LICENSE-MIT.txt" Pack="true" PackagePath="\" Link="LICENSE-MIT.txt" />
   </ItemGroup>
