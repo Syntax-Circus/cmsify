@@ -320,7 +320,9 @@ public sealed class CmsifyClient
         return new HttpRequestResiliencePipeline("CmsifyClient", new HttpRequestResilienceOptions
         {
             MaxAttempts = options.EnableRetries ? Math.Max(1, options.MaxRetryAttempts) : 1,
-            TotalRequestTimeout = options.RequestTimeout,
+            TotalRequestTimeout = options.RequestTimeout == Timeout.InfiniteTimeSpan
+                ? TimeSpan.MaxValue
+                : options.RequestTimeout,
             CircuitFailureRatio = options.CircuitFailureRatio,
             CircuitMinimumThroughput = options.CircuitMinimumThroughput,
             CircuitSamplingDuration = options.CircuitSamplingDuration,

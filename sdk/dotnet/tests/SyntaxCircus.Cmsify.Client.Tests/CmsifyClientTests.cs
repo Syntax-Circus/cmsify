@@ -296,6 +296,38 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task InfiniteRequestTimeout_ConstructsAndSendsWithoutDeadline()
+    {
+        var sends = 0;
+        var attemptToken = default(CancellationToken);
+        var callerToken = TestContext.Current.CancellationToken;
+        var options = new CmsifyClientOptions
+        {
+            BaseUrl = new Uri("https://cms.test"),
+            MaxRetryAttempts = 1,
+            RequestTimeout = Timeout.InfiniteTimeSpan,
+            TokenProvider = cancellationToken =>
+            {
+                attemptToken = cancellationToken;
+                return ValueTask.FromResult<string?>(null);
+            },
+        };
+        var httpClient = new HttpClient(new AsyncStubHandler((_, _) =>
+        {
+            sends++;
+            return Task.FromResult(Json(HttpStatusCode.OK, new { value = "ok" }));
+        }));
+
+        var client = new CmsifyClient(httpClient, options);
+        var result = await client.GetAsync<JsonValue>("/infinite-timeout", callerToken);
+
+        result!.Value.ShouldBe("ok");
+        sends.ShouldBe(1);
+        attemptToken.ShouldBe(callerToken);
+        httpClient.Timeout.ShouldBe(Timeout.InfiniteTimeSpan);
+    }
+
+    [Fact]
     public async Task TokenProvider_IsUsedForEachRequest()
     {
         var tokenCalls = 0;
@@ -345,6 +377,35 @@ public sealed class CmsifyClientTests
         await client.GetAsync<JsonValue>("/observed-retry", TestContext.Current.CancellationToken);
 
         observed.ShouldBe([HttpStatusCode.ServiceUnavailable, HttpStatusCode.OK]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResponseObserverFailure_DoesNotRetryDisposesResponseAndPreservesException(bool timeoutFailure)
+    {
+        var sends = 0;
+        var responseContents = new List<TrackingStringContent>();
+        Exception observerException = timeoutFailure
+            ? new TimeoutException("observer timeout")
+            : new HttpRequestException("observer transport");
+        var client = CreateResilientClient(
+            _ =>
+            {
+                sends++;
+                var content = new TrackingStringContent("{\"value\":\"ok\"}");
+                responseContents.Add(content);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+            },
+            options => options.ResponseObserver = (_, _) => Task.FromException(observerException));
+
+        var actual = await Should.ThrowAsync<Exception>(() => client.GetAsync<JsonValue>(
+            "/observer-failure",
+            TestContext.Current.CancellationToken));
+
+        actual.ShouldBeSameAs(observerException);
+        responseContents[0].Disposed.ShouldBeTrue();
+        sends.ShouldBe(1);
     }
 
     [Fact]
@@ -844,6 +905,17 @@ public sealed class CmsifyClientTests
         {
             length = 0;
             return false;
+        }
+    }
+
+    private sealed class TrackingStringContent(string value) : StringContent(value, Encoding.UTF8, "application/json")
+    {
+        public bool Disposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = disposing;
+            base.Dispose(disposing);
         }
     }
 
