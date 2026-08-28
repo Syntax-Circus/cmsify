@@ -378,8 +378,16 @@ export function buildCapacityReport({ fragmentPaths, sourceSha, sdkVersion, gene
   if (resolved.databaseVersion !== webhook.databaseVersion) {
     fail("Capacity fragment PostgreSQL database identities disagree.");
   }
-  if (typeof generatedAtUtc !== "string" || Number.isNaN(Date.parse(generatedAtUtc))) {
-    fail("Capacity report generatedAtUtc must be an ISO-8601 timestamp.");
+  let canonicalGeneratedAtUtc;
+  try {
+    canonicalGeneratedAtUtc = typeof generatedAtUtc === "string"
+      ? new Date(generatedAtUtc).toISOString()
+      : null;
+  } catch {
+    canonicalGeneratedAtUtc = null;
+  }
+  if (canonicalGeneratedAtUtc !== generatedAtUtc) {
+    fail("Capacity report generatedAtUtc must be canonical UTC output from Date.toISOString().");
   }
   return {
     schema: "cmsify.capacity.v1",
@@ -466,61 +474,27 @@ export function replaceCapacityReport(destination, contents, operations = defaul
   }
   operations.mkdirSync(path.dirname(destination), { recursive: true });
   const stage = operations.temporaryPath(destination, "stage");
-  const backup = operations.temporaryPath(destination, "backup");
   let staged = false;
-  let backedUp = false;
-  let installed = false;
   try {
     operations.writeFileSync(stage, contents, { encoding: "utf8", flag: "wx" });
     staged = true;
-    if (operations.existsSync(destination)) {
-      operations.renameSync(destination, backup);
-      backedUp = true;
-    }
     operations.renameSync(stage, destination);
     staged = false;
-    installed = true;
   } catch (primary) {
-    const rollbackFailures = [];
-    if (installed) {
-      try {
-        operations.rmSync(destination, { force: true });
-        installed = false;
-      } catch (error) {
-        rollbackFailures.push(error);
-      }
-    }
-    if (backedUp) {
-      try {
-        operations.renameSync(backup, destination);
-        backedUp = false;
-      } catch (error) {
-        rollbackFailures.push(error);
-      }
-    }
+    const cleanupFailures = [];
     if (staged) {
       try {
         operations.rmSync(stage, { force: true });
         staged = false;
       } catch (error) {
-        rollbackFailures.push(error);
+        cleanupFailures.push(error);
       }
     }
     throw new AggregateError(
-      [primary, ...rollbackFailures],
-      `Capacity output transaction failed before commit: ${primary instanceof Error ? primary.message : String(primary)}${rollbackFailures.length > 0 ? `; rollback failures: ${rollbackFailures.map((error) => error instanceof Error ? error.message : String(error)).join("; ")}` : "; rollback completed"}`,
+      [primary, ...cleanupFailures],
+      `Capacity output transaction failed before commit: ${primary instanceof Error ? primary.message : String(primary)}${cleanupFailures.length > 0 ? `; stage cleanup failures: ${cleanupFailures.map((error) => error instanceof Error ? error.message : String(error)).join("; ")}` : "; staged output removed"}`,
       { cause: primary },
     );
-  }
-  if (backedUp) {
-    try {
-      operations.rmSync(backup, { force: true });
-    } catch (error) {
-      throw new AggregateError(
-        [error],
-        `Capacity report committed, but backup cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 }
 

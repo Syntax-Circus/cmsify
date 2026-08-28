@@ -8,6 +8,7 @@ import {
   renameSync as fsRenameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -252,6 +253,30 @@ test("requires PostgreSQL identity agreement between database-backed fragments",
   });
 });
 
+test("requires generatedAtUtc to equal the canonical UTC form emitted by Date.toISOString", async () => {
+  await withAsyncTemporaryDirectory(async (root) => {
+    const fragmentPaths = writeFragments(root);
+    const { buildCapacityReport } = await import(pathToFileURL(merger).href);
+    for (const generatedAtUtc of [
+      "2026-08-28",
+      "2026-08-28T12:34:56Z",
+      "2026-08-28T12:34:56.789+00:00",
+      "2026-08-28t12:34:56.789z",
+    ]) {
+      assert.throws(
+        () => buildCapacityReport({
+          fragmentPaths,
+          sourceSha,
+          sdkVersion: "10.0.400",
+          generatedAtUtc,
+        }),
+        /generatedAtUtc.*canonical.*UTC|canonical.*UTC.*generatedAtUtc/i,
+        generatedAtUtc,
+      );
+    }
+  });
+});
+
 test("rejects missing, non-finite, negative, and inconsistent sample or query measurements", () => {
   const cases = [
     {
@@ -375,6 +400,8 @@ test("restores the previous capacity report when atomic installation fails", asy
     const { replaceCapacityReport } = await import(pathToFileURL(merger).href);
     const destination = path.join(root, "capacity-report.json");
     writeFileSync(destination, "old report\n");
+    let destinationObservedDuringInstall = null;
+    let canonicalMovedBeforeInstall = false;
     const operations = {
       existsSync,
       mkdirSync,
@@ -382,7 +409,13 @@ test("restores the previous capacity report when atomic installation fails", asy
       temporaryPath: (target, purpose) => `${target}.${purpose}`,
       writeFileSync,
       renameSync(source, target) {
-        if (source.endsWith(".stage")) throw new Error("injected install failure");
+        if (source === destination) canonicalMovedBeforeInstall = true;
+        if (source.endsWith(".stage")) {
+          destinationObservedDuringInstall = existsSync(destination)
+            ? readFileSync(destination, "utf8")
+            : null;
+          throw new Error("injected install failure");
+        }
         fsRenameSync(source, target);
       },
       rmSync,
@@ -392,6 +425,8 @@ test("restores the previous capacity report when atomic installation fails", asy
       () => replaceCapacityReport(destination, "new report\n", operations),
       /before commit.*injected install failure/i,
     );
+    assert.equal(canonicalMovedBeforeInstall, false);
+    assert.equal(destinationObservedDuringInstall, "old report\n");
     assert.equal(readFileSync(destination, "utf8"), "old report\n");
     assert.equal(existsSync(`${destination}.stage`), false);
     assert.equal(existsSync(`${destination}.backup`), false);
@@ -434,6 +469,65 @@ function capacityProcessDouble(calls, fixture = fragments(), failProject = null)
     return { status: 0, stdout: "capacity passed\n", stderr: "" };
   };
 }
+
+function createDirectoryLinkOrSkip(context, target, linkPath) {
+  try {
+    symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
+    return true;
+  } catch (error) {
+    context.skip(`Directory links are unavailable on this host: ${error.message}`);
+    return false;
+  }
+}
+
+test("runner rejects a capacity ancestor junction before it can delete an external sentinel", async (context) => {
+  const root = mkdtempSync(path.join(tmpdir(), "cmsify-capacity-ancestor-link-"));
+  const external = mkdtempSync(path.join(tmpdir(), "cmsify-capacity-external-"));
+  const sentinel = path.join(external, "fragments", "sentinel.txt");
+  try {
+    mkdirSync(path.dirname(sentinel), { recursive: true });
+    writeFileSync(sentinel, "external sentinel\n");
+    mkdirSync(path.join(root, "artifacts"), { recursive: true });
+    if (!createDirectoryLinkOrSkip(context, external, path.join(root, "artifacts", "capacity"))) return;
+    const calls = [];
+    const { runCapacity } = await import(pathToFileURL(runner).href);
+
+    assert.throws(
+      () => runCapacity({ repositoryRoot: root, execute: capacityProcessDouble(calls) }),
+      /symbolic link|junction|reparse|outside.*repository/i,
+    );
+    assert.equal(readFileSync(sentinel, "utf8"), "external sentinel\n");
+    assert.equal(calls.length, 2, "cleanup rejection must happen before any test project starts");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test("runner rejects a nested fragment junction without traversing or deleting it", async (context) => {
+  const root = mkdtempSync(path.join(tmpdir(), "cmsify-capacity-nested-link-"));
+  const external = mkdtempSync(path.join(tmpdir(), "cmsify-capacity-external-"));
+  const sentinel = path.join(external, "sentinel.txt");
+  try {
+    writeFileSync(sentinel, "external sentinel\n");
+    const fragmentDirectory = path.join(root, "artifacts", "capacity", "fragments");
+    mkdirSync(fragmentDirectory, { recursive: true });
+    writeFileSync(path.join(fragmentDirectory, "stale.json"), "stale\n");
+    if (!createDirectoryLinkOrSkip(context, external, path.join(fragmentDirectory, "external"))) return;
+    const calls = [];
+    const { runCapacity } = await import(pathToFileURL(runner).href);
+
+    assert.throws(
+      () => runCapacity({ repositoryRoot: root, execute: capacityProcessDouble(calls) }),
+      /symbolic link|junction|reparse/i,
+    );
+    assert.equal(readFileSync(sentinel, "utf8"), "external sentinel\n");
+    assert.equal(calls.length, 2, "cleanup rejection must happen before any test project starts");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  }
+});
 
 test("runner cleans only the exact fragment directory and runs the three Release capacity projects", async () => {
   await withAsyncTemporaryDirectory(async (root) => {

@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  rmdirSync,
+  unlinkSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -39,13 +46,134 @@ function executeChecked(execute, command, arguments_, options, label) {
   return typeof result.stdout === "string" ? result.stdout.trim() : "";
 }
 
-function exactFragmentDirectory(repositoryRoot) {
-  const root = path.resolve(repositoryRoot);
-  const capacityRoot = path.resolve(root, "artifacts", "capacity");
-  const fragmentDirectory = path.resolve(capacityRoot, "fragments");
-  if (path.dirname(fragmentDirectory) !== capacityRoot || path.basename(fragmentDirectory) !== "fragments") {
-    fail("Refusing to clean anything other than the exact artifacts/capacity/fragments directory.");
+function normalizedPath(filePath) {
+  const resolved = path.resolve(filePath);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function isWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === ""
+    || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+
+function lstatIfPresent(filePath) {
+  try {
+    return lstatSync(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
   }
+}
+
+function assertPhysicalEntry(entryPath, repositoryRoot, expectedKind) {
+  const details = lstatSync(entryPath);
+  if (details.isSymbolicLink()) {
+    fail(`Refusing capacity cleanup through a symbolic link, junction, or reparse point: ${entryPath}`);
+  }
+  if (expectedKind === "directory" && !details.isDirectory()) {
+    fail(`Capacity cleanup path component must be a directory: ${entryPath}`);
+  }
+  if (expectedKind === "file" && !details.isFile()) {
+    fail(`Capacity cleanup entry must be a regular file: ${entryPath}`);
+  }
+  const physical = realpathSync.native(entryPath);
+  if (!isWithin(repositoryRoot, physical)) {
+    fail(`Capacity cleanup path resolves outside the repository: ${entryPath}`);
+  }
+  if (normalizedPath(physical) !== normalizedPath(entryPath)) {
+    fail(`Refusing capacity cleanup through a reparse point: ${entryPath}`);
+  }
+  return details;
+}
+
+function canonicalRepositoryRoot(repositoryRoot) {
+  const requestedRoot = path.resolve(repositoryRoot);
+  const details = lstatSync(requestedRoot);
+  if (details.isSymbolicLink()) {
+    fail(`Repository root must not be a symbolic link, junction, or reparse point: ${requestedRoot}`);
+  }
+  if (!details.isDirectory()) fail(`Repository root must be a directory: ${requestedRoot}`);
+  return realpathSync.native(requestedRoot);
+}
+
+function ensureSafeDirectory(repositoryRoot, directoryPath) {
+  const relative = path.relative(repositoryRoot, directoryPath);
+  if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+    fail(`Capacity directory must remain beneath the repository: ${directoryPath}`);
+  }
+  let current = repositoryRoot;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    if (lstatIfPresent(current) === null) {
+      try {
+        mkdirSync(current);
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+      }
+    }
+    assertPhysicalEntry(current, repositoryRoot, "directory");
+  }
+}
+
+function assertSafeTree(entryPath, repositoryRoot) {
+  const details = lstatSync(entryPath);
+  if (details.isSymbolicLink()) {
+    fail(`Refusing capacity cleanup through a symbolic link, junction, or reparse point: ${entryPath}`);
+  }
+  if (details.isDirectory()) {
+    assertPhysicalEntry(entryPath, repositoryRoot, "directory");
+    for (const name of readdirSync(entryPath).sort()) {
+      assertSafeTree(path.join(entryPath, name), repositoryRoot);
+    }
+    return;
+  }
+  if (details.isFile()) {
+    assertPhysicalEntry(entryPath, repositoryRoot, "file");
+    return;
+  }
+  fail(`Capacity cleanup tree contains a non-file entry: ${entryPath}`);
+}
+
+function removeSafeTree(entryPath, repositoryRoot) {
+  const details = lstatSync(entryPath);
+  if (details.isSymbolicLink()) {
+    fail(`Refusing capacity cleanup through a symbolic link, junction, or reparse point: ${entryPath}`);
+  }
+  if (details.isDirectory()) {
+    assertPhysicalEntry(entryPath, repositoryRoot, "directory");
+    for (const name of readdirSync(entryPath).sort()) {
+      removeSafeTree(path.join(entryPath, name), repositoryRoot);
+    }
+    assertPhysicalEntry(entryPath, repositoryRoot, "directory");
+    rmdirSync(entryPath);
+    return;
+  }
+  if (details.isFile()) {
+    assertPhysicalEntry(entryPath, repositoryRoot, "file");
+    unlinkSync(entryPath);
+    return;
+  }
+  fail(`Capacity cleanup tree contains a non-file entry: ${entryPath}`);
+}
+
+function prepareFragmentDirectory(repositoryRoot) {
+  const root = canonicalRepositoryRoot(repositoryRoot);
+  const artifactsRoot = path.join(root, "artifacts");
+  const capacityRoot = path.join(artifactsRoot, "capacity");
+  const fragmentDirectory = path.join(capacityRoot, "fragments");
+  for (const existingPath of [artifactsRoot, capacityRoot, fragmentDirectory]) {
+    if (lstatIfPresent(existingPath) !== null) {
+      assertPhysicalEntry(existingPath, root, "directory");
+    }
+  }
+  ensureSafeDirectory(root, capacityRoot);
+  if (lstatIfPresent(fragmentDirectory) !== null) {
+    assertSafeTree(fragmentDirectory, root);
+    removeSafeTree(fragmentDirectory, root);
+  }
+  mkdirSync(fragmentDirectory);
+  assertPhysicalEntry(fragmentDirectory, root, "directory");
   return { root, capacityRoot, fragmentDirectory };
 }
 
@@ -83,12 +211,12 @@ export function runCapacity({
   execute = defaultExecute,
   now = new Date(),
 } = {}) {
-  const { root, capacityRoot, fragmentDirectory } = exactFragmentDirectory(repositoryRoot);
+  const requestedRoot = canonicalRepositoryRoot(repositoryRoot);
   const sourceSha = executeChecked(
     execute,
     "git",
     ["rev-parse", "HEAD"],
-    { cwd: root, env: process.env },
+    { cwd: requestedRoot, env: process.env },
     "git source identity",
   );
   if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
@@ -98,14 +226,12 @@ export function runCapacity({
     execute,
     "dotnet",
     ["--version"],
-    { cwd: root, env: process.env },
+    { cwd: requestedRoot, env: process.env },
     ".NET SDK identity",
   );
   if (sdkVersion !== "10.0.400") fail("dotnet --version must return exactly 10.0.400.");
 
-  mkdirSync(capacityRoot, { recursive: true });
-  rmSync(fragmentDirectory, { recursive: true, force: true });
-  mkdirSync(fragmentDirectory, { recursive: true });
+  const { root, capacityRoot, fragmentDirectory } = prepareFragmentDirectory(requestedRoot);
   const capacityEnvironment = {
     ...process.env,
     CMSIFY_CAPACITY_TIMING: "true",
