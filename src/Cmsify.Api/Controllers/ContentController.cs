@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Cmsify.Api.Auth;
+using Cmsify.Api.Queries;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Domain.ValueObjects;
@@ -32,10 +33,11 @@ public sealed class ContentController : ControllerBase
     private readonly IContentLifecycleService lifecycleService;
     private readonly IContentPublishingService publishingService;
     private readonly ICurrentActor currentActor;
+    private readonly IResolvedContentListQuery resolvedContentListQuery;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IWebhookOutbox webhookOutbox;
 
-    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox)
+    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IServiceProvider serviceProvider, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox)
     {
         this.dbContext = dbContext;
         this.contentValidator = contentValidator;
@@ -43,6 +45,7 @@ public sealed class ContentController : ControllerBase
         this.lifecycleService = lifecycleService;
         this.publishingService = publishingService;
         this.currentActor = currentActor;
+        resolvedContentListQuery = serviceProvider.GetRequiredService<IResolvedContentListQuery>();
         this.workspaceAuthorization = workspaceAuthorization;
         this.webhookOutbox = webhookOutbox;
     }
@@ -889,96 +892,23 @@ public sealed class ContentController : ControllerBase
 
     private async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
     {
-        if (query.Status.HasValue && query.Status.Value != SyntaxCircus.Cmsify.Contracts.ContentStatus.Published)
-        {
-            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], 0, query.Page, query.PageSize));
-        }
-
         var asOf = query.AsOf ?? DateTimeOffset.UtcNow;
-        var versions = await dbContext.ContentVersions.AsNoTracking()
-            .Where(version => version.WorkspaceId == workspaceId && version.Status == ContentVersionStatus.Published)
-            .Where(version =>
-                (version.EffectiveStartAt == null && version.EffectiveEndAt == null)
-                || (version.EffectiveStartAt <= asOf && asOf < version.EffectiveEndAt))
-            .Where(version => !dbContext.ContentItems.Any(content => content.Id == version.ContentItemId && content.IsDeleted))
-            .ToListAsync(ct);
-
-        if (query.TemplateVersionId.HasValue)
-        {
-            versions = versions.Where(version => version.TemplateVersionId == query.TemplateVersionId.Value).ToList();
-        }
-
-        if (query.TemplateId.HasValue)
-        {
-            var templateVersionIds = await dbContext.TemplateVersions.AsNoTracking()
-                .Where(version => version.TemplateId == query.TemplateId.Value)
-                .Select(version => version.Id)
-                .ToListAsync(ct);
-            versions = versions.Where(version => templateVersionIds.Contains(version.TemplateVersionId)).ToList();
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.LocaleCode))
-        {
-            versions = versions.Where(version => version.LocaleCode == query.LocaleCode).ToList();
-        }
-
-        if (query.TranslationGroupId.HasValue)
-        {
-            versions = versions.Where(version => version.TranslationGroupId == query.TranslationGroupId.Value).ToList();
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Slug))
-        {
-            versions = versions.Where(version => version.Slug == query.Slug).ToList();
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Tags))
-        {
-            var tags = query.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(NormalizeTag).ToArray();
-            versions = versions.Where(version => tags.All(tag => version.Tags.Contains(tag))).ToList();
-        }
-
-        if (query.PublishedAfter.HasValue)
-        {
-            versions = versions.Where(version => version.PublishedAt >= query.PublishedAfter.Value).ToList();
-        }
-
-        if (query.PublishedBefore.HasValue)
-        {
-            versions = versions.Where(version => version.PublishedAt <= query.PublishedBefore.Value).ToList();
-        }
-
-        var resolved = versions
-            .GroupBy(version => version.ContentItemId)
-            .Select(group => SelectMostSpecific(group, asOf))
+        var page = await resolvedContentListQuery.ExecuteAsync(workspaceId, query, asOf, ct);
+        var responses = page.Items
+            .Select(row => new ContentItemSummaryResponse(
+                row.ContentItemId,
+                row.TemplateVersionId,
+                row.TemplateName,
+                ContentStatus.Published.ToContract(),
+                row.Slug,
+                row.LocaleCode,
+                row.TranslationGroupId,
+                row.Tags,
+                row.PublishedAt,
+                row.PublishedAt,
+                row.PublishedAt))
             .ToList();
-
-        if (!string.IsNullOrWhiteSpace(query.Q))
-        {
-            resolved = resolved.Where(version => (version.Slug ?? string.Empty).Contains(query.Q, StringComparison.OrdinalIgnoreCase)).ToList();
-        }
-
-        resolved = query.SortBy switch
-        {
-            "publishedAt" => query.SortDesc ? resolved.OrderByDescending(version => version.PublishedAt).ToList() : resolved.OrderBy(version => version.PublishedAt).ToList(),
-            "slug" => query.SortDesc ? resolved.OrderByDescending(version => version.Slug).ToList() : resolved.OrderBy(version => version.Slug).ToList(),
-            _ => query.SortDesc ? resolved.OrderByDescending(version => version.PublishedAt).ToList() : resolved.OrderBy(version => version.PublishedAt).ToList()
-        };
-
-        var total = resolved.Count;
-        if (!ControllerHelpers.TryOffset(query.Page, query.PageSize, out var offset))
-        {
-            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], total, query.Page, query.PageSize));
-        }
-
-        var pageItems = resolved.Skip(offset).Take(ControllerHelpers.Limit(query.PageSize)).ToList();
-        var responses = new List<ContentItemSummaryResponse>();
-        foreach (var version in pageItems)
-        {
-            responses.Add(await ToResolvedSummaryResponseAsync(version, ct));
-        }
-
-        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, total, query.Page, query.PageSize));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, page.TotalCount, query.Page, query.PageSize));
     }
 
     private async Task<ContentVersion?> ResolvePublishedVersionAsync(Guid workspaceId, Guid? contentItemId, string? slug, DateTimeOffset asOf, CancellationToken ct)

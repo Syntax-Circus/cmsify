@@ -194,6 +194,81 @@ public sealed class QueryApiTests : IAsyncLifetime
         Assert.Equal(0, response.GetProperty("items").GetArrayLength());
     }
 
+    [Fact]
+    public async Task ResolvedContentList_SelectsTheMostSpecificActiveVersionAndExcludesTheExactEnd()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedResolvedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z&sortBy=slug&sortDesc=false&pageSize=100",
+            TestContext.Current.CancellationToken);
+        var items = response.GetProperty("items").EnumerateArray().ToDictionary(item => item.GetProperty("id").GetGuid());
+
+        Assert.Equal("rank-selected", items[seed.RankedContentId].GetProperty("slug").GetString());
+        Assert.Equal("boundary-fallback", items[seed.BoundaryContentId].GetProperty("slug").GetString());
+        Assert.DoesNotContain(seed.DeletedContentId, items.Keys);
+    }
+
+    [Fact]
+    public async Task ResolvedContentList_AppliesCandidateFiltersBeforeSelectionAndSearchAfterSelection()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedResolvedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var filteredResponse = await client.GetAsync(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z&status=Published&templateVersionId={seed.ArticleTemplateVersionId}&templateId={seed.ArticleTemplateId}&localeCode=en&translationGroupId={seed.FilterTranslationGroupId}&slug=filter-match&tags=%20Featured%20,NEWS,featured&publishedAfter=2026-06-09T00:00:00Z&publishedBefore=2026-06-11T00:00:00Z&createdAfter=2099-01-01T00:00:00Z&createdBefore=1900-01-01T00:00:00Z",
+            TestContext.Current.CancellationToken);
+        var filteredBody = await filteredResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.True(filteredResponse.IsSuccessStatusCode, filteredBody);
+        var filtered = JsonSerializer.Deserialize<JsonElement>(filteredBody);
+        var searched = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z&q=needle&pageSize=100",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, filtered.GetProperty("totalCount").GetInt32());
+        var filteredItem = filtered.GetProperty("items")[0];
+        Assert.Equal(seed.FilterContentId, filteredItem.GetProperty("id").GetGuid());
+        Assert.Equal(seed.ArticleTemplateVersionId, filteredItem.GetProperty("templateVersionId").GetGuid());
+        Assert.Equal("Article", filteredItem.GetProperty("templateName").GetString());
+        Assert.Equal("filter-match", filteredItem.GetProperty("slug").GetString());
+        Assert.Equal(filteredItem.GetProperty("publishedAt").GetDateTimeOffset(), filteredItem.GetProperty("createdAt").GetDateTimeOffset());
+        Assert.Equal(filteredItem.GetProperty("publishedAt").GetDateTimeOffset(), filteredItem.GetProperty("updatedAt").GetDateTimeOffset());
+
+        Assert.Equal(1, searched.GetProperty("totalCount").GetInt32());
+        Assert.Equal(seed.SearchMatchContentId, searched.GetProperty("items")[0].GetProperty("id").GetGuid());
+    }
+
+    [Theory]
+    [InlineData("publishedAt", true, "00000000-0000-0000-0000-000000000070", "00000000-0000-0000-0000-000000000080", "00000000-0000-0000-0000-000000000090")]
+    [InlineData("publishedAt", false, "00000000-0000-0000-0000-000000000090", "00000000-0000-0000-0000-000000000070", "00000000-0000-0000-0000-000000000080")]
+    [InlineData("createdAt", true, "00000000-0000-0000-0000-000000000070", "00000000-0000-0000-0000-000000000080", "00000000-0000-0000-0000-000000000090")]
+    [InlineData("slug", true, "00000000-0000-0000-0000-000000000090", "00000000-0000-0000-0000-000000000070", "00000000-0000-0000-0000-000000000080")]
+    [InlineData("slug", false, "00000000-0000-0000-0000-000000000070", "00000000-0000-0000-0000-000000000080", "00000000-0000-0000-0000-000000000090")]
+    public async Task ResolvedContentList_UsesStablePublishedAndSlugOrdering(
+        string sortBy,
+        bool sortDesc,
+        string first,
+        string second,
+        string third)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedResolvedContentAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z&localeCode=sort&sortBy={sortBy}&sortDesc={sortDesc.ToString().ToLowerInvariant()}&pageSize=100",
+            TestContext.Current.CancellationToken);
+        var ids = response.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetGuid()).ToArray();
+
+        Assert.Equal([Guid.Parse(first), Guid.Parse(second), Guid.Parse(third)], ids);
+    }
+
     private WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>();
 
@@ -288,7 +363,127 @@ public sealed class QueryApiTests : IAsyncLifetime
         return new QuerySeed(workspaceId, template.Id, published.Id);
     }
 
+    private static async Task<ResolvedQuerySeed> SeedResolvedContentAsync(WebApplicationFactory<Program> factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var workspaceId = await dbContext.Workspaces.Select(workspace => workspace.Id).FirstAsync();
+        var adminUserId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+        dbContext.ApiClients.Add(new ApiClient
+        {
+            Name = "Resolved Semantic Test",
+            TokenHash = BCrypt.Net.BCrypt.HashPassword(ApiToken, 4),
+            Role = UserRole.Reader,
+            WorkspaceId = workspaceId,
+            CreatedByUserId = adminUserId
+        });
+
+        var article = new Template { WorkspaceId = workspaceId, Name = "Article", Slug = $"article-resolved-{Guid.NewGuid():N}" };
+        var articleVersion = new TemplateVersion { TemplateId = article.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
+        article.Versions.Add(articleVersion);
+        var page = new Template { WorkspaceId = workspaceId, Name = "Page", Slug = $"page-resolved-{Guid.NewGuid():N}" };
+        var pageVersion = new TemplateVersion { TemplateId = page.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
+        page.Versions.Add(pageVersion);
+        dbContext.Templates.AddRange(article, page);
+        await dbContext.SaveChangesAsync();
+        article.CurrentVersionId = articleVersion.Id;
+        page.CurrentVersionId = pageVersion.Id;
+
+        var ranked = ResolvedOwner("00000000-0000-0000-0000-000000000010", workspaceId, articleVersion.Id, "rank-owner");
+        var boundary = ResolvedOwner("00000000-0000-0000-0000-000000000020", workspaceId, articleVersion.Id, "boundary-owner");
+        var deleted = ResolvedOwner("00000000-0000-0000-0000-000000000030", workspaceId, articleVersion.Id, "deleted-owner");
+        deleted.IsDeleted = true;
+        deleted.DeletedAt = DateTimeOffset.Parse("2026-06-01T00:00:00Z");
+        var filter = ResolvedOwner("00000000-0000-0000-0000-000000000040", workspaceId, articleVersion.Id, "filter-owner");
+        var searchMiss = ResolvedOwner("00000000-0000-0000-0000-000000000050", workspaceId, articleVersion.Id, "search-miss-owner");
+        var searchMatch = ResolvedOwner("00000000-0000-0000-0000-000000000060", workspaceId, articleVersion.Id, "search-match-owner");
+        var sortFirst = ResolvedOwner("00000000-0000-0000-0000-000000000070", workspaceId, articleVersion.Id, "sort-first-owner");
+        var sortSecond = ResolvedOwner("00000000-0000-0000-0000-000000000080", workspaceId, articleVersion.Id, "sort-second-owner");
+        var sortThird = ResolvedOwner("00000000-0000-0000-0000-000000000090", workspaceId, articleVersion.Id, "sort-third-owner");
+        var filterTranslationGroupId = Guid.Parse("00000000-0000-0000-0000-000000000400");
+
+        dbContext.ContentItems.AddRange(ranked, boundary, deleted, filter, searchMiss, searchMatch, sortFirst, sortSecond, sortThird);
+        dbContext.ContentVersions.AddRange(
+            ResolvedVersion(ranked, 1, articleVersion.Id, "rank-unbounded", "2026-06-01T00:00:00Z"),
+            ResolvedVersion(ranked, 2, articleVersion.Id, "rank-long", "2026-06-02T00:00:00Z", "2026-06-01T00:00:00Z", "2026-07-01T00:00:00Z"),
+            ResolvedVersion(ranked, 3, articleVersion.Id, "rank-short-old", "2026-06-03T00:00:00Z", "2026-06-10T00:00:00Z", "2026-06-20T00:00:00Z"),
+            ResolvedVersion(ranked, 4, articleVersion.Id, "rank-short-published", "2026-06-04T00:00:00Z", "2026-06-10T00:00:00Z", "2026-06-20T00:00:00Z"),
+            ResolvedVersion(ranked, 5, articleVersion.Id, "rank-selected", "2026-06-04T00:00:00Z", "2026-06-10T00:00:00Z", "2026-06-20T00:00:00Z"),
+            ResolvedVersion(boundary, 1, articleVersion.Id, "boundary-fallback", "2026-06-10T00:00:00Z"),
+            ResolvedVersion(boundary, 2, articleVersion.Id, "boundary-expired", "2026-06-15T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-15T12:00:00Z"),
+            ResolvedVersion(deleted, 1, articleVersion.Id, "deleted", "2026-06-01T00:00:00Z"),
+            ResolvedVersion(filter, 1, articleVersion.Id, "filter-match", "2026-06-10T00:00:00Z", localeCode: "en", translationGroupId: filterTranslationGroupId, tags: ["featured", "news"]),
+            ResolvedVersion(filter, 2, pageVersion.Id, "filter-miss", "2026-06-20T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z", "fr", Guid.NewGuid(), ["other"]),
+            ResolvedVersion(searchMiss, 1, articleVersion.Id, "needle-old", "2026-06-01T00:00:00Z"),
+            ResolvedVersion(searchMiss, 2, articleVersion.Id, "current-miss", "2026-06-20T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z"),
+            ResolvedVersion(searchMatch, 1, articleVersion.Id, "needle-current", "2026-06-21T00:00:00Z"),
+            ResolvedVersion(sortFirst, 1, articleVersion.Id, "sort-a", "2026-06-30T00:00:00Z", localeCode: "sort"),
+            ResolvedVersion(sortSecond, 1, articleVersion.Id, "sort-a", "2026-06-30T00:00:00Z", localeCode: "sort"),
+            ResolvedVersion(sortThird, 1, articleVersion.Id, "sort-b", "2026-06-29T00:00:00Z", localeCode: "sort"));
+        await dbContext.SaveChangesAsync();
+
+        return new ResolvedQuerySeed(
+            workspaceId,
+            article.Id,
+            articleVersion.Id,
+            filterTranslationGroupId,
+            ranked.Id,
+            boundary.Id,
+            deleted.Id,
+            filter.Id,
+            searchMatch.Id);
+    }
+
+    private static ContentItem ResolvedOwner(string id, Guid workspaceId, Guid templateVersionId, string slug) =>
+        new()
+        {
+            Id = Guid.Parse(id),
+            WorkspaceId = workspaceId,
+            TemplateVersionId = templateVersionId,
+            Status = ContentStatus.Published,
+            Slug = slug,
+            PublishedAt = DateTimeOffset.Parse("2026-06-01T00:00:00Z")
+        };
+
+    private static ContentVersion ResolvedVersion(
+        ContentItem owner,
+        int versionNumber,
+        Guid templateVersionId,
+        string slug,
+        string publishedAt,
+        string? effectiveStartAt = null,
+        string? effectiveEndAt = null,
+        string? localeCode = null,
+        Guid? translationGroupId = null,
+        IList<string>? tags = null) =>
+        new()
+        {
+            ContentItemId = owner.Id,
+            WorkspaceId = owner.WorkspaceId,
+            VersionNumber = versionNumber,
+            Status = ContentVersionStatus.Published,
+            TemplateVersionId = templateVersionId,
+            Slug = slug,
+            LocaleCode = localeCode,
+            TranslationGroupId = translationGroupId,
+            Tags = tags ?? [],
+            EffectiveStartAt = effectiveStartAt is null ? null : DateTimeOffset.Parse(effectiveStartAt),
+            EffectiveEndAt = effectiveEndAt is null ? null : DateTimeOffset.Parse(effectiveEndAt),
+            PublishedAt = DateTimeOffset.Parse(publishedAt)
+        };
+
     private sealed record QuerySeed(Guid WorkspaceId, Guid TemplateId, Guid PublishedContentId);
+
+    private sealed record ResolvedQuerySeed(
+        Guid WorkspaceId,
+        Guid ArticleTemplateId,
+        Guid ArticleTemplateVersionId,
+        Guid FilterTranslationGroupId,
+        Guid RankedContentId,
+        Guid BoundaryContentId,
+        Guid DeletedContentId,
+        Guid FilterContentId,
+        Guid SearchMatchContentId);
 
     private static void ClearEnvironment()
     {
