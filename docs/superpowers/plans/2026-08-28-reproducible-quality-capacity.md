@@ -600,10 +600,13 @@ Commit: `Add scheduled capacity trend reports`
 - Create: `.github/dependabot.yml`
 - Modify: `.github/workflows/dotnet-test.yml`
 - Modify: `.github/workflows/admin-accessibility.yml`
+- Modify: `.github/workflows/openapi-contract.yml`
 - Modify: `.github/workflows/publish-cmsify.yml`
+- Modify: `.github/workflows/typescript-sdk.yml`
 - Modify: `src/Cmsify.Api/Dockerfile`
 - Modify: `src/Cmsify.Admin/Dockerfile`
 - Modify: `tests/release-contract/quality-policy.test.mjs`
+- Create: `tests/release-contract/yaml-subset.mjs`
 
 - [ ] **Step 1: Add failing workflow/Docker/Dependabot policy tests**
 
@@ -640,11 +643,12 @@ Commit: `Automate locked dependency maintenance`
 
 **Files:**
 
-- Create: `docs/performance.md`
+- Modify: `docs/performance.md`
 - Modify: `README.md`
 - Modify: `AGENTS.md`
 - Modify: `docs/v1-release-readiness.md`
 - Modify: `docs/v1-release-remediation-handoff.md`
+- Create: `tests/release-contract/quality-documentation.test.mjs`
 
 - [ ] **Step 1: Document exact local commands**
 

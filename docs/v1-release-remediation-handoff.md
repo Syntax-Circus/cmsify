@@ -1,15 +1,16 @@
-# V1 release remediation handoff after Task 10
+# V1 release remediation handoff after Task 11 quality and capacity
 
-This is a point-in-time resume document for moving the remediation work to another computer. Resume from the commit containing this file; do not redo Tasks 1–10.
+This is a point-in-time resume document for moving the remediation work to another computer. Resume from the commit containing this file; do not redo Tasks 1–11.
 
 ## Resume point
 
 - Branch: `feature/readiness-audit`
+- Exact Task 11 reproducible-quality implementation source tested: `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4` (`Close dependency policy mutation gaps`); implementation range `a482873..bdaa0ff`.
 - Exact Task 10 Cmsify implementation source tested: `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` (`Snapshot Cmsify retry configuration`); full implementation range `29ba5a8^..b68172d`.
 - Exact sibling source tested: `e5a7c57bbd3f24eb15c66e5d740e05fffd4f1bc3` (`Clarify cancellation ownership control`) on `feature/cmsify-resilience`; full change range `5216a18..e5a7c57`.
-- State: Task 10/F-13 is implemented and validated locally. Release consumption is still blocked on the user-owned stable publication/replacement gate described below. Tasks 11–12 remain untouched.
-- The final Task 10 documentation commit follows the tested implementation commit and changes no runtime, tests, generated output, or package bytes.
-- No push, merge, tag, package publication, image publication, or release was performed in Task 10.
+- State: Tasks 1–11 are implemented and validated locally. F-11, F-16, and F-17 are remediated at the source/test level. Release consumption is still blocked on the user-owned publication/replacement gate described below; outer remediation Task 12 remains open.
+- The Task 11 documentation commit containing this handoff follows the tested implementation commit and changes documentation/release-contract coverage only, not runtime, generated output, package bytes, or dependency locks.
+- No push, merge, tag, package publication, image publication, or release was performed in Task 10 or Task 11.
 
 On the new computer, first make sure this branch and the commit containing this document have been transferred or pushed by the user. Then run:
 
@@ -19,12 +20,15 @@ git status --short
 git log -5 --oneline
 ```
 
-Expected: a clean worktree with the Task 10 documentation commit at `HEAD` and tested implementation source `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` in its direct history. Read `AGENTS.md` before changing anything.
+Expected: a clean worktree with the Task 11 documentation commit at `HEAD` and tested implementation source `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4` in its direct history. Read `AGENTS.md` before changing anything.
 
 ## Authoritative plans and audit
 
 - Master remediation plan: [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md)
 - Release-readiness audit: [`docs/v1-release-readiness.md`](v1-release-readiness.md)
+- Task 11 quality/capacity design: [`docs/superpowers/specs/2026-08-28-reproducible-quality-capacity-design.md`](superpowers/specs/2026-08-28-reproducible-quality-capacity-design.md)
+- Task 11 quality/capacity implementation plan: [`docs/superpowers/plans/2026-08-28-reproducible-quality-capacity.md`](superpowers/plans/2026-08-28-reproducible-quality-capacity.md)
+- Quality/capacity command and evidence runbook: [`docs/performance.md`](performance.md)
 - Task 10 design: [`docs/superpowers/specs/2026-08-27-http-resilience-consolidation-design.md`](superpowers/specs/2026-08-27-http-resilience-consolidation-design.md)
 - Task 10 implementation plan: [`docs/superpowers/plans/2026-08-27-http-resilience-consolidation.md`](superpowers/plans/2026-08-27-http-resilience-consolidation.md)
 - Task 9 design: [`docs/superpowers/specs/2026-08-27-moving-baseline-upgrade-rollback-design.md`](superpowers/specs/2026-08-27-moving-baseline-upgrade-rollback-design.md)
@@ -37,7 +41,7 @@ The master plan checkboxes are not the execution ledger. Use this handoff, Git h
 
 ## Completed remediation
 
-Tasks 1–10 are complete through local implementation and validation. Key Cmsify milestones are:
+Tasks 1–11 are complete through local implementation and validation. Key Cmsify milestones are:
 
 | Area | Commit | Result |
 | --- | --- | --- |
@@ -53,7 +57,8 @@ Tasks 1–10 are complete through local implementation and validation. Key Cmsif
 | Task 7 final | `64ee4fb` | Reader-first inventory, runtime decrypt telemetry, and actionable diagnostics; combined GO. |
 | Task 8 | `415a6a7` | Durable media reconciliation implemented and independently approved. |
 | Task 9 | through `26bd204` plus the evidence-only documentation commit | Moving-baseline fixture, final-review compatibility/safety fixes, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
-| Task 10 | `29ba5a8^..b68172d` plus the documentation commit containing this handoff; sibling `5216a18..e5a7c57` | Shared request-factory resilience, direct/DI/Admin parity, construction-time configuration, atomic logical breaker completion, hard synchronous/asynchronous deadline, stable scheduled request/response snapshots, post-sender observer scheduling isolation, retry ownership, cancellation/observer exclusion, and final local package validation complete; stable publication/replacement remains gated. |
+| Task 10 | `29ba5a8^..b68172d` plus its earlier evidence-only documentation commit; sibling `5216a18..e5a7c57` | Shared request-factory resilience, direct/DI/Admin parity, construction-time configuration, atomic logical breaker completion, hard synchronous/asynchronous deadline, stable scheduled request/response snapshots, post-sender observer scheduling isolation, retry ownership, cancellation/observer exclusion, and final local package validation complete; stable publication/replacement remains gated. |
+| Task 11 | `a482873..bdaa0ff` plus the documentation commit containing this handoff | Exact SDK and twelve locks, unified xUnit v3, warning-free Release enforcement, Sass modules, bounded PostgreSQL resolved listing, deterministic media/webhook capacity invariants, open coverage/capacity trends, locked workflows/containers, and dependency automation complete locally; public restore remains gated. |
 
 Task 5 also changed sibling packages outside this repository:
 
@@ -89,7 +94,22 @@ These are explicitly non-blocking and must remain visible for final release adju
 - Task 4's Syft relationship-only `DESCRIBES` handling and smoke cleanup trap requirement.
 - Task 5 package publication and all external release evidence remain explicit-approval gates.
 - Task 10's `SyntaxCircus.Http.Resilience` stable publication/replacement and clean public restore remain explicit user-owned gates.
-- The default multi-project full-test command historically exposed the existing Media API fixture/initial reconciliation race twice; the isolated failing test passed, and the final strict-serial `-m:1` full solution passed 527/527 after the final resilience regressions were added. Keep this visible for Task 12 rather than attributing it to Task 10.
+- Outer Task 12 retains repository-wide third-party action SHA review, runtime-image digest pins, SBOM generation and signing/attestation, accessibility-trigger expansion, production-like artifact smoke and clean consumers, governance, and final release certification.
+- Keep the Task 9 rollback diagnostic omission visible for final adjudication; Task 11 did not alter the upgrade/rollback harness or claim that omission was closed.
+- The default multi-project full-test command historically exposed the existing Media API fixture/initial reconciliation races. `AvailableAssetWithMissingBlob_ReturnsSanitizedProblemDetails` has intermittently returned generic not-found instead of `/media-blob-missing`; `Delete_WithStaleEtag_ReturnsPreconditionFailedWithoutTombstone` has intermittently returned 404 instead of 412. Focused reruns passed, and the historical Task 10 strict-serial `-m:1` full solution passed 527/527 after the final resilience regressions. Keep both races visible for Task 12 rather than attributing them to Task 10 or Task 11.
+
+## Task 11 quality and capacity evidence
+
+The exact operating commands, report schemas, blocking/trend distinction, datasets, budgets, and index decision are in [Quality and capacity operations](performance.md). The evidence is local and commit-bound; it does not certify hosted or public restore.
+
+- SDK selection returned `10.0.400`. The approved ignored-feed locked restore accepted all twelve project-adjacent lock files. No local feed, package, cache, generated CSS, coverage output, or capacity output is tracked.
+- At final implementation `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`, the semantic quality policy passed 17/17, the complete release-contract set passed 232/232, the forced non-incremental Release build passed with 0 warnings and 0 errors, and both Dockerfile BuildKit static checks reported no warnings. That final fix was policy-test-only and did not change the compiled product or lock graph.
+- At workflow implementation `ce9629417b794c9828a0e686dca6e1f846609877`, the Docker-backed full solution passed 552/552: Core 66, .NET client 71, Admin 35, Infrastructure 303, and API 112. The XPlat run passed the same 552 tests and emitted five Cobertura reports. The direct deterministic capacity filters passed API 10/10, Infrastructure 6/6, and client 4/4.
+- Coverage contracts passed 17/17 at `836674bbdb75210b745a23b5134a8369b89484ea`; the summarizer emits `cmsify.coverage.v1` with source/assembly line and branch fields and no threshold/pass field. Percentages are trend-only.
+- Capacity contracts passed 15/15 and the real runner exited 0 at `05984108b84d708f3fae90260d971a387af71960`. Its `cmsify.capacity.v1` report used PostgreSQL 17.10, exact two-command resolved samples, webhook command count 3 with zero duplicates/overclaims, and `blockingInvariantsPassed: true`. A resolved p95 budget miss emitted a warning and `passed: false` without weakening or failing the blocking invariants.
+- The checked resolved fixture is 520 content items/2,600 published versions, the webhook fixture is 251 eligible rows for a batch of 100, and guarded media tests prove max+1 rejection without state plus incremental streaming/ownership. PostgreSQL 17 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` reported 33.405 ms for the earlier design-minimum 500/2,500 page and showed the version probes using existing indexes; no new index or migration was added.
+
+Public/CI restore remains blocked because `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` is not available from an approved public source. The user must publish those exact bytes or approve and pin a stable replacement, then force a clean ordinary public locked restore, verify asset/package identities, and rerun the focused/full gates. No hosted run, public restore, push, merge, tag, publication, or release is claimed here.
 
 ## Historical Task 8 start point
 
@@ -302,6 +322,6 @@ Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1`
 - `SyntaxCircus.Http.Resilience` remains pinned to local-only `0.2.0-cmsify.1`; unlike the storage package, no stable publication has been confirmed. Public/CI restore is blocked until the user completes the replacement gate above.
 - The candidate is a local content-addressed image, not a published release artifact. No external GitHub Actions run ID exists for this local evidence, and no release is certified solely by this handoff.
 
-## Next task: user publication gate, then Task 11
+## Next task: user publication gate, then outer Task 12
 
-Task 10 implementation is complete locally. First complete the explicit user-owned stable `SyntaxCircus.Http.Resilience` publication/replacement and public-restore validation above; publication itself is not authorized by this handoff. Then resume Task 11 from [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md), preserving tested Cmsify source `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42`, sibling source `e5a7c57bbd3f24eb15c66e5d740e05fffd4f1bc3`, and all completed Tasks 1–10. Tasks 11–12 have not begun. Do not push, merge, tag, publish, or release without explicit approval.
+Task 11 implementation is complete locally at `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`. First complete the explicit user-owned `SyntaxCircus.Http.Resilience` publication/replacement and ordinary public-restore validation above; publication itself is not authorized by this handoff. Then resume outer Task 12 from [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md), preserving the tested Cmsify and sibling sources and all completed Tasks 1–11. Outer Task 12 owns repository-wide action pins, runtime digests, SBOM/signing, accessibility-trigger expansion, production-like artifact smoke and clean consumers, governance, the retained Task 9 rollback diagnostic omission, both media races, and final release certification. Do not push, merge, tag, publish, or release without explicit approval.

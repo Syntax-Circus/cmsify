@@ -216,12 +216,16 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 
 ## Development commands
 
-From the repository root:
+Cmsify pins .NET SDK `10.0.400` and checks in a NuGet lock beside every solution project. Verify the SDK and use locked restore before building:
 
 ```powershell
-dotnet build Cmsify.slnx
-dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
+dotnet --version
+dotnet restore Cmsify.slnx --locked-mode
+dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
+dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```
+
+The ordinary public restore is currently gated by the unpublished `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package. Maintainers with the approved ignored local feed must use the local restore command in [Quality and capacity operations](docs/performance.md); hosted/public restore is not certified until the user publishes those exact bytes or approves and pins a stable replacement.
 
 For the TypeScript client:
 
@@ -233,7 +237,7 @@ npm test
 npm run build
 ```
 
-See [`AGENTS.md`](AGENTS.md) for focused test commands, generated-file rules, and architecture conventions.
+See [Quality and capacity operations](docs/performance.md) for lock regeneration, warning enforcement, deterministic capacity filters, coverage summaries, scheduled timing reports, and the strict-serial final command. See [`AGENTS.md`](AGENTS.md) for generated-file rules and architecture conventions.
 
 ## Contributing
 

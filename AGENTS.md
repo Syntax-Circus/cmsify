@@ -19,9 +19,19 @@ Read this file before changing Cmsify. Keep changes scoped, preserve existing us
 Run from the repository root unless a command changes directory explicitly:
 
 ```powershell
-dotnet build Cmsify.slnx
-dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
+dotnet --version
+dotnet restore Cmsify.slnx --locked-mode
+dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental --verbosity minimal
+dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```
+
+`dotnet --version` must report `10.0.400`. Ordinary public locked restore is still gated by the unpublished exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package. Until the user publishes those bytes or approves a stable replacement, maintainers with the approved ignored feed use:
+
+```powershell
+dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --locked-mode
+```
+
+Never track that feed configuration, package bytes, or package cache. Use [`docs/performance.md`](docs/performance.md) for safe `--force-evaluate` lock regeneration, focused capacity filters, XPlat coverage aggregation, the scheduled timing runner, and the strict-serial final command. Latency and coverage are trends; query counts, database paging, batch/lease bounds, upload rejection, and streaming/ownership assertions are blocking.
 
 Useful focused commands:
 
