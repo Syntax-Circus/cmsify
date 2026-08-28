@@ -1,0 +1,34 @@
+name: Capacity trends
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  capacity-trends:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v4.3.1
+        with:
+          global-json-file: global.json
+      # Public restore remains gated on publication/replacement of SyntaxCircus.Http.Resilience 0.2.0-cmsify.1.
+      - name: Restore locked dependencies
+        run: dotnet restore Cmsify.slnx --locked-mode
+      - name: Build Release binaries
+        run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
+      - name: Run capacity trends
+        run: node scripts/quality/run-capacity.mjs
+      - name: Upload capacity report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: capacity-trend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/capacity/capacity-report.json
+          if-no-files-found: error
+          retention-days: 30
