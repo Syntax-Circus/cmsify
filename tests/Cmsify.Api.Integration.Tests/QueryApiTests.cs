@@ -317,6 +317,7 @@ public sealed class QueryApiTests : IAsyncLifetime
     [InlineData("duration")]
     [InlineData("publishedAt")]
     [InlineData("versionNumber")]
+    [InlineData("effectiveStart")]
     [InlineData("effectiveEnd")]
     public async Task ResolvedContentList_EachWinnerRankAndEndBoundaryIndependentlySelectsTheExpectedVersion(string discriminator)
     {
@@ -331,6 +332,23 @@ public sealed class QueryApiTests : IAsyncLifetime
 
         Assert.Equal(1, response.GetProperty("totalCount").GetInt32());
         Assert.Equal(seed.ExpectedSlug, response.GetProperty("items")[0].GetProperty("slug").GetString());
+    }
+
+    [Fact]
+    public async Task ResolvedContentList_ExcludesDeletedOwnerIndependentlyOfOtherCandidatePredicates()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedDeletedOwnerDiscriminatorAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content?resolve=true&asOf=2026-06-15T12:00:00Z",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, response.GetProperty("totalCount").GetInt32());
+        Assert.Equal(1, response.GetProperty("items").GetArrayLength());
+        Assert.Equal(seed.LiveContentId, response.GetProperty("items")[0].GetProperty("id").GetGuid());
     }
 
     private WebApplicationFactory<Program> CreateFactory() =>
@@ -677,6 +695,11 @@ public sealed class QueryApiTests : IAsyncLifetime
                 second = ResolvedVersion(owner, 2, templateVersion.Id, "version-expected", "2026-06-01T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-16T00:00:00Z");
                 expectedSlug = second.Slug!;
                 break;
+            case "effectiveStart":
+                first = ResolvedVersion(owner, 1, templateVersion.Id, "fallback-before-future", "2026-06-01T00:00:00Z");
+                second = ResolvedVersion(owner, 2, templateVersion.Id, "future-start-newer", "2026-06-02T00:00:00Z", "2026-06-16T00:00:00Z", "2026-06-18T00:00:00Z");
+                expectedSlug = first.Slug!;
+                break;
             case "effectiveEnd":
                 first = ResolvedVersion(owner, 1, templateVersion.Id, "fallback-expected", "2026-06-01T00:00:00Z");
                 second = ResolvedVersion(owner, 2, templateVersion.Id, "ending-at-asof", "2026-06-02T00:00:00Z", "2026-06-14T00:00:00Z", "2026-06-15T12:00:00Z");
@@ -690,6 +713,33 @@ public sealed class QueryApiTests : IAsyncLifetime
         dbContext.ContentVersions.AddRange(first, second);
         await dbContext.SaveChangesAsync();
         return new RankDiscriminatorSeed(workspaceId, expectedSlug);
+    }
+
+    private static async Task<DeletedOwnerDiscriminatorSeed> SeedDeletedOwnerDiscriminatorAsync(WebApplicationFactory<Program> factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var workspaceId = await dbContext.Workspaces.Select(workspace => workspace.Id).FirstAsync();
+        var adminUserId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+        AddResolvedReader(dbContext, workspaceId, adminUserId, "Deleted Owner Discriminator");
+
+        var template = new Template { WorkspaceId = workspaceId, Name = "Owner", Slug = $"owner-{Guid.NewGuid():N}" };
+        var templateVersion = new TemplateVersion { TemplateId = template.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
+        template.Versions.Add(templateVersion);
+        dbContext.Templates.Add(template);
+        await dbContext.SaveChangesAsync();
+        template.CurrentVersionId = templateVersion.Id;
+
+        var live = ResolvedOwner(Guid.CreateVersion7().ToString(), workspaceId, templateVersion.Id, "live-owner");
+        var deleted = ResolvedOwner(Guid.CreateVersion7().ToString(), workspaceId, templateVersion.Id, "deleted-owner");
+        deleted.IsDeleted = true;
+        deleted.DeletedAt = DateTimeOffset.Parse("2026-06-01T00:00:00Z");
+        dbContext.ContentItems.AddRange(live, deleted);
+        dbContext.ContentVersions.AddRange(
+            ResolvedVersion(live, 1, templateVersion.Id, "live-expected", "2026-06-01T00:00:00Z"),
+            ResolvedVersion(deleted, 1, templateVersion.Id, "deleted-newer", "2026-06-02T00:00:00Z"));
+        await dbContext.SaveChangesAsync();
+        return new DeletedOwnerDiscriminatorSeed(workspaceId, live.Id);
     }
 
     private static void AddResolvedReader(CmsifyDbContext dbContext, Guid workspaceId, Guid adminUserId, string name) =>
@@ -720,6 +770,8 @@ public sealed class QueryApiTests : IAsyncLifetime
     private sealed record FilterDiscriminatorSeed(Guid WorkspaceId, string Query, string ExpectedSlug);
 
     private sealed record RankDiscriminatorSeed(Guid WorkspaceId, string ExpectedSlug);
+
+    private sealed record DeletedOwnerDiscriminatorSeed(Guid WorkspaceId, Guid LiveContentId);
 
     private static void ClearEnvironment()
     {
