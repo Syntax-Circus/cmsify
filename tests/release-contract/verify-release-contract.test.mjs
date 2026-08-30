@@ -184,6 +184,13 @@ test("rejects an unsigned promoted destination", () => expectInvalid((root) => m
 test("rejects certification that skips artifact smoke", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("artifact-smoke, ", "")), /certify.*depend.*artifact-smoke/i));
 test("rejects the legacy npm repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /@cmsify\/client.*repository.*Syntax-Circus/i));
 test("rejects the legacy npm lockfile repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package-lock.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /package-lock.*repository.*Syntax-Circus/i));
+test("rejects an npm lockfile without the source private marker", () => expectInvalid((root) => {
+  const path = resolve(root, "sdk/typescript/package-lock.json");
+  const lock = JSON.parse(readFileSync(path, "utf8"));
+  lock.packages[""].repository = { type: "git", url: "git+https://github.com/Syntax-Circus/cmsify.git", directory: "sdk/typescript" };
+  delete lock.packages[""].private;
+  writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`);
+}, /package-lock.*private/i));
 test("rejects an unpinned release action", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@v4")), /pinned/i));
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");

@@ -302,6 +302,7 @@ try {
 try {
   const typeScriptLock = JSON.parse(file("sdk/typescript/package-lock.json"));
   const rootPackage = typeScriptLock.packages?.[""];
+  expect(rootPackage?.private === true, "sdk/typescript/package-lock.json must record private=true to match the source package identity.");
   expect(rootPackage?.repository?.type === "git" && rootPackage?.repository?.url === "git+https://github.com/Syntax-Circus/cmsify.git" && rootPackage?.repository?.directory === "sdk/typescript", "sdk/typescript/package-lock.json repository must use canonical Syntax-Circus GitHub identity and sdk/typescript directory.");
 } catch {
   errors.push("sdk/typescript/package-lock.json must be valid JSON.");
