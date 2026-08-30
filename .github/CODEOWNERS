@@ -1,0 +1,2 @@
+# Pending activation: no verified GitHub user or team is present in trustworthy local repository metadata.
+# Do not invent a CODEOWNER. A repository administrator must verify a GitHub user or team, assign release workflows/scripts, public contracts/OpenAPI, security-sensitive auth/webhook/storage, and governance files, then activate this file as an external governance gate.

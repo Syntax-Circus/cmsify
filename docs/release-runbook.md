@@ -1,0 +1,32 @@
+# Release runbook
+
+This runbook describes the release evidence required before an authorized maintainer dispatches the tracked `publish-cmsify.yml` workflow. It does not authorize a publish, promotion, signing, tag, or release.
+
+## Roles and prerequisites
+
+- The release operator records the exact tag, source SHA, candidate artifact hashes, OCI manifest digests, and workflow run URL.
+- The approver supplies protected approval evidence when a breaking `/api/v1` change or an emergency exception is requested.
+- The backup custodian verifies the matched PostgreSQL, media, and Admin Data Protection-key backup manifest before deployment.
+
+GitHub environment protection, registry permissions, npm/NuGet trusted publishing, advisory enablement, Cosign identity policy, and CODEOWNERS activation are unverified prerequisites. A repository administrator must verify them in the hosted systems before a release; this file does not claim they are configured.
+
+## Preflight and certify
+
+From the exact committed source, record the output of these checked commands:
+
+```powershell
+node --test tests/release-contract/*.test.mjs
+node scripts/release/verify-release-contract.mjs
+node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v0.1.3
+node eng/upgrade-tests/cli.mjs verify-release-baseline --fixture tests/upgrade/fixtures/v0.1.3
+```
+
+Confirm the tag resolves to the recorded source SHA, every lock resolves as documented, and the candidate workflow follows `preflight` → `build` → `artifact-smoke`, `candidate-accessibility`, clean consumers, and `upgrade-rollback` → `certify` → `promote`. Preserve the generated release manifest, `SHA256SUMS`, SPDX files, accessibility output, upgrade diagnostics, package content hashes, and each immutable digest as evidence.
+
+Abort before promotion if any command fails, a source SHA/tag/digest differs, a required protected approval is absent, a backup manifest is incomplete, public restore remains unproved, or any candidate would be rebuilt. Do not rebuild a candidate to repair evidence and do not publish or promote without the required approval; restart the authorized process from a newly recorded candidate instead.
+
+## Promote only certified bytes
+
+The promotion job must copy the certified OCI descriptor by digest and compare the remote digest before package publication. It must not rebuild an image. Before restoring traffic to a deployment, verify a matched database/media backup, the retained prior image digest, `/health/live`, `/health/ready`, Admin sign-in, representative authenticated reads, and representative media downloads. The public restore gate for `SyntaxCircus.Http.Resilience` remains user-owned until exact public bytes and clean restore evidence exist.
+
+Use [Rollback runbook](rollback-runbook.md) when an abort criterion is met during or after deployment.

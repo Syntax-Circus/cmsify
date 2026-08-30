@@ -316,11 +316,18 @@ for (const project of [
 const workflowPath = ".github/workflows/publish-cmsify.yml";
 const workflow = file(workflowPath);
 const accessibilityWorkflow = file(".github/workflows/admin-accessibility.yml");
+const openApiWorkflow = file(".github/workflows/openapi-contract.yml");
 const accessibilityPackage = file("eng/accessibility/package.json");
 const accessibilityLock = file("eng/accessibility/package-lock.json");
 const accessibilityRunner = file("eng/accessibility/run.mjs");
 const upgradeWorkflowPath = ".github/workflows/upgrade-rollback.yml";
 const upgradeWorkflow = file(upgradeWorkflowPath);
+const apiCompatibilityPolicy = file("docs/api-compatibility.md");
+const securityPolicy = file("SECURITY.md");
+const supportPolicy = file("SUPPORT.md");
+const codeOwners = file(".github/CODEOWNERS");
+const releaseRunbook = file("docs/release-runbook.md");
+const rollbackRunbook = file("docs/rollback-runbook.md");
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
 expect(/\bpush:\s*\n\s+tags:/m.test(workflow) && !/\bbranches:/m.test(workflow), "Release workflow must be tag-only; branch builds never publish or tag.");
 expect(/node scripts\/release\/validate-release-tag\.mjs\s+"?\$\{\{\s*github\.ref_name\s*\}\}"?/i.test(workflow) || /validate-release-tag\.mjs/i.test(workflow), "Release workflow must validate the vX.Y.Z or vX.Y.Z-prerelease tag.");
@@ -338,6 +345,21 @@ for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
 for (const match of upgradeWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Upgrade workflow action must be pinned by immutable SHA: ${match[1]}`);
 }
+
+expect(/github\.event\.pull_request\.base\.sha/.test(openApiWorkflow) && /echo "head-sha=\$\{\{ github\.sha \}\}"/.test(openApiWorkflow) && /git cat-file -e "\$base_sha:sdk\/typescript\/openapi\.snapshot\.json"/.test(openApiWorkflow), "OpenAPI comparison must use the exact base SHA and live head document.");
+expect(/tufin\/oasdiff:v1\.28\.0@sha256:[0-9a-f]{64}/i.test(openApiWorkflow), "oasdiff must use an immutable digest-pinned image.");
+expect(/--match-path '\^\/api\/v1\(\?:\/\|\$\)'/.test(openApiWorkflow), "oasdiff must scope breaking comparison to /api/v1.");
+expect(/elif \[\[ \$result -eq 1 \]\]; then[\s\S]*only exit code 1 is an approvable breaking-change result[\s\S]*exit "\$result"/.test(openApiWorkflow), "oasdiff must treat only exit code 1 as breaking and fail closed on tool errors.");
+expect(/environment:\s*\n\s+name: api-breaking-change-approved[\s\S]*APPROVAL_EVIDENCE: \$\{\{ secrets\.API_BREAKING_CHANGE_EVIDENCE \}\}/.test(openApiWorkflow), "Breaking /api/v1 changes require protected api-breaking-change-approved evidence.");
+
+expect(/at least 12 months and through at least one subsequent stable minor release/i.test(apiCompatibilityPolicy), "API compatibility policy must retain deprecated stable /api/v1 contracts for the 12-month and subsequent-minor window.");
+expect(/owner, announcement date, earliest removal date\/version, and replacement\/migration/i.test(apiCompatibilityPolicy) && /Deprecation: true/.test(apiCompatibilityPolicy) && /absolute-date `Sunset` header/i.test(apiCompatibilityPolicy), "API compatibility policy must define complete deprecation metadata and HTTP headers.");
+expect(/\/api\/v2/.test(apiCompatibilityPolicy) && /api-breaking-change-approved/.test(apiCompatibilityPolicy), "API compatibility policy must require /api/v2 or the protected emergency gate for incompatible changes.");
+expect(/https:\/\/github\.com\/Syntax-Circus\/cmsify\/security\/advisories\/new/.test(securityPolicy) && /do not.*secret.*public issue/i.test(securityPolicy) && /coordinated disclosure/i.test(securityPolicy), "SECURITY.md must use the private advisory route and prohibit public secret disclosure.");
+expect(/Security reports/i.test(supportPolicy) && /Defects/i.test(supportPolicy) && /Usage questions/i.test(supportPolicy) && /Support window/i.test(supportPolicy) && /End of support/i.test(supportPolicy), "SUPPORT.md must separate channels, support window, and end-of-support behavior.");
+expect(codeOwners.split(/\r?\n/).every((line) => !line.trim() || line.trim().startsWith("#")) && /pending activation/i.test(codeOwners) && /verified GitHub user or team/i.test(codeOwners), "CODEOWNERS must remain comment-only pending a verified GitHub owner activation gate.");
+expect(/preflight/i.test(releaseRunbook) && /certify/i.test(releaseRunbook) && /promote/i.test(releaseRunbook) && /immutable digest/i.test(releaseRunbook) && /do not rebuild/i.test(releaseRunbook) && /unverified prerequisites/i.test(releaseRunbook), "Release runbook must document fail-closed evidence, immutable digest, no-rebuild, and hosted prerequisites.");
+expect(/abort/i.test(rollbackRunbook) && /backup/i.test(rollbackRunbook) && /restore/i.test(rollbackRunbook) && /immutable digest/i.test(rollbackRunbook) && /do not rebuild/i.test(rollbackRunbook), "Rollback runbook must document abort, verified backup/restore, immutable digest, and no-rebuild boundaries.");
 
 expect(/workflow_dispatch:/i.test(accessibilityWorkflow) && /push:\s*\n\s+branches:\s*\[main\]/i.test(accessibilityWorkflow) && /pull_request:/i.test(accessibilityWorkflow) && !/tags:/i.test(accessibilityWorkflow), "Accessibility workflow must run on manual dispatch, relevant main pushes, and pull requests, never tags only.");
 function accessibilityEventPaths(event) {
@@ -358,6 +380,7 @@ function accessibilityEventPaths(event) {
     const item = /^ {6}- (.*)$/.exec(line)?.[1];
     const quoted = /^"([^"\r\n]*)"(?:[ \t]+#.*)?$/.exec(item ?? "");
     const singleQuoted = /^'([^'\r\n]*)'(?:[ \t]+#.*)?$/.exec(item ?? "");
+    if (quoted?.[1].includes("\\\\")) return { entries, error: "must not contain YAML escape sequences" };
     if (quoted?.[1].startsWith("!") || singleQuoted?.[1].startsWith("!")) return { entries, error: "must not contain negative entries" };
     if (!quoted) return { entries, error: "must contain only double-quoted path sequence entries" };
     entries.push(quoted[1]);

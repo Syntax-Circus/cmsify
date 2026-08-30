@@ -45,7 +45,7 @@ function eventPaths(workflow, event) {
     if (/^(?:[^ \t]| {2}[A-Za-z0-9_.-]+:| {4}[A-Za-z0-9_.-]+:)/.test(line)) break;
     const item = /^ {6}- (.*)$/.exec(line)?.[1];
     const quoted = /^"([^"\r\n]*)"(?:[ \t]+#.*)?$/.exec(item ?? "");
-    if (!quoted || quoted[1].startsWith("!")) return [];
+    if (!quoted || quoted[1].startsWith("!") || quoted[1].includes("\\\\")) return [];
     entries.push(quoted[1]);
   }
   return entries;
@@ -90,6 +90,18 @@ test("single-quoted and separated negative paths invalidate each accessibility e
       ["separated", '      - "src/Cmsify.Admin/**"\n\n      # later path entry\n      - "!src/Cmsify.Admin/**"\n'],
     ]) {
       assert.deepEqual(eventPaths(mutate(replacement), event), [], `${event} ${name} negative path must invalidate its path list`);
+    }
+  }
+});
+
+test("YAML escapes invalidate each accessibility event path list", () => {
+  for (const event of ["push", "pull_request"]) {
+    const mutate = event === "push"
+      ? (replacement) => branchWorkflow.replace('      - "src/Cmsify.Admin/**"\n', replacement)
+      : (replacement) => branchWorkflow.replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n', `  pull_request:\n    paths:\n${replacement}`);
+    for (const [escapeName, escapeSequence] of [["hex", "\\\\x21"], ["unicode", "\\\\u0021"], ["long-unicode", "\\\\U00000021"]]) {
+      const replacement = `      - "src/Cmsify.Admin/**"\n      - "${escapeSequence}src/Cmsify.Admin/**"\n`;
+      assert.deepEqual(eventPaths(mutate(replacement), event), [], `${event} ${escapeName} YAML escape must invalidate its path list`);
     }
   }
 });

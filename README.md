@@ -186,6 +186,9 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 - [Getting started](docs/getting-started.md) — local setup, first login, workspace, and API client token.
 - [Authentication and authorization](docs/authentication-and-authorization.md) — Admin user sessions, API-client tokens, SDK bearer handling, roles, scopes, and token lifecycle.
 - [Operating Cmsify](docs/operations.md) — configuration, production essentials, persistence, health checks, and security.
+- [API compatibility](docs/api-compatibility.md) — `/api/v1` compatibility and deprecation policy.
+- [Release runbook](docs/release-runbook.md) and [rollback runbook](docs/rollback-runbook.md) — authorized-release evidence and recovery boundaries.
+- [Security policy](SECURITY.md) and [support policy](SUPPORT.md) — private vulnerability reporting and public support channels.
 
 **Build integrations and content models:**
 

@@ -1,5 +1,7 @@
 # Operating Cmsify
 
+Release operators must follow the [release runbook](release-runbook.md) and use the [rollback runbook](rollback-runbook.md) when an abort criterion is met. These runbooks retain the required immutable-digest, backup, protected-approval, and no-rebuild evidence boundaries.
+
 ## Configuration
 
 Cmsify reads `appsettings.json`, environment variables, and development dotenv files. Copy `.env.example` for local development. Repository-level `.env` values load before app-level files such as `src/Cmsify.Api/.env.local`, so the closer app-level file wins. See the root [configuration inventory](../README.md#configuration) for every supported API and Admin setting, its default, and its production guidance.

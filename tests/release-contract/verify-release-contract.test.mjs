@@ -30,7 +30,16 @@ const contractFiles = [
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj",
   ".github/workflows/dotnet-test.yml",
   ".github/workflows/admin-accessibility.yml",
+  ".github/workflows/openapi-contract.yml",
   ".github/workflows/upgrade-rollback.yml",
+  "SECURITY.md",
+  "SUPPORT.md",
+  ".github/CODEOWNERS",
+  "docs/api-compatibility.md",
+  "docs/operations.md",
+  "docs/release-runbook.md",
+  "docs/rollback-runbook.md",
+  "docs/README.md",
   workflowPath,
 ];
 
@@ -92,6 +101,11 @@ function mutateAccessibilityWorkflow(root, mutate) {
   writeFileSync(path, mutate(readFileSync(path, "utf8")));
 }
 
+function mutateOpenApiWorkflow(root, mutate) {
+  const path = resolve(root, ".github/workflows/openapi-contract.yml");
+  writeFileSync(path, mutate(readFileSync(path, "utf8")));
+}
+
 function mutateAccessibilityEventPaths(root, event, mutate) {
   mutateAccessibilityWorkflow(root, (workflow) => {
     const start = workflow.search(new RegExp(`^  ${event}:\\s*$`, "m"));
@@ -145,12 +159,18 @@ test("requires canonical Docker Hub names in Buildx archive annotations", () => 
 
 test("rejects branch publication", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('tags: ["v*"]', "branches: [main]")), /tag-only/i));
 test("rejects tag-only branch accessibility", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow.replace("workflow_dispatch:", 'push:\n    tags: ["v*"]')), /accessibility.*manual.*main.*pull request/i));
+test("rejects a mutable OpenAPI comparison image", () => expectInvalid((root) => mutateOpenApiWorkflow(root, (workflow) => workflow.replace(/tufin\/oasdiff:v1\.28\.0@sha256:[0-9a-f]{64}/, "tufin/oasdiff:v1.28.0")), /runtime image.*sha256/i));
+test("rejects an OpenAPI comparison without the /api/v1 scope", () => expectInvalid((root) => mutateOpenApiWorkflow(root, (workflow) => workflow.replace("--match-path '^/api/v1(?:/|$)'", "")), /oasdiff.*\/api\/v1/i));
+test("rejects an OpenAPI tool failure that can become an approval result", () => expectInvalid((root) => mutateOpenApiWorkflow(root, (workflow) => workflow.replace("elif [[ $result -eq 1 ]]; then", "else")), /oasdiff.*exit code 1/i));
 for (const event of ["push", "pull_request"]) {
   test(`rejects paths-ignore substituted for ${event} accessibility paths`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace("    paths:", "    paths-ignore:")), /Accessibility path triggers.*main pushes.*pull requests/i));
   test(`rejects duplicated ${event} accessibility paths`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Admin/**"\n')), /Accessibility path triggers.*main pushes.*pull requests/i));
   test(`rejects a negated required ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - "!src/Cmsify.Admin/**"\n')), new RegExp(`Accessibility ${event} path triggers must not contain negative entries`, "i")));
   test(`rejects a single-quoted negated ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - \'!src/Cmsify.Admin/**\'\n')), new RegExp(`Accessibility ${event} path triggers must not contain negative entries`, "i")));
   test(`rejects a blank/comment-separated negated ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n\n      # later path entry\n      - "!src/Cmsify.Admin/**"\n')), new RegExp(`Accessibility ${event} path triggers must not contain negative entries`, "i")));
+  for (const [escapeName, escapeSequence] of [["hex", "\\\\x21"], ["unicode", "\\\\u0021"], ["long-unicode", "\\\\U00000021"]]) {
+    test(`rejects a ${escapeName}-escaped negated ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', `      - "src/Cmsify.Admin/**"\n      - "${escapeSequence}src/Cmsify.Admin/**"\n`)), new RegExp(`Accessibility ${event} path triggers must not contain YAML escape sequences`, "i")));
+  }
 }
 test("rejects source-built release accessibility", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace("docker load --input artifacts/oci/cmsify-admin.oci.tar", "dotnet run --project src/Cmsify.Admin/Cmsify.Admin.csproj")), /candidate accessibility.*exact.*Admin OCI archive|candidate accessibility.*must not rebuild/i));
 test("rejects an omitted clean candidate package", () => expectInvalid((root) => mutateReleaseJob(root, "dotnet-consumer", (job) => job.replace('            <package pattern="SyntaxCircus.Cmsify.Contracts" />\n', "")), /clean \.NET consumer.*all three.*local source/i));
