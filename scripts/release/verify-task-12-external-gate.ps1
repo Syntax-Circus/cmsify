@@ -153,7 +153,8 @@ function Assert-ReleaseRunIdentity {
     Assert-FullSourceSha -Value $SourceSha
     if ([string] $Run.id -ne $RunId -or
         $Run.event -ne "push" -or
-        $Run.path -ne "$PublishWorkflowPath@$Tag" -or
+        $Run.path -ne $PublishWorkflowPath -or
+        $Run.workflow_ref -ne "$Repository/$PublishWorkflowPath@refs/tags/$Tag" -or
         $Run.head_sha -ne $SourceSha -or
         $Run.head_branch -ne $Tag) {
         throw "Release run workflow, event, tag, or source identity is invalid."
@@ -302,7 +303,11 @@ function Test-ArtifactAttestation {
     if ($checksumsItem.LinkType -or (($checksumsItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
         throw "SHA256SUMS must not be a symbolic link or reparse point."
     }
-    $root = [IO.Path]::GetFullPath($checksumsItem.Directory.FullName)
+    $rootItem = Get-Item -LiteralPath $checksumsItem.Directory.FullName -Force
+    if ($rootItem.LinkType -or (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "Candidate trust root must not be a symbolic link or reparse point."
+    }
+    $root = [IO.Path]::GetFullPath($rootItem.FullName)
     $comparison = if ($IsWindows) { [StringComparer]::OrdinalIgnoreCase } else { [StringComparer]::Ordinal }
     $seen = [Collections.Generic.HashSet[string]]::new($comparison)
     $subjects = @()

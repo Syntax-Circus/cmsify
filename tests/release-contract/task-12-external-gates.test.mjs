@@ -116,7 +116,8 @@ function runResponse() {
     event: "push",
     head_sha: sourceSha,
     head_branch: tag,
-    path: `.github/workflows/publish-cmsify.yml@${tag}`,
+    path: ".github/workflows/publish-cmsify.yml",
+    workflow_ref: `Syntax-Circus/cmsify/.github/workflows/publish-cmsify.yml@refs/tags/${tag}`,
     status: "completed",
     conclusion: "success",
     created_at: minutesFromNow(-90),
@@ -183,6 +184,8 @@ test("protected approval binds exact workflow, tag, SHA, promote job, reviewers,
   for (const mutate of [
     (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/actions/runs/${runId}`].json.head_sha = "2".repeat(40); },
     (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/actions/runs/${runId}`].json.path = ".github/workflows/other.yml"; },
+    (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/actions/runs/${runId}`].json.workflow_ref = `Syntax-Circus/cmsify/.github/workflows/other.yml@refs/tags/${tag}`; },
+    (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/actions/runs/${runId}`].json.workflow_ref = "Syntax-Circus/cmsify/.github/workflows/publish-cmsify.yml@refs/tags/v9.9.9"; },
     (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/actions/runs/${runId}/jobs?filter=latest&per_page=100`].json.jobs[1].name = "other"; },
     (commands) => { commands["gh api repos/Syntax-Circus/cmsify/environments/release"].json.protection_rules[0].reviewers = []; },
     (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/actions/runs/${runId}/approvals`].json[0].state = "rejected"; },
@@ -233,6 +236,20 @@ test("attestation verifies every confined checksummed file and rejects link esca
   });
   assert.notEqual(escaped.status, 0, escaped.stdout);
   assert.match(escaped.stderr, /link|reparse/i);
+
+  const linkedRoot = runGate("artifact-attestation", {
+    arrange({ root, env }) {
+      const actualCandidate = path.join(root, "actual-candidate");
+      const candidateLink = path.join(root, "linked-candidate");
+      mkdirSync(actualCandidate);
+      writeFileSync(path.join(actualCandidate, "subject.bin"), "subject");
+      writeFileSync(path.join(actualCandidate, "SHA256SUMS"), `${sha256("subject")}  subject.bin\n`);
+      symlinkSync(actualCandidate, candidateLink, process.platform === "win32" ? "junction" : "dir");
+      env.CMSIFY_CHECKSUMS_PATH = path.join(candidateLink, "SHA256SUMS");
+    },
+  });
+  assert.notEqual(linkedRoot.status, 0, linkedRoot.stdout);
+  assert.match(linkedRoot.stderr, /trust root.*link|link.*trust root|reparse/i);
 });
 
 function arrangeSoak({ root, env }, overrides = {}) {
