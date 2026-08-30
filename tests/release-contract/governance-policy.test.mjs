@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { validateGovernanceContract } from "../../scripts/release/governance-validator.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -11,6 +12,17 @@ function document(path) {
   assert.equal(existsSync(fullPath), true, `${path} must exist`);
   return readFileSync(fullPath, "utf8");
 }
+
+test("real governance validator ignores decoys outside the three OpenAPI jobs", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  const decoy = `# HEAD_SHA="${"${{ github.event.pull_request.head.sha }}"}"\n${workflow}`
+    .replace('if: needs.contract.outputs.breaking == \'true\'', "if: always()")
+    .replace('if: always()\n    runs-on: ubuntu-latest\n    steps:\n      - name: Require a successful contract check', 'if: success()\n    runs-on: ubuntu-latest\n    steps:\n      - name: Require a successful contract check');
+  const result = validateGovernanceContract({ workflow: decoy });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => /breaking_change_approval\.if/.test(error)));
+  assert.ok(result.errors.some((error) => /contract-gate\.if/.test(error)));
+});
 
 function requireClauses(path, clauses) {
   const contents = document(path);
@@ -82,23 +94,30 @@ test("governance clauses and hosted-state boundaries reject targeted contradicti
   }
   const releaseRunbook = document("docs/release-runbook.md");
   const hostedOverclaim = releaseRunbook.replace("this file does not claim they are configured", "they are configured");
-  assert.throws(() => assert.doesNotMatch(hostedOverclaim, /GitHub environment protection[\s\S]*are configured/i), /expected to not match/);
+  assert.throws(() => assert.doesNotMatch(hostedOverclaim, /unverified prerequisites\.[\s\S]*; they are configured/i), /expected to not match/);
 });
 
 test("OpenAPI compatibility comparison is exact, scoped, pinned, and fail-closed", () => {
   const contents = document(".github/workflows/openapi-contract.yml");
   validateOpenApiContract(contents);
   const mutations = [
-    (source) => source.replace("github.event.pull_request.head.sha", "github.sha"),
-    (source) => source.replace('test "$(git rev-parse HEAD)" = "$HEAD_SHA"', 'test "$(git rev-parse HEAD)" = "${{ github.sha }}"'),
-    (source) => source.replace("github.event.pull_request.base.sha", "github.event.pull_request.head.sha"),
-    (source) => source.replace("--match-path '^/api/v1(?:/|$)'", ""),
-    (source) => source.replace(/tufin\/oasdiff:v1\.28\.0@sha256:[0-9a-f]{64}/, "tufin/oasdiff:v1.28.0"),
-    (source) => source.replace("elif [[ $result -eq 1 ]]; then", "else"),
-    (source) => source.replace('exit "$result"', "exit 0"),
-    (source) => source.replace("api-breaking-change-approved", "unprotected"),
-    (source) => source.replace("secrets.API_BREAKING_CHANGE_EVIDENCE", "github.event.inputs.approval"),
-    (source) => source.replace("needs: [contract, breaking_change_approval]", "needs: [contract]"),
+    ["contract.checkout", (source) => source.replace("ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}", "ref: ${{ github.sha }}")],
+    ["contract.revisions PR head", (source) => source.replace('HEAD_SHA="${{ github.event.pull_request.head.sha }}"', 'HEAD_SHA="${{ github.sha }}"')],
+    ["contract.revisions checkout check", (source) => source.replace('test "$(git rev-parse HEAD)" = "$HEAD_SHA"', "true")],
+    ["contract.revisions head record", (source) => source.replace('echo "head-sha=$HEAD_SHA"', 'echo "head-sha=${{ github.sha }}"')],
+    ["contract.revisions PR base", (source) => source.replace('BASE_SHA="${{ github.event.pull_request.base.sha }}"', 'BASE_SHA="${{ github.event.pull_request.head.sha }}"')],
+    ["contract.revisions base snapshot", (source) => source.replace('git cat-file -e "$BASE_SHA:sdk/typescript/openapi.snapshot.json"', "true")],
+    ["contract.diff digest", (source) => source.replace(/tufin\/oasdiff:v1\.28\.0@sha256:[0-9a-f]{64}/, "tufin/oasdiff:v1.28.0")],
+    ["contract.diff scope", (source) => source.replace("--match-path '^/api/v1(?:/|$)'", "")],
+    ["contract.diff breaking result", (source) => source.replace("elif [[ $result -eq 1 ]]; then", "else")],
+    ["contract.diff fatal tool exit", (source) => source.replace('exit "$result"', "exit 0")],
+    ["approval environment", (source) => source.replace("name: api-breaking-change-approved", "name: unprotected")],
+    ["approval secret", (source) => source.replace("secrets.API_BREAKING_CHANGE_EVIDENCE", "github.event.inputs.approval")],
+    ["contract gate dependencies", (source) => source.replace("needs: [contract, breaking_change_approval]", "needs: [contract]")],
   ];
-  for (let index = 0; index < mutations.length; index += 1) assert.throws(() => validateOpenApiContract(mutations[index](contents), [openApiInvariants[index === 0 ? 0 : index === 1 ? 2 : index === 2 ? 4 : index === 3 ? 7 : index === 4 ? 6 : index === 5 ? 8 : index === 6 ? 9 : index === 7 ? 10 : index === 8 ? 11 : 12]]), /OpenAPI compatibility gate/);
+  assert.equal(mutations.length, 13, "every declared OpenAPI invariant needs an isolated mutation");
+  for (const [name, mutate] of mutations) {
+    const result = validateGovernanceContract({ workflow: mutate(contents) });
+    assert.equal(result.ok, false, `${name} mutation unexpectedly passed`);
+  }
 });

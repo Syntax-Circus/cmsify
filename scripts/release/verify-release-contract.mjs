@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateGovernanceContract } from "./governance-validator.mjs";
 
 const defaultRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const rootArgument = process.argv.indexOf("--root");
@@ -346,21 +347,8 @@ for (const match of upgradeWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Upgrade workflow action must be pinned by immutable SHA: ${match[1]}`);
 }
 
-expect(/ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/.test(openApiWorkflow), "OpenAPI comparison must checkout the exact PR head, never a synthetic workflow SHA.");
-expect(/HEAD_SHA="\$\{\{ github\.event\.pull_request\.head\.sha \}\}"[\s\S]*BASE_SHA="\$\{\{ github\.event\.pull_request\.base\.sha \}\}"[\s\S]*test "\$\(git rev-parse HEAD\)" = "\$HEAD_SHA"[\s\S]*git cat-file -e "\$BASE_SHA:sdk\/typescript\/openapi\.snapshot\.json"[\s\S]*echo "base-sha=\$BASE_SHA"[\s\S]*echo "head-sha=\$HEAD_SHA"/.test(openApiWorkflow), "OpenAPI comparison must record the event-specific PR head and exact target base after verifying checkout identity.");
-expect(/tufin\/oasdiff:v1\.28\.0@sha256:[0-9a-f]{64}/i.test(openApiWorkflow), "oasdiff must use an immutable digest-pinned image.");
-expect(/--match-path '\^\/api\/v1\(\?:\/\|\$\)'/.test(openApiWorkflow), "oasdiff must scope breaking comparison to /api/v1.");
-expect(/elif \[\[ \$result -eq 1 \]\]; then[\s\S]*only exit code 1 is an approvable breaking-change result[\s\S]*exit "\$result"/.test(openApiWorkflow), "oasdiff must treat only exit code 1 as breaking and fail closed on tool errors.");
-expect(/environment:\s*\n\s+name: api-breaking-change-approved[\s\S]*APPROVAL_EVIDENCE: \$\{\{ secrets\.API_BREAKING_CHANGE_EVIDENCE \}\}/.test(openApiWorkflow), "Breaking /api/v1 changes require protected api-breaking-change-approved evidence.");
-
-expect(/at least 12 months and through at least one subsequent stable minor release/i.test(apiCompatibilityPolicy), "API compatibility policy must retain deprecated stable /api/v1 contracts for the 12-month and subsequent-minor window.");
-expect(/owner, announcement date, earliest removal date\/version, and replacement\/migration/i.test(apiCompatibilityPolicy) && /Deprecation: true/.test(apiCompatibilityPolicy) && /absolute-date `Sunset` header/i.test(apiCompatibilityPolicy), "API compatibility policy must define complete deprecation metadata and HTTP headers.");
-expect(/\/api\/v2/.test(apiCompatibilityPolicy) && /api-breaking-change-approved/.test(apiCompatibilityPolicy), "API compatibility policy must require /api/v2 or the protected emergency gate for incompatible changes.");
-expect(/https:\/\/github\.com\/Syntax-Circus\/cmsify\/security\/advisories\/new/.test(securityPolicy) && /do not.*secret.*public issue/i.test(securityPolicy) && /coordinated disclosure/i.test(securityPolicy), "SECURITY.md must use the private advisory route and prohibit public secret disclosure.");
-expect(/Security reports/i.test(supportPolicy) && /Defects/i.test(supportPolicy) && /Usage questions/i.test(supportPolicy) && /Support window/i.test(supportPolicy) && /End of support/i.test(supportPolicy), "SUPPORT.md must separate channels, support window, and end-of-support behavior.");
-expect(codeOwners.split(/\r?\n/).every((line) => !line.trim() || line.trim().startsWith("#")) && /pending activation/i.test(codeOwners) && /verified GitHub user or team/i.test(codeOwners), "CODEOWNERS must remain comment-only pending a verified GitHub owner activation gate.");
-expect(/preflight/i.test(releaseRunbook) && /certify/i.test(releaseRunbook) && /promote/i.test(releaseRunbook) && /immutable digest/i.test(releaseRunbook) && /do not rebuild/i.test(releaseRunbook) && /unverified prerequisites/i.test(releaseRunbook), "Release runbook must document fail-closed evidence, immutable digest, no-rebuild, and hosted prerequisites.");
-expect(/abort/i.test(rollbackRunbook) && /backup/i.test(rollbackRunbook) && /restore/i.test(rollbackRunbook) && /immutable digest/i.test(rollbackRunbook) && /do not rebuild/i.test(rollbackRunbook), "Rollback runbook must document abort, verified backup/restore, immutable digest, and no-rebuild boundaries.");
+const governance = validateGovernanceContract({ workflow: openApiWorkflow, documents: { "docs/api-compatibility.md": apiCompatibilityPolicy, "SECURITY.md": securityPolicy, "SUPPORT.md": supportPolicy, ".github/CODEOWNERS": codeOwners, "docs/release-runbook.md": releaseRunbook, "docs/rollback-runbook.md": rollbackRunbook } });
+errors.push(...governance.errors);
 
 expect(/workflow_dispatch:/i.test(accessibilityWorkflow) && /push:\s*\n\s+branches:\s*\[main\]/i.test(accessibilityWorkflow) && /pull_request:/i.test(accessibilityWorkflow) && !/tags:/i.test(accessibilityWorkflow), "Accessibility workflow must run on manual dispatch, relevant main pushes, and pull requests, never tags only.");
 function accessibilityEventPaths(event) {
