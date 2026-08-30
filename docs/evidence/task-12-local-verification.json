@@ -5,6 +5,19 @@
   "nodeVersion": "v24.14.1",
   "dockerClientVersion": "29.7.2",
   "dockerServerVersion": null,
+  "commandInputs": {
+    "CMSIFY_RELEASE_RUN_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_CHECKSUMS_PATH": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_API_DIGEST": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_ADMIN_DIGEST": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_RELEASE_VERSION": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_RELEASE_TAG": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_WORKFLOW_IDENTITY": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_ACCESSIBILITY_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_PROMOTE_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_SMOKE_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_UPGRADE_ROLLBACK_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" }
+  },
   "localFeedPackage": {
     "id": "SyntaxCircus.Http.Resilience",
     "version": "0.2.0-cmsify.1",
@@ -35,14 +48,14 @@
     { "kind": "OCI and package candidates", "status": "absent/local-unpublished", "digest": null }
   ],
   "externalGates": {
-    "publicPackageRestore": { "passed": false, "reason": "Exact resilience bytes are not available from an approved public source.", "owner": "release owner", "nextCommand": "dotnet restore Cmsify.slnx --locked-mode", "evidenceLink": null },
-    "hostedAccessibility": { "passed": false, "reason": "No hosted candidate workflow evidence.", "owner": "release owner", "nextCommand": "gh run view --log", "evidenceLink": null },
-    "protectedApprovals": { "passed": false, "reason": "No protected release approval.", "owner": "release approver", "nextCommand": "gh run view --log", "evidenceLink": null },
-    "artifactAttestation": { "passed": false, "reason": "No hosted attestation.", "owner": "release owner", "nextCommand": "gh attestation verify --repo Syntax-Circus/cmsify", "evidenceLink": null },
-    "registrySigning": { "passed": false, "reason": "No registry signing evidence.", "owner": "release owner", "nextCommand": "cosign verify docker.io/syntaxcircus/cmsify-api@sha256:<digest>", "evidenceLink": null },
-    "immutableOciPromotion": { "passed": false, "reason": "No immutable OCI promotion.", "owner": "release owner", "nextCommand": "oras manifest fetch --descriptor docker.io/syntaxcircus/cmsify-api:<version>", "evidenceLink": null },
-    "hostedSmokeSoak": { "passed": false, "reason": "No hosted smoke or soak evidence.", "owner": "release owner", "nextCommand": "gh run view --log", "evidenceLink": null },
-    "finalRelease": { "passed": false, "reason": "Final release is not authorized or certified.", "owner": "release approver", "nextCommand": "gh release view v<version>", "evidenceLink": null }
+    "publicPackageRestore": { "passed": false, "reason": "Exact resilience bytes are not available from an approved public source.", "owner": "release operator", "nextCommand": "dotnet restore Cmsify.slnx --locked-mode", "evidenceLink": null },
+    "hostedAccessibility": { "passed": false, "reason": "No hosted candidate workflow evidence.", "owner": "release operator", "nextCommand": "gh run view $env:CMSIFY_RELEASE_RUN_ID --repo Syntax-Circus/cmsify --job $env:CMSIFY_ACCESSIBILITY_JOB_ID --log --exit-status", "evidenceLink": null },
+    "protectedApprovals": { "passed": false, "reason": "No protected release approval.", "owner": "approver", "nextCommand": "gh run view $env:CMSIFY_RELEASE_RUN_ID --repo Syntax-Circus/cmsify --job $env:CMSIFY_PROMOTE_JOB_ID --log --exit-status", "evidenceLink": null },
+    "artifactAttestation": { "passed": false, "reason": "No hosted attestation.", "owner": "release operator", "nextCommand": "gh attestation verify $env:CMSIFY_CHECKSUMS_PATH --repo Syntax-Circus/cmsify", "evidenceLink": null },
+    "registrySigning": { "passed": false, "reason": "No registry signing evidence.", "owner": "release operator", "nextCommand": "cosign verify --certificate-identity $env:CMSIFY_WORKFLOW_IDENTITY --certificate-oidc-issuer https://token.actions.githubusercontent.com docker.io/syntaxcircus/cmsify-api@$env:CMSIFY_API_DIGEST; if ($LASTEXITCODE) { throw 'API signature verification failed' }; cosign verify --certificate-identity $env:CMSIFY_WORKFLOW_IDENTITY --certificate-oidc-issuer https://token.actions.githubusercontent.com docker.io/syntaxcircus/cmsify-admin@$env:CMSIFY_ADMIN_DIGEST; if ($LASTEXITCODE) { throw 'Admin signature verification failed' }", "evidenceLink": null },
+    "immutableOciPromotion": { "passed": false, "reason": "No immutable OCI promotion.", "owner": "release operator", "nextCommand": "$api=(oras manifest fetch --descriptor docker.io/syntaxcircus/cmsify-api:$env:CMSIFY_RELEASE_VERSION|ConvertFrom-Json).digest; if ($api -ne $env:CMSIFY_API_DIGEST) { throw 'API digest mismatch' }; $admin=(oras manifest fetch --descriptor docker.io/syntaxcircus/cmsify-admin:$env:CMSIFY_RELEASE_VERSION|ConvertFrom-Json).digest; if ($admin -ne $env:CMSIFY_ADMIN_DIGEST) { throw 'Admin digest mismatch' }", "evidenceLink": null },
+    "hostedSmokeSoak": { "passed": false, "reason": "No hosted smoke or soak evidence.", "owner": "release operator", "nextCommand": "gh run view $env:CMSIFY_RELEASE_RUN_ID --repo Syntax-Circus/cmsify --job $env:CMSIFY_SMOKE_JOB_ID --log --exit-status; if ($LASTEXITCODE) { throw 'Smoke job failed' }; gh run view $env:CMSIFY_RELEASE_RUN_ID --repo Syntax-Circus/cmsify --job $env:CMSIFY_UPGRADE_ROLLBACK_JOB_ID --log --exit-status; if ($LASTEXITCODE) { throw 'Upgrade rollback job failed' }", "evidenceLink": null },
+    "finalRelease": { "passed": false, "reason": "Final release is not authorized or certified.", "owner": "approver", "nextCommand": "gh release view $env:CMSIFY_RELEASE_TAG --repo Syntax-Circus/cmsify --json name,tagName,url", "evidenceLink": null }
   },
   "knownDiagnostics": [
     "Task 6 breaker carryover: unrecognized contract step sequence; mandatory Task 8 fix.",
