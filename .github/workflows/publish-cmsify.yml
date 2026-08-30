@@ -37,6 +37,7 @@ jobs:
     env:
       VERSION: ${{ needs.resolve.outputs.version }}
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      SBOM_STAGING_ROOT: ${{ runner.temp }}/cmsify-sbom-inputs
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
@@ -71,14 +72,65 @@ jobs:
           mkdir -p artifacts/oci
           docker buildx build --platform linux/amd64 --provenance=false --tag "docker.io/syntaxcircus/cmsify-api:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --metadata-file artifacts/oci/cmsify-api.metadata.json --output type=oci,dest=artifacts/oci/cmsify-api.oci.tar,name=docker.io/syntaxcircus/cmsify-api:$VERSION .
           docker buildx build --platform linux/amd64 --provenance=false --tag "docker.io/syntaxcircus/cmsify-admin:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --metadata-file artifacts/oci/cmsify-admin.metadata.json --output type=oci,dest=artifacts/oci/cmsify-admin.oci.tar,name=docker.io/syntaxcircus/cmsify-admin:$VERSION .
+      - name: Restore exact package candidates into isolated SBOM trees
+        shell: bash
+        run: |
+          test ! -e "$SBOM_STAGING_ROOT"
+          NUGET_CONSUMER="$SBOM_STAGING_ROOT/nuget/consumer"
+          NUGET_SOURCE="$SBOM_STAGING_ROOT/nuget/candidate-source"
+          NUGET_CACHE="$SBOM_STAGING_ROOT/nuget/packages"
+          mkdir -p "$NUGET_CONSUMER" "$NUGET_SOURCE" "$NUGET_CACHE"
+          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+            candidate="$GITHUB_WORKSPACE/artifacts/nuget/$package.$VERSION.nupkg"
+            test -f "$candidate"
+            cp "$candidate" "$NUGET_SOURCE/"
+          done
+          test "$(find "$NUGET_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 3
+          dotnet new console --framework net10.0 --no-restore --output "$NUGET_CONSUMER"
+          cat > "$NUGET_CONSUMER/NuGet.Config" <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="candidate" value="$NUGET_SOURCE" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="candidate">
+                <package pattern="SyntaxCircus.Cmsify.Contracts" />
+                <package pattern="SyntaxCircus.Cmsify.Client" />
+                <package pattern="SyntaxCircus.Cmsify.Client.DistributedCaching" />
+              </packageSource>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          EOF
+          cd "$NUGET_CONSUMER"
+          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+            dotnet add package "$package" --version "$VERSION" --no-restore
+          done
+          dotnet restore --configfile "$NUGET_CONSUMER/NuGet.Config" --packages "$NUGET_CACHE" --no-http-cache
+          NPM_CONSUMER="$SBOM_STAGING_ROOT/npm/consumer"
+          TARBALL="$GITHUB_WORKSPACE/artifacts/npm/cmsify-client-$VERSION.tgz"
+          test -f "$TARBALL"
+          mkdir -p "$NPM_CONSUMER"
+          cd "$NPM_CONSUMER"
+          npm init --yes
+          NPM_CONFIG_CACHE="$SBOM_STAGING_ROOT/npm-cache" npm install --ignore-scripts --no-audit --no-fund "$TARBALL"
       - name: Generate four named SPDX SBOMs with pinned Syft
         run: |
           mkdir -p artifacts/sbom
-          ${{ steps.syft.outputs.cmd }} dir:artifacts/nuget -o spdx-json=artifacts/sbom/cmsify-nuget.spdx.json
-          ${{ steps.syft.outputs.cmd }} dir:artifacts/npm -o spdx-json=artifacts/sbom/cmsify-npm.spdx.json
+          NUGET_CACHE="$SBOM_STAGING_ROOT/nuget/packages"
+          NPM_CONSUMER="$SBOM_STAGING_ROOT/npm/consumer"
+          ${{ steps.syft.outputs.cmd }} dir:"$NUGET_CACHE" -o spdx-json=artifacts/sbom/cmsify-nuget.spdx.json
+          ${{ steps.syft.outputs.cmd }} dir:"$NPM_CONSUMER" -o spdx-json=artifacts/sbom/cmsify-npm.spdx.json
           ${{ steps.syft.outputs.cmd }} oci-archive:artifacts/oci/cmsify-api.oci.tar -o spdx-json=artifacts/sbom/cmsify-api.spdx.json
           ${{ steps.syft.outputs.cmd }} oci-archive:artifacts/oci/cmsify-admin.oci.tar -o spdx-json=artifacts/sbom/cmsify-admin.spdx.json
           node scripts/release/finalize-spdx.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
+          rm -rf "$SBOM_STAGING_ROOT"
+          test ! -e "$SBOM_STAGING_ROOT"
       - name: Bind OCI descriptors before certification
         shell: bash
         run: |

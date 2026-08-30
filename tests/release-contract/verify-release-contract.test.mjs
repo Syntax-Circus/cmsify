@@ -325,6 +325,43 @@ test("rejects release npm packing without the resolved source SHA", () => expect
 test("rejects NuGet packing without explicit source SHA binding", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replaceAll(' -p:RepositoryCommit="$SOURCE_SHA"', "")), /three NuGet candidates.*RepositoryCommit.*SOURCE_SHA/i));
 test("rejects OCI layouts whose platform descriptor can be obscured by inline Buildx provenance", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" --provenance=false", "")), /OCI candidate.*canonical Docker Hub BuildKit/i));
 test("rejects OCI output without the canonical Docker Hub tag and containerd annotations", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('--annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-api:$VERSION" ', "")), /OCI candidate.*canonical Docker Hub/i));
+test("rejects NuGet SBOM staging that omits an exact candidate archive", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+  "for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do",
+  "for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client; do",
+)), /NuGet SBOM.*all three exact candidate archives/i));
+test("rejects NuGet SBOM restore that can ignore a copied candidate archive", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+  '                <package pattern="SyntaxCircus.Cmsify.Contracts" />\n',
+  "",
+)), /NuGet SBOM.*map all three candidate IDs.*isolated source/i));
+test("rejects npm SBOM staging that installs from the source tree", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+  'TARBALL="$GITHUB_WORKSPACE/artifacts/npm/cmsify-client-$VERSION.tgz"',
+  'TARBALL="$GITHUB_WORKSPACE/sdk/typescript"',
+)), /npm SBOM.*exact candidate tarball/i));
+test("rejects NuGet SBOM restore outside its isolated package cache", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+  '--packages "$NUGET_CACHE"',
+  '--packages artifacts/nuget',
+)), /NuGet SBOM.*isolated package cache/i));
+test("rejects npm SBOM install without its isolated cache", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+  'NPM_CONFIG_CACHE="$SBOM_STAGING_ROOT/npm-cache" npm install',
+  "npm install",
+)), /npm SBOM.*isolated consumer and cache/i));
+test("rejects package SBOM generation that scans candidate archive directories", () => expectInvalid(
+  (root) => mutateReleaseJob(root, "build", (job) => job
+    .replace('dir:"$NUGET_CACHE"', "dir:artifacts/nuget")
+    .replace('dir:"$NPM_CONSUMER"', "dir:artifacts/npm")),
+  /package SBOM.*populated.*trees/i,
+));
+test("rejects package SBOM staging inside the uploaded artifact root", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+  'SBOM_STAGING_ROOT: ${{ runner.temp }}/cmsify-sbom-inputs',
+  "SBOM_STAGING_ROOT: artifacts/sbom-inputs",
+)), /SBOM staging.*run-owned temporary root.*outside artifacts/i));
+test("rejects package SBOM staging cleanup after checksum construction", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+  '          rm -rf "$SBOM_STAGING_ROOT"\n          test ! -e "$SBOM_STAGING_ROOT"\n',
+  "",
+).replace(
+  "          (cd artifacts && find . -type f ! -name SHA256SUMS -printf '%P\\0' | sort -z | xargs -0 sha256sum) > artifacts/SHA256SUMS",
+  "          (cd artifacts && find . -type f ! -name SHA256SUMS -printf '%P\\0' | sort -z | xargs -0 sha256sum) > artifacts/SHA256SUMS\n          rm -rf \"$SBOM_STAGING_ROOT\"\n          test ! -e \"$SBOM_STAGING_ROOT\"",
+)), /SBOM staging.*removed before checksum construction and upload/i));
 test("rejects SBOM generation without stable identity finalization", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node scripts\/release\/finalize-spdx\.mjs[^\n]*/, "")), /four SPDX[\s\S]*stable[\s\S]*identit/i));
 test("rejects artifact smoke without candidate-root checksum verification", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          (cd artifacts && sha256sum --check SHA256SUMS)\n", "")), /artifact smoke.*checksums/i));
 test("rejects artifact smoke that omits the exact Admin archive", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace(/\s*node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-admin\.oci\.tar[^\n]*\n/, "\n")), /artifact smoke.*both exact.*OCI/i));
