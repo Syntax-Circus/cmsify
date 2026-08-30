@@ -221,10 +221,13 @@ function escapedRegExp(value) {
 function isMissingDockerTarget(error, kind, target) {
   if (error?.exitCode !== 1) return false;
   const output = `${error?.stderr ?? ""}\n${error?.stdout ?? ""}\n${error?.message ?? ""}`;
-  const exactTarget = escapedRegExp(target);
+  const exactTargets = kind === "image" && target.startsWith("docker.io/")
+    ? [target, target.slice("docker.io/".length)]
+    : [target];
+  const targetPattern = exactTargets.map(escapedRegExp).join("|");
   const diagnostic = kind === "network"
-    ? `(?:No such network:\\s*${exactTarget}|network\\s+${exactTarget}\\s+not found)`
-    : `No such ${kind}:\\s*${exactTarget}`;
+    ? `(?:No such network:\\s*${targetPattern}|network\\s+${targetPattern}\\s+not found)`
+    : `No such ${kind}:\\s*(?:${targetPattern})`;
   return new RegExp(`${diagnostic}(?:\\s|$)`, "i").test(output);
 }
 

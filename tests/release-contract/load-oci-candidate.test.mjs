@@ -63,7 +63,7 @@ function dockerTimeout(phase) {
   return error;
 }
 
-function processBoundary({ digest, kind = "api", version = VERSION, failPhase, existingCanonical = false, occupiedPreflight, cleanupTargetsAlreadyAbsent = false } = {}) {
+function processBoundary({ digest, kind = "api", version = VERSION, failPhase, existingCanonical = false, occupiedPreflight, cleanupTargetsAlreadyAbsent = false, dockerHubShortCanonicalDiagnostic = false } = {}) {
   const calls = [];
   const runId = "cmsify-oci-loader-test123";
   const canonicalRef = `docker.io/syntaxcircus/cmsify-${kind}:${version}`;
@@ -72,6 +72,7 @@ function processBoundary({ digest, kind = "api", version = VERSION, failPhase, e
   const skopeoName = `${runId}-skopeo`;
   const intermediateRef = `127.0.0.1:43123/cmsify-${kind}:${runId}`;
   const imageId = `sha256:${"a".repeat(64)}`;
+  const canonicalMissingTarget = dockerHubShortCanonicalDiagnostic ? canonicalRef.replace(/^docker\.io\//, "") : canonicalRef;
   const run = async (command, args, processOptions) => {
     const call = { command, args: [...args], phase: processOptions.phase };
     calls.push(call);
@@ -81,11 +82,11 @@ function processBoundary({ digest, kind = "api", version = VERSION, failPhase, e
       if (processOptions.phase === "oci-loader-cleanup-registry") throw dockerMissing(`No such container: ${registryName}`);
       if (processOptions.phase === "oci-loader-cleanup-skopeo") throw dockerMissing(`No such container: ${skopeoName}`);
       if (processOptions.phase === "oci-loader-cleanup-intermediate") throw dockerMissing(`No such image: ${intermediateRef}`);
-      if (processOptions.phase === "oci-loader-cleanup-canonical") throw dockerMissing(`No such image: ${canonicalRef}`);
+      if (processOptions.phase === "oci-loader-cleanup-canonical") throw dockerMissing(`No such image: ${canonicalMissingTarget}`);
     }
     switch (processOptions.phase) {
       case "oci-loader-canonical-preflight":
-        if (!existingCanonical && occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such image: ${canonicalRef}`);
+        if (!existingCanonical && occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such image: ${canonicalMissingTarget}`);
         return { exitCode: 0, stdout: `${JSON.stringify({ Id: `sha256:${"b".repeat(64)}` })}\n`, stderr: "", durationMs: 1 };
       case "oci-loader-network-preflight":
         if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`network ${networkName} not found`);
@@ -273,6 +274,84 @@ test("rejects a pre-existing canonical tag before mutation and never removes or 
     assert.deepEqual(boundary.calls.map((call) => call.phase), ["oci-loader-canonical-preflight"]);
     assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-canonical-tag"), false);
     assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), false);
+  } finally { removeCandidate(root); }
+});
+
+test("accepts only the exact Docker Hub-short spelling of a missing canonical image", async () => {
+  const root = createValidCandidate();
+  try {
+    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const { loadOciCandidate } = await loaderModule();
+    const normalized = processBoundary({
+      digest: manifest.oci.api.digest,
+      dockerHubShortCanonicalDiagnostic: true,
+    });
+
+    const result = await loadOciCandidate(options(root), {
+      run: normalized.run,
+      runId: "cmsify-oci-loader-test123",
+      waitForRegistry: async () => {},
+    });
+    assert.deepEqual(result, {
+      ref: normalized.canonicalRef,
+      digest: manifest.oci.api.digest,
+      imageId: normalized.imageId,
+    });
+    assert.equal(normalized.calls.some((call) => call.phase === "oci-loader-canonical-tag"), true);
+
+    const shortCanonicalRef = normalized.canonicalRef.replace(/^docker\.io\//, "");
+    for (const target of [
+      `attacker.invalid/${shortCanonicalRef}`,
+      `${shortCanonicalRef}-attacker`,
+    ]) {
+      const rejected = processBoundary({ digest: manifest.oci.api.digest });
+      const phases = [];
+      const run = async (command, args, processOptions) => {
+        phases.push(processOptions.phase);
+        if (processOptions.phase === "oci-loader-canonical-preflight") throw dockerMissing(`No such image: ${target}`);
+        return rejected.run(command, args, processOptions);
+      };
+      await assert.rejects(loadOciCandidate(options(root), {
+        run,
+        runId: "cmsify-oci-loader-test123",
+        waitForRegistry: async () => {},
+      }), /No such image/i);
+      assert.deepEqual(phases, ["oci-loader-canonical-preflight"], `accepted a non-exact missing-image target ${target}`);
+    }
+
+    const nonExitOne = processBoundary({ digest: manifest.oci.api.digest });
+    const nonExitOnePhases = [];
+    await assert.rejects(loadOciCandidate(options(root), {
+      run: async (command, args, processOptions) => {
+        nonExitOnePhases.push(processOptions.phase);
+        if (processOptions.phase === "oci-loader-canonical-preflight") {
+          const error = dockerMissing(`No such image: ${shortCanonicalRef}`);
+          error.exitCode = 2;
+          throw error;
+        }
+        return nonExitOne.run(command, args, processOptions);
+      },
+      runId: "cmsify-oci-loader-test123",
+      waitForRegistry: async () => {},
+    }), /No such image/i);
+    assert.deepEqual(nonExitOnePhases, ["oci-loader-canonical-preflight"]);
+
+    const cleanup = processBoundary({
+      digest: manifest.oci.api.digest,
+      failPhase: "oci-loader-canonical-inspect",
+      cleanupTargetsAlreadyAbsent: true,
+      dockerHubShortCanonicalDiagnostic: true,
+    });
+    await assert.rejects(loadOciCandidate(options(root), {
+      run: cleanup.run,
+      runId: "cmsify-oci-loader-test123",
+      waitForRegistry: async () => {},
+    }), (error) => {
+      assert.match(error.message, /injected oci-loader-canonical-inspect timeout/i);
+      assert.doesNotMatch(error.message, /OCI loader cleanup failed/i);
+      return true;
+    });
+    assert.equal(cleanup.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
   } finally { removeCandidate(root); }
 });
 
