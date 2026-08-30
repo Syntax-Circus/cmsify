@@ -213,23 +213,45 @@ test("rejects a mutable OCI loader helper image", () => expectInvalid((root) => 
 }, /OCI loader.*Skopeo.*immutable|versioned.*digest/i));
 for (const [name, mutate, diagnostic] of [
   ["Skopeo network access", (source) => source.replace('"--network", "none"', '"--network", importerNetworkName'), /Skopeo.*without network access/i],
-  ["registry relay", (source) => source.replace('"image", "load"', '"image", "pull"'), /Docker.*load.*scratch Docker archive|registry relay/i],
+  ["registry relay", (source) => source.replace('"image", "load"', '"image", "pull"'), /Docker.*load.*scratch Docker archive|registry relay|execute operations/i],
   ["Docker socket", (source) => source.replace('"--network", "none"', '"--mount", "type=bind,source=\/var\/run\/docker.sock,target=\/var\/run\/docker.sock"'), /Docker socket/i],
-  ["direct OCI load", (source) => source.replace('"--input", dockerArchive', '"--input", input.archivePath'), /Docker.*load.*scratch Docker archive/i],
+  ["direct OCI load", (source) => source.replace('"--input", dockerArchive', '"--input", input.archivePath'), /Docker.*load.*scratch Docker archive|execute operations/i],
   ["missing DiffID proof", (source) => source.replace('loaded.RootFS?.Layers', 'input.diffIds'), /DiffID/i],
 ]) {
   test(`rejects OCI loader ${name}`, () => expectInvalid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", mutate), diagnostic));
+}
+for (const [name, command] of [
+  ["additive candidate pull", 'await execute(["image", "pull", input.canonicalRef], "injected-candidate-pull");'],
+  ["additive candidate build", 'await execute(["build", "--tag", input.canonicalRef, "."], "injected-candidate-build");'],
+  ["additive relay network", 'await execute(["network", "create", "relay"], "injected-relay-network");'],
+  ["additive direct OCI load", 'await execute([\n      "image", "load",\n      "--input", input.archivePath,\n    ], "injected-direct-oci-load");'],
+]) {
+  test(`rejects OCI loader ${name}`, () => expectInvalid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", (source) => source.replace(
+    "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
+    `    ${command}\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);`,
+  )), /OCI loader.*(?:candidate|network|original OCI archive).*(?:command|operation|load)/i));
 }
 test("rejects workflow upload of disposable OCI transport scratch", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
   "path: artifacts, if-no-files-found: error",
   "path: ${{ runner.temp }}/cmsify-oci-loader-scratch/candidate.docker.tar, if-no-files-found: error",
 )), /transport scratch.*(?:upload|certif)/i));
+test("rejects renamed runner-temp transport upload from certification", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace(
+  "    steps:\n",
+  "    steps:\n      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with: { name: converted-candidate, path: ${{ runner.temp }}/transport.tar, if-no-files-found: error, retention-days: 14 }\n",
+)), /release workflow.*upload.*allowlist|transport scratch.*(?:upload|certif)/i));
 for (const [relativePath, claim] of [
   ["docs/release-runbook.md", "The registry relay is the certified release image."],
   ["tests/upgrade/README.md", "The rebuilt candidate image is certified for promotion."],
   ["tests/release-smoke/README.md", "The registry relay is the certified release image."],
 ]) {
   test(`rejects certified transport substitution in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${claim}\n`), /runbook.*original OCI archive|transport scratch.*not.*certif/i));
+}
+for (const [relativePath, claim] of [
+  ["docs/release-runbook.md", "The temporary Docker archive is certified release evidence."],
+  ["tests/upgrade/README.md", "The temporary Docker archive is uploaded with the certified artifacts."],
+  ["tests/release-smoke/README.md", "The temporary Docker archive is promoted as the release image."],
+]) {
+  test(`rejects contradictory temporary-archive claim in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${claim}\n`), /runbook.*(?:temporary|transport).*(?:not.*certif|exclusive|never)/i));
 }
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");

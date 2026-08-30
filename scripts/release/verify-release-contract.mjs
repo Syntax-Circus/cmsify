@@ -22,6 +22,105 @@ function expect(condition, message) {
   if (!condition) errors.push(message);
 }
 
+function skipJavaScriptTrivia(source, index) {
+  while (index < source.length) {
+    if (/\s/.test(source[index])) index += 1;
+    else if (source.startsWith("//", index)) {
+      index = source.indexOf("\n", index + 2);
+      if (index === -1) return source.length;
+    } else if (source.startsWith("/*", index)) {
+      const end = source.indexOf("*/", index + 2);
+      if (end === -1) return source.length;
+      index = end + 2;
+    } else break;
+  }
+  return index;
+}
+
+function readJavaScriptArray(source, start) {
+  let quote;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (lineComment) {
+      if (character === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") { blockComment = false; index += 1; }
+      continue;
+    }
+    if (quote !== undefined) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === "/" && next === "/") { lineComment = true; index += 1; continue; }
+    if (character === "/" && next === "*") { blockComment = true; index += 1; continue; }
+    if (["'", '"', "`"].includes(character)) { quote = character; continue; }
+    if (character === "[") depth += 1;
+    else if (character === "]" && --depth === 0) return { source: source.slice(start, index + 1), end: index + 1 };
+  }
+  return undefined;
+}
+
+function splitJavaScriptArray(arraySource) {
+  const elements = [];
+  let start = 1;
+  let quote;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  let depth = 0;
+  for (let index = 1; index < arraySource.length - 1; index += 1) {
+    const character = arraySource[index];
+    const next = arraySource[index + 1];
+    if (lineComment) {
+      if (character === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") { blockComment = false; index += 1; }
+      continue;
+    }
+    if (quote !== undefined) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === "/" && next === "/") { lineComment = true; index += 1; continue; }
+    if (character === "/" && next === "*") { blockComment = true; index += 1; continue; }
+    if (["'", '"', "`"].includes(character)) { quote = character; continue; }
+    if (["[", "{", "("].includes(character)) depth += 1;
+    else if (["]", "}", ")"].includes(character)) depth -= 1;
+    else if (character === "," && depth === 0) {
+      elements.push(arraySource.slice(start, index).trim().replace(/\s+/g, ""));
+      start = index + 1;
+    }
+  }
+  const last = arraySource.slice(start, -1).trim().replace(/\s+/g, "");
+  if (last) elements.push(last);
+  return elements;
+}
+
+function executeArraySignatures(source) {
+  const signatures = [];
+  const pattern = /\bexecute\s*\(/g;
+  for (const match of source.matchAll(pattern)) {
+    const start = skipJavaScriptTrivia(source, match.index + match[0].length);
+    if (source[start] !== "[") continue;
+    const array = readJavaScriptArray(source, start);
+    if (array) signatures.push(JSON.stringify(splitJavaScriptArray(array.source)));
+  }
+  return signatures;
+}
+
 function fixtureSupplyChainFiles(root) {
   const files = [];
   const visit = (directory) => {
@@ -170,6 +269,60 @@ function workflowRunCommands(contents) {
     }
   }
   return commands;
+}
+
+function workflowUploadArtifactSteps(contents) {
+  const lines = contents.replaceAll("\r\n", "\n").split("\n");
+  const uploads = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const stepStart = /^(\s*)-\s+/.exec(lines[index]);
+    if (!stepStart) continue;
+    const stepIndent = stepStart[1].length;
+    const step = [lines[index]];
+    while (index + 1 < lines.length) {
+      const next = lines[index + 1];
+      const indentation = next.match(/^\s*/)[0].length;
+      if (next.trim() !== "" && indentation <= stepIndent) break;
+      step.push(next);
+      index += 1;
+    }
+    const body = step.join("\n");
+    if (!/^\s+(?:-\s+)?uses:\s*actions\/upload-artifact@/m.test(body)) continue;
+    const inlineWithLine = step.find((line) => /with:\s*\{/.test(line));
+    const inlineWith = inlineWithLine === undefined
+      ? undefined
+      : inlineWithLine.slice(inlineWithLine.indexOf("{") + 1, inlineWithLine.lastIndexOf("}"));
+    if (inlineWith !== undefined) {
+      const name = /(?:^|,)\s*name:\s*([^,]+)/.exec(inlineWith)?.[1].trim();
+      const path = /(?:^|,)\s*path:\s*([^,]+)/.exec(inlineWith)?.[1].trim();
+      uploads.push({ name, paths: path === undefined ? [] : [path] });
+      continue;
+    }
+    const name = /^\s+name:\s*(.+?)\s*$/m.exec(body)?.[1];
+    const pathLine = step.findIndex((line) => /^\s+path:\s*/.test(line));
+    const pathValue = pathLine === -1 ? undefined : step[pathLine].replace(/^\s+path:\s*/, "").trim();
+    if (pathValue !== "|" && pathValue !== ">") uploads.push({ name, paths: pathValue === undefined ? [] : [pathValue] });
+    else {
+      const pathIndent = step[pathLine].match(/^\s*/)[0].length;
+      const paths = [];
+      for (let cursor = pathLine + 1; cursor < step.length; cursor += 1) {
+        if (step[cursor].trim() === "") continue;
+        if (step[cursor].match(/^\s*/)[0].length <= pathIndent) break;
+        paths.push(step[cursor].trim());
+      }
+      uploads.push({ name, paths });
+    }
+  }
+  return uploads;
+}
+
+function hasContradictoryTransportClaim(contents) {
+  return contents.split(/[.\n]+/).some((sentence) => {
+    const transportSubject = /(?:temporary|transport|conversion)[^\n]{0,100}(?:archive|scratch|output)|(?:archive|scratch|output)[^\n]{0,100}(?:temporary|transport|conversion)/i.test(sentence);
+    const releaseAction = /certif(?:ied|ication)|upload(?:ed)?|promot(?:ed|ion)/i.test(sentence);
+    const negatedAction = /\b(?:never|not|non-certifying|excluded from)\b[^\n]{0,160}(?:certif(?:ied|ication)|upload(?:ed)?|promot(?:ed|ion))/i.test(sentence);
+    return transportSubject && releaseAction && !negatedAction;
+  });
 }
 
 function shellCommandSegments(tokens) {
@@ -353,10 +506,17 @@ expect(ociLoaderContract?.skopeoImage === "quay.io/skopeo/stable:v1.22.2@sha256:
 expect(ociLoaderContract?.transport === "offline-docker-archive" && ociLoaderSource.includes('transport: "offline-docker-archive"'), "OCI loader must declare offline Docker-archive transport.");
 expect(ociLoaderSource.includes('"--network", "none"'), "Skopeo must run without network access.");
 expect(ociLoaderSource.includes("docker-archive:/scratch/candidate.docker.tar:"), "Skopeo must write only disposable Docker transport scratch.");
-expect(ociLoaderSource.includes('["image", "load", "--input", dockerArchive, "--platform", "linux/amd64"]'), "Docker must load the scratch Docker archive for linux/amd64.");
 expect(!/REGISTRY_IMAGE|registry-port|network-create|docker:\/\/.*registry/i.test(ociLoaderSource), "OCI loader must not use a registry relay.");
 expect(!/docker\.sock|docker_engine/i.test(ociLoaderSource), "OCI loader must not mount the Docker socket.");
-expect(!/\["image",\s*"pull",\s*"--input"|docker buildx?\b|dotnet (?:build|publish)\b/i.test(ociLoaderSource), "OCI loader must not rebuild or pull a candidate image.");
+const approvedLoaderExecuteCommands = [
+  ['"image"', '"pull"', '"--platform"', '"linux/amd64"', "SKOPEO_IMAGE"],
+  ['"run"', '"--rm"', '"--pull=never"', '"--platform"', '"linux/amd64"', '"--name"', "skopeoName", '"--network"', '"none"', '"--label"', "LABEL_OWNER", '"--label"', "`${LABEL_RUN}=${runId}`", '"--mount"', "`type=bind,source=${input.archivePath},target=/candidate.oci.tar,readonly`", '"--mount"', "`type=bind,source=${scratchRoot},target=/scratch`", "SKOPEO_IMAGE", '"copy"', "`oci-archive:/candidate.oci.tar:${options.version}`", "`docker-archive:/scratch/candidate.docker.tar:${input.canonicalRef}`"],
+  ['"image"', '"load"', '"--input"', "dockerArchive", '"--platform"', '"linux/amd64"'],
+  ['"image"', '"inspect"', '"--format"', '"{{json.}}"', "input.canonicalRef"],
+].map((command) => JSON.stringify(command));
+const loaderExecuteCommands = executeArraySignatures(ociLoaderSource);
+expect(loaderExecuteCommands.length === approvedLoaderExecuteCommands.length
+  && approvedLoaderExecuteCommands.every((approved) => loaderExecuteCommands.filter((actual) => actual === approved).length === 1), "OCI loader execute operations must be exactly the approved helper pull, offline Skopeo conversion, scratch Docker load, and canonical inspection; candidate pull/build/tag/network/registry commands and direct original OCI archive loads are forbidden.");
 expect(ociLoaderSource.includes("loaded.Id === input.configDigest"), "OCI loader must prove the loaded image ID from the OCI config digest.");
 expect(ociLoaderSource.includes("loaded.RootFS?.Layers") && ociLoaderSource.includes("value === input.diffIds[index]"), "OCI loader must prove ordered runtime DiffIDs from the OCI config.");
 expect(ociLoaderSource.includes('loaded.Os === "linux"') && ociLoaderSource.includes('loaded.Architecture === "amd64"'), "OCI loader must prove the loaded linux/amd64 platform.");
@@ -375,9 +535,18 @@ for (const [name, contents] of offlineTransportRunbooks) {
   expect(/config digest[^.\n]*ordered DiffIDs[^.\n]*platform[^.\n]*labels[^.\n]*canonical tag/i.test(contents), `${name} must document the complete runtime identity proof.`);
   expect(/scratch[^.\n]*(?:deleted|removed)[^.\n]*never (?:checksummed|added to SHA256SUMS)[^.\n]*uploaded[^.\n]*promoted/i.test(contents), `${name} must document deletion and exclusion of transport scratch from checksums, uploads, and promotion.`);
   expect(!/(?:registry relay|rebuilt (?:candidate )?image)[^.\n]*(?:certif|promot)/i.test(contents), `${name} must keep the original OCI archive certified and transport scratch non-certifying.`);
+  expect(!hasContradictoryTransportClaim(contents), `${name} must state exclusively that temporary transport output is never certified, uploaded, or promoted.`);
 }
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
-expect(!/cmsify-oci-loader|candidate\.docker\.tar|docker-archive:\/scratch/i.test(workflow), "Disposable OCI transport scratch must never be certified or uploaded by the release workflow.");
+const approvedReleaseUploads = [
+  { name: "release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}", paths: ["artifacts"] },
+  { name: "release-smoke-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}", paths: ["${{ runner.temp }}/cmsify-release-smoke/evidence.json"] },
+  { name: "candidate-accessibility-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}", paths: ["${{ runner.temp }}/cmsify-accessibility/accessibility.json", "${{ runner.temp }}/cmsify-accessibility/accessibility.junit.xml"] },
+  { name: "release-upgrade-rollback-diagnostics-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}", paths: ["artifacts/upgrade-tests/**"] },
+].map((upload) => JSON.stringify(upload));
+const releaseUploads = workflowUploadArtifactSteps(workflow).map((upload) => JSON.stringify(upload));
+expect(releaseUploads.length === approvedReleaseUploads.length
+  && approvedReleaseUploads.every((approved) => releaseUploads.filter((actual) => actual === approved).length === 1), "Release workflow upload steps must match the exact artifact/evidence allowlist; disposable or renamed transport scratch must never be uploaded or certified.");
 expect(/\bpush:\s*\n\s+tags:/m.test(workflow) && !/\bbranches:/m.test(workflow), "Release workflow must be tag-only; branch builds never publish or tag.");
 expect(/node scripts\/release\/validate-release-tag\.mjs\s+"?\$\{\{\s*github\.ref_name\s*\}\}"?/i.test(workflow) || /validate-release-tag\.mjs/i.test(workflow), "Release workflow must validate the vX.Y.Z or vX.Y.Z-prerelease tag.");
 expect(/validate-release-tag\.mjs[^\n]*--require-changelog/i.test(workflow), "Reviewed tag promotion must require an exact dated changelog entry.");
