@@ -109,14 +109,53 @@ function splitJavaScriptArray(arraySource) {
   return elements;
 }
 
+function skipJavaScriptQuoted(source, start) {
+  const quote = source[start];
+  let escaped = false;
+  for (let index = start + 1; index < source.length; index += 1) {
+    if (escaped) escaped = false;
+    else if (source[index] === "\\") escaped = true;
+    else if (source[index] === quote) return index + 1;
+  }
+  return source.length;
+}
+
 function executeArraySignatures(source) {
   const signatures = [];
-  const pattern = /\bexecute\s*\(/g;
-  for (const match of source.matchAll(pattern)) {
-    const start = skipJavaScriptTrivia(source, match.index + match[0].length);
-    if (source[start] !== "[") continue;
-    const array = readJavaScriptArray(source, start);
-    if (array) signatures.push(JSON.stringify(splitJavaScriptArray(array.source)));
+  let previousIdentifier;
+  for (let index = 0; index < source.length;) {
+    if (/\s/.test(source[index])) { index += 1; continue; }
+    if (source.startsWith("//", index)) {
+      const end = source.indexOf("\n", index + 2);
+      index = end === -1 ? source.length : end + 1;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      const end = source.indexOf("*/", index + 2);
+      index = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (["'", '"', "`"].includes(source[index])) {
+      index = skipJavaScriptQuoted(source, index);
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(source[index])) {
+      let end = index + 1;
+      while (end < source.length && /[A-Za-z0-9_$]/.test(source[end])) end += 1;
+      const identifier = source.slice(index, end);
+      if (identifier === "execute" && previousIdentifier !== "function") {
+        const openParenthesis = skipJavaScriptTrivia(source, end);
+        if (source[openParenthesis] === "(") {
+          const start = skipJavaScriptTrivia(source, openParenthesis + 1);
+          const array = source[start] === "[" ? readJavaScriptArray(source, start) : undefined;
+          if (array) signatures.push(JSON.stringify(splitJavaScriptArray(array.source)));
+        }
+      }
+      previousIdentifier = identifier;
+      index = end;
+      continue;
+    }
+    index += 1;
   }
   return signatures;
 }
@@ -271,6 +310,10 @@ function workflowRunCommands(contents) {
   return commands;
 }
 
+function workflowActionReference(line) {
+  return /^\s*(?:-\s+)?(?:(?:"uses"|'uses')|uses)\s*:\s*([^\s#]+)/.exec(line)?.[1];
+}
+
 function workflowUploadArtifactSteps(contents) {
   const lines = contents.replaceAll("\r\n", "\n").split("\n");
   const uploads = [];
@@ -287,7 +330,8 @@ function workflowUploadArtifactSteps(contents) {
       index += 1;
     }
     const body = step.join("\n");
-    if (!/^\s+(?:-\s+)?uses:\s*actions\/upload-artifact@/m.test(body)) continue;
+    const action = step.map(workflowActionReference).find(Boolean);
+    if (action?.slice(0, action.lastIndexOf("@")).toLowerCase() !== "actions/upload-artifact") continue;
     const inlineWithLine = step.find((line) => /with:\s*\{/.test(line));
     const inlineWith = inlineWithLine === undefined
       ? undefined
@@ -317,11 +361,15 @@ function workflowUploadArtifactSteps(contents) {
 }
 
 function hasContradictoryTransportClaim(contents) {
-  return contents.split(/[.\n]+/).some((sentence) => {
-    const transportSubject = /(?:temporary|transport|conversion)[^\n]{0,100}(?:archive|scratch|output)|(?:archive|scratch|output)[^\n]{0,100}(?:temporary|transport|conversion)/i.test(sentence);
-    const releaseAction = /certif(?:ied|ication)|upload(?:ed)?|promot(?:ed|ion)/i.test(sentence);
-    const negatedAction = /\b(?:never|not|non-certifying|excluded from)\b[^\n]{0,160}(?:certif(?:ied|ication)|upload(?:ed)?|promot(?:ed|ion))/i.test(sentence);
-    return transportSubject && releaseAction && !negatedAction;
+  const transportSubject = /(?:temporary|transport|conversion)[^\n]{0,100}(?:archive|scratch|output)|(?:archive|scratch|output)[^\n]{0,100}(?:temporary|transport|conversion)/i;
+  const releaseAction = /\b(?:certif(?:y|ies|ied|ication|ying)|upload(?:s|ed|ing)?|promot(?:e|es|ed|ion|ing))\b/i;
+  const negativeRule = /\b(?:never|not|cannot|can't|must\s+not|may\s+not|shall\s+not|prohibited|forbidden|non-certifying|excluded(?:\s+from)?)\b/i;
+  return contents.replaceAll("\r\n", "\n").split(/\n\s*\n/).some((paragraph) => {
+    const subject = transportSubject.exec(paragraph);
+    if (!subject) return false;
+    const transportContext = paragraph.slice(subject.index);
+    return transportContext.split(/(?:[.!?;]\s+|\b(?:but|however|yet)\b)/i)
+      .some((clause) => releaseAction.test(clause) && !negativeRule.test(clause));
   });
 }
 
@@ -391,11 +439,11 @@ export function validateRepositorySupplyChain(root) {
     const workflowImages = isWorkflow ? workflowImageReferences(contents) : [];
     for (const [index, line] of contents.replaceAll("\r\n", "\n").split("\n").entries()) {
       const lineNumber = index + 1;
-      const action = line.match(/^\s*(?:-\s+)?uses:\s*([^\s#]+)/);
-      if (action && !action[1].startsWith("./") && !/^[^/\s]+\/[^@\s]+@[0-9a-f]{40}$/i.test(action[1])) {
-        violations.push(supplyChainError(relativePath, lineNumber, `action reference must use owner/repository@40-hex-SHA: ${action[1]}`));
-      } else if (action && !action[1].startsWith("./") && !/\s#\s+v\d+(?:\.\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?\s*$/.test(line)) {
-        violations.push(supplyChainError(relativePath, lineNumber, `action reference must include a version comment: ${action[1]}`));
+      const action = workflowActionReference(line);
+      if (action && !action.startsWith("./") && !/^[^/\s]+\/[^@\s]+@[0-9a-f]{40}$/i.test(action)) {
+        violations.push(supplyChainError(relativePath, lineNumber, `action reference must use owner/repository@40-hex-SHA: ${action}`));
+      } else if (action && !action.startsWith("./") && !/\s#\s+v\d+(?:\.\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?\s*$/.test(line)) {
+        violations.push(supplyChainError(relativePath, lineNumber, `action reference must include a version comment: ${action}`));
       }
 
       const from = line.match(/^\s*FROM\s+([^\s]+)(?:\s+AS\s+([^\s]+))?/i);
@@ -666,10 +714,10 @@ const dedicatedRehearsal = upgradeWorkflow.indexOf("node --test tests/upgrade/in
 expect(deterministicFixtureCheck >= 0 && dedicatedRehearsal > deterministicFixtureCheck && /CMSIFY_UPGRADE_TEST:\s*"1"/.test(upgradeWorkflow), "Deterministic fixture checking must complete before the opt-in full rehearsal.");
 expect(/if:\s*failure\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*path:\s*artifacts\/upgrade-tests\/\*\*/s.test(upgradeWorkflow), "Dedicated upgrade workflow must upload sanitized diagnostics on failure.");
 
-expect(/build:[\s\S]*dotnet pack[\s\S]*npm pack[\s\S]*docker buildx build[\s\S]*verify-release-artifacts\.mjs[\s\S]*upload-artifact/s.test(workflow), "The build job must build candidate NuGet, npm, and OCI artifacts once, verify them, and upload one candidate artifact.");
+expect(/build:[\s\S]*dotnet pack[\s\S]*npm pack[\s\S]*docker buildx build[\s\S]*verify-release-artifacts\.mjs[\s\S]*upload-artifact/is.test(workflow), "The build job must build candidate NuGet, npm, and OCI artifacts once, verify them, and upload one candidate artifact.");
 const buildJob = jobBody("build");
-const buildCandidateUploads = [...buildJob.matchAll(/actions\/upload-artifact@[0-9a-f]{40}/g)];
-expect(buildCandidateUploads.length === 1 && /name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/.test(buildJob), "The build job must upload exactly one named candidate artifact.");
+const buildCandidateUploads = workflowUploadArtifactSteps(buildJob).filter((upload) => upload.name === "release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}");
+expect(buildCandidateUploads.length === 1 && JSON.stringify(buildCandidateUploads[0].paths) === JSON.stringify(["artifacts"]), "The build job must upload exactly one named candidate artifact.");
 const ociBuildCommands = [...workflow.matchAll(/docker buildx build[^\n]+/g)].map((match) => match[0]);
 expect(ociBuildCommands.length === 2 && ["api", "admin"].every((kind) => ociBuildCommands.some((command) => command.includes("--platform linux/amd64") && command.includes("--provenance=false") && command.includes(`--tag "docker.io/syntaxcircus/cmsify-${kind}:$VERSION"`) && command.includes('manifest-descriptor:org.opencontainers.image.ref.name=$VERSION') && command.includes(`manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-${kind}:$VERSION`) && command.includes(`name=docker.io/syntaxcircus/cmsify-${kind}:$VERSION`))), "Each OCI candidate build must use canonical Docker Hub BuildKit archive and descriptor identities.");
 expect(/docker\/setup-buildx-action@[0-9a-f]{40}[\s\S]*driver:\s*docker-container/s.test(workflow), "OCI candidates require a SHA-pinned docker-container Buildx builder.");
@@ -686,7 +734,7 @@ const sbomFinalization = buildJob.indexOf('node scripts/release/finalize-spdx.mj
 const sbomCleanup = buildJob.indexOf('rm -rf "$SBOM_STAGING_ROOT"');
 const sbomCleanupProof = buildJob.indexOf('test ! -e "$SBOM_STAGING_ROOT"', sbomCleanup);
 const checksumConstruction = buildJob.indexOf("> artifacts/SHA256SUMS");
-const candidateUpload = buildJob.indexOf("actions/upload-artifact@");
+const candidateUpload = buildJob.search(/actions\/upload-artifact@/i);
 expect(sbomFinalization >= 0 && sbomCleanup > sbomFinalization && sbomCleanupProof > sbomCleanup && checksumConstruction > sbomCleanupProof && candidateUpload > checksumConstruction, "SBOM staging must be removed before checksum construction and upload.");
 expect(/cmsify-api\.metadata\.json[\s\S]*containerimage\.descriptor[\s\S]*org\.opencontainers\.image\.ref\.name[\s\S]*io\.containerd\.image\.name[\s\S]*docker\.io\/syntaxcircus\/cmsify-api:\$VERSION[\s\S]*repository:"docker\.io\/syntaxcircus\/cmsify-api"[\s\S]*size:[\s\S]*mediaType:[\s\S]*platform:[\s\S]*release-manifest\.json/s.test(workflow), "Candidate manifest must bind OCI descriptor digest, tag identity, and canonical Docker Hub containerd identity before certification.");
 expect(/finalize-spdx\.mjs --artifacts artifacts --version "\$VERSION" --source-sha "\$SOURCE_SHA"/s.test(workflow) && existsSync(resolve(repositoryRoot, "scripts/release/finalize-spdx.mjs")), "All four SPDX documents must receive stable exact document/source/package identities before certification.");

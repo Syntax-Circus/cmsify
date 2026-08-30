@@ -142,6 +142,14 @@ function expectInvalid(mutator, diagnostic) {
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
+function expectValid(mutator) {
+  const root = createFixture(mutator);
+  try {
+    const result = verify(root);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
+
 test("accepts the checked-in repository release contract", () => {
   const result = verify(repositoryRoot);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -231,6 +239,19 @@ for (const [name, command] of [
     `    ${command}\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);`,
   )), /OCI loader.*(?:candidate|network|original OCI archive).*(?:command|operation|load)/i));
 }
+for (const [name, command] of [
+  ["comment-concealed call", 'await execute /* conceal */ (["network", "create", "relay"], "injected-relay-network");'],
+  ["commented first argument", 'await execute( /* before command */ ["image", "pull", input.canonicalRef], "injected-candidate-pull");'],
+]) {
+  test(`rejects OCI loader additive ${name}`, () => expectInvalid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", (source) => source.replace(
+    "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
+    `    ${command}\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);`,
+  )), /OCI loader.*execute operations/i));
+}
+test("accepts fake execute calls inside loader strings and comments", () => expectValid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", (source) => source.replace(
+  "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
+  '    const harmlessExecuteText = "execute([\\"network\\", \\"create\\", \\"relay\\"])";\n    // execute(["build", "--tag", input.canonicalRef, "."], "comment-only");\n    assert(harmlessExecuteText.length > 0, "Fixture text must remain non-empty.");\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);',
+))));
 test("rejects workflow upload of disposable OCI transport scratch", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
   "path: artifacts, if-no-files-found: error",
   "path: ${{ runner.temp }}/cmsify-oci-loader-scratch/candidate.docker.tar, if-no-files-found: error",
@@ -239,6 +260,23 @@ test("rejects renamed runner-temp transport upload from certification", () => ex
   "    steps:\n",
   "    steps:\n      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with: { name: converted-candidate, path: ${{ runner.temp }}/transport.tar, if-no-files-found: error, retention-days: 14 }\n",
 )), /release workflow.*upload.*allowlist|transport scratch.*(?:upload|certif)/i));
+for (const [name, uses] of [
+  ["quoted uses key", '"uses": actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'],
+  ["case-variant action identity", "uses: Actions/Upload-Artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"],
+]) {
+  test(`rejects renamed runner-temp transport upload with ${name}`, () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace(
+    "    steps:\n",
+    `    steps:\n      - ${uses} # v4.6.2\n        with: { name: converted-candidate, path: \${{ runner.temp }}/transport.tar, if-no-files-found: error, retention-days: 14 }\n`,
+  )), /release workflow.*upload.*allowlist|transport scratch.*(?:upload|certif)/i));
+}
+test("accepts an approved upload with quoted uses and case-variant action identity", () => expectValid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "- uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
+  '- "uses": Actions/Upload-Artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2',
+))));
+test("rejects an unpinned action behind a quoted uses key", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
+  '"uses": actions/checkout@v4 # v4.2.2',
+)), /action reference.*40-hex/i));
 for (const [relativePath, claim] of [
   ["docs/release-runbook.md", "The registry relay is the certified release image."],
   ["tests/upgrade/README.md", "The rebuilt candidate image is certified for promotion."],
@@ -253,6 +291,20 @@ for (const [relativePath, claim] of [
 ]) {
   test(`rejects contradictory temporary-archive claim in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${claim}\n`), /runbook.*(?:temporary|transport).*(?:not.*certif|exclusive|never)/i));
 }
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "The temporary Docker archive is disposable transport scratch. It is uploaded with the certified release artifacts."],
+  ["tests/upgrade/README.md", "Conversion output exists only for the local runtime. This artifact is certified for promotion."],
+  ["tests/release-smoke/README.md", "The Docker transport scratch remains temporary. It may be promoted after certification."],
+]) {
+  test(`rejects split-sentence transport contradiction in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`), /runbook.*exclusive.*temporary transport output/i));
+}
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "The temporary Docker archive is disposable transport output. It cannot be uploaded or promoted."],
+  ["tests/upgrade/README.md", "Transport scratch remains temporary. It must not be certified or uploaded."],
+  ["tests/release-smoke/README.md", "Conversion output is non-certifying. Upload and promotion are prohibited."],
+]) {
+  test(`accepts split-sentence negative transport rule in ${relativePath}`, () => expectValid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`)));
+}
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(
@@ -264,7 +316,7 @@ test("rejects a promotion rebuild", () => expectInvalid((root) => mutateWorkflow
 test("rejects a second build candidate artifact", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => `${job.trimEnd()}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: duplicate-release-candidate, path: artifacts, if-no-files-found: error, retention-days: 14 }
-`), /build job.*exactly one.*candidate artifact/i));
+`), /build job.*exactly one.*candidate artifact|upload steps.*exact.*allowlist/i));
 
 test("rejects a missing dedicated upgrade and rollback workflow", () => expectInvalid((root) => {
   rmSync(resolve(root, ".github/workflows/upgrade-rollback.yml"), { force: true });
