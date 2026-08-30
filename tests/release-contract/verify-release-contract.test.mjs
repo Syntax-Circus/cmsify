@@ -134,6 +134,7 @@ test("requires canonical Docker Hub names in Buildx archive annotations", () => 
 
 test("rejects branch publication", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('tags: ["v*"]', "branches: [main]")), /tag-only/i));
 test("rejects tag-only branch accessibility", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow.replace("workflow_dispatch:", 'push:\n    tags: ["v*"]')), /accessibility.*manual.*main.*pull request/i));
+test("rejects paths-ignore substituted for push and pull-request accessibility paths", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow.replaceAll("    paths:", "    paths-ignore:")), /Accessibility path triggers.*main pushes.*pull requests/i));
 test("rejects accessibility paths duplicated under push while absent from pull requests", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow
   .replace('      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Admin/**"\n')
   .replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '  pull_request:\n    paths:\n      - "src/Cmsify.Contracts/**"\n      - "src/Cmsify.Contracts/**"\n')), /Accessibility path triggers.*main pushes.*pull requests/i));

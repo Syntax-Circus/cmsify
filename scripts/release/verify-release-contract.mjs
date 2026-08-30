@@ -346,7 +346,8 @@ function accessibilityEventPaths(event) {
   const following = accessibilityWorkflow.slice(start + 1);
   const nextEvent = following.search(/^  [A-Za-z0-9_-]+:/m);
   const body = nextEvent === -1 ? accessibilityWorkflow.slice(start) : accessibilityWorkflow.slice(start, start + 1 + nextEvent);
-  return [...body.matchAll(/^      - "([^"]+)"\s*$/gm)].map((match) => match[1]);
+  const paths = body.match(/^    paths:[ \t]*\r?\n((?:      - "[^"\r\n]+"[ \t]*(?:\r?\n|$))*)/m);
+  return paths ? [...paths[1].matchAll(/^      - "([^"\r\n]+)"[ \t]*$/gm)].map((match) => match[1]) : [];
 }
 for (const requiredPath of [
   "src/Cmsify.Admin/**",

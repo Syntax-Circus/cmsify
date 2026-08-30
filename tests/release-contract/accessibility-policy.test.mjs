@@ -34,7 +34,8 @@ function eventPaths(workflow, event) {
   const following = workflow.slice(start + 1);
   const nextEvent = following.search(/^  [A-Za-z0-9_-]+:/m);
   const body = nextEvent === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + nextEvent);
-  return [...body.matchAll(/^      - "([^"]+)"\s*$/gm)].map((match) => match[1]);
+  const paths = body.match(/^    paths:[ \t]*\r?\n((?:      - "[^"\r\n]+"[ \t]*(?:\r?\n|$))*)/m);
+  return paths ? [...paths[1].matchAll(/^      - "([^"\r\n]+)"[ \t]*$/gm)].map((match) => match[1]) : [];
 }
 
 test("branch accessibility runs manually and for relevant main/PR changes", () => {
@@ -46,6 +47,13 @@ test("branch accessibility runs manually and for relevant main/PR changes", () =
     assert.equal(eventPaths(branchWorkflow, "pull_request").filter((candidate) => candidate === path).length, 1, `${path} must gate pull requests exactly once`);
   }
   assert.doesNotMatch(branchWorkflow, /tags:/);
+});
+
+test("paths-ignore is not accepted as an accessibility path trigger", () => {
+  const ignoredPaths = branchWorkflow.replaceAll("    paths:", "    paths-ignore:");
+  for (const event of ["push", "pull_request"]) {
+    assert.deepEqual(eventPaths(ignoredPaths, event), [], `${event} paths-ignore must not be treated as paths`);
+  }
 });
 
 test("branch accessibility installs only the locked harness and emits bounded evidence", () => {
