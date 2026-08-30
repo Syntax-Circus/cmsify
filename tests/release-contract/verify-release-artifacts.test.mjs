@@ -44,6 +44,20 @@ test("accepts a complete Dockerless release candidate fixture", () => {
   }
 });
 
+test("models BuildKit-normalized Docker Hub identity in each OCI layout, metadata descriptor, and release manifest", () => {
+  const root = createValidCandidate();
+  try {
+    for (const kind of ["api", "admin"]) {
+      const expected = `docker.io/syntaxcircus/cmsify-${kind}:${VERSION}`;
+      const metadata = JSON.parse(readFileSync(candidatePath(root, `oci/cmsify-${kind}.metadata.json`), "utf8"))["containerimage.descriptor"];
+      const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+      assert.equal(metadata.annotations["io.containerd.image.name"], expected);
+      assert.equal(manifest.oci[kind].ref, expected);
+      assert.equal(manifest.oci[kind].imageName, expected);
+    }
+  } finally { removeCandidate(root); }
+});
+
 test("rejects an invalid source SHA before artifact inspection", () => {
   const root = createValidCandidate();
   try {
@@ -133,8 +147,8 @@ for (const member of [
 }
 
 const ociStateMutations = [
-  ["API repository", (state) => { state.oci.api.repository = "syntaxcircus/not-api"; }, /OCI API.*repository.*syntaxcircus\/cmsify-api/i],
-  ["API qualified ref", (state) => { state.oci.api.ref = "syntaxcircus/cmsify-api:wrong"; }, /OCI API.*ref.*syntaxcircus\/cmsify-api:1\.2\.3/i],
+  ["API repository", (state) => { state.oci.api.repository = "docker.io/syntaxcircus/not-api"; }, /OCI API.*repository.*docker\.io\/syntaxcircus\/cmsify-api/i],
+  ["API qualified ref", (state) => { state.oci.api.ref = "docker.io/syntaxcircus/cmsify-api:wrong"; }, /OCI API.*ref.*docker\.io\/syntaxcircus\/cmsify-api:1\.2\.3/i],
   ["descriptor media type", (state) => { state.oci.api.descriptorMediaType = "application/json"; }, /OCI API.*descriptor media type/i],
   ["descriptor platform OS", (state) => { state.oci.api.descriptorPlatform.os = "windows"; }, /OCI API.*descriptor platform.*linux\/amd64/i],
   ["descriptor platform architecture", (state) => { state.oci.api.descriptorPlatform.architecture = "arm64"; }, /OCI API.*descriptor platform.*linux\/amd64/i],
@@ -169,7 +183,7 @@ test("resolves the OCI descriptor by exact ref rather than manifests[0]", () => 
   finally { removeCandidate(root); }
 });
 test("rejects an OCI archive descriptor whose ref.name contains the full repository identity", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ descriptor }) => { descriptor.annotations["org.opencontainers.image.ref.name"] = `syntaxcircus/cmsify-api:${VERSION}`; }); } }, /OCI API.*tag ref\.name/i));
-test("rejects an OCI archive descriptor whose containerd image name is not the exact full identity", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ descriptor }) => { descriptor.annotations["io.containerd.image.name"] = `syntaxcircus/cmsify-admin:${VERSION}`; }); } }, /OCI API.*containerd image name/i));
+test("rejects a BuildKit-normalized archive descriptor whose containerd name loses the canonical Docker Hub registry", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ descriptor }) => { descriptor.annotations["io.containerd.image.name"] = `syntaxcircus/cmsify-api:${VERSION}`; }); } }, /OCI API.*containerd image name/i));
 
 test("rejects an OCI manifest whose config digest does not match a blob", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ manifest }) => { manifest.config.digest = `sha256:${"e".repeat(64)}`; }); } }, /OCI API.*config digest.*blob/i));
 test("rejects an OCI manifest whose config declared size is wrong", () => expectInvalid({ afterRender({ root }) { mutateOciLayout(root, "api", ({ manifest }) => { manifest.config.size += 1; }); } }, /OCI API.*config.*declared size/i));

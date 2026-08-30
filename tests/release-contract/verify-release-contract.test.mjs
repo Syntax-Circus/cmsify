@@ -62,10 +62,6 @@ function createFixture(mutator) {
     : branchWorkflow.replace("tests/release-contract/validate-release-tag.test.mjs", "tests/release-contract/validate-release-tag.test.mjs tests/release-contract/finalize-spdx.test.mjs"));
   write(root, workflowPath, round5Workflow(readFileSync(resolve(root, workflowPath), "utf8")));
   write(root, "scripts/release/finalize-spdx.mjs", "// fixture: stable SPDX identities are finalized before checksums\n");
-  for (const [path, image] of [["src/Cmsify.Api/Dockerfile", "api"], ["src/Cmsify.Admin/Dockerfile", "admin"]]) {
-    const dockerfile = readFileSync(resolve(root, path), "utf8");
-    if (!dockerfile.includes("org.opencontainers.image.ref.name")) write(root, path, dockerfile.replace("      org.opencontainers.image.source=", `      org.opencontainers.image.ref.name=\"syntaxcircus/cmsify-${image}:\${BUILD_VERSION}\" \\\n+      org.opencontainers.image.source=`));
-  }
   mutator?.(root);
   return root;
 }
@@ -120,8 +116,27 @@ test("accepts the isolated complete release-contract source fixture", () => {
   finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("copies buildable Dockerfiles unchanged into the isolated release-contract fixture", () => {
+  const root = createFixture();
+  try {
+    for (const path of ["src/Cmsify.Api/Dockerfile", "src/Cmsify.Admin/Dockerfile"]) {
+      assert.equal(readFileSync(resolve(root, path), "utf8"), readFileSync(resolve(repositoryRoot, path), "utf8"));
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("requires canonical Docker Hub names in Buildx archive annotations", () => {
+  const workflow = readFileSync(resolve(repositoryRoot, workflowPath), "utf8");
+  for (const kind of ["api", "admin"]) {
+    assert.match(workflow, new RegExp(`manifest-descriptor:io\\.containerd\\.image\\.name=docker\\.io/syntaxcircus/cmsify-${kind}:\\$VERSION`));
+  }
+});
+
 test("rejects branch publication", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('tags: ["v*"]', "branches: [main]")), /tag-only/i));
 test("rejects tag-only branch accessibility", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow.replace("workflow_dispatch:", 'push:\n    tags: ["v*"]')), /accessibility.*manual.*main.*pull request/i));
+test("rejects accessibility paths duplicated under push while absent from pull requests", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow
+  .replace('      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Admin/**"\n')
+  .replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '  pull_request:\n    paths:\n      - "src/Cmsify.Contracts/**"\n      - "src/Cmsify.Contracts/**"\n')), /Accessibility path triggers.*main pushes.*pull requests/i));
 test("rejects source-built release accessibility", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace("docker load --input artifacts/oci/cmsify-admin.oci.tar", "dotnet run --project src/Cmsify.Admin/Cmsify.Admin.csproj")), /candidate accessibility.*exact.*Admin OCI archive|candidate accessibility.*must not rebuild/i));
 test("rejects an omitted clean candidate package", () => expectInvalid((root) => mutateReleaseJob(root, "dotnet-consumer", (job) => job.replace('            <package pattern="SyntaxCircus.Cmsify.Contracts" />\n', "")), /clean \.NET consumer.*all three.*local source/i));
 test("rejects an unsigned promoted destination", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace(/\n\s*cosign sign --yes "\$API_SUBJECT"/, "")), /Cosign.*sign.*verify.*digest/i));
@@ -214,8 +229,8 @@ test("rejects a NuGet preflight that preserves uppercase prerelease versions", (
 test("rejects package publication before OCI digest-preserving copy and equality", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras cp --from-oci-layout-path artifacts/oci/api", "dotnet nuget push premature.nupkg\n          oras cp --from-oci-layout-path artifacts/oci/api")), /OCI.*remote digest equality.*before.*NuGet.*npm/i));
 test("rejects release npm packing without the resolved source SHA", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('npm pkg set version="$VERSION" gitHead="$SOURCE_SHA"', 'npm pkg set version="$VERSION"')), /npm candidate.*gitHead.*SOURCE_SHA/i));
 test("rejects NuGet packing without explicit source SHA binding", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replaceAll(' -p:RepositoryCommit="$SOURCE_SHA"', "")), /three NuGet candidates.*RepositoryCommit.*SOURCE_SHA/i));
-test("rejects OCI layouts whose platform descriptor can be obscured by inline Buildx provenance", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" --provenance=false", "")), /OCI candidate.*provenance=false.*BuildKit descriptor annotations/i));
-test("rejects OCI output without the tag and containerd full-name annotations", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('--annotation "manifest-descriptor:io.containerd.image.name=syntaxcircus/cmsify-api:$VERSION" ', "")), /OCI candidate.*containerd.*full identity/i));
+test("rejects OCI layouts whose platform descriptor can be obscured by inline Buildx provenance", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" --provenance=false", "")), /OCI candidate.*canonical Docker Hub BuildKit/i));
+test("rejects OCI output without the canonical Docker Hub tag and containerd annotations", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('--annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-api:$VERSION" ', "")), /OCI candidate.*canonical Docker Hub/i));
 test("rejects SBOM generation without stable identity finalization", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node scripts\/release\/finalize-spdx\.mjs[^\n]*/, "")), /four SPDX[\s\S]*stable[\s\S]*identit/i));
 test("rejects artifact smoke without candidate-root checksum verification", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          (cd artifacts && sha256sum --check SHA256SUMS)\n", "")), /artifact smoke.*checksums/i));
 test("rejects artifact smoke that omits the exact Admin archive", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          docker load --input artifacts/oci/cmsify-admin.oci.tar\n", "")), /artifact smoke.*load both exact OCI archives/i));

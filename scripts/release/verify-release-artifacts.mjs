@@ -203,7 +203,7 @@ function verifyOci(expectedFiles, releaseManifest) {
   const result = {};
   for (const kind of ["api", "admin"]) {
     const label = kind === "api" ? "API" : "Admin";
-    const expectedRepository = `syntaxcircus/cmsify-${kind}`;
+    const expectedRepository = `docker.io/syntaxcircus/cmsify-${kind}`;
     const expectedRef = `${expectedRepository}:${version}`;
     const tarName = `cmsify-${kind}.oci.tar`;
     const metadataName = `cmsify-${kind}.metadata.json`;

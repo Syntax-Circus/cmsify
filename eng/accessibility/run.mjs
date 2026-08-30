@@ -69,10 +69,10 @@ async function waitForLogin(url, waitTimeoutMs = WAIT_TIMEOUT_MS) {
 }
 
 export async function waitForLoginUi(page, timeout = WAIT_TIMEOUT_MS) {
-  await page.getByRole("heading", { name: /login/i }).waitFor({ state: "visible", timeout });
+  await page.getByRole("heading", { name: "Sign in to Cmsify", exact: true }).waitFor({ state: "visible", timeout });
   await page.locator("#email, input[name='email']").waitFor({ state: "visible", timeout });
   await page.locator("#password, input[name='password']").waitFor({ state: "visible", timeout });
-  await page.locator("form").filter({ has: page.locator("#email, input[name='email']") }).waitFor({ state: "visible", timeout });
+  await page.locator("form[action='/admin-auth/login']").filter({ has: page.locator("#email, input[name='email']") }).waitFor({ state: "visible", timeout });
 }
 
 function sanitizeViolation(violation) {

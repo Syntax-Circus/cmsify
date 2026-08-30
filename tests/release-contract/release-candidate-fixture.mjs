@@ -224,7 +224,7 @@ function defaultState() {
 }
 
 function imageState(kind) {
-  const repository = `syntaxcircus/cmsify-${kind}`;
+  const repository = `docker.io/syntaxcircus/cmsify-${kind}`;
   return {
     kind,
     repository,
@@ -328,7 +328,7 @@ function renderOci(root, state) {
       };
       write(staging, "oci-layout", json({ imageLayoutVersion: "1.0.0" }));
       write(staging, "index.json", json({ schemaVersion: 2, manifests: [
-        { ...descriptor, annotations: { "org.opencontainers.image.ref.name": "old", "io.containerd.image.name": `unrelated/${kind}:old` } },
+        { ...descriptor, annotations: { "org.opencontainers.image.ref.name": "old", "io.containerd.image.name": `docker.io/unrelated/${kind}:old` } },
         descriptor,
       ] }));
       const target = resolve(root, `oci/cmsify-${kind}.oci.tar`);
@@ -427,7 +427,7 @@ export function mutateOciLayout(root, kind, mutate) {
     execFileSync("tar", ["-xf", archive, "-C", staging]);
     const indexPath = resolve(staging, "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8"));
-    const expectedRef = `syntaxcircus/cmsify-${kind}:${VERSION}`;
+    const expectedRef = `docker.io/syntaxcircus/cmsify-${kind}:${VERSION}`;
     const descriptor = index.manifests.find((candidate) => candidate.annotations?.["io.containerd.image.name"] === expectedRef);
     const manifestPath = descriptor?.digest?.startsWith("sha256:") ? resolve(staging, `blobs/sha256/${descriptor.digest.slice(7)}`) : undefined;
     const manifest = manifestPath && statSync(manifestPath).isFile() ? JSON.parse(readFileSync(manifestPath, "utf8")) : undefined;

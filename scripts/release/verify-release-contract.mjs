@@ -340,6 +340,14 @@ for (const match of upgradeWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
 }
 
 expect(/workflow_dispatch:/i.test(accessibilityWorkflow) && /push:\s*\n\s+branches:\s*\[main\]/i.test(accessibilityWorkflow) && /pull_request:/i.test(accessibilityWorkflow) && !/tags:/i.test(accessibilityWorkflow), "Accessibility workflow must run on manual dispatch, relevant main pushes, and pull requests, never tags only.");
+function accessibilityEventPaths(event) {
+  const start = accessibilityWorkflow.search(new RegExp(`^  ${event}:\\s*$`, "m"));
+  if (start === -1) return [];
+  const following = accessibilityWorkflow.slice(start + 1);
+  const nextEvent = following.search(/^  [A-Za-z0-9_-]+:/m);
+  const body = nextEvent === -1 ? accessibilityWorkflow.slice(start) : accessibilityWorkflow.slice(start, start + 1 + nextEvent);
+  return [...body.matchAll(/^      - "([^"]+)"\s*$/gm)].map((match) => match[1]);
+}
 for (const requiredPath of [
   "src/Cmsify.Admin/**",
   "src/Cmsify.Contracts/**",
@@ -352,8 +360,7 @@ for (const requiredPath of [
   "Cmsify.slnx",
   ".github/workflows/admin-accessibility.yml",
 ]) {
-  const occurrences = accessibilityWorkflow.split(`\"${requiredPath}\"`).length - 1;
-  expect(occurrences === 2, `Accessibility path triggers must include ${requiredPath} for main pushes and pull requests.`);
+  expect(accessibilityEventPaths("push").filter((path) => path === requiredPath).length === 1 && accessibilityEventPaths("pull_request").filter((path) => path === requiredPath).length === 1, `Accessibility path triggers must include ${requiredPath} exactly once for both main pushes and pull requests.`);
 }
 expect(/npm ci --prefix eng\/accessibility/.test(accessibilityWorkflow) && !/npx\s+--yes|npm install(?!\s+--global)/.test(accessibilityWorkflow), "Accessibility workflow must install only the committed harness lock with npm ci.");
 expect(/node eng\/accessibility\/run\.mjs[^\n]*--url http:\/\/127\.0\.0\.1:5177\/login[^\n]*--output artifacts\/accessibility/.test(accessibilityWorkflow), "Accessibility workflow must run the locked harness against the Admin /login page.");
@@ -372,7 +379,7 @@ try {
   errors.push("Accessibility package.json and package-lock.json must be valid JSON.");
 }
 for (const tag of ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]) expect(accessibilityRunner.includes(`\"${tag}\"`), `Accessibility runner must include axe tag ${tag}.`);
-expect(/WAIT_TIMEOUT_MS[\s\S]*NAVIGATION_TIMEOUT_MS[\s\S]*AXE_TIMEOUT_MS/.test(accessibilityRunner) && /getByRole\("heading", \{ name: \/login\/i \}\)\.waitFor/.test(accessibilityRunner) && /#email, input\[name='email'\]/.test(accessibilityRunner) && /#password, input\[name='password'\]/.test(accessibilityRunner) && /locator\("form"\)/.test(accessibilityRunner), "Accessibility runner must wait for visible real login heading, email, password, and form before axe.");
+expect(/WAIT_TIMEOUT_MS[\s\S]*NAVIGATION_TIMEOUT_MS[\s\S]*AXE_TIMEOUT_MS/.test(accessibilityRunner) && /getByRole\("heading", \{ name: "Sign in to Cmsify", exact: true \}\)\.waitFor/.test(accessibilityRunner) && /#email, input\[name='email'\]/.test(accessibilityRunner) && /#password, input\[name='password'\]/.test(accessibilityRunner) && /form\[action='\/admin-auth\/login'\]/.test(accessibilityRunner), "Accessibility runner must wait for the exact visible Sign in to Cmsify heading, credential fields, and login form before axe.");
 expect(/MAX_VIOLATIONS[\s\S]*MAX_NODES[\s\S]*MAX_REPORT_BYTES/.test(accessibilityRunner) && /accessibility\.json/.test(accessibilityRunner) && /accessibility\.junit\.xml/.test(accessibilityRunner), "Accessibility runner must emit bounded sanitized JSON and JUnit evidence.");
 expect(!/html:\s*node\.html|\.html\b/.test(accessibilityRunner), "Accessibility evidence must not retain raw page HTML.");
 
@@ -415,11 +422,11 @@ const buildJob = jobBody("build");
 const buildCandidateUploads = [...buildJob.matchAll(/actions\/upload-artifact@[0-9a-f]{40}/g)];
 expect(buildCandidateUploads.length === 1 && /name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/.test(buildJob), "The build job must upload exactly one named candidate artifact.");
 const ociBuildCommands = [...workflow.matchAll(/docker buildx build[^\n]+/g)].map((match) => match[0]);
-expect(ociBuildCommands.length === 2 && ociBuildCommands.every((command) => command.includes("--platform linux/amd64") && command.includes("--provenance=false") && command.includes('manifest-descriptor:org.opencontainers.image.ref.name=$VERSION') && command.includes('manifest-descriptor:io.containerd.image.name=syntaxcircus/cmsify-')), "Each OCI candidate build must use --provenance=false and BuildKit descriptor annotations for the tag ref.name and containerd full identity.");
+expect(ociBuildCommands.length === 2 && ["api", "admin"].every((kind) => ociBuildCommands.some((command) => command.includes("--platform linux/amd64") && command.includes("--provenance=false") && command.includes(`--tag "docker.io/syntaxcircus/cmsify-${kind}:$VERSION"`) && command.includes('manifest-descriptor:org.opencontainers.image.ref.name=$VERSION') && command.includes(`manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-${kind}:$VERSION`) && command.includes(`name=docker.io/syntaxcircus/cmsify-${kind}:$VERSION`))), "Each OCI candidate build must use canonical Docker Hub BuildKit archive and descriptor identities.");
 expect(/docker\/setup-buildx-action@[0-9a-f]{40}[\s\S]*driver:\s*docker-container/s.test(workflow), "OCI candidates require a SHA-pinned docker-container Buildx builder.");
 expect(/anchore\/sbom-action\/download-syft@[0-9a-f]{40}[\s\S]*syft-version:/s.test(workflow), "Candidate SBOM generation must explicitly provision a pinned SBOM tool.");
 expect(/oci-archive:artifacts\/oci\/cmsify-api\.oci\.tar[\s\S]*oci-archive:artifacts\/oci\/cmsify-admin\.oci\.tar/s.test(workflow), "OCI SPDX generation must scan the exact candidate archives without depending on a mutable daemon tag.");
-expect(/cmsify-api\.metadata\.json[\s\S]*containerimage\.descriptor[\s\S]*org\.opencontainers\.image\.ref\.name[\s\S]*io\.containerd\.image\.name[\s\S]*size:[\s\S]*mediaType:[\s\S]*platform:[\s\S]*release-manifest\.json/s.test(workflow), "Candidate manifest must bind OCI descriptor digest, tag identity, full containerd image identity, size, media type, and platform before certification.");
+expect(/cmsify-api\.metadata\.json[\s\S]*containerimage\.descriptor[\s\S]*org\.opencontainers\.image\.ref\.name[\s\S]*io\.containerd\.image\.name[\s\S]*docker\.io\/syntaxcircus\/cmsify-api:\$VERSION[\s\S]*repository:"docker\.io\/syntaxcircus\/cmsify-api"[\s\S]*size:[\s\S]*mediaType:[\s\S]*platform:[\s\S]*release-manifest\.json/s.test(workflow), "Candidate manifest must bind OCI descriptor digest, tag identity, and canonical Docker Hub containerd identity before certification.");
 expect(/finalize-spdx\.mjs --artifacts artifacts --version "\$VERSION" --source-sha "\$SOURCE_SHA"/s.test(workflow) && existsSync(resolve(repositoryRoot, "scripts/release/finalize-spdx.mjs")), "All four SPDX documents must receive stable exact document/source/package identities before certification.");
 expect(/certify:[\s\S]*download-artifact[\s\S]*attest-build-provenance/s.test(workflow), "The certify job must attest the downloaded immutable candidate.");
 expect(/promote:[\s\S]*environment:\s*release[\s\S]*download-artifact[\s\S]*git ls-remote[\s\S]*sha256sum --check[\s\S]*NuGet\/login@[0-9a-f]{40}[\s\S]*oras cp[\s\S]*oras manifest fetch[\s\S]*dotnet nuget push[\s\S]*npm publish[\s\S]*gh release create/s.test(workflow), "Protected promotion must revalidate the tag, promote certified OCI descriptors, and publish only the certified packages.");
@@ -464,7 +471,7 @@ const artifactApiLoad = artifactSmoke.indexOf("docker load --input artifacts/oci
 const artifactAdminLoad = artifactSmoke.indexOf("docker load --input artifacts/oci/cmsify-admin.oci.tar");
 const artifactCli = artifactSmoke.indexOf("node eng/release-smoke/cli.mjs certify");
 expect(artifactChecksum >= 0 && artifactApiLoad > artifactChecksum && artifactAdminLoad > artifactApiLoad && artifactCli > artifactAdminLoad, "Artifact smoke must verify candidate-root checksums, load both exact OCI archives, then invoke the Task 4 CLI.");
-expect(/cli\.mjs certify[^\n]*--api-image "syntaxcircus\/cmsify-api:\$VERSION"[^\n]*--admin-image "syntaxcircus\/cmsify-admin:\$VERSION"[^\n]*--version "\$VERSION"[^\n]*--source-sha "\$SOURCE_SHA"[^\n]*--output "\$RUNNER_TEMP\/cmsify-release-smoke"/.test(artifactSmoke), "Artifact smoke must pass exact loaded image, version, source, and run-owned output identities to Task 4.");
+expect(/cli\.mjs certify[^\n]*--api-image "docker\.io\/syntaxcircus\/cmsify-api:\$VERSION"[^\n]*--admin-image "docker\.io\/syntaxcircus\/cmsify-admin:\$VERSION"[^\n]*--version "\$VERSION"[^\n]*--source-sha "\$SOURCE_SHA"[^\n]*--output "\$RUNNER_TEMP\/cmsify-release-smoke"/.test(artifactSmoke), "Artifact smoke must pass canonical exact loaded image, version, source, and run-owned output identities to Task 4.");
 expect(!/\b(docker (?:image )?pull|docker run|docker buildx build|docker build|dotnet (?:build|pack|publish)|npm pack)\b/i.test(artifactSmoke), "Artifact smoke must not rebuild or pull a replacement candidate or duplicate Task 4 shell orchestration.");
 expect(jobConditionRequiresSuccess(artifactSmoke) && continueOnErrorIsDisabled(artifactSmoke), "Artifact smoke must fail closed after build.");
 const artifactSmokeConditions = stepConditions(artifactSmoke);
@@ -479,7 +486,7 @@ const accessibilityLoad = candidateAccessibility.indexOf("docker load --input ar
 const accessibilityRun = candidateAccessibility.indexOf("docker run -d --pull=never --name cmsify-admin-accessibility");
 const accessibilityScan = candidateAccessibility.indexOf("node eng/accessibility/run.mjs");
 expect(accessibilityChecksum >= 0 && accessibilityLoad > accessibilityChecksum && accessibilityRun > accessibilityLoad && accessibilityScan > accessibilityRun, "Candidate accessibility must checksum and load the exact Admin OCI archive before scanning it.");
-expect(/docker run[^\n]*--pull=never[^\n]*"syntaxcircus\/cmsify-admin:\$VERSION"/.test(candidateAccessibility) && /--url http:\/\/127\.0\.0\.1:18081\/login/.test(candidateAccessibility), "Candidate accessibility must scan /login from the exact loaded versioned Admin image without pulling.");
+expect(/docker run[^\n]*--pull=never[^\n]*"docker\.io\/syntaxcircus\/cmsify-admin:\$VERSION"/.test(candidateAccessibility) && /--url http:\/\/127\.0\.0\.1:18081\/login/.test(candidateAccessibility), "Candidate accessibility must scan /login from the canonical exact loaded versioned Admin image without pulling.");
 expect(!/\b(dotnet (?:run|build|publish)|docker (?:image )?pull|docker buildx build|docker build|npm pack)\b/i.test(candidateAccessibility), "Candidate accessibility must not rebuild or pull a replacement Admin candidate.");
 expect(jobConditionRequiresSuccess(candidateAccessibility) && continueOnErrorIsDisabled(candidateAccessibility), "Candidate accessibility must fail closed after build.");
 const candidateAccessibilityConditions = stepConditions(candidateAccessibility);
@@ -564,7 +571,7 @@ expect(/--prerelease/.test(promotion), "GitHub Release promotion must mark SemVe
 expect(!/docker push/i.test(promotion) && /oras cp --from-oci-layout-path[\s\S]*oras manifest fetch --descriptor[\s\S]*test "\$API_REMOTE" = "\$API_EXPECTED"/s.test(promotion), "OCI promotion must copy certified descriptors and compare remote digests without mutable docker push.");
 expect(/refs\/tags\/\$GITHUB_REF_NAME\^\{\}[\s\S]*refs\/tags\/\$GITHUB_REF_NAME[\s\S]*REMOTE_SHA/s.test(promotion), "Promotion must peel annotated tags and safely fall back to lightweight tags.");
 expect(/NUGET_VERSION="\$\{VERSION,,\}"[\s\S]*v3-flatcontainer\/\$package\/\$NUGET_VERSION\/\$package\.\$NUGET_VERSION\.nupkg/.test(promotion) && /case "\$http_code" in 404\) ;; 200\) exit 1 ;; \*\)/s.test(promotion) && !/case "\$http_code" in[^\n]*404\|200/.test(promotion), "NuGet preflight must normalize the flat-container version and accept only explicit HTTP 404 absence.");
-expect(/oras manifest fetch --descriptor --oci-layout-path\s+\S+\s+"syntaxcircus\/cmsify-api@\$API_EXPECTED"/s.test(promotion) && /oras cp --from-oci-layout-path\s+\S+\s+"syntaxcircus\/cmsify-api@\$API_EXPECTED"\s+"docker\.io\/syntaxcircus\/cmsify-api:\$VERSION"/s.test(promotion), "Promotion must resolve and copy the certified API descriptor digest through exact ORAS 1.3 local OCI-layout syntax.");
+expect(/oras manifest fetch --descriptor --oci-layout-path\s+\S+\s+"docker\.io\/syntaxcircus\/cmsify-api@\$API_EXPECTED"/s.test(promotion) && /oras cp --from-oci-layout-path\s+\S+\s+"docker\.io\/syntaxcircus\/cmsify-api@\$API_EXPECTED"\s+"docker\.io\/syntaxcircus\/cmsify-api:\$VERSION"/s.test(promotion), "Promotion must resolve and copy the canonical certified API descriptor digest through exact ORAS 1.3 local OCI-layout syntax.");
 expect(!/oras manifest fetch[^\n]*--oci-layout(?:\s|=)[^\n]*--oci-layout-path|oras manifest fetch[^\n]*--oci-layout-path[^\n]*--oci-layout(?:\s|=)/.test(promotion), "ORAS manifest fetch must reject combined --oci-layout and --oci-layout-path syntax.");
 expect(!/oras cp[^\n]*--from-oci-layout(?:\s|=)[^\n]*--from-oci-layout-path|oras cp[^\n]*--from-oci-layout-path[^\n]*--from-oci-layout(?:\s|=)/.test(promotion), "ORAS cp must reject combined --from-oci-layout and --from-oci-layout-path syntax.");
 expect(/auth\.docker\.io\/token\?service=registry\.docker\.io&scope=repository:\$image:pull,push[\s\S]*jq -er \.token[\s\S]*Authorization: Bearer \$bearer/s.test(promotion), "Docker Hub preflight must obtain and use a promotion-credential scoped Bearer token.");
