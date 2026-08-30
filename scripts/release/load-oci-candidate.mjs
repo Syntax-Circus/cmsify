@@ -97,8 +97,10 @@ function assertRegularNonLinkDirectory(input, label) {
   return absolute;
 }
 
-function validateScratchRoot(input, prefix) {
-  const absolute = assertRegularNonLinkDirectory(input, "OCI loader scratch root");
+function scratchRootPathForPrefix(input, prefix) {
+  assert(typeof input === "string" && input.length > 0, "OCI loader scratch root path is required.");
+  assert(typeof prefix === "string" && prefix.length > 0, "OCI loader scratch prefix path is required.");
+  const absolute = resolve(input);
   const absolutePrefix = resolve(prefix);
   assert(normalizedPath(dirname(absolute)) === normalizedPath(dirname(absolutePrefix))
     && basename(absolute).startsWith(basename(absolutePrefix))
@@ -106,10 +108,37 @@ function validateScratchRoot(input, prefix) {
   return absolute;
 }
 
+function validateScratchPrefix(input) {
+  assert(typeof input === "string" && input.length > 0, "OCI loader scratch prefix path is required.");
+  const absolute = resolve(input);
+  assert(basename(absolute).length > 0, "OCI loader scratch prefix name is required.");
+  assertRegularNonLinkDirectory(dirname(absolute), "OCI loader scratch parent");
+  assert(!absolute.includes(","), "OCI loader scratch prefix path must not contain a comma.");
+  return absolute;
+}
+
+function validateScratchRoot(input, prefix) {
+  const ownedRoot = scratchRootPathForPrefix(input, prefix);
+  const absolute = assertRegularNonLinkDirectory(ownedRoot, "OCI loader scratch root");
+  assert(normalizedPath(absolute) === normalizedPath(ownedRoot), "OCI loader scratch root must equal the exact run-owned path.");
+  return absolute;
+}
+
 function defaultCreateScratch(prefix, registerCreated) {
-  const scratchRoot = mkdtempSync(prefix);
-  registerCreated(scratchRoot);
-  return scratchRoot;
+  const exactPrefix = validateScratchPrefix(prefix);
+  const scratchRoot = mkdtempSync(exactPrefix);
+  try {
+    registerCreated(scratchRoot);
+    return scratchRoot;
+  } catch (error) {
+    try {
+      const exactRoot = scratchRootPathForPrefix(scratchRoot, exactPrefix);
+      rmSync(exactRoot, { recursive: true, force: true });
+    } catch (cleanupError) {
+      throw new Error(`${compactError(error)} OCI loader scratch registration rollback failed: ${compactError(cleanupError)}`, { cause: error });
+    }
+    throw error;
+  }
 }
 
 function defaultValidateScratchArchive(input, scratchRoot, maximumBytes) {
@@ -210,18 +239,89 @@ function validateBlobDescriptor(value, mediaType, label) {
   return value;
 }
 
-function assertRequiredJsonPropertiesOnce(bytes, properties, label) {
+function jsonObjectPropertyNamesAtPath(bytes, targetPath, label) {
   const text = bytes.toString("utf8");
-  for (const property of properties) {
-    const token = JSON.stringify(property);
-    let count = 0;
-    let position = 0;
-    while ((position = text.indexOf(token, position)) >= 0) {
-      let cursor = position + token.length;
-      while (/\s/.test(text[cursor] ?? "")) cursor += 1;
-      if (text[cursor] === ":") count += 1;
-      position += token.length;
+  const propertyNames = [];
+  let position = 0;
+  const skipWhitespace = () => {
+    while (/\s/.test(text[position] ?? "")) position += 1;
+  };
+  const readString = () => {
+    skipWhitespace();
+    const start = position;
+    assert(text[position] === "\"", `${label} JSON token structure is invalid.`);
+    position += 1;
+    while (position < text.length) {
+      if (text[position] === "\\") position += 2;
+      else if (text[position] === "\"") {
+        position += 1;
+        return JSON.parse(text.slice(start, position));
+      } else position += 1;
     }
+    throw new Error(`${label} JSON string ended unexpectedly.`);
+  };
+  const isTarget = (path) => path.length === targetPath.length
+    && path.every((segment, index) => segment === targetPath[index]);
+  function visitValue(path, depth) {
+    assert(depth <= 256, `${label} JSON nesting is unsafe.`);
+    skipWhitespace();
+    if (text[position] === "{") visitObject(path, depth);
+    else if (text[position] === "[") visitArray(path, depth);
+    else if (text[position] === "\"") readString();
+    else {
+      while (position < text.length && !/[\s,\]}]/.test(text[position])) position += 1;
+    }
+  }
+  function visitObject(path, depth) {
+    position += 1;
+    skipWhitespace();
+    if (text[position] === "}") {
+      position += 1;
+      return;
+    }
+    while (position < text.length) {
+      const property = readString();
+      if (isTarget(path)) propertyNames.push(property);
+      skipWhitespace();
+      assert(text[position] === ":", `${label} JSON token structure is invalid.`);
+      position += 1;
+      visitValue([...path, property], depth + 1);
+      skipWhitespace();
+      if (text[position] === "}") {
+        position += 1;
+        return;
+      }
+      assert(text[position] === ",", `${label} JSON token structure is invalid.`);
+      position += 1;
+    }
+  }
+  function visitArray(path, depth) {
+    position += 1;
+    skipWhitespace();
+    if (text[position] === "]") {
+      position += 1;
+      return;
+    }
+    while (position < text.length) {
+      visitValue([...path, null], depth + 1);
+      skipWhitespace();
+      if (text[position] === "]") {
+        position += 1;
+        return;
+      }
+      assert(text[position] === ",", `${label} JSON token structure is invalid.`);
+      position += 1;
+    }
+  }
+  visitValue([], 0);
+  return propertyNames;
+}
+
+function assertRequiredJsonPropertiesOnce(bytes, properties, label) {
+  if (properties.length === 0) return;
+  const propertyNames = jsonObjectPropertyNamesAtPath(bytes, ["config", "Labels"], label);
+  for (const property of properties) {
+    const count = propertyNames.filter((candidate) => candidate === property).length;
     const propertyLabel = property.slice("org.opencontainers.image.".length).replace("licenses", "license");
     assert(count === 1, count > 1
       ? `${label} contains a duplicate ${propertyLabel} label; it must appear exactly once.`

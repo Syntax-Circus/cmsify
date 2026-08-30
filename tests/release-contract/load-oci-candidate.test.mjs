@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -252,6 +252,32 @@ evidenceTest("duplicate required OCI label", ({ config, setConfigBytes }) => {
   assert.equal(encoded.includes(original), true);
   setConfigBytes(`${encoded.replace(original, `${JSON.stringify(key)}:"9.9.9",${original}`)}\n`);
 }, /duplicate.*version label|version label.*exactly once/i, { resealConfig: true, resealManifest: true });
+
+evidenceTest("escape-equivalent duplicate required OCI label", ({ config, setConfigBytes }) => {
+  const key = "org.opencontainers.image.version";
+  const encoded = JSON.stringify(config);
+  const original = `${JSON.stringify(key)}:${JSON.stringify(VERSION)}`;
+  assert.equal(encoded.includes(original), true);
+  setConfigBytes(`${encoded.replace(original, `"\\u006frg.opencontainers.image.version":"9.9.9",${original}`)}\n`);
+}, /duplicate.*version label|version label.*exactly once/i, { resealConfig: true, resealManifest: true });
+
+test("allows a required-label-named property outside config Labels", async () => {
+  const root = createValidCandidate();
+  try {
+    mutateOciLayout(root, "api", ({ config, setConfigBytes }) => {
+      const encoded = JSON.stringify(config);
+      const key = JSON.stringify("org.opencontainers.image.version");
+      setConfigBytes(`${encoded.slice(0, -1)},${key}:"not-a-label"}\n`);
+    }, { resealConfig: true, resealManifest: true });
+    const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api") });
+    const { loadOciCandidate } = await loaderModule();
+
+    const result = await loadOciCandidate(options(root), loaderDependencies(boundary));
+
+    assert.equal(result.imageId, boundary.configDigest);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-canonical-inspect"), true);
+  } finally { removeCandidate(root); }
+});
 
 evidenceTest("missing required OCI label", ({ config }) => {
   delete config.config.Labels["org.opencontainers.image.version"];
@@ -662,6 +688,35 @@ test("create-then-throw scratch creation still removes only the registered exact
     assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot]);
     assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-skopeo-copy"), false);
   } finally { removeCandidate(root); }
+});
+
+test("production-default scratch registration failure does not leak its exact created directory", async () => {
+  const root = createValidCandidate();
+  const tempRoot = mkdtempSync(resolve(tmpdir(), "cmsify-oci-loader-temp-parent-"));
+  const commaParent = resolve(tempRoot, "parent,with-comma");
+  const tempVariables = ["TMPDIR", "TMP", "TEMP"];
+  const previous = new Map(tempVariables.map((name) => [name, process.env[name]]));
+  mkdirSync(commaParent);
+  try {
+    for (const name of tempVariables) process.env[name] = commaParent;
+    const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api") });
+    const { loadOciCandidate } = await loaderModule();
+
+    await assert.rejects(loadOciCandidate(options(root), {
+      run: boundary.run,
+      runId: RUN_ID,
+    }), /scratch.*comma|path.*comma/i);
+
+    assert.deepEqual(readdirSync(commaParent), [], "default scratch creation leaked its exact mkdtemp directory");
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-skopeo-copy"), false);
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+    removeCandidate(root);
+  }
 });
 
 test("scratch cleanup runs when archive validation rejects before Docker load", async () => {
