@@ -323,6 +323,10 @@ for (const [relativePath, kind, title] of [
 
 const workflowPath = ".github/workflows/publish-cmsify.yml";
 const workflow = file(workflowPath);
+const accessibilityWorkflow = file(".github/workflows/admin-accessibility.yml");
+const accessibilityPackage = file("eng/accessibility/package.json");
+const accessibilityLock = file("eng/accessibility/package-lock.json");
+const accessibilityRunner = file("eng/accessibility/run.mjs");
 const upgradeWorkflowPath = ".github/workflows/upgrade-rollback.yml";
 const upgradeWorkflow = file(upgradeWorkflowPath);
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
@@ -343,7 +347,40 @@ for (const match of upgradeWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Upgrade workflow action must be pinned by immutable SHA: ${match[1]}`);
 }
 
-for (const job of ["resolve", "build", "upgrade-rollback", "certify", "promote"]) {
+expect(/workflow_dispatch:/i.test(accessibilityWorkflow) && /push:\s*\n\s+branches:\s*\[main\]/i.test(accessibilityWorkflow) && /pull_request:/i.test(accessibilityWorkflow) && !/tags:/i.test(accessibilityWorkflow), "Accessibility workflow must run on manual dispatch, relevant main pushes, and pull requests, never tags only.");
+for (const requiredPath of [
+  "src/Cmsify.Admin/**",
+  "src/Cmsify.Contracts/**",
+  "src/Cmsify.Core/**",
+  "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/**",
+  "eng/accessibility/**",
+  ".github/workflows/admin-accessibility.yml",
+]) {
+  const occurrences = accessibilityWorkflow.split(`\"${requiredPath}\"`).length - 1;
+  expect(occurrences === 2, `Accessibility path triggers must include ${requiredPath} for main pushes and pull requests.`);
+}
+expect(/npm ci --prefix eng\/accessibility/.test(accessibilityWorkflow) && !/npx\s+--yes|npm install(?!\s+--global)/.test(accessibilityWorkflow), "Accessibility workflow must install only the committed harness lock with npm ci.");
+expect(/node eng\/accessibility\/run\.mjs[^\n]*--url http:\/\/127\.0\.0\.1:5177\/login[^\n]*--output artifacts\/accessibility/.test(accessibilityWorkflow), "Accessibility workflow must run the locked harness against the Admin /login page.");
+expect(/if:\s*always\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*accessibility\.json[\s\S]*accessibility\.junit\.xml[\s\S]*retention-days:\s*14/s.test(accessibilityWorkflow), "Accessibility workflow must upload bounded JSON and JUnit evidence on every outcome.");
+
+try {
+  const packageMetadata = JSON.parse(accessibilityPackage);
+  const lockMetadata = JSON.parse(accessibilityLock);
+  expect(packageMetadata.private === true && /^>=20/.test(packageMetadata.engines?.node ?? ""), "Accessibility harness must remain private and require Node 20 or later.");
+  for (const dependency of ["axe-core", "playwright"]) {
+    const version = packageMetadata.dependencies?.[dependency];
+    const locked = lockMetadata.packages?.[`node_modules/${dependency}`];
+    expect(/^\d+\.\d+\.\d+$/.test(version ?? "") && lockMetadata.packages?.[""]?.dependencies?.[dependency] === version && locked?.version === version && /^sha512-/.test(locked?.integrity ?? ""), `Accessibility ${dependency} dependency must use one exact integrity-locked version.`);
+  }
+} catch {
+  errors.push("Accessibility package.json and package-lock.json must be valid JSON.");
+}
+for (const tag of ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]) expect(accessibilityRunner.includes(`\"${tag}\"`), `Accessibility runner must include axe tag ${tag}.`);
+expect(/WAIT_TIMEOUT_MS[\s\S]*NAVIGATION_TIMEOUT_MS[\s\S]*AXE_TIMEOUT_MS/.test(accessibilityRunner), "Accessibility runner must bound readiness, navigation, and axe execution.");
+expect(/MAX_VIOLATIONS[\s\S]*MAX_NODES[\s\S]*MAX_REPORT_BYTES/.test(accessibilityRunner) && /accessibility\.json/.test(accessibilityRunner) && /accessibility\.junit\.xml/.test(accessibilityRunner), "Accessibility runner must emit bounded sanitized JSON and JUnit evidence.");
+expect(!/html:\s*node\.html|\.html\b/.test(accessibilityRunner), "Accessibility evidence must not retain raw page HTML.");
+
+for (const job of ["resolve", "build", "artifact-smoke", "candidate-accessibility", "dotnet-consumer", "node-consumer", "upgrade-rollback", "certify", "promote"]) {
   expect(new RegExp(`^\\s{2}${job}:`, "m").test(workflow), `Release workflow must include the ${job} job.`);
 }
 
@@ -378,32 +415,16 @@ expect(deterministicFixtureCheck >= 0 && dedicatedRehearsal > deterministicFixtu
 expect(/if:\s*failure\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*path:\s*artifacts\/upgrade-tests\/\*\*/s.test(upgradeWorkflow), "Dedicated upgrade workflow must upload sanitized diagnostics on failure.");
 
 expect(/build:[\s\S]*dotnet pack[\s\S]*npm pack[\s\S]*docker buildx build[\s\S]*verify-release-artifacts\.mjs[\s\S]*upload-artifact/s.test(workflow), "The build job must build candidate NuGet, npm, and OCI artifacts once, verify them, and upload one candidate artifact.");
+const buildJob = jobBody("build");
+const buildCandidateUploads = [...buildJob.matchAll(/actions\/upload-artifact@[0-9a-f]{40}/g)];
+expect(buildCandidateUploads.length === 1 && /name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/.test(buildJob), "The build job must upload exactly one named candidate artifact.");
 const ociBuildCommands = [...workflow.matchAll(/docker buildx build[^\n]+/g)].map((match) => match[0]);
 expect(ociBuildCommands.length === 2 && ociBuildCommands.every((command) => command.includes("--platform linux/amd64") && command.includes("--provenance=false")), "Each OCI candidate build must use --provenance=false to expose one exact single linux/amd64 manifest descriptor; release provenance is attached after candidate certification.");
 expect(/docker\/setup-buildx-action@[0-9a-f]{40}[\s\S]*driver:\s*docker-container/s.test(workflow), "OCI candidates require a SHA-pinned docker-container Buildx builder.");
 expect(/anchore\/sbom-action\/download-syft@[0-9a-f]{40}[\s\S]*syft-version:/s.test(workflow), "Candidate SBOM generation must explicitly provision a pinned SBOM tool.");
-expect(/docker run -d[\s\S]*health\/live[\s\S]*curl[\s\S]*18081/s.test(workflow), "OCI candidate verification must start the exact API/Admin images and probe health/static behavior.");
-const smoke = workflow.match(/- name: Smoke exact OCI candidates[\s\S]*?(?=^\s{6}- name:|^\s{6}- uses:|^\s{6}- run:)/m)?.[0] ?? "";
-const firstSmokeResource = smoke.indexOf("docker network create cmsify-smoke");
-const cleanupRegistration = smoke.indexOf("trap cleanup EXIT");
-const firstContainer = smoke.indexOf("docker run -d --name cmsify-postgres-smoke");
-const beforeCleanup = firstSmokeResource >= 0 && cleanupRegistration > firstSmokeResource ? smoke.slice(firstSmokeResource + "docker network create cmsify-smoke".length, cleanupRegistration) : "";
-expect(firstSmokeResource >= 0 && cleanupRegistration > firstSmokeResource && cleanupRegistration < firstContainer && !/docker\s+(?:run|network create)\b/.test(beforeCleanup), "OCI smoke cleanup must be registered immediately after first resource creation and before any container is created.");
-for (const container of ["cmsify-postgres-smoke", "cmsify-api-smoke", "cmsify-admin-smoke"]) {
-  const runLine = smoke.match(new RegExp(`^\\s*docker run[^\\n]*--name ${container}[^\\n]*$`, "m"))?.[0] ?? "";
-  expect(runLine.includes("docker run -d --name") && !runLine.includes("--rm"), `OCI smoke ${container} must omit --rm so failure logs remain available.`);
-}
-expect(/cleanup\(\)[\s\S]*status=\$\?[\s\S]*docker logs cmsify-api-smoke[\s\S]*docker logs cmsify-admin-smoke[\s\S]*docker logs cmsify-postgres-smoke[\s\S]*docker rm -f cmsify-api-smoke cmsify-admin-smoke cmsify-postgres-smoke[\s\S]*docker network rm cmsify-smoke/s.test(smoke), "OCI smoke failure must show logs and clean every container and network on every exit.");
-const firstContainerRemoval = smoke.indexOf("docker rm -f");
-const lastFailureLog = Math.max(...["cmsify-api-smoke", "cmsify-admin-smoke", "cmsify-postgres-smoke"].map((container) => smoke.indexOf(`docker logs ${container}`)));
-expect(lastFailureLog >= 0 && firstContainerRemoval > lastFailureLog, "OCI smoke failure logs must be collected before any container remove operation.");
-expect(/for attempt in \{1\.\.30\}; do[\s\S]*pg_isready[\s\S]*test "\$postgres_ready" = true/s.test(smoke), "PostgreSQL readiness must be bounded and fail closed.");
-expect(/candidates_ready=false\s+for attempt in \{1\.\.30\}; do[\s\S]*--connect-timeout 2 --max-time 5[\s\S]*test "\$candidates_ready" = true/s.test(smoke), "API/Admin readiness must use bounded attempts and request timeouts.");
-expect(/127\.0\.0\.1:18081\/[\s\S]*grep -Fq '<title>Cmsify Admin<\/title>'/s.test(smoke), "Admin smoke probe must assert Cmsify-specific content after HTTP success.");
+expect(/oci-archive:artifacts\/oci\/cmsify-api\.oci\.tar[\s\S]*oci-archive:artifacts\/oci\/cmsify-admin\.oci\.tar/s.test(workflow), "OCI SPDX generation must scan the exact candidate archives without depending on a mutable daemon tag.");
 expect(/cmsify-api\.metadata\.json[\s\S]*containerimage\.descriptor[\s\S]*size:[\s\S]*mediaType:[\s\S]*platform:[\s\S]*release-manifest\.json/s.test(workflow), "Candidate manifest must bind OCI descriptor digest, size, media type, and platform before certification.");
 expect(/finalize-spdx\.mjs --artifacts artifacts --version "\$VERSION" --source-sha "\$SOURCE_SHA"/s.test(workflow) && existsSync(resolve(repositoryRoot, "scripts/release/finalize-spdx.mjs")), "All four SPDX documents must receive stable exact document/source/package identities before certification.");
-expect(/dotnet-consumer:[\s\S]*setup-dotnet[\s\S]*download-artifact[\s\S]*dotnet new console[\s\S]*SyntaxCircus\.Cmsify\.Contracts[\s\S]*SyntaxCircus\.Cmsify\.Client[\s\S]*SyntaxCircus\.Cmsify\.Client\.DistributedCaching/s.test(workflow), "Release workflow must install all three candidate packages into a clean .NET 10 consumer.");
-expect(/node-consumer:[\s\S]*matrix:[\s\S]*node-version:\s*\["20", "22"\][\s\S]*download-artifact[\s\S]*CMSIFY_CLIENT_TARBALL=[\s\S]*npm run test:consumer/s.test(workflow), "Release workflow must install the candidate through the reused clean Node 20/22 consumer check.");
 expect(/certify:[\s\S]*download-artifact[\s\S]*attest-build-provenance/s.test(workflow), "The certify job must attest the downloaded immutable candidate.");
 expect(/promote:[\s\S]*environment:\s*release[\s\S]*download-artifact[\s\S]*git ls-remote[\s\S]*sha256sum --check[\s\S]*NuGet\/login@[0-9a-f]{40}[\s\S]*oras cp[\s\S]*oras manifest fetch[\s\S]*dotnet nuget push[\s\S]*npm publish[\s\S]*gh release create/s.test(workflow), "Protected promotion must revalidate the tag, promote certified OCI descriptors, and publish only the certified packages.");
 
@@ -438,6 +459,55 @@ function continueOnErrorIsDisabled(job) {
   return [...job.matchAll(/^\s+(?:-\s+)?continue-on-error:\s*(.+?)\s*$/gm)]
     .every((match) => normalizedCondition(match[1]) === "false");
 }
+
+const artifactSmoke = jobBody("artifact-smoke");
+expect(/needs:\s*\[resolve, build\]/.test(artifactSmoke), "Artifact smoke must consume resolve and the single build candidate.");
+expect(/actions\/download-artifact@[0-9a-f]{40}[\s\S]*name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/s.test(artifactSmoke), "Artifact smoke must download the single exact build candidate artifact.");
+const artifactChecksum = artifactSmoke.indexOf("(cd artifacts && sha256sum --check SHA256SUMS)");
+const artifactApiLoad = artifactSmoke.indexOf("docker load --input artifacts/oci/cmsify-api.oci.tar");
+const artifactAdminLoad = artifactSmoke.indexOf("docker load --input artifacts/oci/cmsify-admin.oci.tar");
+const artifactCli = artifactSmoke.indexOf("node eng/release-smoke/cli.mjs certify");
+expect(artifactChecksum >= 0 && artifactApiLoad > artifactChecksum && artifactAdminLoad > artifactApiLoad && artifactCli > artifactAdminLoad, "Artifact smoke must verify candidate-root checksums, load both exact OCI archives, then invoke the Task 4 CLI.");
+expect(/cli\.mjs certify[^\n]*--api-image "syntaxcircus\/cmsify-api:\$VERSION"[^\n]*--admin-image "syntaxcircus\/cmsify-admin:\$VERSION"[^\n]*--version "\$VERSION"[^\n]*--source-sha "\$SOURCE_SHA"[^\n]*--output "\$RUNNER_TEMP\/cmsify-release-smoke"/.test(artifactSmoke), "Artifact smoke must pass exact loaded image, version, source, and run-owned output identities to Task 4.");
+expect(!/\b(docker (?:image )?pull|docker run|docker buildx build|docker build|dotnet (?:build|pack|publish)|npm pack)\b/i.test(artifactSmoke), "Artifact smoke must not rebuild or pull a replacement candidate or duplicate Task 4 shell orchestration.");
+expect(jobConditionRequiresSuccess(artifactSmoke) && continueOnErrorIsDisabled(artifactSmoke), "Artifact smoke must fail closed after build.");
+const artifactSmokeConditions = stepConditions(artifactSmoke);
+expect(artifactSmokeConditions.filter((condition) => condition === "always()").length === 1 && artifactSmokeConditions.every((condition) => condition === "success()" || condition === "always()") && /if:\s*always\(\)[\s\S]*Upload bounded release-smoke evidence|Upload bounded release-smoke evidence[\s\S]*if:\s*always\(\)/s.test(artifactSmoke), "Artifact smoke conditions may bypass normal success only to upload bounded evidence.");
+
+const candidateAccessibility = jobBody("candidate-accessibility");
+expect(/needs:\s*\[resolve, build\]/.test(candidateAccessibility), "Candidate accessibility must consume resolve and the single build candidate.");
+expect(/actions\/download-artifact@[0-9a-f]{40}[\s\S]*name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/s.test(candidateAccessibility), "Candidate accessibility must download the single exact build candidate artifact.");
+expect(/npm ci --prefix eng\/accessibility/.test(candidateAccessibility), "Candidate accessibility must install the committed accessibility lock.");
+const accessibilityChecksum = candidateAccessibility.indexOf("(cd artifacts && sha256sum --check SHA256SUMS)");
+const accessibilityLoad = candidateAccessibility.indexOf("docker load --input artifacts/oci/cmsify-admin.oci.tar");
+const accessibilityRun = candidateAccessibility.indexOf("docker run -d --pull=never --name cmsify-admin-accessibility");
+const accessibilityScan = candidateAccessibility.indexOf("node eng/accessibility/run.mjs");
+expect(accessibilityChecksum >= 0 && accessibilityLoad > accessibilityChecksum && accessibilityRun > accessibilityLoad && accessibilityScan > accessibilityRun, "Candidate accessibility must checksum and load the exact Admin OCI archive before scanning it.");
+expect(/docker run[^\n]*--pull=never[^\n]*"syntaxcircus\/cmsify-admin:\$VERSION"/.test(candidateAccessibility) && /--url http:\/\/127\.0\.0\.1:18081\/login/.test(candidateAccessibility), "Candidate accessibility must scan /login from the exact loaded versioned Admin image without pulling.");
+expect(!/\b(dotnet (?:run|build|publish)|docker (?:image )?pull|docker buildx build|docker build|npm pack)\b/i.test(candidateAccessibility), "Candidate accessibility must not rebuild or pull a replacement Admin candidate.");
+expect(jobConditionRequiresSuccess(candidateAccessibility) && continueOnErrorIsDisabled(candidateAccessibility), "Candidate accessibility must fail closed after build.");
+const candidateAccessibilityConditions = stepConditions(candidateAccessibility);
+expect(candidateAccessibilityConditions.filter((condition) => condition === "always()").length === 1 && candidateAccessibilityConditions.every((condition) => condition === "success()" || condition === "always()"), "Candidate accessibility conditions may bypass normal success only for its bounded evidence upload.");
+expect(/if:\s*always\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*accessibility\.json[\s\S]*accessibility\.junit\.xml[\s\S]*retention-days:\s*14/s.test(candidateAccessibility), "Candidate accessibility must upload bounded JSON and JUnit evidence on every outcome.");
+
+const dotnetConsumer = jobBody("dotnet-consumer");
+expect(/needs:\s*\[resolve, build\]/.test(dotnetConsumer) && /global-json-file:\s*source\/global\.json/.test(dotnetConsumer), "Clean .NET consumer must use the repository-pinned .NET 10 SDK and single build candidate.");
+expect(/LOCAL_SOURCE="\$CONSUMER_ROOT\/candidate-source"/.test(dotnetConsumer) && /find "\$LOCAL_SOURCE"[^\n]*'\*\.nupkg'[^\n]*wc -l[^\n]*-eq 3/.test(dotnetConsumer), "Clean .NET consumer must copy exactly three nupkg files into a run-owned local source.");
+for (const packageId of ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching"]) {
+  expect(dotnetConsumer.includes(`<package pattern=\"${packageId}\" />`), `Clean .NET consumer must map all three candidate packages to its local source, including ${packageId}.`);
+}
+expect(/<packageSource key="candidate">[\s\S]*SyntaxCircus\.Cmsify\.Contracts[\s\S]*SyntaxCircus\.Cmsify\.Client[\s\S]*SyntaxCircus\.Cmsify\.Client\.DistributedCaching[\s\S]*<\/packageSource>/s.test(dotnetConsumer), "Clean .NET consumer must map all three Cmsify IDs only to the local source.");
+const publicMapping = dotnetConsumer.match(/<packageSource key="nuget\.org">([\s\S]*?)<\/packageSource>/)?.[1] ?? "";
+expect(/SyntaxCircus\.Http\.Resilience/.test(publicMapping) && !/pattern="\*"|SyntaxCircus\.Cmsify/.test(publicMapping), "Clean .NET consumer public source must allow declared external dependencies but disable all three Cmsify package IDs.");
+expect(/dotnet add package "\$package" --version "\$VERSION" --no-restore/.test(dotnetConsumer) && /dotnet restore --configfile NuGet\.Config --packages "\$CONSUMER_ROOT\/package-cache" --no-http-cache/.test(dotnetConsumer) && /dotnet build --configuration Release --no-restore/.test(dotnetConsumer), "Clean .NET consumer must restore through its isolated mapping and build without a second restore.");
+expect(jobConditionRequiresSuccess(dotnetConsumer) && continueOnErrorIsDisabled(dotnetConsumer) && stepConditions(dotnetConsumer).every((condition) => condition === "success()"), "Clean .NET consumer must fail closed.");
+
+const nodeConsumer = jobBody("node-consumer");
+expect(/needs:\s*\[resolve, build\]/.test(nodeConsumer) && /matrix:[\s\S]*node-version:\s*\["20", "22"\]/s.test(nodeConsumer), "Clean Node consumer must test the single candidate on Node 20 and 22.");
+expect(/TARBALL="\$GITHUB_WORKSPACE\/artifacts\/npm\/cmsify-client-\$VERSION\.tgz"/.test(nodeConsumer) && /npm install --ignore-scripts --no-audit --no-fund "\$TARBALL"/.test(nodeConsumer), "Clean Node consumers must install only the downloaded candidate tarball and its declared registry dependencies.");
+expect(/Object\.keys\(dependencies\)\.length!==1[\s\S]*dependencies\["@cmsify\/client"\]\.startsWith\("file:"\)/s.test(nodeConsumer), "Clean Node consumers must prove the candidate tarball is their only direct dependency.");
+expect(!/actions\/checkout|npm ci|test:consumer|file:\$\{?GITHUB_WORKSPACE.*node_modules/.test(nodeConsumer), "Clean Node consumers must not reuse source checkout dependencies or the source-tree consumer harness.");
+expect(jobConditionRequiresSuccess(nodeConsumer) && continueOnErrorIsDisabled(nodeConsumer) && stepConditions(nodeConsumer).every((condition) => condition === "success()"), "Clean Node consumer matrix must fail closed.");
 
 const releaseUpgrade = jobBody("upgrade-rollback");
 expect(/needs:\s*\[resolve, build\]/.test(releaseUpgrade), "Release upgrade job must consume resolve and build outputs.");
@@ -476,10 +546,15 @@ expect(releaseUpgradeStepConditions.filter((condition) => condition === "failure
 expect(/if:\s*failure\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*path:\s*artifacts\/upgrade-tests\/\*\*/s.test(releaseUpgrade), "Release upgrade job must upload sanitized diagnostics on failure.");
 
 const certification = jobBody("certify");
-expect(/needs:\s*\[[^\]]*upgrade-rollback[^\]]*\]/.test(certification), "The certify job must depend on upgrade-rollback.");
-expect(jobConditionRequiresSuccess(certification), "The certify job condition must require success of the upgrade gate.");
+for (const dependency of ["build", "artifact-smoke", "candidate-accessibility", "dotnet-consumer", "node-consumer", "upgrade-rollback"]) {
+  expect(new RegExp(`needs:\\s*\\[[^\\]]*${dependency}[^\\]]*\\]`).test(certification), `The certify job must depend on ${dependency}.`);
+}
+const certifyChecksum = certification.indexOf("(cd artifacts && sha256sum --check SHA256SUMS)");
+const certifyAttestation = certification.indexOf("actions/attest-build-provenance@");
+expect(certifyChecksum >= 0 && certifyAttestation > certifyChecksum && /subject-checksums:\s*artifacts\/SHA256SUMS/.test(certification), "Certification must verify SHA256SUMS and attest those exact checked candidate subjects.");
+expect(jobConditionRequiresSuccess(certification), "The certify job condition must require success of every artifact, accessibility, consumer, and upgrade gate.");
 expect(continueOnErrorIsDisabled(certification), "The certify job and steps must not enable continue-on-error; certification must fail closed.");
-expect(stepConditions(certification).every((condition) => condition === "success()"), "Certify step conditions must require normal success after the upgrade gate.");
+expect(stepConditions(certification).every((condition) => condition === "success()"), "Certify step conditions must require normal success after every candidate gate.");
 const promotion = jobBody("promote");
 expect(/needs:\s*\[[^\]]*certify[^\]]*\]/.test(promotion), "Promotion must depend on certify so the upgrade gate cannot be bypassed.");
 expect(jobConditionRequiresSuccess(promotion), "The promotion job condition must require success of certify.");
@@ -488,6 +563,7 @@ expect(stepConditions(promotion).every((condition) => condition === "success()")
 expect(!/\b(dotnet pack|npm pack|npm run build|docker buildx build|docker build)\b/i.test(promotion), "Promotion must not rebuild mutable artifacts.");
 expect(!/--skip-duplicate|NUGET_API_KEY\s*:\s*\$\{\{\s*secrets\./i.test(promotion), "NuGet promotion must use the short-lived OIDC key and reject pre-existing package versions.");
 expect(/id-token:\s*write[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org[\s\S]*npm@11\.11\.0[\s\S]*--provenance[\s\S]*--tag "\$NPM_CHANNEL"/s.test(promotion), "npm trusted publishing must have OIDC, registry configuration, supported npm, provenance, and a prerelease-safe tag.");
+expect(/sigstore\/cosign-installer@[0-9a-f]{40}\s+#\s+v\d+[\s\S]*cosign-release:\s*v\d+\.\d+\.\d+/s.test(promotion), "Protected promotion must install a SHA-pinned, versioned Cosign release.");
 expect(/--prerelease/.test(promotion), "GitHub Release promotion must mark SemVer prereleases as prereleases.");
 expect(!/docker push/i.test(promotion) && /oras cp --from-oci-layout-path[\s\S]*oras manifest fetch --descriptor[\s\S]*test "\$API_REMOTE" = "\$API_EXPECTED"/s.test(promotion), "OCI promotion must copy certified descriptors and compare remote digests without mutable docker push.");
 expect(/refs\/tags\/\$GITHUB_REF_NAME\^\{\}[\s\S]*refs\/tags\/\$GITHUB_REF_NAME[\s\S]*REMOTE_SHA/s.test(promotion), "Promotion must peel annotated tags and safely fall back to lightweight tags.");
@@ -502,9 +578,17 @@ for (const mediaType of ["application/vnd.oci.image.manifest.v1+json", "applicat
 expect(/status=.*curl[\s\S]*case "\$status" in 404\) ;; \*\)/s.test(promotion) && !/case "\$status" in[^\n]*(?:200|401|429|5\d\d)[^\n]*\) ;;/s.test(promotion), "Docker Hub manifest absence preflight must accept only HTTP 404.");
 expect(/registry\.npmjs\.org\/@cmsify%2Fclient\/\$VERSION[\s\S]*case "\$npm_status" in 404\) ;; \*\)/s.test(promotion), "npm exact-version preflight must accept only explicit HTTP 404 absence.");
 const ociEquality = promotion.indexOf('test "$API_REMOTE" = "$API_EXPECTED"');
+const apiSubject = promotion.indexOf('API_SUBJECT="docker.io/syntaxcircus/cmsify-api@$API_REMOTE"');
+const adminSubject = promotion.indexOf('ADMIN_SUBJECT="docker.io/syntaxcircus/cmsify-admin@$ADMIN_REMOTE"');
+const apiSign = promotion.indexOf('cosign sign --yes "$API_SUBJECT"');
+const adminSign = promotion.indexOf('cosign sign --yes "$ADMIN_SUBJECT"');
+const apiVerify = promotion.indexOf('cosign verify --certificate-identity "$CERTIFICATE_IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$API_SUBJECT"');
+const adminVerify = promotion.indexOf('cosign verify --certificate-identity "$CERTIFICATE_IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ADMIN_SUBJECT"');
 const nugetPublish = promotion.indexOf("dotnet nuget push");
 const npmPublish = promotion.indexOf("npm publish");
-expect(ociEquality >= 0 && nugetPublish > ociEquality && npmPublish > ociEquality, "OCI remote digest equality must complete before irreversible NuGet and npm publication.");
+expect(ociEquality >= 0 && apiSubject > ociEquality && adminSubject > ociEquality && apiSign > apiSubject && adminSign > adminSubject && apiVerify > apiSign && adminVerify > adminSign, "Cosign must sign and verify both destination repository@sha256:digest subjects only after remote digest equality.");
+expect(/CERTIFICATE_IDENTITY="https:\/\/github\.com\/\$GITHUB_WORKFLOW_REF"/.test(promotion) && !/cosign (?:sign|verify)[^\n]*syntaxcircus\/cmsify-(?:api|admin):\$VERSION/.test(promotion), "Cosign keyless verification must bind the GitHub workflow identity and digest subjects, never mutable tags.");
+expect(nugetPublish > apiVerify && nugetPublish > adminVerify && npmPublish > apiVerify && npmPublish > adminVerify, "OCI remote digest equality and Cosign verification must complete before irreversible NuGet and npm publication.");
 expect(/sudo install|GITHUB_PATH/.test(promotion), "Pinned ORAS installation must use a verified writable tool path.");
 
 const branchWorkflow = file(".github/workflows/dotnet-test.yml");

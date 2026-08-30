@@ -425,12 +425,46 @@ function validateOpenApiWrapperRestorePolicy(documents) {
   }
 }
 
-const expectedReleaseConsumerRun = `CONSUMER_ROOT="$RUNNER_TEMP/cmsify-dotnet-consumer"
-mkdir -p "$CONSUMER_ROOT"
+const expectedReleaseConsumerRun = `(cd artifacts && sha256sum --check SHA256SUMS)
+CONSUMER_ROOT="$RUNNER_TEMP/cmsify-dotnet-consumer"
+LOCAL_SOURCE="$CONSUMER_ROOT/candidate-source"
+mkdir -p "$LOCAL_SOURCE"
+for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+  candidate="$GITHUB_WORKSPACE/artifacts/nuget/$package.$VERSION.nupkg"
+  test -f "$candidate"
+  cp "$candidate" "$LOCAL_SOURCE/"
+done
+test "$(find "$LOCAL_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 3
 cd "$CONSUMER_ROOT"
 dotnet new console --framework net10.0 --no-restore
-for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do dotnet add package "$package" --version "\${{ needs.resolve.outputs.version }}" --source "$GITHUB_WORKSPACE/artifacts/nuget"; done
-dotnet build --configuration Release
+cat > NuGet.Config <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="candidate" value="$LOCAL_SOURCE" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+  <packageSourceMapping>
+    <packageSource key="candidate">
+      <package pattern="SyntaxCircus.Cmsify.Contracts" />
+      <package pattern="SyntaxCircus.Cmsify.Client" />
+      <package pattern="SyntaxCircus.Cmsify.Client.DistributedCaching" />
+    </packageSource>
+    <packageSource key="nuget.org">
+      <package pattern="Microsoft.*" />
+      <package pattern="Polly.*" />
+      <package pattern="System.*" />
+      <package pattern="SyntaxCircus.Http.Resilience" />
+    </packageSource>
+  </packageSourceMapping>
+</configuration>
+EOF
+for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+  dotnet add package "$package" --version "$VERSION" --no-restore
+done
+dotnet restore --configfile NuGet.Config --packages "$CONSUMER_ROOT/package-cache" --no-http-cache
+dotnet build --configuration Release --no-restore
 `;
 
 function validateReleaseConsumer(workflow) {
@@ -457,6 +491,8 @@ function validateReleaseConsumer(workflow) {
       path: "artifacts",
     },
   });
+  assert.deepEqual(steps[3].env, { VERSION: "${{ needs.resolve.outputs.version }}" });
+  assert.equal(steps[3].shell, "bash");
   assert.equal(steps[3].run, expectedReleaseConsumerRun);
   assert.doesNotMatch(steps[3].run, /(?:mkdir|cd)\s+(?:\.\/)?consumer\b|GITHUB_WORKSPACE\/source\/.*consumer/i);
 }

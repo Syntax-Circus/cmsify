@@ -633,7 +633,7 @@ test("scheduled capacity workflow is manual and weekly with only pinned actions 
   assert.match(workflow, /schedule\s*:\s*\n\s*-\s*cron\s*:\s*["']\d+\s+\d+\s+\*\s+\*\s+\d["']/);
   assert.match(workflow, /permissions\s*:\s*\n\s*contents\s*:\s*read/);
   assert.match(workflow, /actions\/checkout@11bd71901bbe5b1630ceea73d27597364c9af683/);
-  assert.match(workflow, /actions\/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7/);
+  assert.match(workflow, /actions\/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d/);
   assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
   assert.doesNotMatch(workflow, /uses:\s*[^\s]+@v\d/i);
   assert.match(workflow, /global-json-file\s*:\s*global\.json/);

@@ -364,7 +364,7 @@ function verifyChecksums(expectedFiles) {
   const path = resolve(artifacts, "SHA256SUMS");
   if (!existsSync(path)) {
     errors.push("Candidate must contain SHA256SUMS.");
-    return;
+    return new Map();
   }
   const checksums = new Map();
   for (const line of readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean)) {
@@ -387,6 +387,21 @@ function verifyChecksums(expectedFiles) {
   const actualFiles = new Set(allFiles(artifacts).filter((name) => name !== "SHA256SUMS"));
   for (const actual of actualFiles) if (!expectedFiles.has(actual)) errors.push(`Candidate contains unchecked extra file ${actual}.`);
   for (const expected of expectedFiles) if (!actualFiles.has(expected)) errors.push(`Candidate is missing certified file ${expected}.`);
+  return checksums;
+}
+
+function verifyCertificationSubjectCoverage(expectedFiles, checksums) {
+  const identitySubjects = [
+    "release-manifest.json",
+    "oci/cmsify-api.oci.tar",
+    "oci/cmsify-admin.oci.tar",
+    "sbom/cmsify-nuget.spdx.json",
+    "sbom/cmsify-npm.spdx.json",
+    "sbom/cmsify-api.spdx.json",
+    "sbom/cmsify-admin.spdx.json",
+  ];
+  expect(identitySubjects.every((subject) => expectedFiles.has(subject) && /^[0-9a-f]{64}$/.test(checksums.get(subject) ?? "")), "Certification subject checksums must bind the release manifest, exact OCI archives, and all four SPDX identities.");
+  expect(checksums.size === expectedFiles.size && [...checksums.keys()].every((subject) => expectedFiles.has(subject)), "Certification subject checksum set must equal the complete verified candidate file set.");
 }
 
 expect(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/.test(version ?? ""), "Release artifact verification requires a SemVer version.");
@@ -402,10 +417,14 @@ if (!existsSync(releaseManifestPath)) errors.push("Candidate must contain releas
 if (releaseManifest) {
   expect(releaseManifest.version === version, `Release manifest version must be ${version}.`);
   expect(releaseManifest.sourceSha === sourceSha, `Release manifest source SHA must be ${sourceSha}.`);
+  const manifestKinds = Object.keys(releaseManifest.oci ?? {}).sort();
+  expect(manifestKinds.length === 2 && manifestKinds[0] === "admin" && manifestKinds[1] === "api", "Release manifest must identify exactly the API and Admin OCI subjects.");
 }
 const oci = verifyOci(expectedFiles, releaseManifest);
+expect(!oci.api?.digest || !oci.admin?.digest || oci.api.digest !== oci.admin.digest, "Release manifest API and Admin OCI subjects must have distinct certified descriptor digests.");
 verifySpdx(expectedFiles, oci);
-verifyChecksums(expectedFiles);
+const checksums = verifyChecksums(expectedFiles);
+verifyCertificationSubjectCoverage(expectedFiles, checksums);
 
 if (errors.length > 0) {
   process.stderr.write(`${errors.join("\n")}\n`);
