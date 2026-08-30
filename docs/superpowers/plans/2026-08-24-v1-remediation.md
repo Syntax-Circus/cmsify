@@ -159,6 +159,8 @@
 
 **Produces:** Exact-candidate container/package/accessibility/backup/restart certification, pinned supply-chain controls and immutable digests, API compatibility/deprecation policy, governance files, and checked go/no-go evidence.
 
+Local evidence is tracked in [`docs/evidence/task-12-local-verification.json`](../../evidence/task-12-local-verification.json). It is a non-certifying ledger: all external gates remain open and Task 8 must resolve its two recorded breaker diagnostics before the completion gate can be adjudicated.
+
 - [ ] Add failing artifact, accessibility-trigger, policy-presence, and compatibility/deprecation checks.
 - [ ] Implement production-like PostgreSQL/API/Admin smoke, CRUD/media/OIDC/webhook/schedule/restart/backup coverage and clean consumers.
 - [ ] Add `SECURITY.md`, support/compatibility/deprecation policies, ownership, vulnerability reporting, and release/rollback runbooks.

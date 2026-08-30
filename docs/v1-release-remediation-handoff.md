@@ -40,6 +40,10 @@ Expected: a clean worktree with the Task 11 documentation commit at `HEAD` and t
 
 The master plan checkboxes are not the execution ledger. Use this handoff, Git history, and the current source/tests as the completed-work record.
 
+## Task 12 evidence status
+
+The machine-readable [Task 12 local evidence ledger](evidence/task-12-local-verification.json) is bound to `70afef5c647f53944fd61d1b35f40ece940aacf7`. It records only local evidence and leaves every external gate false. Task 8 must repair the carried unrecognized contract-step-sequence and concessive hosted-claim-exemption breakers, then rerun and refresh the full gate. Do not describe this handoff as v1 certified or as completing repository implementation.
+
 ## Completed remediation
 
 Tasks 1–11 are complete through local implementation and validation. Key Cmsify milestones are:

@@ -1,0 +1,52 @@
+{
+  "schema": "cmsify.task12-evidence.v1",
+  "sourceSha": "70afef5c647f53944fd61d1b35f40ece940aacf7",
+  "sdkVersion": "10.0.400",
+  "nodeVersion": "v24.14.1",
+  "dockerClientVersion": "29.7.2",
+  "dockerServerVersion": null,
+  "localFeedPackage": {
+    "id": "SyntaxCircus.Http.Resilience",
+    "version": "0.2.0-cmsify.1",
+    "sha256": "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
+    "publicRestoreValidated": false
+  },
+  "checks": [
+    {
+      "name": "release-contract suite",
+      "command": "node --test tests/release-contract/*.test.mjs",
+      "exitCode": 0,
+      "status": "passed",
+      "counts": { "total": 328, "passed": 328, "failed": 0 },
+      "sourceSha": "70afef5c647f53944fd61d1b35f40ece940aacf7"
+    },
+    {
+      "name": "Task 8 completion gate",
+      "command": "dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -m:1",
+      "exitCode": null,
+      "status": "notRun",
+      "counts": null,
+      "passed": false,
+      "reason": "Not run at this evidence revision; Task 8 must refresh this manifest after its fixes and full gate.",
+      "sourceSha": "70afef5c647f53944fd61d1b35f40ece940aacf7"
+    }
+  ],
+  "artifacts": [
+    { "kind": "OCI and package candidates", "status": "absent/local-unpublished", "digest": null }
+  ],
+  "externalGates": {
+    "publicPackageRestore": { "passed": false, "reason": "Exact resilience bytes are not available from an approved public source.", "evidenceLink": null },
+    "hostedAccessibility": { "passed": false, "reason": "No hosted candidate workflow evidence.", "evidenceLink": null },
+    "protectedApprovals": { "passed": false, "reason": "No protected release approval.", "evidenceLink": null },
+    "artifactAttestation": { "passed": false, "reason": "No hosted attestation.", "evidenceLink": null },
+    "registrySigning": { "passed": false, "reason": "No registry signing evidence.", "evidenceLink": null },
+    "immutableOciPromotion": { "passed": false, "reason": "No immutable OCI promotion.", "evidenceLink": null },
+    "hostedSmokeSoak": { "passed": false, "reason": "No hosted smoke or soak evidence.", "evidenceLink": null },
+    "finalRelease": { "passed": false, "reason": "Final release is not authorized or certified.", "evidenceLink": null }
+  },
+  "knownDiagnostics": [
+    "Task 6 breaker carryover: unrecognized contract step sequence; mandatory Task 8 fix.",
+    "Task 6 breaker carryover: concessive hosted-claim exemption; mandatory Task 8 fix.",
+    "Docker daemon unavailable locally: permission denied while connecting to the docker API; dockerServerVersion is null."
+  ]
+}

@@ -6,6 +6,10 @@
 
 This report is a release gate, not a public delivery commitment. It covers the HTTP API, the handwritten .NET contracts and clients, `@cmsify/client`, published containers, production operation, and reuse of sibling `SyntaxCircus.*` packages.
 
+## Task 12 local evidence ledger
+
+The [Task 12 local evidence manifest](evidence/task-12-local-verification.json) is bound to implementation SHA `70afef5c647f53944fd61d1b35f40ece940aacf7`. It records only local release-contract validation (328/328) and an explicitly not-run Task 8 completion command. Docker client `29.7.2` was observable; the daemon denied access, so no server version or image evidence is claimed. All public, hosted, protected-approval, attestation, signing, immutable-promotion, smoke/soak, and final-release gates remain false. This audit remains **not ready**; it does not certify v1 or repository implementation completion.
+
 **Remediation update (2026-08-28):** Tasks 1–11 are implemented and validated locally on `feature/readiness-audit`; the committed reproducible-quality implementation ends at `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`. F-11, F-16, and F-17 are remediated at the local source/test level. F-13's release dependency remains gated: `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` exists only in the ignored local feed. Public/CI restore cannot consume it until the user publishes those exact bytes or approves and pins a stable replacement and the restore/build/test gates are rerun. No publication occurred. Task 12 release certification and its supply-chain, artifact-smoke, accessibility, governance, and final-adjudication work remain open, so this report's overall v1 decision remains **not ready**.
 
 ## Locked v1 decisions
