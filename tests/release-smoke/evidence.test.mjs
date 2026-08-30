@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { basename, parse, resolve } from "node:path";
 import test from "node:test";
 
 import {
   createEvidence,
+  invalidateEvidence,
   sanitizeFailure,
   writeEvidence,
 } from "../../eng/release-smoke/evidence.mjs";
@@ -99,4 +100,53 @@ test("writes evidence atomically below the requested run-owned directory", async
   assert.equal(path, resolve(output, "evidence.json"));
   assert.deepEqual(JSON.parse(await readFile(path, "utf8")), evidence);
   await rm(output, { recursive: true, force: true });
+});
+
+test("invalidates only the exact evidence target while preserving sibling output", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-invalidation-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  const siblingPath = resolve(output, "keep.txt");
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+    await writeFile(siblingPath, "keep", "utf8");
+
+    const result = await invalidateEvidence(output);
+
+    assert.equal(result.targetUnavailable, true);
+    await assert.rejects(readFile(evidencePath, "utf8"));
+    assert.equal(await readFile(siblingPath, "utf8"), "keep");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("evidence invalidation refuses filesystem roots before touching a target", async () => {
+  await assert.rejects(
+    invalidateEvidence(resolve(process.cwd(), parse(process.cwd()).root)),
+    /filesystem root/i,
+  );
+});
+
+test("quarantine cleanup failure is surfaced after the consumable evidence target is unavailable", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-quarantine-cleanup-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        rm: async (path, options) => {
+          if (basename(path).startsWith(".evidence-invalid-")) throw new Error("cleanup refused");
+          return rm(path, options);
+        },
+      }),
+      (error) => error.code === "evidence-quarantine-cleanup-failed" && error.targetUnavailable === true,
+    );
+
+    await assert.rejects(readFile(evidencePath, "utf8"));
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
 });

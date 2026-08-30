@@ -1,4 +1,4 @@
-import { mkdir, open, rename, rm } from "node:fs/promises";
+import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { dirname, parse, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -33,6 +33,33 @@ const CREDENTIAL_PATTERNS = [
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function resolveEvidenceTarget(outputDirectory) {
+  assert(typeof outputDirectory === "string" && outputDirectory.trim().length > 0 && !/[\0\r\n]/.test(outputDirectory), "Release smoke output directory is required.");
+  const output = resolve(outputDirectory);
+  assert(output !== parse(output).root, "Release smoke output directory cannot be a filesystem root.");
+  const path = resolve(output, "evidence.json");
+  assert(dirname(path) === output, "Release smoke evidence path escaped its output directory.");
+  return { output, path };
+}
+
+function evidenceInvalidationError(code, message, targetUnavailable, cause) {
+  const error = new Error(message, cause ? { cause } : undefined);
+  error.name = "EvidenceInvalidationError";
+  error.code = code;
+  error.targetUnavailable = targetUnavailable;
+  return error;
+}
+
+async function isUnavailable(path, inspect) {
+  try {
+    await inspect(path);
+    return false;
+  } catch (error) {
+    if (error?.code === "ENOENT") return true;
+    throw error;
+  }
 }
 
 function isoTimestamp(value, label) {
@@ -126,11 +153,7 @@ export function createEvidence(input) {
 }
 
 export async function writeEvidence(outputDirectory, evidence) {
-  assert(typeof outputDirectory === "string" && outputDirectory.trim().length > 0 && !/[\0\r\n]/.test(outputDirectory), "Release smoke output directory is required.");
-  const output = resolve(outputDirectory);
-  assert(output !== parse(output).root, "Release smoke output directory cannot be a filesystem root.");
-  const path = resolve(output, "evidence.json");
-  assert(dirname(path) === output, "Release smoke evidence path escaped its output directory.");
+  const { output, path } = resolveEvidenceTarget(outputDirectory);
   await mkdir(output, { recursive: true, mode: 0o700 });
   const temporary = resolve(output, `.evidence-${process.pid}-${randomBytes(6).toString("hex")}.tmp`);
   let handle;
@@ -146,4 +169,87 @@ export async function writeEvidence(outputDirectory, evidence) {
     await handle?.close().catch(() => {});
     await rm(temporary, { force: true }).catch(() => {});
   }
+}
+
+export async function invalidateEvidence(outputDirectory, operations = {}) {
+  const { output, path } = resolveEvidenceTarget(outputDirectory);
+  const move = operations.rename ?? rename;
+  const remove = operations.rm ?? rm;
+  const inspect = operations.stat ?? stat;
+  const quarantine = resolve(output, `.evidence-invalid-${process.pid}-${randomBytes(6).toString("hex")}.quarantine`);
+  assert(dirname(quarantine) === output, "Release smoke evidence quarantine path escaped its output directory.");
+
+  try {
+    await move(path, quarantine);
+  } catch (moveError) {
+    if (moveError?.code === "ENOENT") {
+      const unavailable = await isUnavailable(path, inspect);
+      if (unavailable) return Object.freeze({ targetUnavailable: true, quarantineRemoved: true });
+    }
+
+    try {
+      await remove(path, { force: false });
+    } catch (removeError) {
+      let unavailable = false;
+      try {
+        unavailable = await isUnavailable(path, inspect);
+      } catch (inspectError) {
+        throw evidenceInvalidationError(
+          "evidence-invalidation-unverified",
+          "Prior release smoke evidence invalidation could not be verified.",
+          false,
+          new AggregateError([moveError, removeError, inspectError]),
+        );
+      }
+      if (!unavailable) {
+        throw evidenceInvalidationError(
+          "evidence-invalidation-failed",
+          "Prior release smoke evidence remains available after invalidation failed.",
+          false,
+          new AggregateError([moveError, removeError]),
+        );
+      }
+    }
+
+    if (!await isUnavailable(path, inspect)) {
+      throw evidenceInvalidationError(
+        "evidence-invalidation-failed",
+        "Prior release smoke evidence remains available after invalidation.",
+        false,
+        moveError,
+      );
+    }
+    return Object.freeze({ targetUnavailable: true, quarantineRemoved: true });
+  }
+
+  let targetUnavailable;
+  try {
+    targetUnavailable = await isUnavailable(path, inspect);
+  } catch (inspectError) {
+    throw evidenceInvalidationError(
+      "evidence-invalidation-unverified",
+      "Quarantined release smoke evidence invalidation could not be verified.",
+      false,
+      inspectError,
+    );
+  }
+  if (!targetUnavailable) {
+    throw evidenceInvalidationError(
+      "evidence-invalidation-failed",
+      "Prior release smoke evidence remained at its consumable path after quarantine.",
+      false,
+    );
+  }
+
+  try {
+    await remove(quarantine, { force: true });
+  } catch (cleanupError) {
+    throw evidenceInvalidationError(
+      "evidence-quarantine-cleanup-failed",
+      "Prior release smoke evidence was quarantined, but quarantine cleanup failed.",
+      true,
+      cleanupError,
+    );
+  }
+  return Object.freeze({ targetUnavailable: true, quarantineRemoved: true });
 }

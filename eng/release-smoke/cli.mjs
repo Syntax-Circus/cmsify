@@ -41,6 +41,19 @@ export function exitCodeForFailure(error) {
   return 1;
 }
 
+export function formatCliFailure(error) {
+  if (error instanceof ReleaseSmokeFailure) {
+    if (error.evidencePersisted) {
+      return `Release smoke failed during ${error.scenario}; sanitized evidence was written to the requested output directory.`;
+    }
+    if (error.priorEvidenceInvalidated) {
+      return `Release smoke failed during ${error.scenario}; terminal evidence was not persisted and prior evidence was invalidated.`;
+    }
+    return `Release smoke failed during ${error.scenario}; terminal evidence was not persisted and prior evidence invalidation could not be verified.`;
+  }
+  return String(error?.message ?? "Release smoke failed.").replace(/[\r\n]+/g, " ").slice(0, 512);
+}
+
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const parsed = parseCliArguments(argv);
   const options = validateReleaseOptions(parsed);
@@ -57,6 +70,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
     abortController,
     ...(dependencies.registerSignals ? { registerSignals: dependencies.registerSignals } : {}),
     ...(dependencies.evidenceWriter ? { evidenceWriter: dependencies.evidenceWriter } : {}),
+    ...(dependencies.evidenceInvalidator ? { evidenceInvalidator: dependencies.evidenceInvalidator } : {}),
   });
   process.stdout.write(`${JSON.stringify({ status: evidence.status, schema: evidence.schema, runId: evidence.runId, output: options.output })}\n`);
   return evidence;
@@ -64,11 +78,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
-    if (error instanceof ReleaseSmokeFailure) {
-      process.stderr.write(`Release smoke failed during ${error.scenario}; sanitized evidence was written to the requested output directory.\n`);
-    } else {
-      process.stderr.write(`${String(error?.message ?? "Release smoke failed.").replace(/[\r\n]+/g, " ").slice(0, 512)}\n`);
-    }
+    process.stderr.write(`${formatCliFailure(error)}\n`);
     process.exitCode = exitCodeForFailure(error);
   });
 }

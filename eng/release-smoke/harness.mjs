@@ -6,6 +6,8 @@ import { performance } from "node:perf_hooks";
 import {
   RELEASE_SMOKE_SCENARIOS,
   createEvidence,
+  invalidateEvidence,
+  sanitizeFailure,
   writeEvidence,
 } from "./evidence.mjs";
 import { retryBounded } from "./http.mjs";
@@ -102,13 +104,34 @@ function registerProcessSignals(handler) {
 }
 
 export class ReleaseSmokeFailure extends Error {
-  constructor(scenario, evidence, signal) {
+  constructor(scenario, evidence, signal, persistence = {}) {
     super(`Release smoke failed during ${scenario}.`);
     this.name = "ReleaseSmokeFailure";
     this.scenario = scenario;
     this.evidence = evidence;
     this.signal = signal;
+    this.evidencePersisted = persistence.evidencePersisted ?? true;
+    this.priorEvidenceInvalidated = persistence.priorEvidenceInvalidated ?? null;
+    this.evidencePersistenceFailure = persistence.evidencePersistenceFailure ?? null;
   }
+}
+
+function boundedPersistenceCause(operation, error, redactions) {
+  const failure = sanitizeFailure(error, { scenario: "signal", redactions });
+  return Object.freeze({
+    operation,
+    code: failure.code,
+    message: failure.message.slice(0, 256),
+  });
+}
+
+function evidencePersistenceFailure(writeError, invalidationError, redactions) {
+  const causes = [boundedPersistenceCause("write-terminal-evidence", writeError, redactions)];
+  if (invalidationError) causes.push(boundedPersistenceCause("invalidate-prior-evidence", invalidationError, redactions));
+  return Object.freeze({
+    code: invalidationError ? "terminal-evidence-invalidation-failed" : "terminal-evidence-write-failed",
+    causes: Object.freeze(causes),
+  });
 }
 
 function scenarioOperation(name, context, docker, http, onFirstResource) {
@@ -141,6 +164,9 @@ export async function certifyRelease(input, dependencies = {}) {
   assert(http && typeof http === "object", "An HTTP adapter is required.");
   const clock = dependencies.now ?? (() => new Date().toISOString());
   const evidenceWriter = dependencies.evidenceWriter ?? ((evidence) => writeEvidence(options.output, evidence));
+  const evidenceInvalidator = dependencies.evidenceInvalidator ?? (() => invalidateEvidence(options.output));
+  assert(typeof evidenceWriter === "function", "Release smoke evidenceWriter must be a function.");
+  assert(typeof evidenceInvalidator === "function", "Release smoke evidenceInvalidator must be a function.");
   const registerCleanup = dependencies.registerCleanup;
   const abortController = dependencies.abortController ?? new AbortController();
   assert(abortController instanceof AbortController, "Release smoke abortController must be an AbortController.");
@@ -260,9 +286,13 @@ export async function certifyRelease(input, dependencies = {}) {
   applySignalFailure();
   let evidence = buildEvidence();
   let evidenceWriteFailure;
+  let evidencePersisted = false;
+  let priorEvidenceInvalidated = null;
+  let terminalPersistenceFailure;
   try {
     try {
       await evidenceWriter(evidence);
+      evidencePersisted = true;
     } catch (error) {
       evidenceWriteFailure = error;
     }
@@ -270,18 +300,38 @@ export async function certifyRelease(input, dependencies = {}) {
       evidence = buildEvidence();
       try {
         await evidenceWriter(evidence);
+        evidencePersisted = true;
         evidenceWriteFailure = undefined;
       } catch (error) {
+        evidencePersisted = false;
         evidenceWriteFailure = error;
       }
+    }
+    if (receivedSignal && evidenceWriteFailure) {
+      let invalidationError;
+      try {
+        const outcome = await evidenceInvalidator();
+        if (outcome?.targetUnavailable !== true) {
+          const error = new Error("Prior release smoke evidence invalidation was not verified.");
+          error.code = "evidence-invalidation-unverified";
+          error.targetUnavailable = false;
+          throw error;
+        }
+        priorEvidenceInvalidated = true;
+      } catch (error) {
+        invalidationError = error;
+        priorEvidenceInvalidated = error?.targetUnavailable === true;
+      }
+      terminalPersistenceFailure = evidencePersistenceFailure(evidenceWriteFailure, invalidationError, redactions);
     }
   } finally {
     unregisterCleanup();
     unregisterSignals();
   }
-  if (receivedSignal) throw new ReleaseSmokeFailure("signal", evidence, receivedSignal);
+  const persistence = { evidencePersisted, priorEvidenceInvalidated, evidencePersistenceFailure: terminalPersistenceFailure };
+  if (receivedSignal) throw new ReleaseSmokeFailure("signal", evidence, receivedSignal, persistence);
   if (evidenceWriteFailure) throw evidenceWriteFailure;
-  if (failure) throw new ReleaseSmokeFailure(failureScenario, evidence, receivedSignal);
+  if (failure) throw new ReleaseSmokeFailure(failureScenario, evidence, receivedSignal, persistence);
   return evidence;
 }
 

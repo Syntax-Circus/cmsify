@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { parse } from "node:path";
+import { access, rm } from "node:fs/promises";
+import { parse, resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -7,8 +8,9 @@ import {
   certifyRelease,
   createDockerAdapter,
 } from "../../eng/release-smoke/harness.mjs";
+import { writeEvidence } from "../../eng/release-smoke/evidence.mjs";
 import { createReleaseHttpAdapter, retryBounded } from "../../eng/release-smoke/http.mjs";
-import { exitCodeForFailure, parseCliArguments } from "../../eng/release-smoke/cli.mjs";
+import { exitCodeForFailure, formatCliFailure, parseCliArguments } from "../../eng/release-smoke/cli.mjs";
 
 const options = Object.freeze({
   apiImage: "syntaxcircus/cmsify-api:1.2.3",
@@ -359,6 +361,142 @@ test("signal during success evidence persistence replaces it with terminal SIGTE
   assert.deepEqual(reports.map((report) => report.status), ["passed", "failed"]);
   assert.equal(reports.at(-1).failure.scenario, "signal");
   assert.equal(reports.at(-1).failure.code, "signal-sigterm");
+});
+
+test("failed signal evidence replacement invalidates the persisted success file and reports no persisted terminal evidence", async () => {
+  const events = [];
+  const { docker, http } = successfulAdapters(events);
+  const controller = new AbortController();
+  const output = resolve("artifacts/release-smoke/signal-replacement-failure-unit");
+  let signalHandler;
+  let writes = 0;
+  await rm(output, { recursive: true, force: true });
+
+  let terminalError;
+  try {
+    await assert.rejects(
+      certifyRelease({ ...options, output }, {
+        docker,
+        http,
+        abortController: controller,
+        registerSignals(handler) { signalHandler = handler; return () => {}; },
+        evidenceWriter: async (report) => {
+          writes += 1;
+          if (writes === 1) {
+            await writeEvidence(output, report);
+            signalHandler("SIGTERM");
+            return;
+          }
+          throw new Error(`terminal evidence write failed ${"x".repeat(2_048)} cmsify_SHOULD_NOT_LEAK`);
+        },
+      }),
+      (error) => { terminalError = error; return true; },
+    );
+
+    assert.equal(exitCodeForFailure(terminalError), 143);
+    assert.equal(terminalError.evidence.status, "failed");
+    assert.equal(terminalError.evidence.failure.code, "signal-sigterm");
+    assert.equal(terminalError.evidencePersisted, false);
+    assert.equal(terminalError.priorEvidenceInvalidated, true);
+    assert.ok(Buffer.byteLength(JSON.stringify(terminalError.evidencePersistenceFailure), "utf8") <= 2_048);
+    assert.doesNotMatch(JSON.stringify(terminalError.evidencePersistenceFailure), /SHOULD_NOT_LEAK|cmsify_/);
+    await assert.rejects(access(resolve(output, "evidence.json")));
+    assert.doesNotMatch(formatCliFailure(terminalError), /was written|passed evidence/i);
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("signal replacement plus quarantine cleanup failure remains SIGINT, unavailable, and explicitly uncertified", async () => {
+  const events = [];
+  const reports = [];
+  const { docker, http } = successfulAdapters(events);
+  const controller = new AbortController();
+  let signalHandler;
+  let writes = 0;
+  let persisted;
+
+  let terminalError;
+  await assert.rejects(
+    certifyRelease(options, {
+      docker,
+      http,
+      abortController: controller,
+      registerSignals(handler) { signalHandler = handler; return () => {}; },
+      evidenceWriter: async (report) => {
+        writes += 1;
+        reports.push(structuredClone(report));
+        if (writes === 1) {
+          persisted = structuredClone(report);
+          signalHandler("SIGINT");
+          return;
+        }
+        throw new Error("terminal replacement refused");
+      },
+      evidenceInvalidator: async () => {
+        persisted = undefined;
+        const error = new Error("quarantined evidence cleanup refused");
+        error.code = "evidence-quarantine-cleanup-failed";
+        error.targetUnavailable = true;
+        throw error;
+      },
+    }),
+    (error) => { terminalError = error; return true; },
+  );
+
+  assert.equal(exitCodeForFailure(terminalError), 130);
+  assert.equal(persisted, undefined);
+  assert.deepEqual(reports.map((report) => report.status), ["passed", "failed"]);
+  assert.equal(terminalError.evidence.status, "failed");
+  assert.equal(terminalError.evidencePersisted, false);
+  assert.equal(terminalError.priorEvidenceInvalidated, true);
+  assert.equal(terminalError.evidencePersistenceFailure.causes.length, 2);
+  assert.equal(terminalError.evidencePersistenceFailure.causes[1].code, "evidence-quarantine-cleanup-failed");
+  assert.doesNotMatch(formatCliFailure(terminalError), /was written|passed evidence/i);
+});
+
+test("signal replacement plus unverifiable invalidation never certifies success", async () => {
+  const events = [];
+  const { docker, http } = successfulAdapters(events);
+  const controller = new AbortController();
+  let signalHandler;
+  let writes = 0;
+  let persisted;
+
+  let terminalError;
+  await assert.rejects(
+    certifyRelease(options, {
+      docker,
+      http,
+      abortController: controller,
+      registerSignals(handler) { signalHandler = handler; return () => {}; },
+      evidenceWriter: async (report) => {
+        writes += 1;
+        if (writes === 1) {
+          persisted = structuredClone(report);
+          signalHandler("SIGTERM");
+          return;
+        }
+        throw new Error("terminal replacement refused");
+      },
+      evidenceInvalidator: async () => {
+        const error = new Error("evidence target deletion refused");
+        error.code = "evidence-invalidation-failed";
+        error.targetUnavailable = false;
+        throw error;
+      },
+    }),
+    (error) => { terminalError = error; return true; },
+  );
+
+  assert.equal(exitCodeForFailure(terminalError), 143);
+  assert.equal(persisted.status, "passed");
+  assert.equal(terminalError.evidence.status, "failed");
+  assert.equal(terminalError.evidencePersisted, false);
+  assert.equal(terminalError.priorEvidenceInvalidated, false);
+  assert.equal(terminalError.evidencePersistenceFailure.code, "terminal-evidence-invalidation-failed");
+  assert.match(formatCliFailure(terminalError), /not persisted.*could not be verified/i);
+  assert.doesNotMatch(formatCliFailure(terminalError), /was written/i);
 });
 
 for (const failureAt of RELEASE_SMOKE_SCENARIOS) {
