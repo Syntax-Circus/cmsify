@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Hosting;
 using SyntaxCircus.Blazor.Auth;
 
 namespace Cmsify.Admin.Auth;
@@ -23,7 +24,42 @@ public static class AdminAuthEndpoints
         endpoints.MapPost(LogoutPath, LogoutAsync);
         endpoints.MapGet(OidcLoginPath, OidcLoginAsync);
         endpoints.MapPost(RefreshClaimsPath, (Delegate)RefreshClaimsAsync).DisableAntiforgery();
+        var environmentName = endpoints.ServiceProvider.GetRequiredService<IHostEnvironment>().EnvironmentName;
+        var configuredRunId = endpoints.ServiceProvider.GetRequiredService<IConfiguration>()["Admin:ReleaseSmokeRunId"];
+        if (ReleaseSmokeProtectedPath(environmentName, configuredRunId) is { } releaseSmokePath)
+        {
+            endpoints.MapGet(releaseSmokePath, ReleaseSmokeProtectedWorkspacesAsync).RequireAuthorization();
+        }
         return endpoints;
+    }
+
+    internal static string? ReleaseSmokeProtectedPath(string environmentName, string? runId)
+    {
+        if (!string.Equals(environmentName, Environments.Development, StringComparison.Ordinal)
+            || runId is null
+            || !System.Text.RegularExpressions.Regex.IsMatch(
+                runId,
+                @"\Acmsify-smoke-[a-z0-9-]{8,32}\z",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(100)))
+        {
+            return null;
+        }
+
+        return $"/admin-auth/release-smoke/{runId}/protected-workspaces";
+    }
+
+    private static async Task<IResult> ReleaseSmokeProtectedWorkspacesAsync(
+        [FromServices] CmsifyClient cmsify,
+        CancellationToken ct)
+    {
+        var response = await cmsify.Workspaces.ListAsync(page: 1, pageSize: 20, ct)
+            ?? throw new InvalidOperationException("The workspace API returned an empty response body.");
+        return Results.Json(new
+        {
+            proof = "cmsify.release-smoke.admin-api.v1",
+            workspaces = response.Items.Select(workspace => new { workspace.Id, workspace.Name, workspace.Slug }).ToArray()
+        });
     }
 
     private static IResult OidcLoginAsync(HttpContext context, string? returnUrl)

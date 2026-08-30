@@ -5,12 +5,47 @@ using System.Text.Json;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Infrastructure.BackgroundServices;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 
 namespace Cmsify.Infrastructure.Tests;
 
 public sealed class WebhookDestinationValidatorTests
 {
+    [Fact]
+    public async Task ReleaseSmokePrivateDestination_IsAcceptedOnlyForExactDevelopmentRunHost()
+    {
+        const string runId = "cmsify-smoke-1234abcd";
+        var resolver = Substitute.For<IWebhookDnsResolver>();
+        resolver.ResolveAsync($"webhook.{runId}.release-smoke.invalid", Arg.Any<CancellationToken>())
+            .Returns([IPAddress.Parse("172.21.0.6")]);
+        var options = Options.Create(new WebhookOperationalOptions { AllowHttp = true, ReleaseSmokeRunId = runId });
+
+        var result = await new WebhookDestinationValidator(resolver, options, "Development")
+            .ValidateAsync($"http://webhook.{runId}.release-smoke.invalid:8080/hook", TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsValid);
+        Assert.Equal([IPAddress.Parse("172.21.0.6")], result.Addresses);
+    }
+
+    [Theory]
+    [InlineData("Production", "webhook.cmsify-smoke-1234abcd.release-smoke.invalid")]
+    [InlineData("Development", "webhook.cmsify-smoke-foreign.release-smoke.invalid")]
+    [InlineData("Development", "private.example.test")]
+    public async Task ReleaseSmokePrivateDestination_CannotEscapeEnvironmentOrRunBoundaries(string environment, string host)
+    {
+        const string runId = "cmsify-smoke-1234abcd";
+        var resolver = Substitute.For<IWebhookDnsResolver>();
+        resolver.ResolveAsync(host, Arg.Any<CancellationToken>()).Returns([IPAddress.Parse("172.21.0.6")]);
+        var options = Options.Create(new WebhookOperationalOptions { AllowHttp = true, ReleaseSmokeRunId = runId });
+
+        var result = await new WebhookDestinationValidator(resolver, options, environment)
+            .ValidateAsync($"http://{host}:8080/hook", TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsValid);
+        Assert.Equal("Webhook URLs must not resolve to private, loopback, or reserved addresses.", result.Error);
+    }
+
     [Fact]
     public async Task ValidateAsync_AcceptsPublicHttpsHost_AfterOneResolution()
     {

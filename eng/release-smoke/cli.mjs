@@ -35,12 +35,29 @@ export function parseCliArguments(argv) {
   return result;
 }
 
-export async function main(argv = process.argv.slice(2)) {
+export function exitCodeForFailure(error) {
+  if (error?.signal === "SIGINT") return 130;
+  if (error?.signal === "SIGTERM") return 143;
+  return 1;
+}
+
+export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const parsed = parseCliArguments(argv);
   const options = validateReleaseOptions(parsed);
-  const docker = createDockerAdapter({ run: runProcess, repositoryRoot: process.cwd() });
-  const http = createReleaseHttpAdapter({});
-  const evidence = await certifyRelease(options, { docker, http });
+  const abortController = dependencies.abortController ?? new AbortController();
+  const docker = dependencies.docker ?? createDockerAdapter({
+    run: dependencies.run ?? runProcess,
+    repositoryRoot: dependencies.repositoryRoot ?? process.cwd(),
+    signal: abortController.signal,
+  });
+  const http = dependencies.http ?? createReleaseHttpAdapter({ request: dependencies.request, signal: abortController.signal });
+  const evidence = await certifyRelease(options, {
+    docker,
+    http,
+    abortController,
+    ...(dependencies.registerSignals ? { registerSignals: dependencies.registerSignals } : {}),
+    ...(dependencies.evidenceWriter ? { evidenceWriter: dependencies.evidenceWriter } : {}),
+  });
   process.stdout.write(`${JSON.stringify({ status: evidence.status, schema: evidence.schema, runId: evidence.runId, output: options.output })}\n`);
   return evidence;
 }
@@ -52,6 +69,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     } else {
       process.stderr.write(`${String(error?.message ?? "Release smoke failed.").replace(/[\r\n]+/g, " ").slice(0, 512)}\n`);
     }
-    process.exitCode = 1;
+    process.exitCode = exitCodeForFailure(error);
   });
 }

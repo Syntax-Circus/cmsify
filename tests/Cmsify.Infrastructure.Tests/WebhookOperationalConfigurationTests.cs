@@ -68,4 +68,15 @@ public sealed class WebhookOperationalConfigurationTests
         Assert.True(new WebhookOperationalOptionsValidator().Validate(null, webhook).Failed);
         Assert.True(new SchedulerOperationalOptionsValidator().Validate(null, scheduler).Failed);
     }
+
+    [Theory]
+    [InlineData("release-smoke")]
+    [InlineData("cmsify-smoke-too_short")]
+    [InlineData("cmsify-smoke-1234abcd\nProduction")]
+    public void ReleaseSmokeRunId_RejectsMalformedOrAmbiguousValues(string runId)
+    {
+        var result = new WebhookOperationalOptionsValidator().Validate(null, new WebhookOperationalOptions { ReleaseSmokeRunId = runId });
+
+        Assert.True(result.Failed);
+    }
 }

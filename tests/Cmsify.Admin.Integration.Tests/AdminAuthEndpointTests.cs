@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Cmsify.Admin.Auth;
 using Cmsify.Admin.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,89 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
         ExpiresAt: DateTimeOffset.UtcNow.AddHours(8),
         MustChangePassword: mustChangePassword,
         User: new UserSummary(Guid.NewGuid(), "admin@example.com", "Admin", "Admin", IsSuperAdmin: true));
+
+    [Theory]
+    [InlineData("Production", "cmsify-smoke-1234abcd")]
+    [InlineData("Development", null)]
+    [InlineData("Development", "cmsify-smoke-invalid_value")]
+    public void ReleaseSmokeProtectedPath_IsUnavailableOutsideAnExactDevelopmentRun(string environmentName, string? runId)
+    {
+        AdminAuthEndpoints.ReleaseSmokeProtectedPath(environmentName, runId).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ReleaseSmokeProtectedRoute_RequiresLocalSessionAndCallsApiWithItsToken()
+    {
+        const string runId = "cmsify-smoke-1234abcd";
+        factory.EnvironmentName = "Development";
+        factory.ReleaseSmokeRunId = runId;
+        factory.Responder = request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/auth/login" => AdminAuthTestFactory.JsonOk(SuccessfulLogin()),
+            "/api/v1/workspaces" => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = new[] { new { id = Guid.Parse("11111111-1111-4111-8111-111111111111"), name = "Release Smoke Workspace", slug = "release-smoke" } },
+                    totalCount = 1,
+                    page = 1,
+                    pageSize = 20
+                })
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        };
+        var client = CreateClient();
+        var path = $"/admin-auth/release-smoke/{runId}/protected-workspaces";
+
+        using (var anonymous = await client.GetAsync(path, TestContext.Current.CancellationToken))
+        {
+            anonymous.StatusCode.ShouldBe(HttpStatusCode.Found);
+            anonymous.Headers.Location!.AbsolutePath.ShouldBe("/login");
+        }
+        var token = await FetchAntiforgeryTokenAsync(client);
+        using (await client.PostAsync("/admin-auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token,
+            ["email"] = "admin@example.com",
+            ["password"] = "correct",
+            ["returnUrl"] = "/workspaces"
+        }), TestContext.Current.CancellationToken)) { }
+
+        using var proof = await client.GetAsync(path, TestContext.Current.CancellationToken);
+
+        proof.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await proof.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("Release Smoke Workspace");
+        factory.ObservedApiRequests.ShouldContain(request => request.Path == "/api/v1/workspaces" && request.Authorization == "Bearer api-token-abc");
+    }
+
+    [Fact]
+    public async Task ReleaseSmokeProtectedRoute_CallsApiWithOidcSessionToken()
+    {
+        const string runId = "cmsify-smoke-1234abcd";
+        factory.EnvironmentName = "Development";
+        factory.ReleaseSmokeRunId = runId;
+        factory.OidcEnabled = true;
+        factory.Responder = request => request.RequestUri!.AbsolutePath == "/api/v1/workspaces"
+            ? new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = new[] { new { id = Guid.Parse("11111111-1111-4111-8111-111111111111"), name = "Release Smoke Workspace", slug = "release-smoke" } },
+                    totalCount = 1,
+                    page = 1,
+                    pageSize = 20
+                })
+            }
+            : new HttpResponseMessage(HttpStatusCode.NotFound);
+        var client = CreateClient();
+        using (await BeginOidcSignInAsync(client)) { }
+
+        using var proof = await client.GetAsync($"/admin-auth/release-smoke/{runId}/protected-workspaces", TestContext.Current.CancellationToken);
+
+        proof.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await proof.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("Release Smoke Workspace");
+        factory.ObservedApiRequests.ShouldContain(request => request.Path == "/api/v1/workspaces" && request.Authorization == "Bearer initial-access-token");
+    }
 
     [Fact]
     public async Task Login_WithMissingCredentials_RedirectsToLoginWithError()

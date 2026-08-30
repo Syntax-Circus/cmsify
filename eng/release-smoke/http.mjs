@@ -1,5 +1,10 @@
+import https from "node:https";
+import { Readable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
+
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_BYTES = 1024 * 1024;
+const RUN_ID = /^cmsify-smoke-[a-z0-9-]{8,32}$/;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -8,7 +13,7 @@ function assert(condition, message) {
 export async function retryBounded(operation, {
   maxAttempts,
   delayMs,
-  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  sleep = (milliseconds, abortSignal) => delay(milliseconds, undefined, { signal: abortSignal }),
   signal,
 } = {}) {
   assert(typeof operation === "function", "A retry operation is required.");
@@ -24,7 +29,7 @@ export async function retryBounded(operation, {
       return await operation(attempt);
     } catch (error) {
       lastError = error;
-      if (attempt < maxAttempts) await sleep(delayMs);
+      if (attempt < maxAttempts) await sleep(delayMs, signal);
     }
   }
   throw lastError ?? new Error("Retry operation failed.");
@@ -38,9 +43,35 @@ function expectedStatuses(value) {
 
 async function boundedBytes(response, maximum) {
   const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > maximum) throw new Error(`HTTP response exceeded ${maximum} bytes.`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > maximum) throw new Error(`HTTP response exceeded ${maximum} bytes.`);
+  if (Number.isFinite(declared) && declared > maximum) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`HTTP response exceeded ${maximum} bytes.`);
+  }
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (total <= maximum) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const retained = value.subarray(0, maximum + 1 - total);
+      chunks.push(retained);
+      total += retained.byteLength;
+      if (total > maximum) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`HTTP response exceeded ${maximum} bytes.`);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   return bytes;
 }
 
@@ -54,6 +85,7 @@ export async function requestHttp({
   maxBytes = DEFAULT_MAX_BYTES,
   fetchImpl = globalThis.fetch,
   signal,
+  tlsCa,
 } = {}) {
   assert(typeof url === "string" && /^https?:\/\//.test(url), "HTTP URL must be absolute.");
   assert(typeof method === "string" && /^[A-Z]+$/i.test(method), "HTTP method is invalid.");
@@ -61,13 +93,16 @@ export async function requestHttp({
   assert(Number.isSafeInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 120_000, "HTTP timeout is invalid.");
   assert(Number.isSafeInteger(maxBytes) && maxBytes >= 1 && maxBytes <= 64 * 1024 * 1024, "HTTP response limit is invalid.");
   assert(typeof fetchImpl === "function", "HTTP fetch implementation is required.");
+  assert(tlsCa === undefined || typeof tlsCa === "string" || Buffer.isBuffer(tlsCa), "HTTP TLS CA must be PEM text or bytes.");
   const statuses = expectedStatuses instanceof Set ? expectedStatuses : expectedStatuses;
   const allowed = expectedStatusesFn(statuses);
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const combined = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
   let response;
   try {
-    response = await fetchImpl(url, { method, headers, body, redirect: "manual", signal: combined });
+    response = tlsCa !== undefined && new URL(url).protocol === "https:"
+      ? await trustedHttpsRequest(url, { method, headers, body, signal: combined, ca: tlsCa })
+      : await fetchImpl(url, { method, headers, body, redirect: "manual", signal: combined });
   } catch {
     throw new Error(`HTTP ${method.toUpperCase()} ${new URL(url).pathname} failed with a transport error.`);
   }
@@ -91,39 +126,136 @@ export async function requestHttp({
   });
 }
 
+function trustedHttpsRequest(url, { method, headers, body, signal, ca }) {
+  assert(body === undefined || typeof body === "string" || Buffer.isBuffer(body) || body instanceof Uint8Array,
+    "Trusted HTTPS requests support only byte and string bodies.");
+  return new Promise((resolve, reject) => {
+    const request = https.request(url, { method, headers, ca, rejectUnauthorized: true, signal }, (incoming) => {
+      const values = new Map();
+      for (const [name, value] of Object.entries(incoming.headers)) {
+        if (value !== undefined) values.set(name.toLowerCase(), Array.isArray(value) ? value.join(", ") : value);
+      }
+      const setCookies = [];
+      for (let index = 0; index < incoming.rawHeaders.length; index += 2) {
+        if (incoming.rawHeaders[index].toLowerCase() === "set-cookie") setCookies.push(incoming.rawHeaders[index + 1]);
+      }
+      resolve({
+        status: incoming.statusCode ?? 0,
+        headers: { get: (name) => values.get(name.toLowerCase()) ?? null, getSetCookie: () => [...setCookies] },
+        body: Readable.toWeb(incoming),
+      });
+    });
+    request.once("error", reject);
+    request.end(body);
+  });
+}
+
 function expectedStatusesFn(value) {
   return expectedStatuses(value);
 }
 
 export class CookieJar {
   #cookies = new Map();
+  #now;
+  #sequence = 0;
 
-  absorb(headers) {
+  constructor({ now = () => new Date() } = {}) {
+    assert(typeof now === "function", "CookieJar clock must be a function.");
+    this.#now = now;
+  }
+
+  absorb(url, headers) {
+    const origin = new URL(url);
+    assert(["http:", "https:"].includes(origin.protocol), "CookieJar URL must use HTTP or HTTPS.");
     assert(headers && typeof headers.getSetCookie === "function", "CookieJar requires Fetch Headers with getSetCookie().");
     for (const line of headers.getSetCookie()) {
-      const pair = line.split(";", 1)[0];
+      const segments = line.split(";").map((value) => value.trim());
+      const pair = segments.shift() ?? "";
       const separator = pair.indexOf("=");
       if (separator <= 0) continue;
       const name = pair.slice(0, separator).trim();
       const value = pair.slice(separator + 1).trim();
-      if (value.length === 0 || /expires=Thu, 01 Jan 1970/i.test(line)) this.#cookies.delete(name);
-      else this.#cookies.set(name, value);
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) continue;
+      const attributes = new Map();
+      for (const segment of segments) {
+        const split = segment.indexOf("=");
+        const attribute = (split < 0 ? segment : segment.slice(0, split)).trim().toLowerCase();
+        const attributeValue = split < 0 ? "" : segment.slice(split + 1).trim();
+        if (!attributes.has(attribute)) attributes.set(attribute, attributeValue);
+      }
+      const secure = attributes.has("secure");
+      if (secure && origin.protocol !== "https:") continue;
+      const requestedDomain = attributes.get("domain")?.replace(/^\./, "").toLowerCase();
+      const hostname = origin.hostname.toLowerCase();
+      if (requestedDomain && !domainMatches(hostname, requestedDomain)) continue;
+      const domain = requestedDomain ?? hostname;
+      const hostOnly = requestedDomain === undefined;
+      const requestedPath = attributes.get("path");
+      const path = requestedPath?.startsWith("/") ? requestedPath : defaultCookiePath(origin.pathname);
+      const sameSiteValue = attributes.get("samesite")?.toLowerCase();
+      const sameSite = ["strict", "lax", "none"].includes(sameSiteValue) ? sameSiteValue : "lax";
+      if (sameSite === "none" && !secure) continue;
+      const now = this.#now().getTime();
+      const maximumAge = attributes.has("max-age") ? Number(attributes.get("max-age")) : undefined;
+      const expiresAt = Number.isFinite(maximumAge)
+        ? now + Math.max(0, maximumAge) * 1_000
+        : attributes.has("expires") ? Date.parse(attributes.get("expires")) : null;
+      const key = `${name}\0${domain}\0${path}`;
+      if (value.length === 0 || (Number.isFinite(expiresAt) && expiresAt <= now)) {
+        this.#cookies.delete(key);
+        continue;
+      }
+      this.#cookies.set(key, { name, value, domain, hostOnly, path, secure, sameSite, expiresAt, sequence: this.#sequence++ });
     }
   }
 
-  header() {
-    return [...this.#cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+  header(url, { method = "GET", topLevelNavigation = false, initiatorUrl = url } = {}) {
+    const target = new URL(url);
+    const initiator = new URL(initiatorUrl);
+    const now = this.#now().getTime();
+    const sameSite = target.hostname.toLowerCase() === initiator.hostname.toLowerCase();
+    const values = [];
+    for (const [key, cookie] of this.#cookies) {
+      if (Number.isFinite(cookie.expiresAt) && cookie.expiresAt <= now) {
+        this.#cookies.delete(key);
+        continue;
+      }
+      const targetHost = target.hostname.toLowerCase();
+      if (cookie.hostOnly ? targetHost !== cookie.domain : !domainMatches(targetHost, cookie.domain)) continue;
+      if (!pathMatches(target.pathname || "/", cookie.path)) continue;
+      if (cookie.secure && target.protocol !== "https:") continue;
+      if (cookie.sameSite === "strict" && !sameSite) continue;
+      if (cookie.sameSite === "lax" && !sameSite && !(topLevelNavigation && ["GET", "HEAD"].includes(method.toUpperCase()))) continue;
+      values.push(cookie);
+    }
+    return values.sort((left, right) => right.path.length - left.path.length || left.sequence - right.sequence)
+      .map(({ name, value }) => `${name}=${value}`).join("; ");
   }
+}
+
+function domainMatches(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function defaultCookiePath(pathname) {
+  if (!pathname?.startsWith("/") || pathname === "/") return "/";
+  const lastSlash = pathname.lastIndexOf("/");
+  return lastSlash <= 0 ? "/" : pathname.slice(0, lastSlash);
+}
+
+function pathMatches(requestPath, cookiePath) {
+  return requestPath === cookiePath
+    || (requestPath.startsWith(cookiePath) && (cookiePath.endsWith("/") || requestPath[cookiePath.length] === "/"));
 }
 
 export async function requestWithCookies(jar, input) {
   assert(jar instanceof CookieJar, "A CookieJar is required.");
-  const cookie = jar.header();
+  const cookie = jar.header(input.url, input.cookieContext);
   const response = await requestHttp({
     ...input,
     headers: { ...input.headers, ...(cookie ? { cookie } : {}) },
   });
-  jar.absorb(response.headers);
+  jar.absorb(input.url, response.headers);
   return response;
 }
 
@@ -152,8 +284,8 @@ function requireGuid(value, label) {
   return value;
 }
 
-function absorbCookies(jar, response) {
-  if (typeof response.headers.getSetCookie === "function") jar.absorb(response.headers);
+function absorbCookies(jar, url, response) {
+  if (typeof response.headers.getSetCookie === "function") jar.absorb(url, response.headers);
 }
 
 function antiforgeryToken(html) {
@@ -168,8 +300,9 @@ function antiforgeryToken(html) {
 
 export function createReleaseHttpAdapter({
   request = requestHttp,
-  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  sleep = (milliseconds, abortSignal) => delay(milliseconds, undefined, { signal: abortSignal }),
   now = () => new Date(),
+  signal,
 } = {}) {
   assert(typeof request === "function", "Release HTTP adapter requires a request function.");
   assert(typeof sleep === "function", "Release HTTP adapter requires a sleep function.");
@@ -183,6 +316,8 @@ export function createReleaseHttpAdapter({
     expectedStatuses: options.expectedStatuses ?? [200],
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxBytes: options.maxBytes ?? DEFAULT_MAX_BYTES,
+    ...(options.signal ?? signal ? { signal: options.signal ?? signal } : {}),
+    ...(options.tlsCa === undefined ? {} : { tlsCa: options.tlsCa }),
   });
   const json = (base, path, options = {}) => call(base, path, {
     ...options,
@@ -190,13 +325,27 @@ export function createReleaseHttpAdapter({
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   const withJar = async (jar, base, path, options = {}) => {
-    const cookie = jar.header();
+    const url = joinUrl(base, path);
+    const cookie = jar.header(url, options.cookieContext);
     const response = await call(base, path, {
       ...options,
       headers: { ...(options.headers ?? {}), ...(cookie ? { cookie } : {}) },
     });
-    absorbCookies(jar, response);
+    absorbCookies(jar, url, response);
     return response;
+  };
+  const proveProtectedAdminApi = async (context, jar) => {
+    assert(RUN_ID.test(context.runId), "Protected Admin proof requires a validated release smoke run ID.");
+    const proofResponse = await withJar(
+      jar,
+      context.runtime.adminBase,
+      `/admin-auth/release-smoke/${context.runId}/protected-workspaces`,
+      { maxBytes: 1024 * 1024, tlsCa: context.runtime.tlsCa },
+    );
+    const proof = requireObject(proofResponse.json(), "Protected Admin API proof");
+    assert(proof.proof === "cmsify.release-smoke.admin-api.v1" && Array.isArray(proof.workspaces), "Protected Admin route returned an invalid proof contract.");
+    const workspace = proof.workspaces.find((item) => item?.id === context.runtime.workspaceId);
+    assert(workspace?.name === "Release Smoke Workspace" && workspace.slug === "release-smoke", "Protected Admin route did not return the API-backed release workspace.");
   };
 
   async function waitForApi(context) {
@@ -207,7 +356,7 @@ export function createReleaseHttpAdapter({
       const ready = await call(context.runtime.apiBase, "/health/ready", { timeoutMs: 5_000 });
       assert(live.status === 200 && ready.status === 200, "API health endpoints are not ready.");
       return true;
-    }, { maxAttempts: context.maxAttempts, delayMs: 2_000, sleep });
+    }, { maxAttempts: context.maxAttempts, delayMs: 2_000, sleep, signal: context.signal ?? signal });
     return { attempts };
   }
 
@@ -215,24 +364,41 @@ export function createReleaseHttpAdapter({
     let attempts = 0;
     await retryBounded(async (attempt) => {
       attempts = attempt;
-      const page = await call(context.runtime.adminBase, "/", { timeoutMs: 5_000, maxBytes: 2 * 1024 * 1024 });
+      const page = await call(context.runtime.adminBase, "/", { timeoutMs: 5_000, maxBytes: 2 * 1024 * 1024, tlsCa: context.runtime.tlsCa });
       assert(page.text.includes("<title>Cmsify Admin</title>"), "Admin root did not return Cmsify-specific content.");
       const asset = page.text.match(/(?:src|href)=["']([^"']*(?:blazor\.web\.js|cmsify[^"']*\.(?:css|js)))["']/i)?.[1]
         ?? "/_framework/blazor.web.js";
-      const staticResponse = await call(context.runtime.adminBase, asset, { timeoutMs: 5_000, maxBytes: 8 * 1024 * 1024 });
+      const staticResponse = await call(context.runtime.adminBase, asset, { timeoutMs: 5_000, maxBytes: 8 * 1024 * 1024, tlsCa: context.runtime.tlsCa });
       assert(staticResponse.bytes.byteLength > 0, "Admin static asset was empty.");
       return true;
-    }, { maxAttempts: context.maxAttempts, delayMs: 2_000, sleep });
+    }, { maxAttempts: context.maxAttempts, delayMs: 2_000, sleep, signal: context.signal ?? signal });
     return { attempts };
   }
 
   async function localLogin(context) {
-    const login = await json(context.runtime.apiBase, "/api/v1/auth/login", {
+    let password = context.secrets.seedPassword;
+    let login = await json(context.runtime.apiBase, "/api/v1/auth/login", {
       method: "POST",
-      body: { email: "admin@release-smoke.invalid", password: context.secrets.seedPassword },
+      body: { email: "admin@release-smoke.invalid", password },
     });
-    const loginBody = requireObject(login.json(), "Local login");
+    let loginBody = requireObject(login.json(), "Local login");
     assert(typeof loginBody.token === "string" && loginBody.token.length >= 32, "Local login did not return an opaque token.");
+    if (loginBody.mustChangePassword === true) {
+      assert(typeof context.secrets.changedAdminPassword === "string" && context.secrets.changedAdminPassword.length >= 16, "Forced password change requires a run-scoped replacement password.");
+      await json(context.runtime.apiBase, "/api/v1/auth/change-password", {
+        method: "POST",
+        headers: bearer(loginBody.token),
+        body: { currentPassword: password, newPassword: context.secrets.changedAdminPassword },
+        expectedStatuses: [204],
+      });
+      password = context.secrets.changedAdminPassword;
+      login = await json(context.runtime.apiBase, "/api/v1/auth/login", {
+        method: "POST",
+        body: { email: "admin@release-smoke.invalid", password },
+      });
+      loginBody = requireObject(login.json(), "Post-change local login");
+      assert(loginBody.mustChangePassword === false && typeof loginBody.token === "string" && loginBody.token.length >= 32, "Forced password change did not establish an unrestricted API session.");
+    }
     context.secrets.localToken = loginBody.token;
 
     const workspacePage = await json(context.runtime.apiBase, "/api/v1/workspaces?page=1&pageSize=20", {
@@ -244,11 +410,11 @@ export function createReleaseHttpAdapter({
     requireGuid(workspace.id, "Seed workspace ID");
 
     const jar = new CookieJar();
-    const loginPage = await withJar(jar, context.runtime.adminBase, "/login");
+    const loginPage = await withJar(jar, context.runtime.adminBase, "/login", { tlsCa: context.runtime.tlsCa });
     const form = new URLSearchParams({
       __RequestVerificationToken: antiforgeryToken(loginPage.text),
       email: "admin@release-smoke.invalid",
-      password: context.secrets.seedPassword,
+      password,
       returnUrl: "/workspaces",
     });
     const adminLogin = await withJar(jar, context.runtime.adminBase, "/admin-auth/login", {
@@ -256,10 +422,12 @@ export function createReleaseHttpAdapter({
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form.toString(),
       expectedStatuses: [302],
+      tlsCa: context.runtime.tlsCa,
     });
-    assert(requiredHeader(adminLogin, "location").startsWith("/account/change-password") || requiredHeader(adminLogin, "location") === "/workspaces", "Admin local login returned an unexpected redirect.");
-    assert(jar.header().includes("cmsify.admin.auth="), "Admin local login did not establish a session cookie.");
-    return { localToken: loginBody.token, workspaceId: workspace.id, localAdminCookie: jar.header() };
+    assert(requiredHeader(adminLogin, "location") === "/workspaces", "Admin local login did not establish unrestricted access.");
+    assert(jar.header(joinUrl(context.runtime.adminBase, "/workspaces")).includes("cmsify.admin.auth="), "Admin local login did not establish a session cookie.");
+    await proveProtectedAdminApi({ ...context, runtime: { ...context.runtime, workspaceId: workspace.id } }, jar);
+    return { localToken: loginBody.token, workspaceId: workspace.id };
   }
 
   async function apiClientAuth(context) {
@@ -342,8 +510,8 @@ export function createReleaseHttpAdapter({
   }
 
   async function oidcFlow(context) {
-    await call(context.runtime.oidcBase, `/configure?workspaceId=${encodeURIComponent(context.runtime.workspaceId)}`);
-    const tokenResponse = await json(context.runtime.oidcBase, "/test-token");
+    await call(context.runtime.oidcBase, `/configure?workspaceId=${encodeURIComponent(context.runtime.workspaceId)}`, { tlsCa: context.runtime.tlsCa });
+    const tokenResponse = await json(context.runtime.oidcBase, "/test-token", { tlsCa: context.runtime.tlsCa });
     const oidcToken = requireObject(tokenResponse.json(), "OIDC token").access_token;
     assert(typeof oidcToken === "string" && oidcToken.split(".").length === 3, "OIDC issuer did not return a JWT.");
     const me = await json(context.runtime.apiBase, "/api/v1/auth/me", { headers: bearer(oidcToken) });
@@ -351,14 +519,16 @@ export function createReleaseHttpAdapter({
     assert(actor.role === "Admin" && actor.workspaceId === context.runtime.workspaceId, "OIDC API claims were not mapped.");
 
     const jar = new CookieJar();
-    const challenge = await withJar(jar, context.runtime.adminBase, "/admin-auth/oidc-login?returnUrl=%2Fworkspaces", { expectedStatuses: [302] });
+    const challenge = await withJar(jar, context.runtime.adminBase, "/admin-auth/oidc-login?returnUrl=%2Fworkspaces", { expectedStatuses: [302], tlsCa: context.runtime.tlsCa });
     const internalAuthorize = new URL(requiredHeader(challenge, "location"));
-    const authorize = await withJar(jar, context.runtime.oidcBase, `${internalAuthorize.pathname}${internalAuthorize.search}`, { expectedStatuses: [302] });
+    const authorize = await withJar(jar, context.runtime.oidcBase, `${internalAuthorize.pathname}${internalAuthorize.search}`, { expectedStatuses: [302], tlsCa: context.runtime.tlsCa });
     const callback = new URL(requiredHeader(authorize, "location"));
-    const signedIn = await withJar(jar, `${callback.protocol}//${callback.host}`, `${callback.pathname}${callback.search}`, { expectedStatuses: [302] });
+    const signedIn = await withJar(jar, `${callback.protocol}//${callback.host}`, `${callback.pathname}${callback.search}`, {
+      expectedStatuses: [302], tlsCa: context.runtime.tlsCa,
+      cookieContext: { initiatorUrl: context.runtime.oidcBase, topLevelNavigation: true, method: "GET" },
+    });
     assert(requiredHeader(signedIn, "location") === "/workspaces", "OIDC Admin callback did not retain the return URL.");
-    const page = await withJar(jar, context.runtime.adminBase, "/workspaces", { maxBytes: 4 * 1024 * 1024 });
-    assert(page.text.includes("Workspaces") && page.text.includes("Release Smoke Workspace"), "OIDC Admin session did not render API-backed workspace state.");
+    await proveProtectedAdminApi(context, jar);
     return { status: "passed" };
   }
 
@@ -367,7 +537,7 @@ export function createReleaseHttpAdapter({
     const token = context.runtime.localToken;
     const created = await json(context.runtime.apiBase, `/api/v1/workspaces/${workspace}/webhooks`, {
       method: "POST", headers: bearer(token), expectedStatuses: [201],
-      body: { name: "Release smoke receiver", url: "http://webhook:8080/hook", secret: null, events: ["workspace.updated"] },
+      body: { name: "Release smoke receiver", url: `http://webhook.${context.runId}.release-smoke.invalid:8080/hook`, secret: null, events: ["workspace.updated"] },
     });
     const endpoint = requireObject(created.json(), "Webhook creation").endpoint;
     requireGuid(endpoint?.id, "Webhook endpoint ID");
@@ -381,9 +551,10 @@ export function createReleaseHttpAdapter({
     let delivered;
     await retryBounded(async () => {
       const status = requireObject((await json(context.runtime.webhookBase, "/status")).json(), "Webhook receiver status");
-      assert(Number.isSafeInteger(status.count) && status.count >= 1, "Webhook receiver has not observed a delivery.");
+      assert(Number.isSafeInteger(status.count) && status.count >= 1 && Array.isArray(status.eventTypes)
+        && status.eventTypes.includes("workspace.updated"), "Webhook receiver has not observed the exact workspace.updated delivery.");
       delivered = status.count;
-    }, { maxAttempts: 30, delayMs: 1_000, sleep });
+    }, { maxAttempts: 30, delayMs: 1_000, sleep, signal: context.signal ?? signal });
     return { webhookEndpointId: endpoint.id, deliveries: delivered };
   }
 
@@ -410,7 +581,7 @@ export function createReleaseHttpAdapter({
     await retryBounded(async () => {
       const value = requireObject((await json(context.runtime.apiBase, `${contentBase}/${content.id}`, { headers: bearer(token) })).json(), "Scheduled content status");
       assert(value.status === "Published", "Scheduled content is not published yet.");
-    }, { maxAttempts: 30, delayMs: 1_000, sleep });
+    }, { maxAttempts: 30, delayMs: 1_000, sleep, signal: context.signal ?? signal });
     return { persistentTemplateId: template.id, persistentContentId: content.id, persistentSlug: "release-smoke-persisted" };
   }
 
@@ -418,7 +589,10 @@ export function createReleaseHttpAdapter({
     await waitForApi({ ...context, maxAttempts: 30 });
     await waitForAdmin({ ...context, maxAttempts: 30 });
     const login = requireObject((await json(context.runtime.apiBase, "/api/v1/auth/login", {
-      method: "POST", body: { email: "admin@release-smoke.invalid", password: context.secrets.seedPassword },
+      method: "POST", body: {
+        email: "admin@release-smoke.invalid",
+        password: context.secrets.changedAdminPassword ?? context.secrets.seedPassword,
+      },
     })).json(), "Persistence login");
     const content = requireObject((await json(context.runtime.apiBase, `/api/v1/workspaces/${context.runtime.workspaceId}/content/by-slug/${context.artifacts.persistentSlug}`, {
       headers: bearer(login.token),

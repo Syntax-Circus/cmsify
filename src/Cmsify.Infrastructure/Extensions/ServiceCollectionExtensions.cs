@@ -77,7 +77,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWebhookDestinationValidator>(provider =>
             new WebhookDestinationValidator(
                 provider.GetRequiredService<IWebhookDnsResolver>(),
-                provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>()));
+                provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
+                provider.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().EnvironmentName));
         services.AddSingleton<IWebhookSocketConnector, SocketWebhookConnector>();
         services.AddHttpClient(nameof(WebhookDeliveryProcessor), (provider, client) =>
             client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds))

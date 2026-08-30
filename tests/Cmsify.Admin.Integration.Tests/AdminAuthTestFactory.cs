@@ -33,6 +33,8 @@ namespace Cmsify.Admin.Integration.Tests;
 /// </summary>
 internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
 {
+    public string EnvironmentName { get; set; } = "Testing";
+    public string? ReleaseSmokeRunId { get; set; }
     public bool OidcEnabled { get; set; }
     public bool OidcAccessTokenExpiresImmediately { get; set; }
     public bool OidcRefreshSucceeds { get; set; } = true;
@@ -58,7 +60,7 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(EnvironmentName);
         builder.ConfigureHostConfiguration(c =>
         {
             c.AddInMemoryCollection(new Dictionary<string, string?>
@@ -66,6 +68,7 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 ["Admin:ApiBaseUrl"] = "http://api.test",
                 ["Admin:Auth:Session:SlidingWindowMinutes"] = "60",
                 ["Admin:Auth:Session:MaxLifetimeHours"] = "24",
+                ["Admin:ReleaseSmokeRunId"] = ReleaseSmokeRunId,
                 ["Auth:Oidc:Enabled"] = OidcEnabled.ToString(),
                 ["Auth:Oidc:Authority"] = "http://identity.test",
                 ["Auth:Oidc:ClientId"] = "cmsify-admin",

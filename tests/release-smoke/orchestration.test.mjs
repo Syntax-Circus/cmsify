@@ -8,7 +8,7 @@ import {
   createDockerAdapter,
 } from "../../eng/release-smoke/harness.mjs";
 import { createReleaseHttpAdapter, retryBounded } from "../../eng/release-smoke/http.mjs";
-import { parseCliArguments } from "../../eng/release-smoke/cli.mjs";
+import { exitCodeForFailure, parseCliArguments } from "../../eng/release-smoke/cli.mjs";
 
 const options = Object.freeze({
   apiImage: "syntaxcircus/cmsify-api:1.2.3",
@@ -40,6 +40,12 @@ test("CLI accepts only the complete certify interface and rejects duplicates or 
     "--admin-image", options.adminImage, "--version", options.version, "--source-sha", options.sourceSha, "--output", options.output,
   ]), /duplicate/i);
   assert.throws(() => parseCliArguments(["certify", "--mystery", "value"]), /unknown/i);
+});
+
+test("CLI maps completed signal failures to conventional process statuses", () => {
+  assert.equal(exitCodeForFailure({ signal: "SIGINT" }), 130);
+  assert.equal(exitCodeForFailure({ signal: "SIGTERM" }), 143);
+  assert.equal(exitCodeForFailure(new Error("ordinary failure")), 1);
 });
 
 function successfulAdapters(events, { failureAt } = {}) {
@@ -200,6 +206,48 @@ test("fails closed when restore reports either destroyed data volume as its targ
   assert.equal(events.filter((event) => event === "cleanup").length, 1);
 });
 
+test("one shared abort signal cancels an active scenario and awaits exactly one cleanup before terminal evidence", async () => {
+  const events = [];
+  const reports = [];
+  const { docker, http } = successfulAdapters(events);
+  const controller = new AbortController();
+  let signalHandler;
+  docker.prepareFoundation = async ({ onFirstResource, signal }) => {
+    assert.equal(signal, controller.signal);
+    events.push("first-resource-created");
+    onFirstResource();
+    queueMicrotask(() => signalHandler("SIGTERM"));
+    await new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  };
+  docker.cleanup = async ({ signal }) => {
+    assert.equal(signal, controller.signal);
+    events.push("cleanup-start");
+    await new Promise((resolve) => setImmediate(resolve));
+    events.push("cleanup-finished");
+  };
+
+  await assert.rejects(
+    certifyRelease(options, {
+      docker,
+      http,
+      abortController: controller,
+      registerSignals(handler) {
+        signalHandler = handler;
+        return () => events.push("signals-unregistered");
+      },
+      evidenceWriter: async (report) => {
+        events.push("evidence-written");
+        reports.push(report);
+      },
+    }),
+    (error) => error.signal === "SIGTERM",
+  );
+  assert.equal(events.filter((event) => event === "cleanup-start").length, 1);
+  assert.ok(events.indexOf("cleanup-finished") < events.indexOf("evidence-written"));
+  assert.ok(events.indexOf("evidence-written") < events.indexOf("signals-unregistered"));
+  assert.equal(reports.at(-1).status, "failed");
+});
+
 for (const failureAt of RELEASE_SMOKE_SCENARIOS) {
   test(`captures bounded logs, sanitized evidence, and cleanup when ${failureAt} fails`, async () => {
     const events = [];
@@ -265,7 +313,7 @@ test("Docker candidate commands use already-loaded immutable IDs and never build
   };
   const docker = createDockerAdapter({ run, repositoryRoot: process.cwd() });
   const candidates = await docker.inspectCandidates(options);
-  await docker.startCandidates({ ...options, candidates, runId: options.runId }, { restored: false });
+  await docker.startCandidates({ ...options, candidates, runId: options.runId, runtime: { tlsDirectory: "C:\\release-smoke-tls" } }, { restored: false });
 
   assert.equal(calls.some(([, first]) => first === "build" || first === "pull"), false);
   const candidateRuns = calls.filter((call) => call[1] === "run" && call.some((arg) => arg === candidates.api.imageId || arg === candidates.admin.imageId));

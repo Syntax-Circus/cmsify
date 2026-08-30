@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Configuration;
+using System.Text.RegularExpressions;
 
 namespace Cmsify.Infrastructure.BackgroundServices;
 
@@ -15,6 +16,7 @@ public sealed class WebhookOperationalOptions
     public int MaxAttempts { get; set; } = 10;
     public int RequestTimeoutSeconds { get; set; } = 15;
     public bool AllowHttp { get; set; }
+    public string? ReleaseSmokeRunId { get; set; }
     public int RetentionDays { get; set; } = 30;
     public int CleanupBatchSize { get; set; } = 100;
     public int CleanupIntervalSeconds { get; set; } = 3_600;
@@ -44,6 +46,11 @@ public sealed class WebhookOperationalOptionsValidator : IValidateOptions<Webhoo
         Validate(options.RetentionDays, 1, 3_650, nameof(options.RetentionDays), failures);
         Validate(options.CleanupBatchSize, 1, 500, nameof(options.CleanupBatchSize), failures);
         Validate(options.CleanupIntervalSeconds, 1, 86_400, nameof(options.CleanupIntervalSeconds), failures);
+        if (options.ReleaseSmokeRunId is not null
+            && !Regex.IsMatch(options.ReleaseSmokeRunId, @"\Acmsify-smoke-[a-z0-9-]{8,32}\z", RegexOptions.CultureInvariant))
+        {
+            failures.Add($"{nameof(options.ReleaseSmokeRunId)} must be a validated release-smoke run ID.");
+        }
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }
 
