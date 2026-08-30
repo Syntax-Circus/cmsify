@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createMatchedBackup, rehearse, validateCandidateInput, verifyMatchedBackup } from "../../../eng/upgrade-tests/rehearsal.mjs";
 import { createDockerHarness } from "../../../eng/upgrade-tests/docker.mjs";
 import { createRunScope } from "../../../eng/upgrade-tests/paths.mjs";
+import { MAX_SAFE_JSON_BYTES, writeBoundedJsonAtomically } from "../../../eng/upgrade-tests/safe-files.mjs";
 
 const candidateSourceSha = "0123456789abcdef0123456789abcdef01234567";
 const fixtureDigest = "9".repeat(64);
@@ -93,6 +94,30 @@ async function runWithFakes({ fail } = {}) {
     rmSync(repositoryRoot, { force: true, recursive: true });
   }
 }
+
+test("bounded JSON writer accepts just-under and exactly-at cap atomically, then rejects just-over", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-json-cap-"));
+  const reportPath = resolve(repositoryRoot, "artifacts", "report.json");
+  const emptyReportBytes = Buffer.byteLength(`${JSON.stringify({ payload: "" }, null, 2)}\n`, "utf8");
+  const reportWithBytes = (bytes) => ({ payload: "x".repeat(bytes - emptyReportBytes) });
+
+  try {
+    await writeBoundedJsonAtomically(repositoryRoot, reportPath, reportWithBytes(MAX_SAFE_JSON_BYTES - 1));
+    assert.equal(Buffer.byteLength(readFileSync(reportPath, "utf8"), "utf8"), MAX_SAFE_JSON_BYTES - 1);
+
+    await writeBoundedJsonAtomically(repositoryRoot, reportPath, reportWithBytes(MAX_SAFE_JSON_BYTES));
+    const atCap = readFileSync(reportPath, "utf8");
+    assert.equal(Buffer.byteLength(atCap, "utf8"), MAX_SAFE_JSON_BYTES);
+
+    await assert.rejects(
+      () => writeBoundedJsonAtomically(repositoryRoot, reportPath, reportWithBytes(MAX_SAFE_JSON_BYTES + 1)),
+      /exceeds its size limit/i,
+    );
+    assert.equal(readFileSync(reportPath, "utf8"), atCap);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
 
 test("never destroys upgraded state before re-verifying the matched backup", async () => {
   const { events } = await runWithFakes();
@@ -1315,6 +1340,12 @@ test("compacts prior phase detail before finalizing oversized rollback diagnosti
     const report = JSON.parse(serialized);
     assert.ok(Buffer.byteLength(serialized, "utf8") <= 64 * 1024);
     assert.equal(report.schema, "cmsify.upgrade-diagnostics.v1");
+    assert.deepEqual(report.source, {
+      fixtureDigest,
+      baselineImage,
+      fixture: null,
+    });
+    assert.equal(report.candidate.sourceSha, candidateSourceSha);
     assert.equal(report.failedStage, "rollback");
     assert.equal(report.failureEvidence.readiness.length, 16);
     assert.equal(report.failureEvidence.assertions.length, 128);
