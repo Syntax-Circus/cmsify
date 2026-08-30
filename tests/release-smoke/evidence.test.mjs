@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { basename, parse, resolve } from "node:path";
 import test from "node:test";
 
@@ -128,6 +128,142 @@ test("evidence invalidation refuses filesystem roots before touching a target", 
   );
 });
 
+test("evidence invalidation requires an existing real output directory", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-missing-output-unit-test");
+  await rm(output, { recursive: true, force: true });
+
+  await assert.rejects(
+    invalidateEvidence(output),
+    (error) => error.code === "evidence-output-unavailable" && error.targetUnavailable === false,
+  );
+});
+
+test("evidence invalidation rejects a directory symlink or junction before mutating its target", async () => {
+  const root = resolve("artifacts/release-smoke/evidence-output-link-unit-test");
+  const target = resolve(root, "target");
+  const output = resolve(root, "output-link");
+  const targetEvidence = resolve(target, "evidence.json");
+  await rm(root, { recursive: true, force: true });
+  try {
+    await mkdir(target, { recursive: true });
+    await writeFile(targetEvidence, "passed", "utf8");
+    await symlink(target, output, process.platform === "win32" ? "junction" : "dir");
+
+    await assert.rejects(
+      invalidateEvidence(output),
+      (error) => error.code === "evidence-output-indirection" && error.targetUnavailable === false,
+    );
+
+    assert.equal(await readFile(targetEvidence, "utf8"), "passed");
+    assert.deepEqual(await readdir(target), ["evidence.json"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("evidence invalidation rejects a Windows junction component before mutating through it", { skip: process.platform !== "win32" }, async () => {
+  const root = resolve("artifacts/release-smoke/evidence-output-junction-unit-test");
+  const targetParent = resolve(root, "target-parent");
+  const targetOutput = resolve(targetParent, "output");
+  const junctionParent = resolve(root, "junction-parent");
+  const output = resolve(junctionParent, "output");
+  const targetEvidence = resolve(targetOutput, "evidence.json");
+  await rm(root, { recursive: true, force: true });
+  try {
+    await mkdir(targetOutput, { recursive: true });
+    await writeFile(targetEvidence, "passed", "utf8");
+    await symlink(targetParent, junctionParent, "junction");
+
+    await assert.rejects(
+      invalidateEvidence(output),
+      (error) => error.code === "evidence-output-indirection" && error.targetUnavailable === false,
+    );
+
+    assert.equal(await readFile(targetEvidence, "utf8"), "passed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("evidence invalidation rejects an output link whose canonical target is a filesystem root before mutation", async () => {
+  const root = resolve("artifacts/release-smoke/evidence-output-root-link-unit-test");
+  const output = resolve(root, "output-link");
+  const mutations = [];
+  await rm(root, { recursive: true, force: true });
+  try {
+    await mkdir(root, { recursive: true });
+    await symlink(parse(output).root, output, process.platform === "win32" ? "junction" : "dir");
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        rename: async (...args) => {
+          mutations.push(["rename", ...args]);
+          throw Object.assign(new Error("mutation must not run"), { code: "EACCES" });
+        },
+        rm: async (...args) => {
+          mutations.push(["rm", ...args]);
+          throw Object.assign(new Error("mutation must not run"), { code: "EACCES" });
+        },
+      }),
+      (error) => error.targetUnavailable === false && /filesystem root|indirection/i.test(error.message),
+    );
+
+    assert.deepEqual(mutations, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a dangling evidence link is removed rather than misclassified as absent after a rename miss", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-dangling-link-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  const missingTarget = resolve(output, "missing-target");
+  await rm(output, { recursive: true, force: true });
+  try {
+    await mkdir(missingTarget, { recursive: true });
+    await symlink(missingTarget, evidencePath, process.platform === "win32" ? "junction" : "dir");
+    await rm(missingTarget, { recursive: true, force: true });
+
+    const result = await invalidateEvidence(output, {
+      rename: async () => { throw Object.assign(new Error("simulated rename miss"), { code: "ENOENT" }); },
+    });
+
+    assert.equal(result.targetUnavailable, true);
+    await assert.rejects(lstat(evidencePath), (error) => error.code === "ENOENT");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-time writeEvidence reentrancy cannot recreate evidence before invalidation returns", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-reentrant-write-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  let recreationError;
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    const result = await invalidateEvidence(output, {
+      rm: async (path, options) => {
+        if (basename(path).startsWith(".evidence-invalid-")) {
+          try {
+            await writeEvidence(output, { status: "recreated" });
+          } catch (error) {
+            recreationError = error;
+          }
+        }
+        return rm(path, options);
+      },
+    });
+
+    assert.equal(result.targetUnavailable, true);
+    assert.equal(recreationError?.code, "evidence-operation-conflict");
+    await assert.rejects(lstat(evidencePath), (error) => error.code === "ENOENT");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
 test("quarantine cleanup failure is surfaced after the consumable evidence target is unavailable", async () => {
   const output = resolve("artifacts/release-smoke/evidence-quarantine-cleanup-unit-test");
   const evidencePath = resolve(output, "evidence.json");
@@ -146,6 +282,62 @@ test("quarantine cleanup failure is surfaced after the consumable evidence targe
     );
 
     await assert.rejects(readFile(evidencePath, "utf8"));
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("quarantine cleanup failure reports target unavailable false when cleanup recreates evidence", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-quarantine-recreation-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        rm: async (path, options) => {
+          if (basename(path).startsWith(".evidence-invalid-")) {
+            await writeFile(evidencePath, "recreated", "utf8");
+            throw new Error("cleanup refused");
+          }
+          return rm(path, options);
+        },
+      }),
+      (error) => error.code === "evidence-quarantine-cleanup-failed" && error.targetUnavailable === false,
+    );
+
+    assert.equal(await readFile(evidencePath, "utf8"), "recreated");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("quarantine cleanup completes before a final no-follow verification failure is reported", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-final-verification-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  let quarantineRemoved = false;
+  const inspect = async (path) => {
+    if (path === evidencePath) throw Object.assign(new Error("inspection refused"), { code: "EACCES" });
+    return stat(path);
+  };
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        lstat: inspect,
+        rm: async (path, options) => {
+          if (basename(path).startsWith(".evidence-invalid-")) quarantineRemoved = true;
+          return rm(path, options);
+        },
+      }),
+      (error) => error.code === "evidence-invalidation-unverified" && error.targetUnavailable === false,
+    );
+
+    assert.equal(quarantineRemoved, true);
+    assert.deepEqual(await readdir(output), []);
   } finally {
     await rm(output, { recursive: true, force: true });
   }
