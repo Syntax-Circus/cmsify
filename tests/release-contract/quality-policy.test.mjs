@@ -174,8 +174,253 @@ function validateDotnetSetupAndRestorePolicy(documents) {
     ".github/workflows/admin-accessibility.yml:axe:dotnet restore Cmsify.slnx --locked-mode",
     ".github/workflows/capacity-trends.yml:capacity-trends:dotnet restore Cmsify.slnx --locked-mode",
     ".github/workflows/dotnet-test.yml:test:dotnet restore Cmsify.slnx --locked-mode",
+    ".github/workflows/openapi-contract.yml:contract:dotnet restore Cmsify.slnx --locked-mode",
     ".github/workflows/publish-cmsify.yml:build:dotnet restore Cmsify.slnx --locked-mode",
+    ".github/workflows/typescript-sdk.yml:sdk:dotnet restore Cmsify.slnx --locked-mode",
   ]);
+}
+
+function javaScriptTokens(source, sourceName) {
+  const tokens = [];
+  for (let index = 0; index < source.length;) {
+    if (/\s/.test(source[index])) {
+      index += 1;
+      continue;
+    }
+    if (source.startsWith("//", index)) {
+      index = source.indexOf("\n", index + 2);
+      if (index === -1) break;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      const end = source.indexOf("*/", index + 2);
+      assert.notEqual(end, -1, `${sourceName}: unterminated block comment`);
+      index = end + 2;
+      continue;
+    }
+    if (["'", '"'].includes(source[index])) {
+      const quote = source[index];
+      let value = "";
+      let closed = false;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\") {
+          assert.equal(index + 1 < source.length, true, `${sourceName}: unterminated string escape`);
+          value += source[index + 1];
+          index += 2;
+        } else if (source[index] === quote) {
+          index += 1;
+          closed = true;
+          break;
+        } else {
+          value += source[index];
+          index += 1;
+        }
+      }
+      assert.equal(closed, true, `${sourceName}: unterminated string literal`);
+      tokens.push({ type: "string", value });
+      continue;
+    }
+    if (source[index] === "`") {
+      let escaped = false;
+      let closed = false;
+      index += 1;
+      while (index < source.length) {
+        if (escaped) escaped = false;
+        else if (source[index] === "\\") escaped = true;
+        else if (source[index] === "`") {
+          index += 1;
+          closed = true;
+          break;
+        }
+        index += 1;
+      }
+      assert.equal(closed, true, `${sourceName}: unterminated template literal`);
+      tokens.push({ type: "template" });
+      continue;
+    }
+    const identifier = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(source.slice(index));
+    if (identifier !== null) {
+      tokens.push({ type: "identifier", value: identifier[0] });
+      index += identifier[0].length;
+      continue;
+    }
+    tokens.push({ type: "punctuation", value: source[index] });
+    index += 1;
+  }
+  return tokens;
+}
+
+function dotnetRunArgumentLists(source, sourceName) {
+  const tokens = javaScriptTokens(source, sourceName);
+  const calls = [];
+  for (let index = 0; index < tokens.length - 5; index += 1) {
+    if (tokens[index].type !== "identifier" || tokens[index].value !== "run"
+      || tokens[index - 1]?.value === "." || tokens[index + 1]?.value !== "("
+      || tokens[index + 2]?.type !== "string" || tokens[index + 2].value !== "dotnet"
+      || tokens[index + 3]?.value !== "," || tokens[index + 4]?.value !== "[") continue;
+
+    const argumentsList = [];
+    let argumentIndex = index + 5;
+    let expectArgument = true;
+    while (argumentIndex < tokens.length && tokens[argumentIndex].value !== "]") {
+      const token = tokens[argumentIndex];
+      if (expectArgument) {
+        assert.equal(
+          ["string", "identifier"].includes(token.type),
+          true,
+          `${sourceName}: unsupported dotnet argument token`,
+        );
+        argumentsList.push(token.type === "string" ? token.value : { identifier: token.value });
+      } else {
+        assert.equal(token.value, ",", `${sourceName}: dotnet arguments must be comma-separated`);
+      }
+      expectArgument = !expectArgument;
+      argumentIndex += 1;
+    }
+    assert.equal(argumentIndex < tokens.length, true, `${sourceName}: unterminated dotnet argument list`);
+    assert.equal(expectArgument, false, `${sourceName}: trailing comma in dotnet argument list`);
+    calls.push(argumentsList);
+  }
+  return calls;
+}
+
+function validateOpenApiWrapperBuild(openApiSource) {
+  const buildCalls = dotnetRunArgumentLists(openApiSource, "scripts/openapi.mjs")
+    .filter((argumentsList) => argumentsList[0] === "build"
+      && argumentsList.some((argument) => argument?.identifier === "apiProject"));
+  assert.equal(buildCalls.length, 1, "scripts/openapi.mjs: exactly one API repository build");
+  assert.deepEqual(buildCalls[0], [
+    "build",
+    { identifier: "apiProject" },
+    "--configuration",
+    "Release",
+    "--no-restore",
+    "--nologo",
+  ], "scripts/openapi.mjs: API build must consume a prior restore");
+}
+
+function shellCommandSegments(command) {
+  const segments = [];
+  let words = [];
+  let word = "";
+  let quote = null;
+  let escaped = false;
+  const pushWord = () => {
+    if (word.length > 0) words.push(word);
+    word = "";
+  };
+  const pushSegment = () => {
+    pushWord();
+    if (words.length > 0) segments.push(words);
+    words = [];
+  };
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (escaped) {
+      word += character;
+      escaped = false;
+    } else if (quote !== null) {
+      if (character === quote) quote = null;
+      else if (character === "\\" && quote === '"') escaped = true;
+      else word += character;
+    } else if (["'", '"'].includes(character)) {
+      quote = character;
+    } else if (character === "#" && word.length === 0) {
+      break;
+    } else if (/\s/.test(character)) {
+      pushWord();
+    } else if ([";", "|", "&"].includes(character)) {
+      pushSegment();
+      if (command[index + 1] === character) index += 1;
+    } else if (character === "\\") {
+      escaped = true;
+    } else {
+      word += character;
+    }
+  }
+  pushSegment();
+  return segments;
+}
+
+function commandStart(words) {
+  let index = 0;
+  if (words[index] === "env") index += 1;
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index += 1;
+  return index;
+}
+
+function normalizedWorkflowDirectory(directory) {
+  const normalized = path.posix.normalize((directory || ".").replaceAll("\\", "/"));
+  return normalized === "./" ? "." : normalized;
+}
+
+function invokesOpenApiBuildWrapper(words, workingDirectory) {
+  const commandIndex = commandStart(words);
+  const executable = words[commandIndex];
+  if (executable === "node") {
+    const script = words[commandIndex + 1];
+    const operation = words[commandIndex + 2];
+    return typeof script === "string"
+      && normalizedWorkflowDirectory(path.posix.join(workingDirectory, script)) === "scripts/openapi.mjs"
+      && ["check", "update", "export"].includes(operation);
+  }
+  if (executable !== "npm") return false;
+
+  let prefix = workingDirectory;
+  let index = commandIndex + 1;
+  while (index < words.length && !["run", "run-script"].includes(words[index])) {
+    if (["--prefix", "-C"].includes(words[index]) && typeof words[index + 1] === "string") {
+      prefix = path.posix.join(workingDirectory, words[index + 1]);
+      index += 2;
+    } else if (words[index].startsWith("--prefix=")) {
+      prefix = path.posix.join(workingDirectory, words[index].slice("--prefix=".length));
+      index += 1;
+    } else {
+      index += 1;
+    }
+  }
+  const script = words[index + 1];
+  return normalizedWorkflowDirectory(prefix) === "sdk/typescript"
+    && ["generate", "generate:check"].includes(script);
+}
+
+function isRootLockedSolutionRestore(words, workingDirectory) {
+  const commandIndex = commandStart(words);
+  return normalizedWorkflowDirectory(workingDirectory) === "."
+    && words.length === commandIndex + 4
+    && words[commandIndex] === "dotnet"
+    && words[commandIndex + 1] === "restore"
+    && words[commandIndex + 2] === "Cmsify.slnx"
+    && words[commandIndex + 3] === "--locked-mode";
+}
+
+function validateOpenApiWrapperRestorePolicy(documents) {
+  for (const [workflowPath, workflow] of Object.entries(documents)) {
+    for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+      let lockedSolutionRestoreSeen = false;
+      for (const step of job.steps ?? []) {
+        if (typeof step.run !== "string") continue;
+        const workingDirectory = normalizedWorkflowDirectory(
+          step["working-directory"]
+            ?? job.defaults?.run?.["working-directory"]
+            ?? workflow.defaults?.run?.["working-directory"]
+            ?? ".",
+        );
+        const commandSegments = step.run.split("\n").flatMap(shellCommandSegments);
+        for (const words of commandSegments) {
+          if (isRootLockedSolutionRestore(words, workingDirectory)) lockedSolutionRestoreSeen = true;
+          if (!invokesOpenApiBuildWrapper(words, workingDirectory)) continue;
+          assert.equal(
+            lockedSolutionRestoreSeen,
+            true,
+            `${workflowPath}:${jobName}: OpenAPI wrapper requires a prior same-job root locked solution restore`,
+          );
+        }
+      }
+    }
+  }
 }
 
 const expectedReleaseConsumerRun = `CONSUMER_ROOT="$RUNNER_TEMP/cmsify-dotnet-consumer"
@@ -569,6 +814,112 @@ test("models the pull-request .NET quality job with exact step-local commands an
 
 test("associates every tracked setup-dotnet step with global.json and every solution restore with locked mode", () => {
   validateDotnetSetupAndRestorePolicy(workflowDocuments());
+});
+
+test("restores the locked repository graph before wrapper-induced OpenAPI builds", () => {
+  const documents = workflowDocuments();
+  validateOpenApiWrapperBuild(readRepositoryFile("scripts/openapi.mjs"));
+  validateOpenApiWrapperRestorePolicy(documents);
+
+  const withoutNoRestore = readRepositoryFile("scripts/openapi.mjs").replace(', "--no-restore"', "");
+  assert.throws(() => validateOpenApiWrapperBuild(withoutNoRestore), /must consume a prior restore/);
+
+  for (const [workflowPath, jobName] of [
+    [".github/workflows/openapi-contract.yml", "contract"],
+    [".github/workflows/typescript-sdk.yml", "sdk"],
+    [".github/workflows/publish-cmsify.yml", "build"],
+  ]) {
+    const mutation = structuredClone(documents);
+    for (const step of mutation[workflowPath].jobs[jobName].steps) {
+      if (typeof step.run === "string") {
+        step.run = step.run.replace(/^\s*dotnet restore Cmsify\.slnx --locked-mode\s*\n?/m, "");
+      }
+    }
+    assert.throws(
+      () => validateOpenApiWrapperRestorePolicy(mutation),
+      new RegExp(`${workflowPath.replaceAll(".", "\\.")}:${jobName}: OpenAPI wrapper`),
+    );
+  }
+});
+
+test("recognizes supported OpenAPI wrapper command and working-directory variants", () => {
+  const validDocuments = {
+    ".github/workflows/variants.yml": {
+      defaults: { run: { "working-directory": "sdk/typescript" } },
+      jobs: {
+        inheritedNpm: {
+          steps: [
+            {
+              "working-directory": ".",
+              run: "dotnet restore Cmsify.slnx --locked-mode",
+            },
+            { run: "npm run generate:check -- --verbose" },
+          ],
+        },
+        prefixedNpm: {
+          defaults: { run: { "working-directory": "." } },
+          steps: [
+            { run: "dotnet restore Cmsify.slnx --locked-mode" },
+            { run: "npm --prefix sdk/typescript run generate:check" },
+          ],
+        },
+        relativeNode: {
+          defaults: { run: { "working-directory": "sdk/typescript" } },
+          steps: [
+            { "working-directory": "./", run: "dotnet restore Cmsify.slnx --locked-mode" },
+            { run: "node ../../scripts/openapi.mjs update" },
+          ],
+        },
+      },
+    },
+  };
+  assert.doesNotThrow(() => validateOpenApiWrapperRestorePolicy(validDocuments));
+
+  for (const jobName of ["inheritedNpm", "prefixedNpm", "relativeNode"]) {
+    const withoutRestore = structuredClone(validDocuments);
+    withoutRestore[".github/workflows/variants.yml"].jobs[jobName].steps.shift();
+    assert.throws(
+      () => validateOpenApiWrapperRestorePolicy(withoutRestore),
+      new RegExp(`variants\\.yml:${jobName}: OpenAPI wrapper`),
+    );
+  }
+});
+
+test("ignores comments, echoed text, and unrelated package scripts", () => {
+  assert.doesNotThrow(() => validateOpenApiWrapperRestorePolicy({
+    ".github/workflows/non-wrappers.yml": {
+      jobs: {
+        examples: {
+          steps: [{
+            run: `# npm run generate:check
+echo "node scripts/openapi.mjs check"
+npm run generate:check
+node other/scripts/openapi.mjs export`,
+          }],
+        },
+      },
+    },
+  }));
+});
+
+test("parses the real OpenAPI build call without comment or formatting false results", () => {
+  const source = readRepositoryFile("scripts/openapi.mjs");
+  const equivalentFormatting = source.replace(
+    'run("dotnet", ["build", apiProject, "--configuration", "Release", "--no-restore", "--nologo"]);',
+    "run ( 'dotnet' , [ 'build', apiProject, '--configuration', 'Release', '--no-restore', '--nologo' ] );",
+  );
+  assert.notEqual(equivalentFormatting, source);
+  assert.doesNotThrow(() => validateOpenApiWrapperBuild(equivalentFormatting));
+
+  const commentedOutBuild = source.replace(
+    '  run("dotnet", ["build", apiProject, "--configuration", "Release", "--no-restore", "--nologo"]);',
+    '  // run("dotnet", ["build", apiProject, "--configuration", "Release", "--no-restore", "--nologo"]);',
+  );
+  assert.notEqual(commentedOutBuild, source);
+  assert.throws(
+    () => validateOpenApiWrapperBuild(commentedOutBuild),
+    /exactly one API repository build/,
+  );
 });
 
 test("isolates the release consumer from the checked-out repository policy ancestry", () => {

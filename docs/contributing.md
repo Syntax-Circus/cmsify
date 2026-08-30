@@ -22,6 +22,7 @@ dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
 For TypeScript SDK changes, run the full SDK validation sequence:
 
 ```powershell
+dotnet restore Cmsify.slnx --locked-mode
 Set-Location sdk/typescript
 npm ci
 npm run generate:check
@@ -29,6 +30,8 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+`generate:check` builds the API with `--no-restore`, so the locked solution restore is a required repository-root prerequisite. If public restore is blocked by the unpublished resilience package, use only the approved ignored-feed command documented in [`AGENTS.md`](../AGENTS.md#build-and-test); never add that feed or its package bytes to source control.
 
 The API and infrastructure integration tests require Testcontainers PostgreSQL. Do not skip them merely because Docker is unavailable; report the environment limitation in the pull request.
 

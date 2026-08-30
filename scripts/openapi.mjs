@@ -68,7 +68,7 @@ function exportLiveDocument(output) {
   mkdirSync(dirname(output), { recursive: true });
   const exportKeyId = "openapi_export";
   const exportKey = randomBytes(32).toString("base64");
-  run("dotnet", ["build", apiProject, "--configuration", "Release", "--nologo"]);
+  run("dotnet", ["build", apiProject, "--configuration", "Release", "--no-restore", "--nologo"]);
   run("dotnet", ["tool", "restore"]);
   run("dotnet", ["tool", "run", "swagger", "tofile", "--output", output, apiAssembly, "v1"], {
     ASPNETCORE_ENVIRONMENT: "Production",

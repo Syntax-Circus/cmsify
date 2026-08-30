@@ -78,6 +78,7 @@ Generated files are under `src/generated` and should not be edited by hand. Afte
 
 ```powershell
 Set-Location ../..
+dotnet restore Cmsify.slnx --locked-mode
 node scripts/openapi.mjs update
 Set-Location sdk/typescript
 npm run generate:check
@@ -87,4 +88,4 @@ npm run build
 npm run test:consumer
 ```
 
-`update` is the only command allowed to modify the checked-in OpenAPI snapshot or generated TypeScript files. `generate:check` is non-mutating: it exports the live document and generates into a temporary directory before checking live-to-snapshot and generated-to-tracked drift.
+`update` is the only command allowed to modify the checked-in OpenAPI snapshot or generated TypeScript files. `generate:check` is non-mutating: it exports the live document and generates into a temporary directory before checking live-to-snapshot and generated-to-tracked drift. Both commands build `Cmsify.Api` with `--no-restore`, so complete the applicable public or approved ignored-feed locked solution restore from the repository root first.

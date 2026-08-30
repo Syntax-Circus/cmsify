@@ -43,6 +43,7 @@ dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.cspr
 For the TypeScript client:
 
 ```powershell
+dotnet restore Cmsify.slnx --locked-mode
 Set-Location sdk/typescript
 npm ci
 npm run generate:check
@@ -50,6 +51,8 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+The OpenAPI generation check builds `Cmsify.Api` with `--no-restore`; complete the applicable public or approved ignored-feed locked solution restore from the repository root before running it.
 
 The API and infrastructure integration tests use Testcontainers PostgreSQL. Admin integration tests use a fake API handler where documented. Do not skip tests merely because they need Docker; report the environment limitation.
 
