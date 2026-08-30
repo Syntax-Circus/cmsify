@@ -29,7 +29,9 @@ const FLAGS = Object.freeze({
   "--kind": "kind",
   "--version": "version",
 });
-const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+const DOCKER_TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
+const CANONICAL_REF = /^docker\.io\/syntaxcircus\/cmsify-(?:api|admin):[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
 const MAX_JSON_BYTES = 1024 * 1024;
@@ -133,27 +135,39 @@ function readOciArchiveDocuments(input) {
   return { path: checked.path, index: documents.get("index.json") };
 }
 
+function isStrictSemVer(value) {
+  const match = SEMVER.exec(value);
+  if (!match) return false;
+  return match[1] === undefined || match[1].split(".").every((identifier) => !/^\d+$/.test(identifier) || identifier === "0" || !identifier.startsWith("0"));
+}
+
 function validateInputs(options) {
   assert(options && typeof options === "object", "OCI loader options are required.");
   assert(["api", "admin"].includes(options.kind), "OCI loader kind must be api or admin.");
-  assert(typeof options.version === "string" && SEMVER.test(options.version), "OCI loader version must be exact SemVer.");
+  assert(typeof options.version === "string", "OCI loader version must be a string.");
+  assert(!options.version.includes("+"), "OCI loader version must not contain SemVer build metadata because it is used as a Docker tag.");
+  assert(isStrictSemVer(options.version), "OCI loader version must be strict SemVer 2.0 without leading-zero numeric identifiers.");
+  assert(Buffer.byteLength(options.version, "utf8") <= 128 && DOCKER_TAG.test(options.version), "OCI loader version must be a valid Docker tag no longer than 128 bytes.");
   const manifest = parseJsonFile(options.manifest, "Release manifest");
   const archive = readOciArchiveDocuments(options.archive);
   assert(manifest.value?.version === options.version, `Release manifest version must equal ${options.version}.`);
   const certified = manifest.value?.oci?.[options.kind];
   const repository = `docker.io/syntaxcircus/cmsify-${options.kind}`;
   const canonicalRef = `${repository}:${options.version}`;
+  assert(CANONICAL_REF.test(canonicalRef), `OCI loader canonical ref ${canonicalRef} is unsafe.`);
   assert(certified && typeof certified === "object", `Release manifest must bind OCI kind ${options.kind}.`);
   assert(certified.repository === repository, `Release manifest ${options.kind} repository must be ${repository}.`);
   assert(certified.ref === canonicalRef && certified.imageName === canonicalRef && certified.tag === options.version, `Release manifest ${options.kind} must bind the safe canonical ref ${canonicalRef}.`);
   assert(DIGEST.test(certified.digest ?? ""), `Release manifest ${options.kind} digest must be an exact sha256 digest.`);
   assert(certified.mediaType === OCI_MANIFEST, `Release manifest ${options.kind} must bind an OCI image manifest.`);
+  assert(Number.isSafeInteger(certified.size) && certified.size > 0, `Release manifest ${options.kind} descriptor size must be a positive safe integer.`);
   assert(certified.platform?.os === "linux" && certified.platform?.architecture === "amd64", `Release manifest ${options.kind} must bind linux/amd64.`);
   const selected = (archive.index?.manifests ?? []).filter((descriptor) => descriptor?.annotations?.["org.opencontainers.image.ref.name"] === options.version
     && descriptor?.annotations?.["io.containerd.image.name"] === canonicalRef);
   assert(selected.length === 1, `OCI archive index must select exactly one descriptor by tag and canonical containerd name for ${options.kind}.`);
   const descriptor = selected[0];
   assert(descriptor.digest === certified.digest, `OCI archive selected descriptor digest must equal the release-manifest ${options.kind} digest.`);
+  assert(Number.isSafeInteger(descriptor.size) && descriptor.size > 0, `OCI archive selected descriptor size must be a positive safe integer.`);
   assert(descriptor.mediaType === certified.mediaType && descriptor.size === certified.size, `OCI archive selected descriptor metadata must equal the release-manifest ${options.kind} descriptor.`);
   assert(descriptor.platform?.os === "linux" && descriptor.platform?.architecture === "amd64", `OCI archive selected descriptor must be linux/amd64.`);
   return { archivePath: archive.path, canonicalRef, certified };
@@ -190,8 +204,28 @@ function safeRunId(value) {
   return runId;
 }
 
+function runResourceName(runId, suffix) {
+  const name = `${runId}-${suffix}`;
+  assert(Buffer.byteLength(name, "utf8") <= 128 && /^[a-z0-9][a-z0-9_.-]*$/.test(name), `OCI loader ${suffix} name is unsafe.`);
+  return name;
+}
+
 function compactError(error) {
   return String(error?.message ?? error ?? "unknown failure").replace(/[\r\n]+/g, " ").slice(0, 512);
+}
+
+function escapedRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isMissingDockerTarget(error, kind, target) {
+  if (error?.exitCode !== 1) return false;
+  const output = `${error?.stderr ?? ""}\n${error?.stdout ?? ""}\n${error?.message ?? ""}`;
+  const exactTarget = escapedRegExp(target);
+  const diagnostic = kind === "network"
+    ? `(?:No such network:\\s*${exactTarget}|network\\s+${exactTarget}\\s+not found)`
+    : `No such ${kind}:\\s*${exactTarget}`;
+  return new RegExp(`${diagnostic}(?:\\s|$)`, "i").test(output);
 }
 
 export async function loadOciCandidate(options, dependencies = {}) {
@@ -199,35 +233,52 @@ export async function loadOciCandidate(options, dependencies = {}) {
   const run = dependencies.run ?? runProcess;
   const waitForRegistry = dependencies.waitForRegistry ?? defaultWaitForRegistry;
   const runId = safeRunId(dependencies.runId);
-  const networkName = `${runId}-network`;
-  const registryName = `${runId}-registry`;
-  let networkCreated = false;
-  let registryCreated = false;
+  const networkName = runResourceName(runId, "network");
+  const registryName = runResourceName(runId, "registry");
+  const skopeoName = runResourceName(runId, "skopeo");
+  let networkCleanupIntent = false;
+  let registryCleanupIntent = false;
+  let skopeoCleanupIntent = false;
   let intermediateRef;
-  let intermediatePulled = false;
-  let canonicalCreated = false;
+  let intermediateCleanupIntent = false;
+  let canonicalCleanupIntent = false;
   let completed = false;
   let primaryError;
   const cleanupErrors = [];
   const execute = (args, phase) => run("docker", args, { timeoutMs: PROCESS_TIMEOUT_MS, phase });
-  const cleanup = async (args, phase) => {
+  const assertAbsent = async (args, phase, kind, target, label) => {
     try { await execute(args, phase); }
-    catch (error) { cleanupErrors.push(`${phase}: ${compactError(error)}`); }
+    catch (error) {
+      if (isMissingDockerTarget(error, kind, target)) return;
+      throw error;
+    }
+    throw new Error(`${label} already exists; refusing to mutate it.`);
+  };
+  const cleanup = async (args, phase, kind, target) => {
+    try { await execute(args, phase); }
+    catch (error) {
+      if (isMissingDockerTarget(error, kind, target)) return;
+      cleanupErrors.push(`${phase}: ${compactError(error)}`);
+    }
   };
 
   try {
+    await assertAbsent(["image", "inspect", input.canonicalRef], "oci-loader-canonical-preflight", "image", input.canonicalRef, "Canonical candidate ref");
+    await assertAbsent(["network", "inspect", networkName], "oci-loader-network-preflight", "network", networkName, "Run-owned Docker network");
+    await assertAbsent(["container", "inspect", registryName], "oci-loader-registry-preflight", "container", registryName, "Run-owned Registry container");
+    await assertAbsent(["container", "inspect", skopeoName], "oci-loader-skopeo-preflight", "container", skopeoName, "Run-owned Skopeo container");
     await execute(["image", "pull", "--platform", "linux/amd64", REGISTRY_IMAGE], "oci-loader-registry-image-pull");
     await execute(["image", "pull", "--platform", "linux/amd64", SKOPEO_IMAGE], "oci-loader-skopeo-image-pull");
-    const network = await execute(["network", "create", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, networkName], "oci-loader-network-create");
-    networkCreated = true;
+    networkCleanupIntent = true;
+    const network = await execute(["network", "create", "--internal", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, networkName], "oci-loader-network-create");
     const returnedNetworkId = String(network.stdout).trim();
     assert(/^[a-f0-9]{12,64}$|^network-id$/.test(returnedNetworkId), "Docker did not return a safe isolated network ID.");
+    registryCleanupIntent = true;
     const registry = await execute([
       "run", "--detach", "--pull=never", "--platform", "linux/amd64", "--name", registryName,
       "--network", networkName, "--network-alias", "registry", "--publish", "127.0.0.1::5000",
       "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, REGISTRY_IMAGE,
     ], "oci-loader-registry-start");
-    registryCreated = true;
     const returnedRegistryId = String(registry.stdout).trim();
     assert(/^[a-f0-9]{12,64}$|^registry-container-id$/.test(returnedRegistryId), "Docker did not return a safe isolated registry container ID.");
     const published = await execute(["container", "port", registryName, "5000/tcp"], "oci-loader-registry-port");
@@ -235,20 +286,23 @@ export async function loadOciCandidate(options, dependencies = {}) {
     await waitForRegistry(`http://127.0.0.1:${port}/v2/`);
     const localRepository = `127.0.0.1:${port}/cmsify-${options.kind}`;
     intermediateRef = `${localRepository}:${runId}`;
+    await assertAbsent(["image", "inspect", intermediateRef], "oci-loader-intermediate-preflight", "image", intermediateRef, "Run-owned loopback image tag");
+    skopeoCleanupIntent = true;
     await execute([
-      "run", "--rm", "--pull=never", "--platform", "linux/amd64", "--network", networkName,
+      "run", "--rm", "--pull=never", "--platform", "linux/amd64", "--name", skopeoName,
+      "--network", networkName, "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`,
       "--mount", `type=bind,source=${input.archivePath},target=/candidate.oci.tar,readonly`,
       SKOPEO_IMAGE, "copy", "--preserve-digests", "--dest-tls-verify=false",
       `oci-archive:/candidate.oci.tar:${options.version}`, `docker://registry:5000/cmsify-${options.kind}:${runId}`,
     ], "oci-loader-skopeo-copy");
+    intermediateCleanupIntent = true;
     await execute(["image", "pull", "--platform", "linux/amd64", intermediateRef], "oci-loader-candidate-pull");
-    intermediatePulled = true;
     const inspected = parseDockerJson(await execute(["image", "inspect", "--format", "{{json .}}", intermediateRef], "oci-loader-candidate-inspect"), "candidate inspection");
     const expectedRepoDigest = `${localRepository}@${input.certified.digest}`;
     assert(Array.isArray(inspected.RepoDigests) && inspected.RepoDigests.includes(expectedRepoDigest), `Loopback candidate RepoDigest must equal certified destination digest ${input.certified.digest}.`);
     assert(/^sha256:[0-9a-f]{64}$/.test(inspected.Id ?? ""), "Loopback candidate must have an immutable Docker image ID.");
+    canonicalCleanupIntent = true;
     await execute(["image", "tag", inspected.Id, input.canonicalRef], "oci-loader-canonical-tag");
-    canonicalCreated = true;
     const canonical = parseDockerJson(await execute(["image", "inspect", "--format", "{{json .}}", input.canonicalRef], "oci-loader-canonical-inspect"), "canonical candidate inspection");
     assert(canonical.Id === inspected.Id && Array.isArray(canonical.RepoTags) && canonical.RepoTags.includes(input.canonicalRef), "Canonical candidate tag must resolve to the exact digest-verified image ID.");
     completed = true;
@@ -257,10 +311,11 @@ export async function loadOciCandidate(options, dependencies = {}) {
     primaryError = error;
     throw error;
   } finally {
-    if (canonicalCreated && !completed) await cleanup(["image", "rm", input.canonicalRef], "oci-loader-cleanup-canonical");
-    if (intermediatePulled) await cleanup(["image", "rm", intermediateRef], "oci-loader-cleanup-intermediate");
-    if (registryCreated) await cleanup(["container", "rm", "--force", registryName], "oci-loader-cleanup-registry");
-    if (networkCreated) await cleanup(["network", "rm", networkName], "oci-loader-cleanup-network");
+    if (canonicalCleanupIntent && !completed) await cleanup(["image", "rm", input.canonicalRef], "oci-loader-cleanup-canonical", "image", input.canonicalRef);
+    if (intermediateCleanupIntent) await cleanup(["image", "rm", intermediateRef], "oci-loader-cleanup-intermediate", "image", intermediateRef);
+    if (skopeoCleanupIntent) await cleanup(["container", "rm", "--force", skopeoName], "oci-loader-cleanup-skopeo", "container", skopeoName);
+    if (registryCleanupIntent) await cleanup(["container", "rm", "--force", registryName], "oci-loader-cleanup-registry", "container", registryName);
+    if (networkCleanupIntent) await cleanup(["network", "rm", networkName], "oci-loader-cleanup-network", "network", networkName);
     if (cleanupErrors.length > 0) {
       const message = `${primaryError ? `${compactError(primaryError)} ` : ""}OCI loader cleanup failed: ${cleanupErrors.join("; ").slice(0, 1024)}`;
       if (!primaryError) throw new Error(message);

@@ -294,6 +294,24 @@ test("rejects release rehearsal candidate-variable drift", () => expectInvalid((
 test("rejects a pull between exact archive import and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(/(\s*node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-api\.oci\.tar[^\n]*)/, '$1\n          docker image pull "$CANDIDATE_IMAGE"')), /release upgrade.*pull.*between.*load.*rehearsal/i));
 test("rejects a re-tag between exact archive load and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("          node eng/upgrade-tests/cli.mjs rehearse", "          docker image tag syntaxcircus/cmsify-api:other \"$CANDIDATE_IMAGE\"\n          node eng/upgrade-tests/cli.mjs rehearse")), /release upgrade.*re-tag.*between.*load.*rehearsal/i));
 
+for (const [separator, compound] of [
+  ["and", 'true && docker pull "$CANDIDATE_IMAGE"'],
+  ["semicolon", 'true; docker image pull "$CANDIDATE_IMAGE"'],
+  ["or", 'false || docker pull "$CANDIDATE_IMAGE"'],
+  ["pipe", 'true | docker image pull "$CANDIDATE_IMAGE"'],
+  ["background", 'true & docker pull "$CANDIDATE_IMAGE"'],
+]) {
+  test(`rejects a ${separator}-separated pull between exact archive load and rehearsal`, () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(
+    "          node eng/upgrade-tests/cli.mjs rehearse",
+    `          ${compound}\n          node eng/upgrade-tests/cli.mjs rehearse`,
+  )), /release upgrade.*pull.*between.*load.*rehearsal/i));
+}
+
+test("rejects a compound re-tag between exact archive load and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(
+  "          node eng/upgrade-tests/cli.mjs rehearse",
+  '          true && docker tag syntaxcircus/cmsify-api:other "$CANDIDATE_IMAGE"\n          node eng/upgrade-tests/cli.mjs rehearse',
+)), /release upgrade.*re-tag.*between.*load.*rehearsal/i));
+
 test("rejects combined ORAS boolean and path flags", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api", "oras manifest fetch --descriptor --oci-layout --oci-layout-path artifacts/oci/api")), /ORAS.*combined.*--oci-layout/i));
 test("rejects combined ORAS copy boolean and path flags", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras cp --from-oci-layout-path artifacts/oci/api", "oras cp --from-oci-layout --from-oci-layout-path artifacts/oci/api")), /ORAS.*combined.*--from-oci-layout/i));
 test("rejects Docker Hub preflight without a scoped Bearer token", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("https://auth.docker.io/token?service=registry.docker.io&scope=repository:$image:pull,push", "https://registry-1.docker.io/v2/token")), /Docker Hub.*scoped Bearer token/i));

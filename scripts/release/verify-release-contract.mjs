@@ -492,10 +492,18 @@ function jobBody(name) {
 }
 
 function loaderInvocations(job) {
-  return workflowRunCommands(job)
-    .flatMap((command) => shellCommandSegments(command))
-    .map((command) => command.map((token) => token.value))
+  return workflowCommandSegments(job)
     .filter((command) => command[0] === "node" && command[1] === ociLoaderPath);
+}
+
+function workflowCommandSegments(contents) {
+  return workflowRunCommands(contents)
+    .flatMap((command) => shellCommandSegments(command))
+    .map((command) => command.map((token) => token.value));
+}
+
+function isDockerImageOperation(command, operation) {
+  return command[0] === "docker" && (command[1] === operation || (command[1] === "image" && command[2] === operation));
 }
 
 function exactLoaderInvocation(kind) {
@@ -615,9 +623,17 @@ const releasePostgresPull = releaseUpgrade.indexOf('docker pull --platform linux
 const releaseMinioPull = releaseUpgrade.indexOf('docker pull --platform linux/amd64 "$MINIO_IMAGE"');
 const releaseRehearsal = releaseUpgrade.indexOf("cli.mjs rehearse");
 expect(releaseBaseline >= 0 && releaseFixture > releaseBaseline && releaseBaselinePull > releaseFixture && releasePostgresPull > releaseBaselinePull && releaseMinioPull > releasePostgresPull && releaseLoad > releaseMinioPull && releaseRehearsal > releaseLoad, "Release upgrade job must verify the moving baseline and fixture, pull every exact linux/amd64 prerequisite, import the candidate archive, then rehearse that image.");
-const loadedCandidateWindow = releaseLoad >= 0 && releaseRehearsal > releaseLoad ? releaseUpgrade.slice(releaseLoad, releaseRehearsal) : "";
-expect(!/^\s*docker\s+(?:image\s+)?pull\b/im.test(loadedCandidateWindow), "Release upgrade job must not pull between exact archive load and rehearsal.");
-expect(!/^\s*docker\s+(?:image\s+)?tag\b/im.test(loadedCandidateWindow), "Release upgrade job must not re-tag between exact archive load and rehearsal.");
+const releaseUpgradeCommands = workflowCommandSegments(releaseUpgrade);
+const expectedReleaseLoader = exactLoaderInvocation("api");
+const releaseLoaderCommand = releaseUpgradeCommands.findIndex((command) => command.length === expectedReleaseLoader.length
+  && command.every((value, index) => value === expectedReleaseLoader[index]));
+const releaseRehearsalCommand = releaseUpgradeCommands.findIndex((command, index) => index > releaseLoaderCommand
+  && command[0] === "node" && command[1] === "eng/upgrade-tests/cli.mjs" && command[2] === "rehearse");
+const loadedCandidateCommands = releaseLoaderCommand >= 0 && releaseRehearsalCommand > releaseLoaderCommand
+  ? releaseUpgradeCommands.slice(releaseLoaderCommand + 1, releaseRehearsalCommand)
+  : [];
+expect(!loadedCandidateCommands.some((command) => isDockerImageOperation(command, "pull")), "Release upgrade job must not pull between exact archive load and rehearsal.");
+expect(!loadedCandidateCommands.some((command) => isDockerImageOperation(command, "tag")), "Release upgrade job must not re-tag between exact archive load and rehearsal.");
 expect(!/\b(docker buildx build|docker build|dotnet pack|npm pack)\b/i.test(releaseUpgrade), "Release upgrade job must not rebuild the candidate.");
 expect(jobConditionRequiresSuccess(releaseUpgrade), "The upgrade-rollback job condition must require successful dependencies so the release gate fails closed.");
 expect(continueOnErrorIsDisabled(releaseUpgrade), "The upgrade-rollback job and steps must not enable continue-on-error; the gate must fail closed.");
