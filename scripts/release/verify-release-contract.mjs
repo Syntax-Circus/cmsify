@@ -342,7 +342,27 @@ function workflowRunCommands(contents) {
 function decodeYamlScalar(source) {
   const scalar = source.trim();
   if (scalar.startsWith('"')) {
-    try { return JSON.parse(scalar); } catch { return undefined; }
+    if (!scalar.endsWith('"')) return undefined;
+    const namedEscapes = new Map([
+      ["0", "\0"], ["a", "\x07"], ["b", "\b"], ["t", "\t"], ["n", "\n"], ["v", "\v"],
+      ["f", "\f"], ["r", "\r"], ["e", "\x1b"], [" ", " "], ['"', '"'], ["/", "/"], ["\\", "\\"],
+      ["N", "\u0085"], ["_", "\u00a0"], ["L", "\u2028"], ["P", "\u2029"],
+    ]);
+    let decoded = "";
+    for (let index = 1; index < scalar.length - 1; index += 1) {
+      if (scalar[index] !== "\\") { decoded += scalar[index]; continue; }
+      const escape = scalar[++index];
+      if (namedEscapes.has(escape)) { decoded += namedEscapes.get(escape); continue; }
+      const digits = escape === "x" ? 2 : escape === "u" ? 4 : escape === "U" ? 8 : 0;
+      if (digits === 0) return undefined;
+      const hexadecimal = scalar.slice(index + 1, index + 1 + digits);
+      if (!new RegExp(`^[0-9a-f]{${digits}}$`, "i").test(hexadecimal)) return undefined;
+      const codePoint = Number.parseInt(hexadecimal, 16);
+      if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return undefined;
+      decoded += String.fromCodePoint(codePoint);
+      index += digits;
+    }
+    return decoded;
   }
   if (scalar.startsWith("'")) {
     if (!scalar.endsWith("'")) return undefined;
@@ -375,9 +395,14 @@ function yamlScalarPrefix(source) {
 
 function workflowActionReference(line) {
   const mapping = /^\s*(?:-\s+)?((?:"(?:\\.|[^"\\])*"|'(?:''|[^'])*'|[^\s:#]+))\s*:\s*(.*)$/.exec(line);
-  if (!mapping || decodeYamlScalar(mapping[1])?.toLowerCase() !== "uses") return undefined;
+  if (!mapping) return undefined;
+  const key = decodeYamlScalar(mapping[1]);
+  if (key === undefined) return { invalid: true };
+  if (key.toLowerCase() !== "uses") return undefined;
   const scalar = yamlScalarPrefix(mapping[2]);
-  return scalar === undefined ? undefined : decodeYamlScalar(scalar);
+  if (scalar === undefined) return { invalid: true };
+  const value = decodeYamlScalar(scalar);
+  return value === undefined ? { invalid: true } : { value };
 }
 
 function workflowUploadArtifactSteps(contents) {
@@ -396,7 +421,7 @@ function workflowUploadArtifactSteps(contents) {
       index += 1;
     }
     const body = step.join("\n");
-    const action = step.map(workflowActionReference).find(Boolean);
+    const action = step.map(workflowActionReference).find(Boolean)?.value;
     if (action?.slice(0, action.lastIndexOf("@")).toLowerCase() !== "actions/upload-artifact") continue;
     const inlineWithLine = step.find((line) => /with:\s*\{/.test(line));
     const inlineWith = inlineWithLine === undefined
@@ -450,10 +475,19 @@ function hasContradictoryTransportClaim(contents) {
     return trailingProhibition.test(clauseAfter);
   };
   return contents.replaceAll("\r\n", "\n").split(/\n\s*\n/).some((paragraph) => {
-    const subject = transportSubject.exec(paragraph);
-    if (!subject) return false;
-    const transportContext = paragraph.slice(subject.index);
-    return [...transportContext.matchAll(releaseAction)].some((action) => !actionIsNegated(transportContext, action));
+    const clauses = paragraph.replaceAll("\n", " ")
+      .split(/(?:[.!?;:](?:\s+|$)|\b(?:before|after|while|whereas|but|however|yet)\b)/i)
+      .map((clause) => clause.trim())
+      .filter(Boolean);
+    let previousClauseHasTransport = false;
+    for (const clause of clauses) {
+      const hasTransport = transportSubject.test(clause);
+      const explicitTransportPronoun = /^(?:[-*]\s*)?(?:it\b|(?:this|that|the)\s+(?:archive|scratch|output|artifact)\b)/i.test(clause);
+      const associated = hasTransport || (previousClauseHasTransport && explicitTransportPronoun);
+      previousClauseHasTransport = hasTransport;
+      if (associated && [...clause.matchAll(releaseAction)].some((action) => !actionIsNegated(clause, action))) return true;
+    }
+    return false;
   });
 }
 
@@ -523,7 +557,12 @@ export function validateRepositorySupplyChain(root) {
     const workflowImages = isWorkflow ? workflowImageReferences(contents) : [];
     for (const [index, line] of contents.replaceAll("\r\n", "\n").split("\n").entries()) {
       const lineNumber = index + 1;
-      const action = workflowActionReference(line);
+      const actionReference = workflowActionReference(line);
+      if (isWorkflow && actionReference?.invalid) {
+        violations.push(supplyChainError(relativePath, lineNumber, "quoted YAML action key/value scalar must decode successfully"));
+        continue;
+      }
+      const action = actionReference?.value;
       if (action && !action.startsWith("./") && !/^[^/\s]+\/[^@\s]+@[0-9a-f]{40}$/i.test(action)) {
         violations.push(supplyChainError(relativePath, lineNumber, `action reference must use owner/repository@40-hex-SHA: ${action}`));
       } else if (action && !action.startsWith("./") && !/\s#\s+v\d+(?:\.\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?\s*$/.test(line)) {

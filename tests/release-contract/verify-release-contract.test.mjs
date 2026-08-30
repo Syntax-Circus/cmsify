@@ -309,6 +309,23 @@ test("rejects a double-quoted mutable action value", () => expectInvalid((root) 
   "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
   '"uses": "actions/checkout@v4" # v4.2.2',
 )), /action reference.*40-hex/i));
+for (const [name, usesKey] of [
+  ["hex escape", '"u\\x73es"'],
+  ["upper Unicode escape", '"u\\U00000073es"'],
+]) {
+  test(`rejects scratch upload behind a uses key with ${name}`, () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace(
+    "    steps:\n",
+    `    steps:\n      - ${usesKey}: "Actions/Upload-Artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4.6.2\n        with: { name: converted-candidate, path: \${{ runner.temp }}/escaped-transport.tar, if-no-files-found: error, retention-days: 14 }\n`,
+  )), /release workflow.*upload.*allowlist|transport scratch.*(?:upload|certif)/i));
+}
+test("rejects an undecodable quoted action key", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
+  '"u\\qses": actions/checkout@v4 # v4.2.2',
+)), /quoted.*action|YAML.*scalar|decode/i));
+test("rejects an undecodable quoted action value", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
+  'uses: "actions/checkout@v4\\q" # v4.2.2',
+)), /quoted.*action|YAML.*scalar|decode/i));
 for (const [relativePath, claim] of [
   ["docs/release-runbook.md", "The registry relay is the certified release image."],
   ["tests/upgrade/README.md", "The rebuilt candidate image is certified for promotion."],
@@ -350,6 +367,18 @@ for (const [relativePath, paragraph] of [
   ["docs/release-runbook.md", "Temporary transport output is prohibited from certification and forbidden from promotion."],
 ]) {
   test(`accepts action-scoped negative transport rule in ${relativePath}`, () => expectValid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`)));
+}
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "Certified release artifacts include the temporary Docker archive."],
+  ["tests/upgrade/README.md", "Uploaded evidence includes this temporary transport output."],
+]) {
+  test(`rejects action-before-transport contradiction in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`), /runbook.*exclusive.*temporary transport output/i));
+}
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "The temporary Docker archive is deleted before certification of the original OCI archive."],
+  ["tests/release-smoke/README.md", "Temporary transport output is discarded while the original OCI archive is promoted by digest."],
+]) {
+  test(`accepts a temporal boundary to original-archive action in ${relativePath}`, () => expectValid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`)));
 }
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");
