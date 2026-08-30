@@ -10,7 +10,7 @@ import { loadExpectedData } from "./expected.mjs";
 import { createDockerHttpAdapter } from "./http.mjs";
 import { loadFixtureManifest, verifyFixtureGenerationProvenance } from "./manifest.mjs";
 import { assertTrustedRunScope, createRunScope } from "./paths.mjs";
-import { assertPhysicalPath, ensureSafeDirectory, openSafeRegularFile, readSafeFile, writeBoundedJsonAtomically, writeSafeAtomically } from "./safe-files.mjs";
+import { assertPhysicalPath, ensureSafeDirectory, MAX_SAFE_JSON_BYTES, openSafeRegularFile, readSafeFile, writeBoundedJsonAtomically, writeSafeAtomically } from "./safe-files.mjs";
 
 export const REHEARSAL_PHASES = Object.freeze([
   "preflight",
@@ -751,6 +751,40 @@ function recordCleanupOutcome(next, status, error) {
   };
 }
 
+function reportBytes(value) {
+  return Buffer.byteLength(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function summarizedEvidence(value) {
+  const evidence = safeEvidence(value);
+  if (!evidence) return undefined;
+  return {
+    truncated: true,
+    ...(evidence.readiness ? { readinessCount: evidence.readiness.length } : {}),
+    ...(evidence.assertions ? { assertionCount: evidence.assertions.length } : {}),
+    ...(evidence.manifestSha256 ? { manifestSha256: evidence.manifestSha256 } : {}),
+    ...(evidence.sourceMediaObjectCount !== undefined ? { sourceMediaObjectCount: evidence.sourceMediaObjectCount } : {}),
+    ...(evidence.prerequisites ? { prerequisites: evidence.prerequisites } : {}),
+    ...(evidence.backupVerified ? { backupVerified: true } : {}),
+    ...(evidence.dataVolumesDiscarded ? { dataVolumesDiscarded: true } : {}),
+    ...(evidence.canaryId ? { canaryId: evidence.canaryId } : {}),
+  };
+}
+
+function compactReportForPersistence(next) {
+  if (reportBytes(next) <= MAX_SAFE_JSON_BYTES) return next;
+
+  const failedPhase = next.phases.find(({ name }) => name === next.failedStage);
+  if (failedPhase && next.failureEvidence !== null) delete failedPhase.evidence;
+
+  for (const phase of next.phases) {
+    if (phase.status === "passed" && phase.evidence) phase.evidence = summarizedEvidence(phase.evidence);
+  }
+
+  assert(reportBytes(next) <= MAX_SAFE_JSON_BYTES, "Compacted upgrade diagnostics exceed the safe JSON size limit.");
+  return next;
+}
+
 function operationFor(operations, phase) {
   const names = {
     preflight: "preflight",
@@ -794,6 +828,7 @@ export async function rehearse(options) {
   const commit = async (phaseName, status, mutate) => {
     const next = structuredClone(report);
     mutate(next);
+    compactReportForPersistence(next);
     try {
       await persist(structuredClone(next));
     } catch {
@@ -838,14 +873,17 @@ export async function rehearse(options) {
       const phase = next.phases[phaseIndex];
       if (phase.status === "pending") phase.startedAt = now();
       if (phase.status !== "passed") {
+        const alreadyFailed = phase.status === "failed";
         phase.status = "failed";
         phase.completedAt = now();
         const summary = failureSummary(error, phaseName, failureKind);
         phase.error = summary.message.slice(0, 256);
         phase.errorCode = summary.code;
-        const allowedEvidence = safeEvidence(error?.safeEvidence);
-        if (allowedEvidence) phase.evidence = allowedEvidence;
-        retainFirstFailure(next, phaseName, error?.safeEvidence);
+        if (!alreadyFailed) {
+          const allowedEvidence = safeEvidence(error?.safeEvidence);
+          if (allowedEvidence) phase.evidence = allowedEvidence;
+          retainFirstFailure(next, phaseName, error?.safeEvidence);
+        }
       }
       next.status = "failed";
       if (phaseName === "cleanup") next.completedAt = now();

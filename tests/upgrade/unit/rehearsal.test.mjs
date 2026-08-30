@@ -58,6 +58,20 @@ function successfulOperations(events, failure) {
   };
 }
 
+function maximumSafeEvidence(status) {
+  return {
+    readiness: Array.from({ length: 16 }, (_, index) => ({
+      service: `service-${String(index).padStart(2, "0")}-${"r".repeat(53)}`,
+      status: "ready",
+      attempts: 10_000,
+    })),
+    assertions: Array.from({ length: 128 }, (_, index) => ({
+      name: `assertion-${String(index).padStart(3, "0")}-${"a".repeat(49)}`,
+      status,
+    })),
+  };
+}
+
 async function runWithFakes({ fail } = {}) {
   const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-test-"));
   const events = [];
@@ -1235,6 +1249,84 @@ test("final rollback diagnostics retain safe failure evidence after cleanup", as
     assert.deepEqual(events.slice(-2), ["diagnostics:capture", "owned-resources:cleanup"]);
     const serialized = JSON.stringify(report);
     for (const forbidden of [secret, "Host=rollback-secret", "Bearer"]) assert.equal(serialized.includes(forbidden), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("retains maximum allow-listed rollback evidence within the report cap", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rollback-at-cap-"));
+  const runId = "rollback-at-cap-001";
+  const operations = successfulOperations([]);
+  operations.rollback = async () => {
+    const error = new Error("Invariant maximum-rollback-evidence failed:");
+    error.safeEvidence = maximumSafeEvidence("failed");
+    throw error;
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId,
+      operations,
+    }), /rollback phase invariant/i);
+
+    const serialized = readFileSync(resolve(repositoryRoot, "artifacts", "upgrade-tests", runId, "report.json"), "utf8");
+    const report = JSON.parse(serialized);
+    assert.ok(Buffer.byteLength(serialized, "utf8") <= 64 * 1024);
+    assert.equal(report.failedStage, "rollback");
+    assert.equal(report.failureEvidence.readiness.length, 16);
+    assert.equal(report.failureEvidence.assertions.length, 128);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
+test("compacts prior phase detail before finalizing oversized rollback diagnostics", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rollback-over-cap-"));
+  const runId = "rollback-over-cap-001";
+  const operations = successfulOperations([]);
+  for (const name of ["restoreFixture", "baseline"]) {
+    const operation = operations[name];
+    operations[name] = async (context) => ({ ...await operation(context), ...maximumSafeEvidence("passed") });
+  }
+  operations.rollback = async () => {
+    const error = new Error("Invariant oversized-rollback-evidence failed:");
+    error.safeEvidence = maximumSafeEvidence("failed");
+    throw error;
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId,
+      operations,
+    }), /rollback phase invariant/i);
+
+    const serialized = readFileSync(resolve(repositoryRoot, "artifacts", "upgrade-tests", runId, "report.json"), "utf8");
+    const report = JSON.parse(serialized);
+    assert.ok(Buffer.byteLength(serialized, "utf8") <= 64 * 1024);
+    assert.equal(report.schema, "cmsify.upgrade-diagnostics.v1");
+    assert.equal(report.failedStage, "rollback");
+    assert.equal(report.failureEvidence.readiness.length, 16);
+    assert.equal(report.failureEvidence.assertions.length, 128);
+    assert.deepEqual(report.cleanup, { status: "passed" });
+    for (const phaseName of ["restore-fixture", "baseline"]) {
+      assert.deepEqual(report.phases.find(({ name }) => name === phaseName).evidence, {
+        truncated: true,
+        readinessCount: 16,
+        assertionCount: 128,
+      });
+    }
+    assert.equal(report.phases.find(({ name }) => name === "rollback").evidence, undefined);
   } finally {
     rmSync(repositoryRoot, { force: true, recursive: true });
   }
