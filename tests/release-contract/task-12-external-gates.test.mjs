@@ -60,6 +60,10 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function sha512(value) {
+  return createHash("sha512").update(value).digest("base64");
+}
+
 function minutesFromNow(minutes) {
   return new Date(testNow.getTime() + minutes * 60_000).toISOString().replace(".000Z", "Z");
 }
@@ -126,8 +130,14 @@ function runGate(gate, { commands = {}, environment = {}, arrange } = {}) {
 const packageIdentity = {
   id: "SyntaxCircus.Http.Resilience",
   version: "0.2.0-cmsify.1",
-  contentHash: "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+  expectedRepositorySignature: {
+    type: "Repository",
+    serviceIndex: "https://api.nuget.org/v3/index.json",
+    owner: "syntaxcircus",
+  },
 };
+const signedPublicPackageBytes = Buffer.from([80, 75, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+const localUnsignedPackageSha256 = sha256("different-local-unsigned-package-bytes").toUpperCase();
 const affectedAssets = [
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/obj/project.assets.json",
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/obj/project.assets.json",
@@ -136,17 +146,27 @@ const affectedAssets = [
   "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json",
 ];
 
-function publicAssets(libraryPacksSource) {
+function publicAssets(libraryPacksSource, contentHash) {
   const packagePath = `${packageIdentity.id.toLowerCase()}/${packageIdentity.version}`;
   const document = {
-    libraries: { [`${packageIdentity.id}/${packageIdentity.version}`]: { type: "package", path: packagePath, sha512: packageIdentity.contentHash } },
+    libraries: { [`${packageIdentity.id}/${packageIdentity.version}`]: { type: "package", path: packagePath, sha512: contentHash } },
     packageFolders: { "{{ARG_AFTER:--packages}}": {} },
     project: { restore: { configFilePaths: ["{{ARG_AFTER:--configfile}}"], sources: { [libraryPacksSource]: {}, "https://api.nuget.org/v3/index.json": {} } } },
   };
   return affectedAssets.map((asset) => ({ path: asset, json: document }));
 }
 
-function runPublicRestore({ downloadBytes = "public-package-bytes", expectedBytes = downloadBytes, cacheBytes = downloadBytes, mutateScript, mutateIdentity, libraryPacksSource, captureTemporaryRoot = false } = {}) {
+function runPublicRestore({
+  downloadBytes = signedPublicPackageBytes,
+  cacheBytes = downloadBytes,
+  contentHash = sha512(downloadBytes),
+  verification = {},
+  mutateLock,
+  mutateScript,
+  mutateIdentity,
+  libraryPacksSource,
+  captureTemporaryRoot = false,
+} = {}) {
   const { root, bin } = makeRoot();
   const repo = path.join(root, "repo");
   const scriptPath = path.join(repo, "scripts/release/verify-task-12-external-gate.ps1");
@@ -157,19 +177,31 @@ function runPublicRestore({ downloadBytes = "public-package-bytes", expectedByte
   if (mutateScript) script = mutateScript(script);
   writeFileSync(scriptPath, script);
   writeFileSync(path.join(repo, "Cmsify.slnx"), "<Solution />");
-  const sha = sha256(expectedBytes).toUpperCase();
-  const trackedIdentity = { ...packageIdentity, sha256: sha, publicRestoreValidated: false };
+  const trackedIdentity = { ...packageIdentity, localUnsignedSha256: localUnsignedPackageSha256, contentHash, publicRestoreValidated: false };
   mutateIdentity?.(trackedIdentity);
   writeFileSync(evidencePath, JSON.stringify({ localFeedPackage: trackedIdentity }));
+  for (const [assetIndex, asset] of affectedAssets.entries()) {
+    const lockPath = path.join(repo, asset.replace("/obj/project.assets.json", "/packages.lock.json"));
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    const lock = { version: 1, dependencies: { "net10.0": { [packageIdentity.id]: { type: asset.includes("SyntaxCircus.Cmsify.Client/obj") ? "Direct" : "CentralTransitive", resolved: packageIdentity.version, contentHash } } } };
+    if (assetIndex === 0) mutateLock?.(lock);
+    writeFileSync(lockPath, JSON.stringify(lock));
+  }
   const fixturePath = path.join(root, "commands.json");
   const logPath = path.join(root, "calls.log");
   const temporaryRootCapturePath = path.join(root, "temporary-root.txt");
   const trustedLibraryPacks = libraryPacksSource ?? path.join(bin, "library-packs");
+  const signatureType = verification.signatureType ?? packageIdentity.expectedRepositorySignature.type;
+  const serviceIndex = verification.serviceIndex ?? packageIdentity.expectedRepositorySignature.serviceIndex;
+  const owner = verification.owner ?? packageIdentity.expectedRepositorySignature.owner;
+  const reportedContentHash = verification.contentHash ?? contentHash;
+  const verifyOutput = verification.output ?? `Verifying ${packageIdentity.id}.${packageIdentity.version}\nContent hash: ${reportedContentHash}\nSignature type: ${signatureType}\nService index: ${serviceIndex}\nOwners: ${owner}\nSuccessfully verified package '${packageIdentity.id}.${packageIdentity.version}'.\n`;
   const minimalConfig = `<?xml version="1.0" encoding="utf-8"?>\n<configuration>\n  <packageSources>\n    <clear />\n    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />\n  </packageSources>\n</configuration>\n`;
   const fixture = {
     patterns: [
       { pattern: "^curl .*--output .+ https://api\\.nuget\\.org/v3-flatcontainer/syntaxcircus\\.http\\.resilience/0\\.2\\.0-cmsify\\.1/syntaxcircus\\.http\\.resilience\\.0\\.2\\.0-cmsify\\.1\\.nupkg$", response: { writeAfterArgument: { name: "--output", base64: Buffer.from(downloadBytes).toString("base64") } } },
-      { pattern: "^dotnet restore Cmsify\\.slnx --configfile .+ --packages .+ --no-http-cache --locked-mode --force-evaluate$", response: { assertFileAfterArgument: { name: "--configfile", exact: minimalConfig }, writeFiles: [...publicAssets(trustedLibraryPacks), { path: `{{ARG_AFTER:--packages}}/${packageIdentity.id.toLowerCase()}/${packageIdentity.version}/${packageIdentity.id.toLowerCase()}.${packageIdentity.version}.nupkg`, base64: Buffer.from(cacheBytes).toString("base64") }] } },
+      { pattern: "^dotnet nuget verify .+ --all --configfile .+ --verbosity normal --force-english-output$", response: { exitCode: verification.exitCode ?? 0, stdout: verifyOutput } },
+      { pattern: "^dotnet restore Cmsify\\.slnx --configfile .+ --packages .+ --no-http-cache --locked-mode$", response: { assertFileAfterArgument: { name: "--configfile", exact: minimalConfig }, writeFiles: [...publicAssets(trustedLibraryPacks, contentHash), { path: `{{ARG_AFTER:--packages}}/${packageIdentity.id.toLowerCase()}/${packageIdentity.version}/${packageIdentity.id.toLowerCase()}.${packageIdentity.version}.nupkg`, base64: Buffer.from(cacheBytes).toString("base64") }] } },
     ],
   };
   writeFileSync(fixturePath, JSON.stringify(fixture));
@@ -179,6 +211,7 @@ function runPublicRestore({ downloadBytes = "public-package-bytes", expectedByte
     encoding: "utf8",
   });
   result.calls = existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split(/\r?\n/).filter(Boolean) : [];
+  result.verifyOutput = verifyOutput;
   result.capturedTemporaryRoot = existsSync(temporaryRootCapturePath) ? readFileSync(temporaryRootCapturePath, "utf8") : undefined;
   result.temporaryRootExistsAfter = result.capturedTemporaryRoot ? existsSync(result.capturedTemporaryRoot) : undefined;
   rmSync(root, { recursive: true, force: true });
@@ -245,12 +278,12 @@ test("declares exactly the immutable inputs consumed by gate subcommands", () =>
 
 test("public restore authenticates exact public bytes in isolated NuGet state and exactly five restored graphs", () => {
   const valid = runPublicRestore();
-  assert.equal(valid.status, 0, valid.stderr);
+  assert.equal(valid.status, 0, `${valid.stderr}\n${valid.verifyOutput}`);
+  assert.notEqual(sha256(signedPublicPackageBytes).toUpperCase(), localUnsignedPackageSha256, "signed public bytes must differ from local unsigned provenance bytes");
   assert.equal(valid.calls.filter((call) => call.startsWith("curl ")).length, 1);
+  assert.equal(valid.calls.filter((call) => call.startsWith("dotnet nuget verify ")).length, 1);
   assert.equal(valid.calls.filter((call) => call.startsWith("dotnet restore ")).length, 1);
 
-  const wrongBytes = runPublicRestore({ downloadBytes: "wrong-public-package-bytes", expectedBytes: "public-package-bytes" });
-  assert.notEqual(wrongBytes.status, 0, wrongBytes.stdout);
   const wrongCacheBytes = runPublicRestore({ cacheBytes: "wrong-restored-cache-bytes" });
   assert.notEqual(wrongCacheBytes.status, 0, wrongCacheBytes.stdout);
   const deceptiveLibraryPacks = runPublicRestore({ libraryPacksSource: path.join(os.tmpdir(), "attacker", "library-packs") });
@@ -264,8 +297,31 @@ test("public restore authenticates exact public bytes in isolated NuGet state an
     assert.equal(result.calls.length, 0, result.calls.join("\n"));
   }
 
+  for (const options of [
+    { verification: { output: "Successfully verified package.\n" } },
+    { verification: { signatureType: "Author" } },
+    { verification: { serviceIndex: "https://packages.example.invalid/v3/index.json" } },
+    { verification: { owner: "attacker" } },
+    { verification: { exitCode: 7 } },
+    { verification: { contentHash: sha512("wrong-content") } },
+  ]) {
+    const result = runPublicRestore(options);
+    assert.notEqual(result.status, 0, `signature/content mutation unexpectedly passed: ${result.stdout}`);
+    assert.equal(result.calls.filter((call) => call.startsWith("dotnet restore ")).length, 0, result.calls.join("\n"));
+  }
+
+  for (const mutateLock of [
+    (lock) => { lock.dependencies["net10.0"][packageIdentity.id].resolved = "9.9.9"; },
+    (lock) => { lock.dependencies["net10.0"][packageIdentity.id].contentHash = sha512("wrong-lock-content"); },
+    (lock) => { lock.dependencies["net10.0"][packageIdentity.id].type = "CentralTransitive"; },
+  ]) {
+    const result = runPublicRestore({ mutateLock });
+    assert.notEqual(result.status, 0, `lock mutation unexpectedly passed: ${result.stdout}`);
+    assert.equal(result.calls.filter((call) => call.startsWith("dotnet restore ")).length, 0, result.calls.join("\n"));
+  }
+
   for (const mutateScript of [
-    (script) => script.replace('@("restore", "Cmsify.slnx", "--configfile", $configPath, "--packages", $packagesRoot, "--no-http-cache", "--locked-mode", "--force-evaluate")', '@("restore", "Cmsify.slnx", "--locked-mode")'),
+    (script) => script.replace('@("restore", "Cmsify.slnx", "--configfile", $configPath, "--packages", $packagesRoot, "--no-http-cache", "--locked-mode")', '@("restore", "Cmsify.slnx", "--locked-mode")'),
     (script) => script.replace('"--packages", $packagesRoot, ', ""),
     (script) => script.replace('"--no-http-cache", ', ""),
     (script) => script.replace('https://api.nuget.org/v3/index.json', 'artifacts/local-nuget/http-resilience'),

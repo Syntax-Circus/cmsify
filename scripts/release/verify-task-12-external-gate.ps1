@@ -236,12 +236,18 @@ function Test-PublicPackageRestore {
     try { $identity = (Get-Content -Raw -LiteralPath $evidencePath | ConvertFrom-Json -Depth 20).localFeedPackage } catch { throw "Tracked Task 12 package identity is missing or invalid." }
     $packageId = [string] $identity.id
     $packageVersion = [string] $identity.version
-    $packageSha = [string] $identity.sha256
+    $localUnsignedSha = [string] $identity.localUnsignedSha256
     $contentHash = [string] $identity.contentHash
+    $expectedSignatureType = [string] $identity.expectedRepositorySignature.type
+    $expectedServiceIndex = [string] $identity.expectedRepositorySignature.serviceIndex
+    $expectedOwner = [string] $identity.expectedRepositorySignature.owner
     if ($packageId -cnotmatch "^[A-Za-z0-9][A-Za-z0-9._-]+$" -or
         $packageVersion -cnotmatch "^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" -or
-        $packageSha -cnotmatch "^[A-F0-9]{64}$" -or
-        $contentHash -cnotmatch "^[A-Za-z0-9+/]{86}==$") {
+        $localUnsignedSha -cnotmatch "^[A-F0-9]{64}$" -or
+        $contentHash -cnotmatch "^[A-Za-z0-9+/]{86}==$" -or
+        $expectedSignatureType -cne "Repository" -or
+        $expectedServiceIndex -cne "https://api.nuget.org/v3/index.json" -or
+        $expectedOwner -cne "syntaxcircus") {
         throw "Tracked Task 12 package identity is incomplete or invalid."
     }
 
@@ -274,26 +280,47 @@ function Test-PublicPackageRestore {
         $downloadUrl = "https://api.nuget.org/v3-flatcontainer/$lowerId/$lowerVersion/$nupkgName"
         [void] (Invoke-CheckedNative -FilePath "curl" -Arguments @("--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--tlsv1.2", "--output", $nupkgPath, $downloadUrl) -FailureMessage "Exact public package download failed")
         if (-not (Test-Path -LiteralPath $nupkgPath -PathType Leaf)) { throw "Exact public package download produced no nupkg." }
-        $actualPackageSha = (Get-FileHash -LiteralPath $nupkgPath -Algorithm SHA256).Hash
-        if ($actualPackageSha -cne $packageSha) { throw "Exact public package SHA-256 does not match tracked evidence." }
+        $downloadedSignedSha = (Get-FileHash -LiteralPath $nupkgPath -Algorithm SHA256).Hash
+        $verificationOutput = Invoke-CheckedNative -FilePath "dotnet" -Arguments @("nuget", "verify", $nupkgPath, "--all", "--configfile", $configPath, "--verbosity", "normal", "--force-english-output") -FailureMessage "Public package signature verification failed"
+        $verificationText = $verificationOutput -join [Environment]::NewLine
+        $contentHashMatches = [Regex]::Matches($verificationText, "(?m)^[ `t]*Content hash:[ `t]*(?<value>\S+)[ `t`r]*$")
+        $signatureTypeMatches = [Regex]::Matches($verificationText, "(?m)^[ `t]*Signature type:[ `t]*(?<value>\S+)[ `t`r]*$")
+        $serviceIndexMatches = [Regex]::Matches($verificationText, "(?m)^[ `t]*Service index:[ `t]*(?<value>\S+)[ `t`r]*$")
+        $ownerMatches = [Regex]::Matches($verificationText, "(?m)^[ `t]*Owners:[ `t]*(?<value>[^`r`n]+?)[ `t`r]*$")
+        if ($contentHashMatches.Count -ne 1 -or $contentHashMatches[0].Groups["value"].Value -cne $contentHash) { throw "Public package content hash is invalid." }
+        if ($signatureTypeMatches.Count -ne 1 -or $signatureTypeMatches[0].Groups["value"].Value -cne $expectedSignatureType) { throw "Public package signature type is invalid." }
+        if ($serviceIndexMatches.Count -ne 1 -or $serviceIndexMatches[0].Groups["value"].Value -cne $expectedServiceIndex) { throw "Public package repository service index is invalid." }
+        if ($ownerMatches.Count -ne 1 -or $ownerMatches[0].Groups["value"].Value -cne $expectedOwner) { throw "Public package repository owner is invalid." }
+
+        $graphDefinitions = @(
+            @{ Asset = "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/obj/project.assets.json"; Lock = "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/packages.lock.json"; LockType = "Direct" },
+            @{ Asset = "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/obj/project.assets.json"; Lock = "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/packages.lock.json"; LockType = "CentralTransitive" },
+            @{ Asset = "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/obj/project.assets.json"; Lock = "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/packages.lock.json"; LockType = "CentralTransitive" },
+            @{ Asset = "src/Cmsify.Admin/obj/project.assets.json"; Lock = "src/Cmsify.Admin/packages.lock.json"; LockType = "CentralTransitive" },
+            @{ Asset = "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json"; Lock = "tests/Cmsify.Admin.Integration.Tests/packages.lock.json"; LockType = "CentralTransitive" }
+        )
+        foreach ($definition in $graphDefinitions) {
+            $lockPath = Join-Path $repositoryRoot $definition.Lock
+            try { $lock = Get-Content -Raw -LiteralPath $lockPath | ConvertFrom-Json -Depth 100 } catch { throw "Public restore lock graph is missing or invalid JSON: $($definition.Lock)." }
+            $lockEntries = @($lock.dependencies.PSObject.Properties | ForEach-Object { $_.Value.PSObject.Properties | Where-Object { $_.Name -ceq $packageId } })
+            if ($lockEntries.Count -ne 1 -or
+                $lockEntries[0].Value.type -isnot [string] -or $lockEntries[0].Value.type -cne $definition.LockType -or
+                $lockEntries[0].Value.resolved -isnot [string] -or $lockEntries[0].Value.resolved -cne $packageVersion -or
+                $lockEntries[0].Value.contentHash -isnot [string] -or $lockEntries[0].Value.contentHash -cne $contentHash) {
+                throw "Public restore lock graph package identity is invalid: $($definition.Lock)."
+            }
+        }
 
         Push-Location $repositoryRoot
         try {
-            [void] (Invoke-CheckedNative -FilePath "dotnet" -Arguments @("restore", "Cmsify.slnx", "--configfile", $configPath, "--packages", $packagesRoot, "--no-http-cache", "--locked-mode", "--force-evaluate") -FailureMessage "Public locked restore failed")
+            [void] (Invoke-CheckedNative -FilePath "dotnet" -Arguments @("restore", "Cmsify.slnx", "--configfile", $configPath, "--packages", $packagesRoot, "--no-http-cache", "--locked-mode") -FailureMessage "Public locked restore failed")
         }
         finally { Pop-Location }
         $restoredNupkgPath = Join-Path $packagesRoot "$lowerId/$lowerVersion/$nupkgName"
         if (-not (Test-Path -LiteralPath $restoredNupkgPath -PathType Leaf)) { throw "Fresh package cache does not contain the exact restored nupkg." }
         $restoredPackageSha = (Get-FileHash -LiteralPath $restoredNupkgPath -Algorithm SHA256).Hash
-        if ($restoredPackageSha -cne $packageSha) { throw "Fresh package cache nupkg SHA-256 does not match tracked evidence." }
+        if ($restoredPackageSha -cne $downloadedSignedSha) { throw "Fresh package cache nupkg bytes do not match the verified public download." }
 
-        $assetPaths = @(
-            "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/obj/project.assets.json",
-            "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/obj/project.assets.json",
-            "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/obj/project.assets.json",
-            "src/Cmsify.Admin/obj/project.assets.json",
-            "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json"
-        )
         $libraryKey = "$packageId/$packageVersion"
         $expectedPackagePath = "$lowerId/$lowerVersion"
         $dotnetCommand = Get-Command dotnet -ErrorAction Stop
@@ -303,7 +330,8 @@ function Test-PublicPackageRestore {
         $trustedLibraryPacks = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($dotnetPath)) "library-packs")).TrimEnd('\', '/')
         $sourceComparison = if ($IsWindows) { [StringComparer]::OrdinalIgnoreCase } else { [StringComparer]::Ordinal }
         $verified = @()
-        foreach ($relativePath in $assetPaths) {
+        foreach ($definition in $graphDefinitions) {
+            $relativePath = $definition.Asset
             $assetPath = Join-Path $repositoryRoot $relativePath
             if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) { throw "Public restore did not produce required asset graph $relativePath." }
             try { $assets = Get-Content -Raw -LiteralPath $assetPath | ConvertFrom-Json -Depth 100 } catch { throw "Public restore asset graph is invalid JSON: $relativePath." }
