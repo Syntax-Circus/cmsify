@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +21,7 @@ function expect(condition, message) {
   if (!condition) errors.push(message);
 }
 
-function supplyChainFiles(root) {
+function fixtureSupplyChainFiles(root) {
   const files = [];
   const visit = (directory) => {
     if (!existsSync(directory)) return;
@@ -40,21 +41,121 @@ function supplyChainFiles(root) {
   return files.sort();
 }
 
+function supplyChainFiles(root) {
+  try {
+    return execFileSync("git", ["ls-files", "--",
+      ":(glob).github/workflows/*.yml",
+      ":(glob).github/workflows/*.yaml",
+      ":(glob)**/compose*.yml",
+      ":(glob)**/compose*.yaml",
+      ":(glob)**/docker-compose*.yml",
+      ":(glob)**/docker-compose*.yaml",
+      "src/Cmsify.Api/Dockerfile",
+      "src/Cmsify.Admin/Dockerfile",
+    ], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .sort();
+  } catch {
+    return fixtureSupplyChainFiles(root);
+  }
+}
+
 function supplyChainError(relativePath, line, message) {
   return `${relativePath}:${line}: ${message}`;
 }
 
 function hasPinnedDigest(reference) {
-  return /@sha256:[0-9a-f]{64}$/i.test(reference);
+  return /@sha256:[0-9a-f]{64}$/i.test(reference)
+    || /@sha256:\$\{[^}]+\}$/i.test(reference);
 }
 
-function workflowImageReferences(line) {
-  if (!/\bdocker\s+run\b/.test(line)) return [];
-  return line.split(/\s+/).map((token) => token.replaceAll(/^["']|["',;]$/g, ""))
-    .filter((token) => !token.startsWith("-") && !token.startsWith("$") && !token.includes("=")
-      && !token.startsWith("/") && !token.startsWith("2>")
-      && /(?:\/|:|@sha256)/.test(token)
-      && /^(?:(?:[a-z0-9.-]+(?::\d+)?\/)?[a-z][a-z0-9._-]*)(?::[a-z0-9._$-]+)?(?:@sha256:[0-9a-f]{64})?$/i.test(token));
+function hasVerifiedUpgradeComposeInput(relativePath, reference) {
+  return relativePath === "tests/upgrade/compose.yml" && [
+    "${POSTGRES_IMAGE}",
+    "${MINIO_IMAGE}",
+    "${BASELINE_API_IMAGE}",
+    "${CANDIDATE_API_IMAGE:-cmsify-upgrade-candidate:local}",
+  ].includes(reference);
+}
+
+function shellTokens(lines) {
+  return lines.flatMap(({ line, text }) => [...text.matchAll(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)]
+    .map((match) => ({ line, value: match[0].replaceAll(/^["']|["']$/g, "") })));
+}
+
+function workflowRunCommands(contents) {
+  const lines = contents.replaceAll("\r\n", "\n").split("\n");
+  const commands = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const run = /^(\s*)(?:-\s+)?run:\s*(.*)$/.exec(lines[index]);
+    if (!run) continue;
+    const indentation = run[1].length;
+    const block = /^[>|][+-]?$/.test(run[2].trim());
+    const commandLines = block ? [] : [{ line: index + 1, text: run[2] }];
+    while (block && index + 1 < lines.length) {
+      const next = lines[index + 1];
+      if (next.trim() !== "" && next.match(/^\s*/)[0].length <= indentation) break;
+      index += 1;
+      commandLines.push({ line: index + 1, text: next.trim() });
+    }
+    let logical = [];
+    for (const commandLine of commandLines) {
+      logical.push(commandLine);
+      if (!/\\\s*$/.test(commandLine.text)) {
+        commands.push(shellTokens(logical.map(({ line, text }) => ({ line, text: text.replace(/\\\s*$/, "") }))));
+        logical = [];
+      }
+    }
+    if (logical.length > 0) commands.push(shellTokens(logical));
+  }
+  return commands;
+}
+
+function dockerCommandIndex(tokens, command) {
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    if (tokens[index].value !== "docker") continue;
+    if (command === "build" && (tokens[index + 1].value === "build" || (tokens[index + 1].value === "buildx" && tokens[index + 2]?.value === "build"))) return index;
+    if (command === "run" && tokens[index + 1].value === "run") return index;
+  }
+  return -1;
+}
+
+const dockerRunOptionsWithValues = new Set(["--add-host", "--annotation", "--cidfile", "--cpus", "--entrypoint", "--env", "--env-file", "--label", "--label-file", "--mount", "--name", "--network", "--platform", "--publish", "--runtime", "--user", "--volume", "--workdir", "-e", "-p", "-u", "-v", "-w"]);
+
+function dockerRunImage(tokens) {
+  const index = dockerCommandIndex(tokens, "run");
+  if (index === -1) return undefined;
+  for (let cursor = index + 2; cursor < tokens.length; cursor += 1) {
+    const option = tokens[cursor].value;
+    if (!option.startsWith("-")) return tokens[cursor];
+    if (!option.includes("=") && (dockerRunOptionsWithValues.has(option) || /^-[epuvw]$/.test(option))) cursor += 1;
+  }
+  return undefined;
+}
+
+function dockerBuildTags(tokens) {
+  const index = dockerCommandIndex(tokens, "build");
+  if (index === -1) return [];
+  const tags = [];
+  for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+    const option = tokens[cursor].value;
+    if ((option === "--tag" || option === "-t") && tokens[cursor + 1]) tags.push(tokens[++cursor].value);
+    else if (option.startsWith("--tag=")) tags.push(option.slice("--tag=".length));
+    else if (option.startsWith("-t") && option.length > 2) tags.push(option.slice(2));
+  }
+  return tags;
+}
+
+function workflowImageReferences(contents) {
+  const builtImages = new Set();
+  const references = [];
+  for (const command of workflowRunCommands(contents)) {
+    const image = dockerRunImage(command);
+    if (image) references.push({ ...image, builtEarlier: builtImages.has(image.value) });
+    for (const tag of dockerBuildTags(command)) builtImages.add(tag);
+  }
+  return references;
 }
 
 export function validateRepositorySupplyChain(root) {
@@ -63,12 +164,14 @@ export function validateRepositorySupplyChain(root) {
     const contents = readFileSync(resolve(root, relativePath), "utf8");
     const isWorkflow = relativePath.startsWith(".github/workflows/");
     const stageAliases = new Set(["scratch"]);
-    const workflowBuiltImages = new Set([...contents.matchAll(/(?:--tag|-t)\s+["']?([^\s"']+)/g)].map((match) => match[1]));
+    const workflowImages = isWorkflow ? workflowImageReferences(contents) : [];
     for (const [index, line] of contents.replaceAll("\r\n", "\n").split("\n").entries()) {
       const lineNumber = index + 1;
       const action = line.match(/^\s*(?:-\s+)?uses:\s*([^\s#]+)/);
       if (action && !action[1].startsWith("./") && !/^[^/\s]+\/[^@\s]+@[0-9a-f]{40}$/i.test(action[1])) {
         violations.push(supplyChainError(relativePath, lineNumber, `action reference must use owner/repository@40-hex-SHA: ${action[1]}`));
+      } else if (action && !action[1].startsWith("./") && !/\s#\s+v\d+(?:\.\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?\s*$/.test(line)) {
+        violations.push(supplyChainError(relativePath, lineNumber, `action reference must include a version comment: ${action[1]}`));
       }
 
       const from = line.match(/^\s*FROM\s+([^\s]+)(?:\s+AS\s+([^\s]+))?/i);
@@ -80,16 +183,21 @@ export function validateRepositorySupplyChain(root) {
         if (alias) stageAliases.add(alias);
       }
 
-      const composeImage = line.match(/^\s*image:\s*["']?([^\s"'#]+)["']?/);
+      const composeImage = line.match(/^\s*image:\s*(.*?)\s*(?:#.*)?$/);
       const imageReferences = [
-        ...(composeImage ? [composeImage[1]] : []),
-        ...(isWorkflow ? workflowImageReferences(line) : []),
+        ...(composeImage ? [composeImage[1].trim().replaceAll(/^["']|["']$/g, "")] : []),
       ];
       for (const reference of imageReferences) {
-        if (reference.includes("${") || stageAliases.has(reference) || workflowBuiltImages.has(reference)) continue;
+        if (stageAliases.has(reference) || hasVerifiedUpgradeComposeInput(relativePath, reference)) continue;
         if (!hasPinnedDigest(reference)) {
           violations.push(supplyChainError(relativePath, lineNumber, `runtime image must use @sha256:<64 hex>: ${reference}`));
         }
+      }
+    }
+    for (const { line, value, builtEarlier } of workflowImages) {
+      if (value.startsWith("$") || builtEarlier) continue;
+      if (!hasPinnedDigest(value)) {
+        violations.push(supplyChainError(relativePath, line, `runtime image must use @sha256:<64 hex>: ${value}`));
       }
     }
   }
