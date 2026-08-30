@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with:
           global-json-file: global.json
@@ -50,16 +51,20 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            base_sha="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
           else
-            base_sha="${{ github.event.before }}"
-            if [[ "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
-              base_sha="$(git rev-parse "${{ github.sha }}^")"
+            HEAD_SHA="${{ github.sha }}"
+            BASE_SHA="${{ github.event.before }}"
+            if [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+              BASE_SHA="$(git rev-parse "$HEAD_SHA^")"
             fi
           fi
-          git cat-file -e "$base_sha:sdk/typescript/openapi.snapshot.json"
-          echo "base-sha=$base_sha" >> "$GITHUB_OUTPUT"
-          echo "head-sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          git cat-file -e "$BASE_SHA:sdk/typescript/openapi.snapshot.json"
+          echo "base-sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Verify live OpenAPI and tracked generated output
         run: node scripts/openapi.mjs check
       - name: Export live head document

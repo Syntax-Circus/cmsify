@@ -346,7 +346,8 @@ for (const match of upgradeWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Upgrade workflow action must be pinned by immutable SHA: ${match[1]}`);
 }
 
-expect(/github\.event\.pull_request\.base\.sha/.test(openApiWorkflow) && /echo "head-sha=\$\{\{ github\.sha \}\}"/.test(openApiWorkflow) && /git cat-file -e "\$base_sha:sdk\/typescript\/openapi\.snapshot\.json"/.test(openApiWorkflow), "OpenAPI comparison must use the exact base SHA and live head document.");
+expect(/ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/.test(openApiWorkflow), "OpenAPI comparison must checkout the exact PR head, never a synthetic workflow SHA.");
+expect(/HEAD_SHA="\$\{\{ github\.event\.pull_request\.head\.sha \}\}"[\s\S]*BASE_SHA="\$\{\{ github\.event\.pull_request\.base\.sha \}\}"[\s\S]*test "\$\(git rev-parse HEAD\)" = "\$HEAD_SHA"[\s\S]*git cat-file -e "\$BASE_SHA:sdk\/typescript\/openapi\.snapshot\.json"[\s\S]*echo "base-sha=\$BASE_SHA"[\s\S]*echo "head-sha=\$HEAD_SHA"/.test(openApiWorkflow), "OpenAPI comparison must record the event-specific PR head and exact target base after verifying checkout identity.");
 expect(/tufin\/oasdiff:v1\.28\.0@sha256:[0-9a-f]{64}/i.test(openApiWorkflow), "oasdiff must use an immutable digest-pinned image.");
 expect(/--match-path '\^\/api\/v1\(\?:\/\|\$\)'/.test(openApiWorkflow), "oasdiff must scope breaking comparison to /api/v1.");
 expect(/elif \[\[ \$result -eq 1 \]\]; then[\s\S]*only exit code 1 is an approvable breaking-change result[\s\S]*exit "\$result"/.test(openApiWorkflow), "oasdiff must treat only exit code 1 as breaking and fail closed on tool errors.");
@@ -380,7 +381,7 @@ function accessibilityEventPaths(event) {
     const item = /^ {6}- (.*)$/.exec(line)?.[1];
     const quoted = /^"([^"\r\n]*)"(?:[ \t]+#.*)?$/.exec(item ?? "");
     const singleQuoted = /^'([^'\r\n]*)'(?:[ \t]+#.*)?$/.exec(item ?? "");
-    if (quoted?.[1].includes("\\\\")) return { entries, error: "must not contain YAML escape sequences" };
+    if (quoted?.[1].includes("\\")) return { entries, error: "must not contain YAML escape sequences" };
     if (quoted?.[1].startsWith("!") || singleQuoted?.[1].startsWith("!")) return { entries, error: "must not contain negative entries" };
     if (!quoted) return { entries, error: "must contain only double-quoted path sequence entries" };
     entries.push(quoted[1]);

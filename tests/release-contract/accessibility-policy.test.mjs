@@ -45,7 +45,7 @@ function eventPaths(workflow, event) {
     if (/^(?:[^ \t]| {2}[A-Za-z0-9_.-]+:| {4}[A-Za-z0-9_.-]+:)/.test(line)) break;
     const item = /^ {6}- (.*)$/.exec(line)?.[1];
     const quoted = /^"([^"\r\n]*)"(?:[ \t]+#.*)?$/.exec(item ?? "");
-    if (!quoted || quoted[1].startsWith("!") || quoted[1].includes("\\\\")) return [];
+    if (!quoted || quoted[1].startsWith("!") || quoted[1].includes("\\")) return [];
     entries.push(quoted[1]);
   }
   return entries;
@@ -99,8 +99,9 @@ test("YAML escapes invalidate each accessibility event path list", () => {
     const mutate = event === "push"
       ? (replacement) => branchWorkflow.replace('      - "src/Cmsify.Admin/**"\n', replacement)
       : (replacement) => branchWorkflow.replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n', `  pull_request:\n    paths:\n${replacement}`);
-    for (const [escapeName, escapeSequence] of [["hex", "\\\\x21"], ["unicode", "\\\\u0021"], ["long-unicode", "\\\\U00000021"]]) {
+    for (const [escapeName, escapeSequence] of [["hex", String.raw`\x21`], ["unicode", String.raw`\u0021`], ["long-unicode", String.raw`\U00000021`]]) {
       const replacement = `      - "src/Cmsify.Admin/**"\n      - "${escapeSequence}src/Cmsify.Admin/**"\n`;
+      assert.equal([...replacement].filter((character) => character === "\\").length, 1, `${event} ${escapeName} fixture must contain exactly one raw backslash`);
       assert.deepEqual(eventPaths(mutate(replacement), event), [], `${event} ${escapeName} YAML escape must invalidate its path list`);
     }
   }

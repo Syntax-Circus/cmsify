@@ -1,6 +1,6 @@
 # Release runbook
 
-This runbook describes the release evidence required before an authorized maintainer dispatches the tracked `publish-cmsify.yml` workflow. It does not authorize a publish, promotion, signing, tag, or release.
+This runbook describes the release evidence required before an authorized maintainer pushes a validated SemVer tag to trigger the tracked `publish-cmsify.yml` workflow. It does not authorize a publish, promotion, signing, tag, or release.
 
 ## Roles and prerequisites
 
@@ -21,7 +21,7 @@ node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v
 node eng/upgrade-tests/cli.mjs verify-release-baseline --fixture tests/upgrade/fixtures/v0.1.3
 ```
 
-Confirm the tag resolves to the recorded source SHA, every lock resolves as documented, and the candidate workflow follows `preflight` → `build` → `artifact-smoke`, `candidate-accessibility`, clean consumers, and `upgrade-rollback` → `certify` → `promote`. Preserve the generated release manifest, `SHA256SUMS`, SPDX files, accessibility output, upgrade diagnostics, package content hashes, and each immutable digest as evidence.
+Confirm the tag resolves to the recorded source SHA, every lock resolves as documented, and the candidate workflow follows `resolve` → `build` → parallel `artifact-smoke`, `candidate-accessibility`, `dotnet-consumer`, `node-consumer`, and `upgrade-rollback` → `certify` → `promote`. Preserve the generated release manifest, `SHA256SUMS`, SPDX files, accessibility output, upgrade diagnostics, package content hashes, and each immutable digest as evidence.
 
 Abort before promotion if any command fails, a source SHA/tag/digest differs, a required protected approval is absent, a backup manifest is incomplete, public restore remains unproved, or any candidate would be rebuilt. Do not rebuild a candidate to repair evidence and do not publish or promote without the required approval; restart the authorized process from a newly recorded candidate instead.
 
