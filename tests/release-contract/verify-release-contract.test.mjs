@@ -201,6 +201,13 @@ test("rejects a mutable OCI loader helper image", () => expectInvalid((root) => 
     "quay.io/skopeo/stable:v1.22.2",
   ));
 }, /OCI loader.*Skopeo.*immutable|versioned.*digest/i));
+test("rejects OCI loader topology contract drift", () => expectInvalid((root) => {
+  const path = resolve(root, "scripts/release/load-oci-candidate.mjs");
+  writeFileSync(path, readFileSync(path, "utf8").replace(
+    'registry: "relay+importer"',
+    'registry: "importer"',
+  ));
+}, /OCI loader.*Registry.*relay.*importer/i));
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(

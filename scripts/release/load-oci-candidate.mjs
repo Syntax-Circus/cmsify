@@ -21,6 +21,12 @@ export const LOADER_CONTRACT = Object.freeze({
   schema: "cmsify.oci-loader.v1",
   registryImage: REGISTRY_IMAGE,
   skopeoImage: SKOPEO_IMAGE,
+  topology: Object.freeze({
+    importer: "internal",
+    relay: "loopback-published",
+    registry: "relay+importer",
+    skopeo: "importer-only",
+  }),
 });
 
 const FLAGS = Object.freeze({
@@ -231,10 +237,12 @@ export async function loadOciCandidate(options, dependencies = {}) {
   const run = dependencies.run ?? runProcess;
   const waitForRegistry = dependencies.waitForRegistry ?? defaultWaitForRegistry;
   const runId = safeRunId(dependencies.runId);
-  const networkName = runResourceName(runId, "network");
+  const importerNetworkName = runResourceName(runId, "importer-network");
+  const relayNetworkName = runResourceName(runId, "relay-network");
   const registryName = runResourceName(runId, "registry");
   const skopeoName = runResourceName(runId, "skopeo");
-  let networkCleanupIntent = false;
+  let importerNetworkCleanupIntent = false;
+  let relayNetworkCleanupIntent = false;
   let registryCleanupIntent = false;
   let skopeoCleanupIntent = false;
   let intermediateRef;
@@ -262,23 +270,29 @@ export async function loadOciCandidate(options, dependencies = {}) {
 
   try {
     await assertAbsent(["image", "inspect", input.canonicalRef], "oci-loader-canonical-preflight", "image", input.canonicalRef, "Canonical candidate ref");
-    await assertAbsent(["network", "inspect", networkName], "oci-loader-network-preflight", "network", networkName, "Run-owned Docker network");
+    await assertAbsent(["network", "inspect", importerNetworkName], "oci-loader-importer-network-preflight", "network", importerNetworkName, "Run-owned importer network");
+    await assertAbsent(["network", "inspect", relayNetworkName], "oci-loader-relay-network-preflight", "network", relayNetworkName, "Run-owned relay network");
     await assertAbsent(["container", "inspect", registryName], "oci-loader-registry-preflight", "container", registryName, "Run-owned Registry container");
     await assertAbsent(["container", "inspect", skopeoName], "oci-loader-skopeo-preflight", "container", skopeoName, "Run-owned Skopeo container");
     await execute(["image", "pull", "--platform", "linux/amd64", REGISTRY_IMAGE], "oci-loader-registry-image-pull");
     await execute(["image", "pull", "--platform", "linux/amd64", SKOPEO_IMAGE], "oci-loader-skopeo-image-pull");
-    networkCleanupIntent = true;
-    const network = await execute(["network", "create", "--internal", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, networkName], "oci-loader-network-create");
-    const returnedNetworkId = String(network.stdout).trim();
-    assert(/^[a-f0-9]{12,64}$|^network-id$/.test(returnedNetworkId), "Docker did not return a safe isolated network ID.");
+    importerNetworkCleanupIntent = true;
+    const importerNetwork = await execute(["network", "create", "--internal", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, importerNetworkName], "oci-loader-importer-network-create");
+    const returnedImporterNetworkId = String(importerNetwork.stdout).trim();
+    assert(/^[a-f0-9]{12,64}$|^network-id$/.test(returnedImporterNetworkId), "Docker did not return a safe internal importer network ID.");
+    relayNetworkCleanupIntent = true;
+    const relayNetwork = await execute(["network", "create", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, relayNetworkName], "oci-loader-relay-network-create");
+    const returnedRelayNetworkId = String(relayNetwork.stdout).trim();
+    assert(/^[a-f0-9]{12,64}$|^network-id$/.test(returnedRelayNetworkId), "Docker did not return a safe loopback relay network ID.");
     registryCleanupIntent = true;
     const registry = await execute([
       "run", "--detach", "--pull=never", "--platform", "linux/amd64", "--name", registryName,
-      "--network", networkName, "--network-alias", "registry", "--publish", "127.0.0.1::5000",
+      "--network", relayNetworkName, "--publish", "127.0.0.1::5000",
       "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, REGISTRY_IMAGE,
     ], "oci-loader-registry-start");
     const returnedRegistryId = String(registry.stdout).trim();
     assert(/^[a-f0-9]{12,64}$|^registry-container-id$/.test(returnedRegistryId), "Docker did not return a safe isolated registry container ID.");
+    await execute(["network", "connect", "--alias", registryName, importerNetworkName, registryName], "oci-loader-registry-attach");
     const published = await execute(["container", "port", registryName, "5000/tcp"], "oci-loader-registry-port");
     const port = parseRegistryPort(published);
     await waitForRegistry(`http://127.0.0.1:${port}/v2/`);
@@ -288,10 +302,10 @@ export async function loadOciCandidate(options, dependencies = {}) {
     skopeoCleanupIntent = true;
     await execute([
       "run", "--rm", "--pull=never", "--platform", "linux/amd64", "--name", skopeoName,
-      "--network", networkName, "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`,
+      "--network", importerNetworkName, "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`,
       "--mount", `type=bind,source=${input.archivePath},target=/candidate.oci.tar,readonly`,
       SKOPEO_IMAGE, "copy", "--preserve-digests", "--dest-tls-verify=false",
-      `oci-archive:/candidate.oci.tar:${options.version}`, `docker://registry:5000/cmsify-${options.kind}:${runId}`,
+      `oci-archive:/candidate.oci.tar:${options.version}`, `docker://${registryName}:5000/cmsify-${options.kind}:${runId}`,
     ], "oci-loader-skopeo-copy");
     intermediateCleanupIntent = true;
     await execute(["image", "pull", "--platform", "linux/amd64", intermediateRef], "oci-loader-candidate-pull");
@@ -313,7 +327,8 @@ export async function loadOciCandidate(options, dependencies = {}) {
     if (intermediateCleanupIntent) await cleanup(["image", "rm", intermediateRef], "oci-loader-cleanup-intermediate", "image", intermediateRef);
     if (skopeoCleanupIntent) await cleanup(["container", "rm", "--force", skopeoName], "oci-loader-cleanup-skopeo", "container", skopeoName);
     if (registryCleanupIntent) await cleanup(["container", "rm", "--force", registryName], "oci-loader-cleanup-registry", "container", registryName);
-    if (networkCleanupIntent) await cleanup(["network", "rm", networkName], "oci-loader-cleanup-network", "network", networkName);
+    if (importerNetworkCleanupIntent) await cleanup(["network", "rm", importerNetworkName], "oci-loader-cleanup-importer-network", "network", importerNetworkName);
+    if (relayNetworkCleanupIntent) await cleanup(["network", "rm", relayNetworkName], "oci-loader-cleanup-relay-network", "network", relayNetworkName);
     if (cleanupErrors.length > 0) {
       const message = `${primaryError ? `${compactError(primaryError)} ` : ""}OCI loader cleanup failed: ${cleanupErrors.join("; ").slice(0, 1024)}`;
       if (!primaryError) throw new Error(message);

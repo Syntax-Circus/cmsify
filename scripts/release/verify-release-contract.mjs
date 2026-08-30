@@ -349,6 +349,10 @@ if (ociLoaderSource) {
 expect(ociLoaderContract?.schema === "cmsify.oci-loader.v1", "OCI loader must expose schema cmsify.oci-loader.v1.");
 expect(ociLoaderContract?.registryImage === "docker.io/library/registry:2.8.3@sha256:46faa9a1ae6813194b53921a370f2f4f8c5e1aae228a89bceafef5847a6a3278", "OCI loader Registry helper must use the approved immutable versioned tag and linux/amd64 digest.");
 expect(ociLoaderContract?.skopeoImage === "quay.io/skopeo/stable:v1.22.2@sha256:f7cfa282082cbfc25b754905225985584d1fbc410fef99e1b498c9b64087b755", "OCI loader Skopeo helper must use the approved immutable versioned tag and linux/amd64 digest.");
+expect(ociLoaderContract?.topology?.importer === "internal", "OCI loader importer network must be internal.");
+expect(ociLoaderContract?.topology?.relay === "loopback-published", "OCI loader relay network must publish only through loopback.");
+expect(ociLoaderContract?.topology?.registry === "relay+importer", "OCI loader Registry must join the relay and importer networks.");
+expect(ociLoaderContract?.topology?.skopeo === "importer-only", "OCI loader Skopeo must join only the internal importer network.");
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
 expect(/\bpush:\s*\n\s+tags:/m.test(workflow) && !/\bbranches:/m.test(workflow), "Release workflow must be tag-only; branch builds never publish or tag.");
 expect(/node scripts\/release\/validate-release-tag\.mjs\s+"?\$\{\{\s*github\.ref_name\s*\}\}"?/i.test(workflow) || /validate-release-tag\.mjs/i.test(workflow), "Release workflow must validate the vX.Y.Z or vX.Y.Z-prerelease tag.");

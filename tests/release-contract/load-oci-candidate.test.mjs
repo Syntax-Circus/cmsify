@@ -67,7 +67,8 @@ function processBoundary({ digest, kind = "api", version = VERSION, failPhase, e
   const calls = [];
   const runId = "cmsify-oci-loader-test123";
   const canonicalRef = `docker.io/syntaxcircus/cmsify-${kind}:${version}`;
-  const networkName = `${runId}-network`;
+  const importerNetworkName = `${runId}-importer-network`;
+  const relayNetworkName = `${runId}-relay-network`;
   const registryName = `${runId}-registry`;
   const skopeoName = `${runId}-skopeo`;
   const intermediateRef = `127.0.0.1:43123/cmsify-${kind}:${runId}`;
@@ -78,7 +79,8 @@ function processBoundary({ digest, kind = "api", version = VERSION, failPhase, e
     calls.push(call);
     if (processOptions.phase === failPhase) throw dockerTimeout(failPhase);
     if (cleanupTargetsAlreadyAbsent && processOptions.phase.startsWith("oci-loader-cleanup-")) {
-      if (processOptions.phase === "oci-loader-cleanup-network") throw dockerMissing(`network ${networkName} not found`);
+      if (processOptions.phase === "oci-loader-cleanup-importer-network") throw dockerMissing(`network ${importerNetworkName} not found`);
+      if (processOptions.phase === "oci-loader-cleanup-relay-network") throw dockerMissing(`network ${relayNetworkName} not found`);
       if (processOptions.phase === "oci-loader-cleanup-registry") throw dockerMissing(`No such container: ${registryName}`);
       if (processOptions.phase === "oci-loader-cleanup-skopeo") throw dockerMissing(`No such container: ${skopeoName}`);
       if (processOptions.phase === "oci-loader-cleanup-intermediate") throw dockerMissing(`No such image: ${intermediateRef}`);
@@ -88,9 +90,12 @@ function processBoundary({ digest, kind = "api", version = VERSION, failPhase, e
       case "oci-loader-canonical-preflight":
         if (!existingCanonical && occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such image: ${canonicalMissingTarget}`);
         return { exitCode: 0, stdout: `${JSON.stringify({ Id: `sha256:${"b".repeat(64)}` })}\n`, stderr: "", durationMs: 1 };
-      case "oci-loader-network-preflight":
-        if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`network ${networkName} not found`);
-        return { exitCode: 0, stdout: `${JSON.stringify({ Name: networkName })}\n`, stderr: "", durationMs: 1 };
+      case "oci-loader-importer-network-preflight":
+        if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`network ${importerNetworkName} not found`);
+        return { exitCode: 0, stdout: `${JSON.stringify({ Name: importerNetworkName })}\n`, stderr: "", durationMs: 1 };
+      case "oci-loader-relay-network-preflight":
+        if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`network ${relayNetworkName} not found`);
+        return { exitCode: 0, stdout: `${JSON.stringify({ Name: relayNetworkName })}\n`, stderr: "", durationMs: 1 };
       case "oci-loader-registry-preflight":
         if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such container: ${registryName}`);
         return { exitCode: 0, stdout: `${JSON.stringify({ Name: `/${registryName}` })}\n`, stderr: "", durationMs: 1 };
@@ -100,7 +105,8 @@ function processBoundary({ digest, kind = "api", version = VERSION, failPhase, e
       case "oci-loader-intermediate-preflight":
         if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such image: ${intermediateRef}`);
         return { exitCode: 0, stdout: `${JSON.stringify({ Id: `sha256:${"c".repeat(64)}` })}\n`, stderr: "", durationMs: 1 };
-      case "oci-loader-network-create": return { exitCode: 0, stdout: "network-id\n", stderr: "", durationMs: 1 };
+      case "oci-loader-importer-network-create": return { exitCode: 0, stdout: "network-id\n", stderr: "", durationMs: 1 };
+      case "oci-loader-relay-network-create": return { exitCode: 0, stdout: "network-id\n", stderr: "", durationMs: 1 };
       case "oci-loader-registry-start": return { exitCode: 0, stdout: "registry-container-id\n", stderr: "", durationMs: 1 };
       case "oci-loader-registry-port": return { exitCode: 0, stdout: "127.0.0.1:43123\n", stderr: "", durationMs: 1 };
       case "oci-loader-candidate-inspect":
@@ -110,7 +116,7 @@ function processBoundary({ digest, kind = "api", version = VERSION, failPhase, e
       default: return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
     }
   };
-  return { calls, run, canonicalRef, intermediateRef, imageId, networkName, registryName, skopeoName };
+  return { calls, run, canonicalRef, intermediateRef, imageId, importerNetworkName, relayNetworkName, registryName, skopeoName };
 }
 
 function commandText(call) {
@@ -150,7 +156,8 @@ test("imports a real OCI-layout fixture without native docker load, rebuilding, 
     assert.equal(copy.args.includes("io.syntaxcircus.cmsify.oci-loader-run=cmsify-oci-loader-test123"), true);
     assert.deepEqual(boundary.calls.filter((call) => call.phase.endsWith("-preflight")).map((call) => call.phase), [
       "oci-loader-canonical-preflight",
-      "oci-loader-network-preflight",
+      "oci-loader-importer-network-preflight",
+      "oci-loader-relay-network-preflight",
       "oci-loader-registry-preflight",
       "oci-loader-skopeo-preflight",
       "oci-loader-intermediate-preflight",
@@ -158,7 +165,7 @@ test("imports a real OCI-layout fixture without native docker load, rebuilding, 
   } finally { removeCandidate(root); }
 });
 
-test("creates an internal helper network with no external egress", async () => {
+test("creates exact labeled internal-importer and loopback-relay networks", async () => {
   const root = createValidCandidate();
   try {
     const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
@@ -171,8 +178,70 @@ test("creates an internal helper network with no external egress", async () => {
       waitForRegistry: async () => {},
     });
 
-    const networkCreate = boundary.calls.find((call) => call.phase === "oci-loader-network-create");
-    assert.equal(networkCreate?.args.includes("--internal"), true);
+    const importerPreflight = boundary.calls.find((call) => call.phase === "oci-loader-importer-network-preflight");
+    const relayPreflight = boundary.calls.find((call) => call.phase === "oci-loader-relay-network-preflight");
+    const importerCreate = boundary.calls.find((call) => call.phase === "oci-loader-importer-network-create");
+    const relayCreate = boundary.calls.find((call) => call.phase === "oci-loader-relay-network-create");
+    assert.deepEqual(importerPreflight?.args, ["network", "inspect", boundary.importerNetworkName]);
+    assert.deepEqual(relayPreflight?.args, ["network", "inspect", boundary.relayNetworkName]);
+    assert.deepEqual(importerCreate?.args, [
+      "network", "create", "--internal", "--label", "io.syntaxcircus.cmsify.oci-loader=true",
+      "--label", "io.syntaxcircus.cmsify.oci-loader-run=cmsify-oci-loader-test123", boundary.importerNetworkName,
+    ]);
+    assert.deepEqual(relayCreate?.args, [
+      "network", "create", "--label", "io.syntaxcircus.cmsify.oci-loader=true",
+      "--label", "io.syntaxcircus.cmsify.oci-loader-run=cmsify-oci-loader-test123", boundary.relayNetworkName,
+    ]);
+  } finally { removeCandidate(root); }
+});
+
+test("starts Registry on the relay then attaches it to the importer under its run-owned name", async () => {
+  const root = createValidCandidate();
+  try {
+    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const boundary = processBoundary({ digest: manifest.oci.api.digest });
+    const { loadOciCandidate } = await loaderModule();
+
+    await loadOciCandidate(options(root), {
+      run: boundary.run,
+      runId: "cmsify-oci-loader-test123",
+      waitForRegistry: async () => {},
+    });
+
+    const registryStart = boundary.calls.find((call) => call.phase === "oci-loader-registry-start");
+    assert.equal(registryStart?.args[registryStart.args.indexOf("--network") + 1], boundary.relayNetworkName);
+    assert.equal(registryStart?.args.includes(boundary.importerNetworkName), false);
+    assert.equal(registryStart?.args.includes("127.0.0.1::5000"), true);
+    const registryAttach = boundary.calls.find((call) => call.phase === "oci-loader-registry-attach");
+    assert.deepEqual(registryAttach?.args, [
+      "network", "connect", "--alias", boundary.registryName,
+      boundary.importerNetworkName, boundary.registryName,
+    ]);
+    assert.equal(boundary.calls.filter((call) => call.phase === "oci-loader-registry-attach").length, 1);
+    assert.equal(boundary.calls.indexOf(registryAttach) > boundary.calls.indexOf(registryStart), true);
+  } finally { removeCandidate(root); }
+});
+
+test("runs Skopeo only on the internal importer and addresses the run-owned Registry alias", async () => {
+  const root = createValidCandidate();
+  try {
+    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const boundary = processBoundary({ digest: manifest.oci.api.digest });
+    const { loadOciCandidate } = await loaderModule();
+
+    await loadOciCandidate(options(root), {
+      run: boundary.run,
+      runId: "cmsify-oci-loader-test123",
+      waitForRegistry: async () => {},
+    });
+
+    const copy = boundary.calls.find((call) => call.phase === "oci-loader-skopeo-copy");
+    assert.equal(copy?.args[copy.args.indexOf("--network") + 1], boundary.importerNetworkName);
+    assert.equal(copy?.args.includes(boundary.relayNetworkName), false);
+    assert.equal(copy?.args.includes(`docker://${boundary.registryName}:5000/cmsify-api:cmsify-oci-loader-test123`), true);
+    const relayConsumers = boundary.calls.filter((call) => (call.args[0] === "run" || (call.args[0] === "network" && call.args[1] === "connect"))
+      && call.args.includes(boundary.relayNetworkName));
+    assert.deepEqual(relayConsumers.map((call) => call.phase), ["oci-loader-registry-start"]);
   } finally { removeCandidate(root); }
 });
 
@@ -411,19 +480,21 @@ test("rejects collisions on exact run-owned resource names before their create c
   const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
   const { loadOciCandidate } = await loaderModule();
   const cases = [
-    ["oci-loader-network-preflight", "oci-loader-network-create"],
+    ["oci-loader-importer-network-preflight", "oci-loader-importer-network-create", true],
+    ["oci-loader-relay-network-preflight", "oci-loader-relay-network-create", true],
     ["oci-loader-registry-preflight", "oci-loader-registry-start"],
     ["oci-loader-skopeo-preflight", "oci-loader-skopeo-copy"],
     ["oci-loader-intermediate-preflight", "oci-loader-candidate-pull"],
   ];
 
-  for (const [occupiedPreflight, forbiddenMutation] of cases) {
+  for (const [occupiedPreflight, forbiddenMutation, beforeMutation = false] of cases) {
     const boundary = processBoundary({ digest: manifest.oci.api.digest, occupiedPreflight });
     await assert.rejects(loadOciCandidate(options(root), {
       run: boundary.run,
       runId: "cmsify-oci-loader-test123",
       waitForRegistry: async () => {},
     }), /already exists|collision/i);
+    if (beforeMutation) assert.equal(boundary.calls.every((call) => call.args[1] === "inspect"), true, `${occupiedPreflight} allowed mutation before both network names were cleared`);
     assert.equal(boundary.calls.some((call) => call.phase === forbiddenMutation), false, `${occupiedPreflight} allowed ${forbiddenMutation}`);
   }
 });
@@ -463,14 +534,16 @@ test("cleans exact run-owned resources when create commands time out after side 
   const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
   const { loadOciCandidate } = await loaderModule();
   const cases = [
-    ["oci-loader-network-create", ["oci-loader-cleanup-network"]],
-    ["oci-loader-registry-start", ["oci-loader-cleanup-registry", "oci-loader-cleanup-network"]],
-    ["oci-loader-registry-port", ["oci-loader-cleanup-registry", "oci-loader-cleanup-network"]],
-    ["oci-loader-skopeo-copy", ["oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-network"]],
-    ["oci-loader-candidate-pull", ["oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-network"]],
-    ["oci-loader-candidate-inspect", ["oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-network"]],
-    ["oci-loader-canonical-tag", ["oci-loader-cleanup-canonical", "oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-network"]],
-    ["oci-loader-canonical-inspect", ["oci-loader-cleanup-canonical", "oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-network"]],
+    ["oci-loader-importer-network-create", ["oci-loader-cleanup-importer-network"]],
+    ["oci-loader-relay-network-create", ["oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-registry-start", ["oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-registry-attach", ["oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-registry-port", ["oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-skopeo-copy", ["oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-candidate-pull", ["oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-candidate-inspect", ["oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-canonical-tag", ["oci-loader-cleanup-canonical", "oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
+    ["oci-loader-canonical-inspect", ["oci-loader-cleanup-canonical", "oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
   ];
   for (const [failPhase, expectedCleanup] of cases) {
     const boundary = processBoundary({ digest: manifest.oci.api.digest, failPhase });
@@ -485,7 +558,8 @@ test("cleans exact run-owned resources when create commands time out after side 
       "oci-loader-cleanup-intermediate": boundary.intermediateRef,
       "oci-loader-cleanup-skopeo": boundary.skopeoName,
       "oci-loader-cleanup-registry": boundary.registryName,
-      "oci-loader-cleanup-network": boundary.networkName,
+      "oci-loader-cleanup-importer-network": boundary.importerNetworkName,
+      "oci-loader-cleanup-relay-network": boundary.relayNetworkName,
     })[cleanup]);
     assert.deepEqual(targets, expectedTargets, `${failPhase} cleanup selected an unexpected target`);
   }
@@ -505,16 +579,16 @@ test("treats already-absent exact cleanup targets as clean while real cleanup er
     assert.deepEqual(result, { ref: absent.canonicalRef, digest: manifest.oci.api.digest, imageId: absent.imageId });
     assert.equal(absent.calls.some((call) => call.phase === "oci-loader-cleanup-skopeo"), true);
 
-    const blocked = processBoundary({ digest: manifest.oci.api.digest, failPhase: "oci-loader-cleanup-network" });
+    const blocked = processBoundary({ digest: manifest.oci.api.digest, failPhase: "oci-loader-cleanup-relay-network" });
     await assert.rejects(loadOciCandidate(options(root), {
       run: blocked.run,
       runId: "cmsify-oci-loader-test123",
       waitForRegistry: async () => {},
-    }), /cleanup failed.*cleanup-network.*injected/i);
+    }), /cleanup failed.*cleanup-relay-network.*injected/i);
   } finally { removeCandidate(root); }
 });
 
-test("cleans the registry and network when readiness fails outside the process runner", async () => {
+test("cleans the registry and both networks when readiness fails outside the process runner", async () => {
   const root = createValidCandidate();
   try {
     const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
@@ -527,7 +601,8 @@ test("cleans the registry and network when readiness fails outside the process r
     }), /registry readiness failure/i);
     const phases = boundary.calls.map((call) => call.phase);
     assert.equal(phases.includes("oci-loader-cleanup-registry"), true);
-    assert.equal(phases.includes("oci-loader-cleanup-network"), true);
+    assert.equal(phases.includes("oci-loader-cleanup-importer-network"), true);
+    assert.equal(phases.includes("oci-loader-cleanup-relay-network"), true);
   } finally { removeCandidate(root); }
 });
 
@@ -544,8 +619,10 @@ test("uses only known run-owned names for cleanup when Docker returns malformed 
     const { loadOciCandidate } = await loaderModule();
     await assert.rejects(loadOciCandidate(options(root), { run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /safe isolated registry container ID/i);
     const registryCleanup = boundary.calls.find((call) => call.phase === "oci-loader-cleanup-registry");
-    const networkCleanup = boundary.calls.find((call) => call.phase === "oci-loader-cleanup-network");
+    const importerCleanup = boundary.calls.find((call) => call.phase === "oci-loader-cleanup-importer-network");
+    const relayCleanup = boundary.calls.find((call) => call.phase === "oci-loader-cleanup-relay-network");
     assert.deepEqual(registryCleanup?.args, ["container", "rm", "--force", "cmsify-oci-loader-test123-registry"]);
-    assert.deepEqual(networkCleanup?.args, ["network", "rm", "cmsify-oci-loader-test123-network"]);
+    assert.deepEqual(importerCleanup?.args, ["network", "rm", "cmsify-oci-loader-test123-importer-network"]);
+    assert.deepEqual(relayCleanup?.args, ["network", "rm", "cmsify-oci-loader-test123-relay-network"]);
   } finally { removeCandidate(root); }
 });
