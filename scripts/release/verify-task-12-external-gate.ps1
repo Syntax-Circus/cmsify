@@ -28,7 +28,7 @@ $GateInputs = [ordered]@{
     "public-package-restore"   = @()
     "hosted-accessibility"    = @("CMSIFY_RELEASE_RUN_ID", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_RELEASE_TAG", "CMSIFY_ACCESSIBILITY_JOB_ID")
     "protected-approvals"     = @("CMSIFY_RELEASE_RUN_ID", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_RELEASE_TAG", "CMSIFY_PROMOTE_JOB_ID")
-    "artifact-attestation"    = @("CMSIFY_CHECKSUMS_PATH", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_ATTESTATION_SIGNER_WORKFLOW")
+    "artifact-attestation"   = @("CMSIFY_CHECKSUMS_PATH", "CMSIFY_RELEASE_VERSION", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_ATTESTATION_SIGNER_WORKFLOW")
     "registry-signing"        = @("CMSIFY_API_DIGEST", "CMSIFY_ADMIN_DIGEST", "CMSIFY_RELEASE_TAG", "CMSIFY_COSIGN_CERTIFICATE_IDENTITY")
     "immutable-oci-promotion" = @("CMSIFY_RELEASE_VERSION", "CMSIFY_API_DIGEST", "CMSIFY_ADMIN_DIGEST")
     "hosted-smoke-soak"       = @("CMSIFY_RELEASE_RUN_ID", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_RELEASE_TAG", "CMSIFY_SMOKE_JOB_ID", "CMSIFY_UPGRADE_ROLLBACK_JOB_ID", "CMSIFY_SOAK_EVIDENCE_PATH", "CMSIFY_SOAK_EVIDENCE_SHA256", "CMSIFY_ATTESTATION_SIGNER_WORKFLOW")
@@ -198,10 +198,12 @@ function Assert-NoLinkComponents {
     }
 
     $current = $rootFull
-    foreach ($part in $relative.Split(@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar), [StringSplitOptions]::RemoveEmptyEntries)) {
+    $separators = [char[]] @([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    foreach ($part in $relative.Split($separators, [StringSplitOptions]::RemoveEmptyEntries)) {
         $current = Join-Path $current $part
         $item = Get-Item -LiteralPath $current -Force
-        if ($item.LinkType -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        $resolvedLink = if ($item.PSIsContainer) { [IO.Directory]::ResolveLinkTarget($current, $false) } else { [IO.File]::ResolveLinkTarget($current, $false) }
+        if ($resolvedLink -or $item.LinkType -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
             throw "Candidate path contains a symbolic link or reparse point."
         }
     }
@@ -230,7 +232,110 @@ function Invoke-AttestationVerification {
 }
 
 function Test-PublicPackageRestore {
-    [void] (Invoke-CheckedNative -FilePath "dotnet" -Arguments @("restore", "Cmsify.slnx", "--locked-mode") -FailureMessage "Public locked restore failed")
+    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
+    $evidencePath = Join-Path $repositoryRoot "docs/evidence/task-12-local-verification.json"
+    try { $identity = (Get-Content -Raw -LiteralPath $evidencePath | ConvertFrom-Json -Depth 20).localFeedPackage } catch { throw "Tracked Task 12 package identity is missing or invalid." }
+    $packageId = [string] $identity.id
+    $packageVersion = [string] $identity.version
+    $packageSha = [string] $identity.sha256
+    $contentHash = [string] $identity.contentHash
+    if ($packageId -cnotmatch "^[A-Za-z0-9][A-Za-z0-9._-]+$" -or
+        $packageVersion -cnotmatch "^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" -or
+        $packageSha -cnotmatch "^[A-F0-9]{64}$" -or
+        $contentHash -cnotmatch "^[A-Za-z0-9+/]{86}==$") {
+        throw "Tracked Task 12 package identity is incomplete or invalid."
+    }
+
+    $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    $temporaryRoot = [IO.Path]::GetFullPath((Join-Path $temporaryParent "cmsify-public-restore-$([Guid]::NewGuid().ToString('N'))"))
+    if ([IO.Path]::GetRelativePath($temporaryParent, $temporaryRoot).StartsWith("..") -or (Test-Path -LiteralPath $temporaryRoot)) {
+        throw "Public restore temporary root is not an exact new child of the system temporary directory."
+    }
+    [void] (New-Item -ItemType Directory -Path $temporaryRoot)
+    $temporaryItem = Get-Item -LiteralPath $temporaryRoot -Force
+    if ($temporaryItem.LinkType -or (($temporaryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "Public restore temporary root must not be a symbolic link or reparse point."
+    }
+
+    try {
+        $configPath = Join-Path $temporaryRoot "NuGet.Config"
+        $packagesRoot = Join-Path $temporaryRoot "packages"
+        $downloadRoot = Join-Path $temporaryRoot "download"
+        [void] (New-Item -ItemType Directory -Path $packagesRoot)
+        [void] (New-Item -ItemType Directory -Path $downloadRoot)
+        $configContents = "<?xml version=`"1.0`" encoding=`"utf-8`"?>`n<configuration>`n  <packageSources>`n    <clear />`n    <add key=`"nuget.org`" value=`"https://api.nuget.org/v3/index.json`" protocolVersion=`"3`" />`n  </packageSources>`n</configuration>`n"
+        [IO.File]::WriteAllText($configPath, $configContents, [Text.UTF8Encoding]::new($false))
+
+        $lowerId = $packageId.ToLowerInvariant()
+        $lowerVersion = $packageVersion.ToLowerInvariant()
+        $nupkgName = "$lowerId.$lowerVersion.nupkg"
+        $nupkgPath = Join-Path $downloadRoot $nupkgName
+        $downloadUrl = "https://api.nuget.org/v3-flatcontainer/$lowerId/$lowerVersion/$nupkgName"
+        [void] (Invoke-CheckedNative -FilePath "curl" -Arguments @("--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--tlsv1.2", "--output", $nupkgPath, $downloadUrl) -FailureMessage "Exact public package download failed")
+        if (-not (Test-Path -LiteralPath $nupkgPath -PathType Leaf)) { throw "Exact public package download produced no nupkg." }
+        $actualPackageSha = (Get-FileHash -LiteralPath $nupkgPath -Algorithm SHA256).Hash
+        if ($actualPackageSha -cne $packageSha) { throw "Exact public package SHA-256 does not match tracked evidence." }
+
+        Push-Location $repositoryRoot
+        try {
+            [void] (Invoke-CheckedNative -FilePath "dotnet" -Arguments @("restore", "Cmsify.slnx", "--configfile", $configPath, "--packages", $packagesRoot, "--no-http-cache", "--locked-mode", "--force-evaluate") -FailureMessage "Public locked restore failed")
+        }
+        finally { Pop-Location }
+        $restoredNupkgPath = Join-Path $packagesRoot "$lowerId/$lowerVersion/$nupkgName"
+        if (-not (Test-Path -LiteralPath $restoredNupkgPath -PathType Leaf)) { throw "Fresh package cache does not contain the exact restored nupkg." }
+        $restoredPackageSha = (Get-FileHash -LiteralPath $restoredNupkgPath -Algorithm SHA256).Hash
+        if ($restoredPackageSha -cne $packageSha) { throw "Fresh package cache nupkg SHA-256 does not match tracked evidence." }
+
+        $assetPaths = @(
+            "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/obj/project.assets.json",
+            "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/obj/project.assets.json",
+            "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/obj/project.assets.json",
+            "src/Cmsify.Admin/obj/project.assets.json",
+            "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json"
+        )
+        $libraryKey = "$packageId/$packageVersion"
+        $expectedPackagePath = "$lowerId/$lowerVersion"
+        $verified = @()
+        foreach ($relativePath in $assetPaths) {
+            $assetPath = Join-Path $repositoryRoot $relativePath
+            if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) { throw "Public restore did not produce required asset graph $relativePath." }
+            try { $assets = Get-Content -Raw -LiteralPath $assetPath | ConvertFrom-Json -Depth 100 } catch { throw "Public restore asset graph is invalid JSON: $relativePath." }
+            $matches = @($assets.libraries.PSObject.Properties | Where-Object { $_.Name -ceq $libraryKey })
+            if ($matches.Count -ne 1) { throw "Public restore asset graph must contain exactly one exact package identity: $relativePath." }
+            $library = $matches[0].Value
+            if ($library.type -isnot [string] -or $library.type -cne "package" -or
+                $library.path -isnot [string] -or $library.path -cne $expectedPackagePath -or
+                $library.sha512 -isnot [string] -or $library.sha512 -cne $contentHash) {
+                throw "Public restore asset graph package type, path, or content hash is invalid: $relativePath."
+            }
+            $packageFolders = @($assets.packageFolders.PSObject.Properties.Name)
+            if ($packageFolders.Count -ne 1 -or [IO.Path]::GetFullPath($packageFolders[0]).TrimEnd('\', '/') -cne $packagesRoot.TrimEnd('\', '/')) {
+                throw "Public restore asset graph did not use the exact fresh packages directory: $relativePath."
+            }
+            $configFiles = @($assets.project.restore.configFilePaths)
+            if ($configFiles.Count -ne 1 -or [IO.Path]::GetFullPath([string] $configFiles[0]) -cne [IO.Path]::GetFullPath($configPath)) {
+                throw "Public restore asset graph did not use the exact public-only NuGet configuration: $relativePath."
+            }
+            $sources = @($assets.project.restore.sources.PSObject.Properties.Name)
+            $publicSources = @($sources | Where-Object { $_ -ceq "https://api.nuget.org/v3/index.json" })
+            $unexpectedSources = @($sources | Where-Object {
+                if ($_ -ceq "https://api.nuget.org/v3/index.json") { return $false }
+                try {
+                    $sourcePath = [IO.Path]::GetFullPath([string] $_).TrimEnd('\', '/')
+                    return ([IO.Path]::GetFileName($sourcePath) -cne "library-packs")
+                }
+                catch { return $true }
+            })
+            if ($publicSources.Count -ne 1 -or $unexpectedSources.Count -ne 0) {
+                throw "Public restore asset graph contains a non-public or unexpected package source: $relativePath."
+            }
+            $verified += $relativePath
+        }
+        if ($verified.Count -ne 5) { throw "Public restore must verify exactly five affected asset graphs." }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force }
+    }
 }
 
 function Test-HostedAccessibility {
@@ -297,6 +402,8 @@ function Test-ArtifactAttestation {
     $signerWorkflow = $Inputs.CMSIFY_ATTESTATION_SIGNER_WORKFLOW
     Assert-FullSourceSha -Value $sourceSha
     Assert-AttestationSignerWorkflow -Value $signerWorkflow
+    $version = $Inputs.CMSIFY_RELEASE_VERSION
+    if ($version -cnotmatch "^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$") { throw "Release version is invalid." }
     if (-not (Test-Path -LiteralPath $checksumsPath -PathType Leaf)) { throw "SHA256SUMS file is missing." }
 
     $checksumsItem = Get-Item -LiteralPath $checksumsPath -Force
@@ -308,6 +415,17 @@ function Test-ArtifactAttestation {
         throw "Candidate trust root must not be a symbolic link or reparse point."
     }
     $root = [IO.Path]::GetFullPath($rootItem.FullName)
+    $manifestPath = Join-Path $root "release-manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Release manifest is missing." }
+    Assert-NoLinkComponents -Root $root -Path $manifestPath
+    try { $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json -Depth 100 } catch { throw "Release manifest is invalid JSON." }
+    if ($manifest.version -isnot [string] -or $manifest.version -cne $version -or
+        $manifest.sourceSha -isnot [string] -or $manifest.sourceSha -cne $sourceSha) {
+        throw "Release manifest version or source SHA does not match immutable gate inputs."
+    }
+    $artifactVerifier = Join-Path $PSScriptRoot "verify-release-artifacts.mjs"
+    [void] (Invoke-CheckedNative -FilePath "node" -Arguments @($artifactVerifier, "--artifacts", $root, "--version", $version, "--source-sha", $sourceSha) -FailureMessage "Complete release candidate verification failed")
+
     $comparison = if ($IsWindows) { [StringComparer]::OrdinalIgnoreCase } else { [StringComparer]::Ordinal }
     $seen = [Collections.Generic.HashSet[string]]::new($comparison)
     $subjects = @()

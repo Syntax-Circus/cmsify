@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,6 +17,14 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  SOURCE_SHA as candidateSourceSha,
+  VERSION as candidateVersion,
+  createValidCandidate,
+  mutateJsonFile,
+  refreshChecksums,
+  removeCandidate,
+} from "./release-candidate-fixture.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const verifier = path.join(repositoryRoot, "scripts/release/verify-task-12-external-gate.ps1");
@@ -60,7 +70,7 @@ function makeRoot() {
   mkdirSync(bin);
   const stub = path.join(root, "tool-stub.mjs");
   copyFileSync(stubSource, stub);
-  for (const tool of ["gh", "oras", "cosign", "dotnet"]) {
+  for (const tool of ["gh", "oras", "cosign", "dotnet", "curl"]) {
     if (process.platform === "win32") {
       writeFileSync(path.join(bin, `${tool}.ps1`), `& '${process.execPath.replaceAll("'", "''")}' '${stub.replaceAll("'", "''")}' '${tool}' @args\nexit $LASTEXITCODE\n`);
     } else {
@@ -98,16 +108,77 @@ function runGate(gate, { commands = {}, environment = {}, arrange } = {}) {
   try {
     const fixturePath = path.join(root, "commands.json");
     writeFileSync(fixturePath, JSON.stringify({ commands }));
-    const env = { ...baseEnvironment(bin), CMSIFY_TASK12_STUB_FIXTURE: fixturePath, ...environment };
+    const logPath = path.join(root, "calls.log");
+    const env = { ...baseEnvironment(bin), CMSIFY_TASK12_STUB_FIXTURE: fixturePath, CMSIFY_TASK12_STUB_LOG: logPath, ...environment };
     arrange?.({ root, env });
-    return spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", verifier, "-Gate", gate], {
+    const result = spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", verifier, "-Gate", gate], {
       cwd: repositoryRoot,
       env,
       encoding: "utf8",
     });
+    result.calls = existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split(/\r?\n/).filter(Boolean) : [];
+    return result;
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+const packageIdentity = {
+  id: "SyntaxCircus.Http.Resilience",
+  version: "0.2.0-cmsify.1",
+  contentHash: "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+};
+const affectedAssets = [
+  "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/obj/project.assets.json",
+  "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/obj/project.assets.json",
+  "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/obj/project.assets.json",
+  "src/Cmsify.Admin/obj/project.assets.json",
+  "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json",
+];
+
+function publicAssets() {
+  const packagePath = `${packageIdentity.id.toLowerCase()}/${packageIdentity.version}`;
+  const document = {
+    libraries: { [`${packageIdentity.id}/${packageIdentity.version}`]: { type: "package", path: packagePath, sha512: packageIdentity.contentHash } },
+    packageFolders: { "{{ARG_AFTER:--packages}}": {} },
+    project: { restore: { configFilePaths: ["{{ARG_AFTER:--configfile}}"], sources: { "C:/Program Files/dotnet/library-packs": {}, "https://api.nuget.org/v3/index.json": {} } } },
+  };
+  return affectedAssets.map((asset) => ({ path: asset, json: document }));
+}
+
+function runPublicRestore({ downloadBytes = "public-package-bytes", expectedBytes = downloadBytes, cacheBytes = downloadBytes, mutateScript, mutateIdentity } = {}) {
+  const { root, bin } = makeRoot();
+  const repo = path.join(root, "repo");
+  const scriptPath = path.join(repo, "scripts/release/verify-task-12-external-gate.ps1");
+  const evidencePath = path.join(repo, "docs/evidence/task-12-local-verification.json");
+  mkdirSync(path.dirname(scriptPath), { recursive: true });
+  mkdirSync(path.dirname(evidencePath), { recursive: true });
+  let script = readFileSync(verifier, "utf8");
+  if (mutateScript) script = mutateScript(script);
+  writeFileSync(scriptPath, script);
+  writeFileSync(path.join(repo, "Cmsify.slnx"), "<Solution />");
+  const sha = sha256(expectedBytes).toUpperCase();
+  const trackedIdentity = { ...packageIdentity, sha256: sha, publicRestoreValidated: false };
+  mutateIdentity?.(trackedIdentity);
+  writeFileSync(evidencePath, JSON.stringify({ localFeedPackage: trackedIdentity }));
+  const fixturePath = path.join(root, "commands.json");
+  const logPath = path.join(root, "calls.log");
+  const minimalConfig = `<?xml version="1.0" encoding="utf-8"?>\n<configuration>\n  <packageSources>\n    <clear />\n    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />\n  </packageSources>\n</configuration>\n`;
+  const fixture = {
+    patterns: [
+      { pattern: "^curl .*--output .+ https://api\\.nuget\\.org/v3-flatcontainer/syntaxcircus\\.http\\.resilience/0\\.2\\.0-cmsify\\.1/syntaxcircus\\.http\\.resilience\\.0\\.2\\.0-cmsify\\.1\\.nupkg$", response: { writeAfterArgument: { name: "--output", base64: Buffer.from(downloadBytes).toString("base64") } } },
+      { pattern: "^dotnet restore Cmsify\\.slnx --configfile .+ --packages .+ --no-http-cache --locked-mode --force-evaluate$", response: { assertFileAfterArgument: { name: "--configfile", exact: minimalConfig }, writeFiles: [...publicAssets(), { path: `{{ARG_AFTER:--packages}}/${packageIdentity.id.toLowerCase()}/${packageIdentity.version}/${packageIdentity.id.toLowerCase()}.${packageIdentity.version}.nupkg`, base64: Buffer.from(cacheBytes).toString("base64") }] } },
+    ],
+  };
+  writeFileSync(fixturePath, JSON.stringify(fixture));
+  const result = spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", scriptPath, "-Gate", "public-package-restore"], {
+    cwd: repo,
+    env: { ...baseEnvironment(bin), CMSIFY_TASK12_STUB_FIXTURE: fixturePath, CMSIFY_TASK12_STUB_LOG: logPath },
+    encoding: "utf8",
+  });
+  result.calls = existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split(/\r?\n/).filter(Boolean) : [];
+  rmSync(root, { recursive: true, force: true });
+  return result;
 }
 
 function runResponse() {
@@ -168,6 +239,36 @@ test("declares exactly the immutable inputs consumed by gate subcommands", () =>
   assert.deepEqual(JSON.parse(result.stdout).sort(), [...requiredInputs].sort());
 });
 
+test("public restore authenticates exact public bytes in isolated NuGet state and exactly five restored graphs", () => {
+  const valid = runPublicRestore();
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.equal(valid.calls.filter((call) => call.startsWith("curl ")).length, 1);
+  assert.equal(valid.calls.filter((call) => call.startsWith("dotnet restore ")).length, 1);
+
+  const wrongBytes = runPublicRestore({ downloadBytes: "wrong-public-package-bytes", expectedBytes: "public-package-bytes" });
+  assert.notEqual(wrongBytes.status, 0, wrongBytes.stdout);
+  const wrongCacheBytes = runPublicRestore({ cacheBytes: "wrong-restored-cache-bytes" });
+  assert.notEqual(wrongCacheBytes.status, 0, wrongCacheBytes.stdout);
+  for (const mutateIdentity of [
+    (identity) => { delete identity.contentHash; },
+    (identity) => { identity.contentHash = "wrong"; },
+  ]) {
+    const result = runPublicRestore({ mutateIdentity });
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.equal(result.calls.length, 0, result.calls.join("\n"));
+  }
+
+  for (const mutateScript of [
+    (script) => script.replace('@("restore", "Cmsify.slnx", "--configfile", $configPath, "--packages", $packagesRoot, "--no-http-cache", "--locked-mode", "--force-evaluate")', '@("restore", "Cmsify.slnx", "--locked-mode")'),
+    (script) => script.replace('"--packages", $packagesRoot, ', ""),
+    (script) => script.replace('"--no-http-cache", ', ""),
+    (script) => script.replace('https://api.nuget.org/v3/index.json', 'artifacts/local-nuget/http-resilience'),
+  ]) {
+    const result = runPublicRestore({ mutateScript });
+    assert.notEqual(result.status, 0, `security mutation unexpectedly passed: ${result.stdout}`);
+  }
+});
+
 test("immutable OCI verification fails closed on a native fetch failure", () => {
   const commands = {
     [`oras manifest fetch --descriptor docker.io/syntaxcircus/cmsify-api:${version}`]: { exitCode: 7, stderr: "registry unavailable" },
@@ -199,57 +300,94 @@ test("protected approval binds exact workflow, tag, SHA, promote job, reviewers,
   }
 });
 
-test("attestation verifies every confined checksummed file and rejects link escape", () => {
-  const commands = {};
-  const valid = runGate("artifact-attestation", {
-    commands,
-    arrange({ root, env }) {
-      const candidate = path.join(root, "candidate");
-      mkdirSync(candidate);
-      const first = path.join(candidate, "first.bin");
-      const second = path.join(candidate, "second.bin");
-      writeFileSync(first, "first");
-      writeFileSync(second, "second");
-      const sums = `${sha256("first")}  first.bin\n${sha256("second")}  second.bin\n`;
-      const sumsPath = path.join(candidate, "SHA256SUMS");
-      writeFileSync(sumsPath, sums);
-      env.CMSIFY_CHECKSUMS_PATH = sumsPath;
-      commands[`gh attestation verify ${first} --repo Syntax-Circus/cmsify --signer-workflow ${signerWorkflow} --source-digest ${sourceSha}`] = {};
-      commands[`gh attestation verify ${second} --repo Syntax-Circus/cmsify --signer-workflow ${signerWorkflow} --source-digest ${sourceSha}`] = {};
-      writeFileSync(env.CMSIFY_TASK12_STUB_FIXTURE, JSON.stringify({ commands }));
-    },
-  });
+function runCanonicalAttestation(mutate) {
+  const candidate = createValidCandidate();
+  try {
+    mutate?.(candidate);
+    const sumsPath = path.join(candidate, "SHA256SUMS");
+    const subjects = readFileSync(sumsPath, "utf8").trim().split(/\r?\n/).map((line) => line.replace(/^[0-9a-f]{64}  /, ""));
+    const commands = Object.fromEntries(subjects.map((subject) => [
+      `gh attestation verify ${path.join(candidate, ...subject.split("/"))} --repo Syntax-Circus/cmsify --signer-workflow ${signerWorkflow} --source-digest ${candidateSourceSha}`,
+      {},
+    ]));
+    return runGate("artifact-attestation", {
+      commands,
+      environment: {
+        CMSIFY_CHECKSUMS_PATH: sumsPath,
+        CMSIFY_RELEASE_SOURCE_SHA: candidateSourceSha,
+        CMSIFY_RELEASE_VERSION: candidateVersion,
+      },
+    });
+  } finally {
+    removeCandidate(candidate);
+  }
+}
+
+test("attestation verifies the complete canonical candidate before any exact subject attestation", () => {
+  const valid = runCanonicalAttestation();
   assert.equal(valid.status, 0, valid.stderr);
+  assert.ok(valid.calls.filter((call) => call.startsWith("gh attestation verify ")).length > 7);
 
-  const escaped = runGate("artifact-attestation", {
-    arrange({ root, env }) {
-      const candidate = path.join(root, "candidate");
-      const outside = path.join(root, "outside");
-      mkdirSync(candidate);
-      mkdirSync(outside);
-      writeFileSync(path.join(outside, "subject.bin"), "outside");
-      symlinkSync(outside, path.join(candidate, "link"), process.platform === "win32" ? "junction" : "dir");
+  for (const mutate of [
+    (candidate) => {
       const sumsPath = path.join(candidate, "SHA256SUMS");
-      writeFileSync(sumsPath, `${sha256("outside")}  link/subject.bin\n`);
-      env.CMSIFY_CHECKSUMS_PATH = sumsPath;
+      const lines = readFileSync(sumsPath, "utf8").trimEnd().split(/\r?\n/);
+      writeFileSync(sumsPath, `${lines.slice(1).join("\n")}\n`);
     },
-  });
-  assert.notEqual(escaped.status, 0, escaped.stdout);
-  assert.match(escaped.stderr, /link|reparse/i);
+    (candidate) => {
+      writeFileSync(path.join(candidate, "unexpected.bin"), "unexpected");
+      const sumsPath = path.join(candidate, "SHA256SUMS");
+      writeFileSync(sumsPath, `${readFileSync(sumsPath, "utf8")}${sha256("unexpected")}  unexpected.bin\n`);
+    },
+    (candidate) => {
+      mutateJsonFile(candidate, "release-manifest.json", (manifest) => { manifest.sourceSha = "f".repeat(40); });
+      refreshChecksums(candidate);
+    },
+    (candidate) => {
+      mutateJsonFile(candidate, "release-manifest.json", (manifest) => { manifest.version = "9.9.9"; });
+      refreshChecksums(candidate);
+    },
+  ]) {
+    const result = runCanonicalAttestation(mutate);
+    assert.notEqual(result.status, 0, `candidate mutation unexpectedly passed: ${result.stdout}`);
+    assert.equal(result.calls.filter((call) => call.startsWith("gh attestation verify ")).length, 0, result.calls.join("\n"));
+  }
+});
 
-  const linkedRoot = runGate("artifact-attestation", {
-    arrange({ root, env }) {
-      const actualCandidate = path.join(root, "actual-candidate");
-      const candidateLink = path.join(root, "linked-candidate");
-      mkdirSync(actualCandidate);
-      writeFileSync(path.join(actualCandidate, "subject.bin"), "subject");
-      writeFileSync(path.join(actualCandidate, "SHA256SUMS"), `${sha256("subject")}  subject.bin\n`);
-      symlinkSync(actualCandidate, candidateLink, process.platform === "win32" ? "junction" : "dir");
-      env.CMSIFY_CHECKSUMS_PATH = path.join(candidateLink, "SHA256SUMS");
-    },
-  });
-  assert.notEqual(linkedRoot.status, 0, linkedRoot.stdout);
-  assert.match(linkedRoot.stderr, /trust root.*link|link.*trust root|reparse/i);
+test("attestation rejects link escape and linked trust root", () => {
+  const escapedCandidate = createValidCandidate();
+  try {
+    const escaped = runGate("artifact-attestation", {
+      environment: { CMSIFY_RELEASE_SOURCE_SHA: candidateSourceSha, CMSIFY_RELEASE_VERSION: candidateVersion },
+      arrange({ root, env }) {
+        const outside = path.join(root, "outside-nuget");
+        renameSync(path.join(escapedCandidate, "nuget"), outside);
+        symlinkSync(outside, path.join(escapedCandidate, "nuget"), process.platform === "win32" ? "junction" : "dir");
+        env.CMSIFY_CHECKSUMS_PATH = path.join(escapedCandidate, "SHA256SUMS");
+      },
+    });
+    assert.notEqual(escaped.status, 0, escaped.stdout);
+    assert.match(escaped.stderr, /link|reparse|complete release candidate verification/i);
+    assert.equal(escaped.calls.filter((call) => call.startsWith("gh attestation verify ")).length, 0);
+  } finally {
+    removeCandidate(escapedCandidate);
+  }
+
+  const actualCandidate = createValidCandidate();
+  try {
+    const linkedRoot = runGate("artifact-attestation", {
+      environment: { CMSIFY_RELEASE_SOURCE_SHA: candidateSourceSha, CMSIFY_RELEASE_VERSION: candidateVersion },
+      arrange({ root, env }) {
+        const candidateLink = path.join(root, "linked-candidate");
+        symlinkSync(actualCandidate, candidateLink, process.platform === "win32" ? "junction" : "dir");
+        env.CMSIFY_CHECKSUMS_PATH = path.join(candidateLink, "SHA256SUMS");
+      },
+    });
+    assert.notEqual(linkedRoot.status, 0, linkedRoot.stdout);
+    assert.match(linkedRoot.stderr, /trust root.*link|link.*trust root|reparse/i);
+  } finally {
+    removeCandidate(actualCandidate);
+  }
 });
 
 function arrangeSoak({ root, env }, overrides = {}) {

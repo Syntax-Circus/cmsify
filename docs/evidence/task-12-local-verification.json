@@ -26,6 +26,7 @@
     "id": "SyntaxCircus.Http.Resilience",
     "version": "0.2.0-cmsify.1",
     "sha256": "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
+    "contentHash": "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
     "publicRestoreValidated": false
   },
   "checks": [

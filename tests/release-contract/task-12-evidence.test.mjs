@@ -22,7 +22,7 @@ function validate(evidence, documentText = docs, planText = outerPlan) {
   for (const key of ["sourceSha", "sdkVersion", "nodeVersion", "dockerClientVersion", "dockerServerVersion", "localFeedPackage", "checks", "artifacts", "externalGates", "knownDiagnostics"]) assert.ok(key in evidence, `missing ${key}`);
   assert.equal(evidence.sourceSha, sha, "evidence must not transplant a stale source SHA");
   assert.equal(evidence.sdkVersion, "10.0.400"); assert.equal(evidence.nodeVersion, "v24.14.1"); assert.equal(evidence.dockerClientVersion, "29.7.2"); assert.equal(evidence.dockerServerVersion, null);
-  assert.deepEqual(evidence.localFeedPackage, { id: "SyntaxCircus.Http.Resilience", version: "0.2.0-cmsify.1", sha256: "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C", publicRestoreValidated: false });
+  assert.deepEqual(evidence.localFeedPackage, { id: "SyntaxCircus.Http.Resilience", version: "0.2.0-cmsify.1", sha256: "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C", contentHash: "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==", publicRestoreValidated: false });
   assert.deepEqual(evidence.checks, [{ name: "release-contract suite", command: "node --test tests/release-contract/*.test.mjs", exitCode: 0, status: "passed", counts: { total: 328, passed: 328, failed: 0 }, sourceSha: sha }, { name: "Task 8 completion gate", command: "dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -m:1", exitCode: null, status: "notRun", counts: null, passed: false, reason: "Not run at this evidence revision; Task 8 must refresh this manifest after its fixes and full gate.", sourceSha: sha }]);
   assert.deepEqual(evidence.artifacts, [{ kind: "OCI and package candidates", status: "absent/local-unpublished", digest: null }]);
   assert.deepEqual(Object.keys(evidence.commandInputs).sort(), commandInputs.sort());
@@ -47,6 +47,8 @@ test("Task 12 evidence mutations are rejected", () => {
     (copy) => { copy.sdkVersion = "0"; }, (copy) => { copy.nodeVersion = "v0"; }, (copy) => { copy.dockerClientVersion = "0"; }, (copy) => { copy.dockerServerVersion = "0"; },
     (copy) => { copy.checks[0].command = "stale"; }, (copy) => { copy.checks[0].counts.total = 0; }, (copy) => { copy.checks[1].reason = " "; },
     (copy) => { copy.localFeedPackage.sha256 = "bad"; },
+    (copy) => { delete copy.localFeedPackage.contentHash; },
+    (copy) => { copy.localFeedPackage.contentHash = "bad"; },
     (copy) => { copy.localFeedPackage.publicRestoreValidated = true; },
     (copy) => { copy.artifacts[0].status = "local-published"; }, (copy) => { copy.artifacts[0].status = "promotion-complete"; },
     (copy) => { copy.sourceSha = "0".repeat(40); },
