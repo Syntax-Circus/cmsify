@@ -7,7 +7,7 @@ The Cmsify API is the headless CMS service for composable, versioned content mod
 Deploy this image together with `syntaxcircus/cmsify-admin` by using the production Compose template. The template configures PostgreSQL, persistent media storage, Admin Data Protection keys, loopback-bound service ports, and the API/Admin connection.
 
 1. Follow the [production deployment guide](https://docs.cmsify.dev/operations/) to prepare configuration and secrets.
-2. Copy [`docker-compose.prod.env.example`](https://github.com/Syntax-Circus/cmsify/blob/main/docker-compose.prod.env.example) to a private environment file and set the exact `CMSIFY_VERSION`, `CMSIFY_API_IMAGE_DIGEST`, and `CMSIFY_ADMIN_IMAGE_DIGEST` values published for that release.
+2. Copy [`docker-compose.prod.env.example`](https://github.com/Syntax-Circus/cmsify/blob/main/docker-compose.prod.env.example) to a private environment file, set the exact `CMSIFY_VERSION`, and update the literal API/Admin manifest digests in `docker-compose.prod.yml` for that release.
 3. Start the paired services with the [production Compose template](https://github.com/Syntax-Circus/cmsify/blob/main/docker-compose.prod.yml).
 
 Use a versioned tag in production. The moving `latest` tag is provided for evaluation and development only.

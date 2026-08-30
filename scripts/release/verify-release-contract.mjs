@@ -66,8 +66,7 @@ function supplyChainError(relativePath, line, message) {
 }
 
 function hasPinnedDigest(reference) {
-  return /@sha256:[0-9a-f]{64}$/i.test(reference)
-    || /@sha256:\$\{[^}]+\}$/i.test(reference);
+  return /@sha256:[0-9a-f]{64}$/i.test(reference);
 }
 
 function hasVerifiedUpgradeComposeInput(relativePath, reference) {
@@ -80,8 +79,47 @@ function hasVerifiedUpgradeComposeInput(relativePath, reference) {
 }
 
 function shellTokens(lines) {
-  return lines.flatMap(({ line, text }) => [...text.matchAll(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)]
-    .map((match) => ({ line, value: match[0].replaceAll(/^["']|["']$/g, "") })));
+  const tokens = [];
+  let value = "";
+  let tokenLine;
+  let quote;
+  const flush = () => {
+    if (value !== "") tokens.push({ line: tokenLine, value });
+    value = "";
+    tokenLine = undefined;
+  };
+  for (const { line, text } of lines) {
+    for (let index = 0; index < text.length; index += 1) {
+      const character = text[index];
+      if (quote !== undefined) {
+        if (character === quote) quote = undefined;
+        else value += character;
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        if (value === "") tokenLine = line;
+        quote = character;
+      } else if (character === "&" && text[index + 1] === "&") {
+        flush();
+        tokens.push({ line, value: "&&" });
+        index += 1;
+      } else if (character === "|" && text[index + 1] === "|") {
+        flush();
+        tokens.push({ line, value: "||" });
+        index += 1;
+      } else if (character === ";") {
+        flush();
+        tokens.push({ line, value: ";" });
+      } else if (/\s/.test(character)) {
+        flush();
+      } else {
+        if (value === "") tokenLine = line;
+        value += character;
+      }
+    }
+    flush();
+  }
+  return tokens;
 }
 
 function workflowRunCommands(contents) {
@@ -99,34 +137,55 @@ function workflowRunCommands(contents) {
       index += 1;
       commandLines.push({ line: index + 1, text: next.trim() });
     }
-    let logical = [];
-    for (const commandLine of commandLines) {
-      logical.push(commandLine);
-      if (!/\\\s*$/.test(commandLine.text)) {
-        commands.push(shellTokens(logical.map(({ line, text }) => ({ line, text: text.replace(/\\\s*$/, "") }))));
-        logical = [];
+    if (run[2].trim().startsWith(">")) {
+      let folded = [];
+      for (const commandLine of commandLines) {
+        if (commandLine.text === "") {
+          if (folded.length > 0) commands.push(shellTokens(folded));
+          folded = [];
+        } else folded.push(commandLine);
       }
+      if (folded.length > 0) commands.push(shellTokens(folded));
+    } else {
+      let literal = [];
+      for (const commandLine of commandLines) {
+        literal.push({ line: commandLine.line, text: commandLine.text.replace(/\\\s*$/, "") });
+        if (!/\\\s*$/.test(commandLine.text)) {
+          commands.push(shellTokens(literal));
+          literal = [];
+        }
+      }
+      if (literal.length > 0) commands.push(shellTokens(literal));
     }
-    if (logical.length > 0) commands.push(shellTokens(logical));
   }
   return commands;
 }
 
-function dockerCommandIndex(tokens, command) {
-  for (let index = 0; index < tokens.length - 1; index += 1) {
-    if (tokens[index].value !== "docker") continue;
-    if (command === "build" && (tokens[index + 1].value === "build" || (tokens[index + 1].value === "buildx" && tokens[index + 2]?.value === "build"))) return index;
-    if (command === "run" && tokens[index + 1].value === "run") return index;
+function shellCommandSegments(tokens) {
+  const commands = [];
+  let command = [];
+  for (const token of tokens) {
+    if (["&&", "||", ";"].includes(token.value)) {
+      if (command.length > 0) commands.push(command);
+      command = [];
+    } else command.push(token);
   }
-  return -1;
+  if (command.length > 0) commands.push(command);
+  return commands;
+}
+
+function dockerCommandKind(tokens) {
+  if (tokens[0]?.value !== "docker") return undefined;
+  if (tokens[1]?.value === "run") return "run";
+  if (tokens[1]?.value === "build" || (tokens[1]?.value === "buildx" && tokens[2]?.value === "build")) return "build";
+  return undefined;
 }
 
 const dockerRunOptionsWithValues = new Set(["--add-host", "--annotation", "--cidfile", "--cpus", "--entrypoint", "--env", "--env-file", "--label", "--label-file", "--mount", "--name", "--network", "--platform", "--publish", "--runtime", "--user", "--volume", "--workdir", "-e", "-p", "-u", "-v", "-w"]);
 
 function dockerRunImage(tokens) {
-  const index = dockerCommandIndex(tokens, "run");
-  if (index === -1) return undefined;
-  for (let cursor = index + 2; cursor < tokens.length; cursor += 1) {
+  if (dockerCommandKind(tokens) !== "run") return undefined;
+  for (let cursor = 2; cursor < tokens.length; cursor += 1) {
     const option = tokens[cursor].value;
     if (!option.startsWith("-")) return tokens[cursor];
     if (!option.includes("=") && (dockerRunOptionsWithValues.has(option) || /^-[epuvw]$/.test(option))) cursor += 1;
@@ -135,10 +194,9 @@ function dockerRunImage(tokens) {
 }
 
 function dockerBuildTags(tokens) {
-  const index = dockerCommandIndex(tokens, "build");
-  if (index === -1) return [];
+  if (dockerCommandKind(tokens) !== "build") return [];
   const tags = [];
-  for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+  for (let cursor = 1; cursor < tokens.length; cursor += 1) {
     const option = tokens[cursor].value;
     if ((option === "--tag" || option === "-t") && tokens[cursor + 1]) tags.push(tokens[++cursor].value);
     else if (option.startsWith("--tag=")) tags.push(option.slice("--tag=".length));
@@ -150,10 +208,12 @@ function dockerBuildTags(tokens) {
 function workflowImageReferences(contents) {
   const builtImages = new Set();
   const references = [];
-  for (const command of workflowRunCommands(contents)) {
-    const image = dockerRunImage(command);
-    if (image) references.push({ ...image, builtEarlier: builtImages.has(image.value) });
-    for (const tag of dockerBuildTags(command)) builtImages.add(tag);
+  for (const shellLine of workflowRunCommands(contents)) {
+    for (const command of shellCommandSegments(shellLine)) {
+      const image = dockerRunImage(command);
+      if (image) references.push({ ...image, builtEarlier: builtImages.has(image.value) });
+      for (const tag of dockerBuildTags(command)) builtImages.add(tag);
+    }
   }
   return references;
 }

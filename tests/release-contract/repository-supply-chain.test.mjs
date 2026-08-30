@@ -123,3 +123,48 @@ test("supply-chain validator ignores untracked Compose drafts", () => {
     assert.deepEqual(validateRepositorySupplyChain(root), []);
   });
 });
+
+test("supply-chain validator applies folded YAML run semantics", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/folded.yml", `jobs:
+  test:
+    steps:
+      - run: >
+          docker run
+          ubuntu:latest
+`);
+    assert.match(validateRepositorySupplyChain(root).join("\n"), /folded\.yml:6: runtime image/);
+  });
+});
+
+test("supply-chain validator requires Docker commands at shell boundaries", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/echo-build.yml", "jobs:\n  test:\n    steps:\n      - run: echo docker build --tag postgres:17-alpine && docker run postgres:17-alpine\n");
+    assert.match(validateRepositorySupplyChain(root).join("\n"), /echo-build\.yml:4: runtime image/);
+  });
+});
+
+test("supply-chain validator requires literal Compose digests", () => {
+  withTemporaryRepository((root) => {
+    write(root, "compose-interpolated-digest.yml", "services:\n  app:\n    image: postgres@sha256:${UNPINNED_DIGEST}\n");
+    assert.match(validateRepositorySupplyChain(root).join("\n"), /compose-interpolated-digest\.yml:3: runtime image/);
+  });
+});
+
+test("supply-chain validator examines every shell-boundary Docker run", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/later-run.yml", `jobs:
+  test:
+    steps:
+      - run: docker run postgres:17@sha256:${postgresDigest} && docker run postgres:17-alpine || docker run postgres:17-alpine; docker run postgres:17-alpine
+`);
+    assert.match(validateRepositorySupplyChain(root).join("\n"), /later-run\.yml:4: runtime image/);
+  });
+});
+
+test("supply-chain validator preserves Docker build ordering within one shell step", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/build-before-run.yml", "jobs:\n  test:\n    steps:\n      - run: docker build --tag cmsify-candidate:local . && docker run cmsify-candidate:local\n");
+    assert.deepEqual(validateRepositorySupplyChain(root), []);
+  });
+});

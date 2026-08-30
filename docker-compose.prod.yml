@@ -15,7 +15,7 @@ services:
       retries: 10
 
   api:
-    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:${CMSIFY_API_IMAGE_DIGEST:?CMSIFY_API_IMAGE_DIGEST is required}
+    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:d82c8333b3b6cf8a479858bdbe63a304bcca66fa2be2b22ada7ea099863e5301
     env_file:
       - ${CMSIFY_API_KEYRING_ENV_FILE:?CMSIFY_API_KEYRING_ENV_FILE is required}
     ports:
@@ -64,7 +64,7 @@ services:
       retries: 12
 
   admin:
-    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:${CMSIFY_ADMIN_IMAGE_DIGEST:?CMSIFY_ADMIN_IMAGE_DIGEST is required}
+    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:476d21907c1b5583d95dd04cad815dc582a531a5eb1f0795dd04c35ff9e4cf6e
     ports:
       - "127.0.0.1:${CMSIFY_ADMIN_PORT:-5001}:8080"
     environment:
