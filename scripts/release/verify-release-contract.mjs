@@ -96,7 +96,10 @@ function shellTokens(lines) {
         else value += character;
         continue;
       }
-      if (character === "'" || character === '"') {
+      if (character === "\\" && index + 1 < text.length) {
+        if (value === "") tokenLine = line;
+        value += `\\${text[++index]}`;
+      } else if (character === "'" || character === '"') {
         if (value === "") tokenLine = line;
         quote = character;
       } else if (character === "&" && text[index + 1] === "&") {
@@ -107,6 +110,9 @@ function shellTokens(lines) {
         flush();
         tokens.push({ line, value: "||" });
         index += 1;
+      } else if (character === "|" || character === "&") {
+        flush();
+        tokens.push({ line, value: character });
       } else if (character === ";") {
         flush();
         tokens.push({ line, value: ";" });
@@ -165,7 +171,7 @@ function shellCommandSegments(tokens) {
   const commands = [];
   let command = [];
   for (const token of tokens) {
-    if (["&&", "||", ";"].includes(token.value)) {
+    if (["&&", "||", ";", "|", "&"].includes(token.value)) {
       if (command.length > 0) commands.push(command);
       command = [];
     } else command.push(token);

@@ -168,3 +168,29 @@ test("supply-chain validator preserves Docker build ordering within one shell st
     assert.deepEqual(validateRepositorySupplyChain(root), []);
   });
 });
+
+test("supply-chain validator examines Docker commands after pipe and background boundaries", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/pipe.yml", "jobs:\n  test:\n    steps:\n      - run: docker build --tag cmsify-candidate:local . | docker run postgres:17-alpine\n");
+    assert.match(validateRepositorySupplyChain(root).join("\n"), /pipe\.yml:4: runtime image/);
+
+    const backgroundRoot = path.join(root, "background");
+    mkdirSync(backgroundRoot);
+    validRepository(backgroundRoot);
+    write(backgroundRoot, ".github/workflows/background.yml", "jobs:\n  test:\n    steps:\n      - run: docker build --tag cmsify-candidate:local . & docker run postgres:17-alpine\n");
+    assert.match(validateRepositorySupplyChain(backgroundRoot).join("\n"), /background\.yml:4: runtime image/);
+  });
+});
+
+test("supply-chain validator does not split quoted or escaped shell separators", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/quoted-separators.yml", `jobs:
+  test:
+    steps:
+      - run: docker run postgres:17@sha256:${postgresDigest} \\| docker run postgres:17-alpine
+      - run: docker run postgres:17@sha256:${postgresDigest} \\& docker run postgres:17-alpine
+      - run: echo 'docker run postgres:17-alpine | docker run postgres:17-alpine'
+`);
+    assert.deepEqual(validateRepositorySupplyChain(root), []);
+  });
+});
