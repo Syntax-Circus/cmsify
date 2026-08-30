@@ -17,6 +17,19 @@ function governanceDocuments() {
   return Object.fromEntries(["docs/api-compatibility.md", "SECURITY.md", "SUPPORT.md", ".github/CODEOWNERS", "docs/release-runbook.md", "docs/rollback-runbook.md"].map((path) => [path, document(path)]));
 }
 
+function insertContractStepAtBoundary(source, boundary, stepLines) {
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  const contractIndex = lines.indexOf("  contract:");
+  const approvalIndex = lines.indexOf("  breaking_change_approval:");
+  assert.notEqual(contractIndex, -1, "contract job must exist");
+  assert.notEqual(approvalIndex, -1, "approval job must exist");
+  const stepIndexes = lines.flatMap((line, index) => index > contractIndex && index < approvalIndex && /^      - /.test(line) ? [index] : []);
+  const boundaries = [...stepIndexes, approvalIndex];
+  assert.equal(boundaries.length, 13, "the canonical contract job must expose every step boundary");
+  lines.splice(boundaries[boundary], 0, ...stepLines);
+  return lines.join("\n");
+}
+
 test("real governance validator ignores decoys outside the three OpenAPI jobs", () => {
   const workflow = document(".github/workflows/openapi-contract.yml");
   const decoy = `# HEAD_SHA="${"${{ github.event.pull_request.head.sha }}"}"\n${workflow}`
@@ -67,6 +80,20 @@ test("real governance validator rejects unreachable and decoy critical workflow 
     const candidate = mutate(workflow);
     assert.notEqual(candidate, workflow, `${name} mutation must change source`);
     assert.equal(validateGovernanceContract({ workflow: candidate }).ok, false, `${name} unreachable/decoy mutation unexpectedly passed`);
+  }
+});
+
+test("real governance validator rejects extra run, uses, and env steps at every contract-job boundary", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  const unexpectedSteps = [
+    ["run", ["      - name: Unexpected run mutation", "        run: echo mutation"]],
+    ["uses", ["      - uses: example.invalid/unexpected/action@0123456789abcdef0123456789abcdef01234567"]],
+    ["env", ["      - name: Unexpected environment mutation", "        env:", "          MUTATION: enabled", "        run: echo mutation"]],
+  ];
+  for (let boundary = 0; boundary < 13; boundary += 1) for (const [kind, stepLines] of unexpectedSteps) {
+    const candidate = insertContractStepAtBoundary(workflow, boundary, stepLines);
+    assert.notEqual(candidate, workflow, `boundary ${boundary} ${kind} mutation must change source`);
+    assert.equal(validateGovernanceContract({ workflow: candidate }).ok, false, `boundary ${boundary} extra ${kind} step unexpectedly passed`);
   }
 });
 
@@ -156,6 +183,23 @@ test("every declared document clause and hosted overclaim is checked by the shar
     const documents = governanceDocuments();
     documents["docs/release-runbook.md"] = `${documents["docs/release-runbook.md"]}\n${claim}.`;
     assert.equal(validateGovernanceContract({ workflow, documents }).ok, false, `${claim} overclaim unexpectedly passed`);
+  }
+});
+
+test("exact hosted disclaimers cannot conceal affirmative claims through conjunctions or punctuation", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  const claim = "signing has been enabled";
+  const combinations = [
+    ["conjunction", (disclaimer) => `${disclaimer.replace(/\.$/, "")}, but ${claim}.`],
+    ["punctuation", (disclaimer) => `${disclaimer.replace(/\.$/, "")}; ${claim}.`],
+    ["new sentence", (disclaimer) => `${disclaimer} ${claim}.`],
+  ];
+  for (const disclaimer of honestHostedPrerequisiteDisclaimers) for (const [form, combine] of combinations) {
+    const documents = governanceDocuments();
+    const changed = `${documents["docs/release-runbook.md"]}\n${combine(disclaimer)}\n`;
+    assert.notEqual(changed, documents["docs/release-runbook.md"], `${form} mutation must change source`);
+    documents["docs/release-runbook.md"] = changed;
+    assert.equal(validateGovernanceContract({ workflow, documents }).ok, false, `${form} claim combined with ${disclaimer} unexpectedly passed`);
   }
 });
 

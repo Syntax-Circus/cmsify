@@ -48,6 +48,13 @@ function checkoutBody(job, errors) {
   return lines.slice(start, end === -1 ? lines.length : end).join("\n").trimEnd();
 }
 
+function contractStepSequence(job, errors) {
+  const lines = job.split("\n");
+  const stepHeaders = lines.filter((line) => /^    steps:\s*$/.test(line));
+  if (stepHeaders.length !== 1) errors.push("contract.steps must occur exactly once as an active workflow field");
+  return lines.filter((line) => /^      -(?:\s.*)?$/.test(line));
+}
+
 function requireExact(errors, source, expected, message) {
   if (source !== expected) errors.push(message);
 }
@@ -56,6 +63,21 @@ const canonicalCheckout = `      - uses: actions/checkout@11bd71901bbe5b1630ceea
         with:
           fetch-depth: 0
           ref: \${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}`;
+
+const canonicalContractStepSequence = [
+  "      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+  "      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d",
+  "      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444",
+  "      - name: Install TypeScript generator",
+  "      - name: Restore locked solution dependencies",
+  "      - name: Restore pinned OpenAPI exporter",
+  "      - name: Resolve exact comparison revisions",
+  "      - name: Verify live OpenAPI and tracked generated output",
+  "      - name: Export live head document",
+  "      - name: Materialize target-branch contract",
+  "      - name: Detect breaking /api/v1 changes with oasdiff 1.28.0",
+  "      - name: Publish comparison evidence",
+];
 
 const canonicalRevisions = `      - name: Resolve exact comparison revisions
         id: revisions
@@ -137,12 +159,14 @@ export function validateGovernanceContract({ workflow, documents = {} }) {
   const lines = activeLines(workflow);
   const contract = jobBody(lines, "contract", errors);
   const checkout = checkoutBody(contract, errors);
+  const contractSteps = contractStepSequence(contract, errors);
   const revisions = stepBody(contract, "revisions", "Resolve exact comparison revisions", errors);
   const diff = stepBody(contract, "diff", "Detect breaking /api/v1 changes with oasdiff 1.28.0", errors);
   const approval = jobBody(lines, "breaking_change_approval", errors);
   const gate = jobBody(lines, "contract-gate", errors);
 
   requireExact(errors, checkout, canonicalCheckout, "contract.checkout must use the exact PR head ref in the canonical active checkout step");
+  if (contractSteps.length !== canonicalContractStepSequence.length || contractSteps.some((step, index) => step !== canonicalContractStepSequence[index])) errors.push("contract.steps must retain the exact ordered canonical step sequence without extra or unrecognized steps");
   requireExact(errors, revisions, canonicalRevisions, "contract.revisions must record exact base and head identities in the canonical active revisions step");
   requireExact(errors, diff, canonicalDiff, "contract.diff must scope comparison to /api/v1 and treat only exit 1 as breaking while tool failures remain fatal in the canonical active oasdiff step");
   requireExact(errors, approval, canonicalApproval, "breaking_change_approval must be the canonical active approval job");
@@ -157,7 +181,12 @@ export function validateGovernanceContract({ workflow, documents = {} }) {
     if (!/pending activation/i.test(owners) || !/verified GitHub user or team/i.test(owners) || owners.split(/\r?\n/).some((line) => line.trim() && !line.trim().startsWith("#"))) errors.push("CODEOWNERS must remain comment-only pending verified ownership activation");
   }
   const governanceText = Object.values(documents).join("\n");
-  const affirmativeHostedClaim = governanceText.split(/[.!?]/).some((sentence) => !/\b(?:must verify|unverified|do not claim|pending activation)\b/i.test(sentence) && /(?:GitHub environments?|environment protections?|registry permissions?|CODEOWNERS|advisory|advisories|signing|Cosign identity (?:policy|policies)|NuGet trusted publishing|npm trusted publishing|publications?)\s+(?:is|are|has been|have been)\s+(?:configured|active|enabled|complete|protected|published)/i.test(sentence));
+  const exactHostedClaimDisclaimers = [
+    ...honestHostedPrerequisiteDisclaimers,
+    "The repository administrator must verify that GitHub private advisories are enabled before relying on this route.",
+  ];
+  const hostedClaimScanText = exactHostedClaimDisclaimers.reduce((text, disclaimer) => text.replaceAll(disclaimer, ""), governanceText);
+  const affirmativeHostedClaim = /(?:GitHub environments?|environment protections?|registry permissions?|CODEOWNERS|advisory|advisories|signing|Cosign identity (?:policy|policies)|NuGet trusted publishing|npm trusted publishing|publications?)\s+(?:is|are|has been|have been)\s+(?:configured|active|enabled|complete|protected|published)/i.test(hostedClaimScanText);
   if (/unverified prerequisites\.[\s\S]*; they are configured/i.test(governanceText) || affirmativeHostedClaim) errors.push("Governance documents must not claim hosted protections, ownership, signing, or publication are active/configured");
   return { ok: errors.length === 0, errors };
 }
