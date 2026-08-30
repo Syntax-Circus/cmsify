@@ -155,6 +155,7 @@ export async function certifyRelease(input, dependencies = {}) {
   let unregisterSignals = () => {};
   let cleanupPromise;
   let receivedSignal;
+  let receivedSignalError;
   let failure;
   let failureScenario;
   let cleanupStatus = "passed";
@@ -172,9 +173,18 @@ export async function certifyRelease(input, dependencies = {}) {
     if (receivedSignal) return;
     receivedSignal = signalName;
     abortController.abort(new Error(`Release smoke interrupted by ${signalName}.`));
-    if (firstResource) void cleanup().catch(() => {});
   });
   assert(typeof unregisterSignals === "function", "Signal registration must return an unregister function.");
+  const applySignalFailure = () => {
+    if (!receivedSignal) return false;
+    receivedSignalError ??= Object.assign(
+      new Error(`Release smoke interrupted by ${receivedSignal}.`),
+      { code: `signal-${receivedSignal.toLowerCase()}` },
+    );
+    failure = receivedSignalError;
+    failureScenario = "signal";
+    return true;
+  };
 
   try {
     for (let index = 0; index < RELEASE_SMOKE_SCENARIOS.length; index += 1) {
@@ -211,6 +221,7 @@ export async function certifyRelease(input, dependencies = {}) {
       }
     }
   } finally {
+    applySignalFailure();
     if (failure) {
       try {
         await docker.captureLogs({ ...context, maxLines: 200, maxBytes: 256 * 1024 });
@@ -227,10 +238,11 @@ export async function certifyRelease(input, dependencies = {}) {
         failureScenario = "cleanup";
       }
     }
+    applySignalFailure();
   }
 
   redactions.push(...Object.values(context.secrets).filter((value) => typeof value === "string"));
-  const evidence = createEvidence({
+  const buildEvidence = () => createEvidence({
     version: options.version,
     sourceSha: options.sourceSha,
     runId: options.runId,
@@ -245,12 +257,30 @@ export async function certifyRelease(input, dependencies = {}) {
     failure: failure ? { error: failure, scenario: failureScenario, redactions } : null,
     cleanup: { status: cleanupStatus },
   });
+  applySignalFailure();
+  let evidence = buildEvidence();
+  let evidenceWriteFailure;
   try {
-    await evidenceWriter(evidence);
+    try {
+      await evidenceWriter(evidence);
+    } catch (error) {
+      evidenceWriteFailure = error;
+    }
+    if (applySignalFailure() && evidence.failure?.code !== receivedSignalError.code) {
+      evidence = buildEvidence();
+      try {
+        await evidenceWriter(evidence);
+        evidenceWriteFailure = undefined;
+      } catch (error) {
+        evidenceWriteFailure = error;
+      }
+    }
   } finally {
     unregisterCleanup();
     unregisterSignals();
   }
+  if (receivedSignal) throw new ReleaseSmokeFailure("signal", evidence, receivedSignal);
+  if (evidenceWriteFailure) throw evidenceWriteFailure;
   if (failure) throw new ReleaseSmokeFailure(failureScenario, evidence, receivedSignal);
   return evidence;
 }
@@ -380,14 +410,14 @@ export function createDockerAdapter({ run, repositoryRoot, signal }) {
     await retryBounded(() => execute([
       "exec", "--env", `PGPASSWORD=${password}`, name,
       "pg_isready", "--username", "cmsify", "--dbname", "cmsify",
-    ], "postgres-readiness", { timeoutMs: 10_000, redact: [password] }), { maxAttempts, delayMs: 2_000 });
+    ], "postgres-readiness", { timeoutMs: 10_000, redact: [password] }), { maxAttempts, delayMs: 2_000, signal });
   }
 
   async function waitForMinio(name, accessKey, secretKey, maxAttempts) {
     await retryBounded(async () => {
       await execute(["exec", name, "mc", "alias", "set", "smoke", "http://127.0.0.1:9000", accessKey, secretKey], "minio-alias", { redact: [accessKey, secretKey] });
       return execute(["exec", name, "mc", "ready", "smoke"], "minio-readiness", { timeoutMs: 10_000, redact: [accessKey, secretKey] });
-    }, { maxAttempts, delayMs: 2_000 });
+    }, { maxAttempts, delayMs: 2_000, signal });
   }
 
   async function createVolume(name, runId) {

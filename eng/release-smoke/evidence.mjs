@@ -76,7 +76,7 @@ function sanitizeText(value, redactions) {
 }
 
 export function sanitizeFailure(error, { scenario, redactions = [] } = {}) {
-  assert(typeof scenario === "string" && (RELEASE_SMOKE_SCENARIOS.includes(scenario) || scenario === "cleanup"), "A valid failure scenario is required.");
+  assert(typeof scenario === "string" && (RELEASE_SMOKE_SCENARIOS.includes(scenario) || scenario === "cleanup" || scenario === "signal"), "A valid failure scenario is required.");
   assert(Array.isArray(redactions) && redactions.every((value) => typeof value === "string"), "Failure redactions must be strings.");
   const rawCode = typeof error?.code === "string" ? error.code : "scenario-failed";
   const code = /^[a-z0-9-]{1,64}$/.test(rawCode) ? rawCode : "scenario-failed";

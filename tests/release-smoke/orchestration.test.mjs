@@ -248,6 +248,119 @@ test("one shared abort signal cancels an active scenario and awaits exactly one 
   assert.equal(reports.at(-1).status, "failed");
 });
 
+test("signal during active resource creation waits for unwind, captures logs, then cleans the late resource once", async () => {
+  const events = [];
+  const reports = [];
+  const resources = ["network"];
+  const cleaned = [];
+  const { docker, http } = successfulAdapters(events);
+  const controller = new AbortController();
+  let signalHandler;
+  docker.prepareFoundation = async ({ onFirstResource }) => {
+    events.push("creation-started");
+    onFirstResource();
+    signalHandler("SIGTERM");
+    signalHandler("SIGINT");
+    await new Promise((resolve) => setImmediate(resolve));
+    resources.push("postgres-created-after-abort");
+    events.push("creation-finished-after-abort");
+    return { attempts: 1 };
+  };
+  docker.captureLogs = async () => events.push("logs");
+  docker.cleanup = async () => {
+    events.push("cleanup");
+    cleaned.push(...resources);
+  };
+
+  let terminalError;
+  await assert.rejects(
+    certifyRelease(options, {
+      docker,
+      http,
+      abortController: controller,
+      registerSignals(handler) { signalHandler = handler; return () => {}; },
+      evidenceWriter: async (report) => reports.push(structuredClone(report)),
+    }),
+    (error) => { terminalError = error; return true; },
+  );
+
+  assert.equal(exitCodeForFailure(terminalError), 143);
+  assert.deepEqual(cleaned, ["network", "postgres-created-after-abort"]);
+  assert.equal(events.filter((event) => event === "cleanup").length, 1);
+  assert.ok(events.indexOf("creation-finished-after-abort") < events.indexOf("logs"));
+  assert.ok(events.indexOf("logs") < events.indexOf("cleanup"));
+  assert.equal(reports.at(-1).status, "failed");
+  assert.equal(reports.at(-1).failure.scenario, "signal");
+  assert.equal(reports.at(-1).failure.code, "signal-sigterm");
+});
+
+test("first signal during cleanup forces SIGINT failure evidence without starting a second cleanup", async () => {
+  const events = [];
+  const reports = [];
+  const { docker, http } = successfulAdapters(events);
+  const controller = new AbortController();
+  let signalHandler;
+  docker.cleanup = async () => {
+    events.push("cleanup-started");
+    signalHandler("SIGINT");
+    await new Promise((resolve) => setImmediate(resolve));
+    events.push("cleanup-finished");
+  };
+
+  let terminalError;
+  await assert.rejects(
+    certifyRelease(options, {
+      docker,
+      http,
+      abortController: controller,
+      registerSignals(handler) { signalHandler = handler; return () => {}; },
+      evidenceWriter: async (report) => reports.push(structuredClone(report)),
+    }),
+    (error) => { terminalError = error; return true; },
+  );
+
+  assert.equal(exitCodeForFailure(terminalError), 130);
+  assert.equal(events.filter((event) => event === "cleanup-started").length, 1);
+  assert.equal(events.filter((event) => event === "cleanup-finished").length, 1);
+  assert.equal(reports.at(-1).status, "failed");
+  assert.equal(reports.at(-1).failure.scenario, "signal");
+  assert.equal(reports.at(-1).failure.code, "signal-sigint");
+});
+
+test("signal during success evidence persistence replaces it with terminal SIGTERM evidence", async () => {
+  const events = [];
+  const reports = [];
+  const { docker, http } = successfulAdapters(events);
+  const controller = new AbortController();
+  let signalHandler;
+  let writes = 0;
+
+  let terminalError;
+  await assert.rejects(
+    certifyRelease(options, {
+      docker,
+      http,
+      abortController: controller,
+      registerSignals(handler) { signalHandler = handler; return () => {}; },
+      evidenceWriter: async (report) => {
+        writes += 1;
+        reports.push(structuredClone(report));
+        if (writes === 1) {
+          signalHandler("SIGTERM");
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      },
+    }),
+    (error) => { terminalError = error; return true; },
+  );
+
+  assert.equal(exitCodeForFailure(terminalError), 143);
+  assert.equal(events.filter((event) => event === "cleanup").length, 1);
+  assert.deepEqual(reports.map((report) => report.status), ["passed", "failed"]);
+  assert.equal(reports.at(-1).failure.scenario, "signal");
+  assert.equal(reports.at(-1).failure.code, "signal-sigterm");
+});
+
 for (const failureAt of RELEASE_SMOKE_SCENARIOS) {
   test(`captures bounded logs, sanitized evidence, and cleanup when ${failureAt} fails`, async () => {
     const events = [];
@@ -286,6 +399,29 @@ test("bounded retries stop after the configured attempt count", async () => {
     /not ready/,
   );
   assert.equal(attempts, 4);
+});
+
+test("an abort raised by a failed retry attempt skips all remaining sleeps and attempts", async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  let sleeps = 0;
+
+  await assert.rejects(
+    retryBounded(async () => {
+      attempts += 1;
+      controller.abort(new Error("SIGTERM"));
+      throw new Error("readiness failed while aborting");
+    }, {
+      maxAttempts: 4,
+      delayMs: 1_000,
+      signal: controller.signal,
+      sleep: async () => { sleeps += 1; },
+    }),
+    /SIGTERM/i,
+  );
+
+  assert.equal(attempts, 1);
+  assert.equal(sleeps, 0);
 });
 
 test("Docker candidate commands use already-loaded immutable IDs and never build or pull candidates", async () => {

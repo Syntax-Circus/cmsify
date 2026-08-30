@@ -189,6 +189,99 @@ test("the shared abort signal is forwarded to real Docker process boundaries", a
   assert.deepEqual(observed, [controller.signal, controller.signal]);
 });
 
+test("PostgreSQL readiness abort stops retry attempts and sleeps immediately", async () => {
+  const output = await mkdtemp(join(tmpdir(), "cmsify-release-postgres-abort-"));
+  const controller = new AbortController();
+  let readinessAttempts = 0;
+  const adapter = createDockerAdapter({
+    repositoryRoot: process.cwd(),
+    signal: controller.signal,
+    run: async (command, args) => {
+      if (command === "openssl") {
+        const keyout = args.indexOf("-keyout");
+        const out = args.indexOf("-out");
+        if (keyout >= 0) await writeFile(args[keyout + 1], "TEST PRIVATE KEY");
+        if (out >= 0) await writeFile(args[out + 1], "TEST CERTIFICATE");
+        return processResult();
+      }
+      if (args.includes("pg_isready")) {
+        readinessAttempts += 1;
+        controller.abort(new Error("SIGTERM"));
+        throw new Error("postgres is not ready");
+      }
+      if (args[0] === "port") return processResult("127.0.0.1:41000\n");
+      return processResult();
+    },
+  });
+  const context = {
+    output,
+    runId,
+    maxAttempts: 2,
+    onFirstResource() {},
+    candidates: { api: { imageId: `sha256:${"a".repeat(64)}` }, admin: { imageId: `sha256:${"b".repeat(64)}` } },
+    runtime: {},
+    secrets: {},
+  };
+
+  try {
+    await assert.rejects(adapter.prepareFoundation(context), /(?:abort|SIGTERM)/i);
+    assert.equal(readinessAttempts, 1);
+  } finally {
+    await adapter.cleanup(context);
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("MinIO readiness abort stops retry attempts and sleeps immediately", async () => {
+  const output = await mkdtemp(join(tmpdir(), "cmsify-release-minio-abort-"));
+  const controller = new AbortController();
+  let aliasAttempts = 0;
+  let readinessAttempts = 0;
+  const adapter = createDockerAdapter({
+    repositoryRoot: process.cwd(),
+    signal: controller.signal,
+    run: async (command, args) => {
+      if (command === "openssl") {
+        const keyout = args.indexOf("-keyout");
+        const out = args.indexOf("-out");
+        if (keyout >= 0) await writeFile(args[keyout + 1], "TEST PRIVATE KEY");
+        if (out >= 0) await writeFile(args[out + 1], "TEST CERTIFICATE");
+        return processResult();
+      }
+      if (args.includes("pg_isready")) return processResult();
+      if (args.includes("mc") && args.includes("alias")) {
+        aliasAttempts += 1;
+        return processResult();
+      }
+      if (args.includes("mc") && args.includes("ready")) {
+        readinessAttempts += 1;
+        controller.abort(new Error("SIGINT"));
+        throw new Error("minio is not ready");
+      }
+      if (args[0] === "port") return processResult("127.0.0.1:41000\n");
+      return processResult();
+    },
+  });
+  const context = {
+    output,
+    runId,
+    maxAttempts: 2,
+    onFirstResource() {},
+    candidates: { api: { imageId: `sha256:${"a".repeat(64)}` }, admin: { imageId: `sha256:${"b".repeat(64)}` } },
+    runtime: {},
+    secrets: {},
+  };
+
+  try {
+    await assert.rejects(adapter.prepareFoundation(context), /(?:abort|SIGINT)/i);
+    assert.equal(aliasAttempts, 1);
+    assert.equal(readinessAttempts, 1);
+  } finally {
+    await adapter.cleanup(context);
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
 test("cleanup remains runnable after the shared scenario signal is aborted", async () => {
   const controller = new AbortController();
   controller.abort(new Error("SIGTERM"));

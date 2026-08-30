@@ -29,6 +29,7 @@ export async function retryBounded(operation, {
       return await operation(attempt);
     } catch (error) {
       lastError = error;
+      if (signal?.aborted) throw signal.reason ?? new Error("Retry operation was aborted.");
       if (attempt < maxAttempts) await sleep(delayMs, signal);
     }
   }
