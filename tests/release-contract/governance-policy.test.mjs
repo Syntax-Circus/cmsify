@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { governanceDocumentClauses, validateGovernanceContract } from "../../scripts/release/governance-validator.mjs";
+import { governanceDocumentClauses, honestHostedPrerequisiteDisclaimers, validateGovernanceContract } from "../../scripts/release/governance-validator.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -24,8 +24,8 @@ test("real governance validator ignores decoys outside the three OpenAPI jobs", 
     .replace('if: always()\n    runs-on: ubuntu-latest\n    steps:\n      - name: Require a successful contract check', 'if: success()\n    runs-on: ubuntu-latest\n    steps:\n      - name: Require a successful contract check');
   const result = validateGovernanceContract({ workflow: decoy });
   assert.equal(result.ok, false);
-  assert.ok(result.errors.some((error) => /breaking_change_approval\.if/.test(error)));
-  assert.ok(result.errors.some((error) => /contract-gate\.if/.test(error)));
+  assert.ok(result.errors.some((error) => /canonical active approval job/.test(error)));
+  assert.ok(result.errors.some((error) => /canonical active gate job/.test(error)));
 });
 
 test("real governance validator rejects each commented, duplicate, or disabled critical structure mutation", () => {
@@ -52,6 +52,21 @@ test("real governance validator rejects each commented, duplicate, or disabled c
     const candidate = mutate(workflow);
     assert.notEqual(candidate, workflow, `${name} mutation must change source`);
     assert.equal(validateGovernanceContract({ workflow: candidate }).ok, false, `${name} unexpectedly passed`);
+  }
+});
+
+test("real governance validator rejects unreachable and decoy critical workflow bodies", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  const mutations = [
+    ["checkout decoy environment", (source) => source.replace("        with:\n", "        env:\n          DECOY: required\n        with:\n")],
+    ["revisions heredoc decoy", (source) => source.replace('          git cat-file -e "$HEAD_SHA^{commit}"\n          test "$(git rev-parse HEAD)" = "$HEAD_SHA"\n          git cat-file -e "$BASE_SHA:sdk/typescript/openapi.snapshot.json"\n          echo "base-sha=$BASE_SHA" >> "$GITHUB_OUTPUT"\n          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"', '          true;# required\n          cat <<\'REQUIRED\'\n          git cat-file -e "$HEAD_SHA^{commit}"\n          test "$(git rev-parse HEAD)" = "$HEAD_SHA"\n          git cat-file -e "$BASE_SHA:sdk/typescript/openapi.snapshot.json"\n          echo "base-sha=$BASE_SHA" >> "$GITHUB_OUTPUT"\n          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"\n          REQUIRED')],
+    ["diff unreachable alternate", (source) => source.replace('          docker run --rm -v "$RUNNER_TEMP:/work:ro" tufin/oasdiff:v1.28.0@sha256:86830f988eaafcf589acb2794ee5ab78e3300ded071d6517bf085469300cbf36 breaking /work/openapi-base.json /work/openapi-head.json --match-path \'^/api/v1(?:/|$)\' --fail-on ERR > "$RUNNER_TEMP/oasdiff.txt" 2>&1\n          result=$?', '          if false; then\n            docker run --rm -v "$RUNNER_TEMP:/work:ro" tufin/oasdiff:v1.28.0@sha256:86830f988eaafcf589acb2794ee5ab78e3300ded071d6517bf085469300cbf36 breaking /work/openapi-base.json /work/openapi-head.json --match-path \'^/api/v1(?:/|$)\' --fail-on ERR > "$RUNNER_TEMP/oasdiff.txt" 2>&1\n            result=$?\n          fi')],
+    ["gate unreachable conditions", (source) => source.replace('          if [[ "${{ needs.contract.result }}" != "success" ]]; then\n            echo "The OpenAPI contract job did not succeed." >&2\n            exit 1\n          fi\n          if [[ "${{ needs.contract.outputs.breaking }}" == "true" && "${{ needs.breaking_change_approval.result }}" != "success" ]]; then\n            echo "A breaking /api/v1 change requires successful protected approval evidence." >&2\n            exit 1\n          fi', '          if false; then\n            if [[ "${{ needs.contract.result }}" != "success" ]]; then\n              echo "The OpenAPI contract job did not succeed." >&2\n              exit 1\n            fi\n            if [[ "${{ needs.contract.outputs.breaking }}" == "true" && "${{ needs.breaking_change_approval.result }}" != "success" ]]; then\n              echo "A breaking /api/v1 change requires successful protected approval evidence." >&2\n              exit 1\n            fi\n          fi')],
+  ];
+  for (const [name, mutate] of mutations) {
+    const candidate = mutate(workflow);
+    assert.notEqual(candidate, workflow, `${name} mutation must change source`);
+    assert.equal(validateGovernanceContract({ workflow: candidate }).ok, false, `${name} unreachable/decoy mutation unexpectedly passed`);
   }
 });
 
@@ -137,20 +152,20 @@ test("every declared document clause and hosted overclaim is checked by the shar
     documents[path] = changed;
     assert.equal(validateGovernanceContract({ workflow, documents }).ok, false, `${path} ${clause} mutation unexpectedly passed`);
   }
-  for (const claim of ["environment protection is configured", "environment protections are configured", "registry permission is configured", "registry permissions are configured", "CODEOWNERS is active", "advisory is enabled", "advisories are enabled", "signing is active", "NuGet trusted publishing is configured", "npm trusted publishing is configured", "publication is published", "publications are configured"]) {
+  for (const claim of ["GitHub environment is protected", "GitHub environments have been enabled", "environment protection is configured", "environment protections are configured", "registry permission is configured", "registry permissions have been enabled", "CODEOWNERS is active", "advisory is enabled", "advisories have been enabled", "signing has been enabled", "Cosign identity policy is active", "Cosign identity policies have been configured", "NuGet trusted publishing is configured", "npm trusted publishing has been enabled", "publication is published", "publications are configured"]) {
     const documents = governanceDocuments();
     documents["docs/release-runbook.md"] = `${documents["docs/release-runbook.md"]}\n${claim}.`;
     assert.equal(validateGovernanceContract({ workflow, documents }).ok, false, `${claim} overclaim unexpectedly passed`);
   }
 });
 
-test("every CODEOWNERS and hosted-honesty condition is checked by the shared validator", () => {
+test("every CODEOWNERS and exact hosted-honesty condition is checked by the shared validator", () => {
   const workflow = document(".github/workflows/openapi-contract.yml");
   const mutations = [
     ["pending activation", (source) => source.replace(/pending activation/i, "removed-governance-clause")],
     ["verified GitHub owner", (source) => source.replace(/verified GitHub user or team/i, "removed-governance-clause")],
     ["comment-only ownership", (source) => `${source}\n* @unverified-owner\n`],
-    ["honest unverified prerequisite boundary", (source) => source.replace("this file does not claim they are configured", "they are configured")],
+    ...honestHostedPrerequisiteDisclaimers.map((disclaimer) => ["exact honest hosted prerequisite disclaimer", (source) => source.replace(disclaimer, "hosted configuration is complete")]),
   ];
   for (const [name, mutate] of mutations) {
     const documents = governanceDocuments();

@@ -1,5 +1,5 @@
 function activeLines(source) {
-  return source.replaceAll("\r\n", "\n").split("\n").filter((line) => !/^\s*#/.test(line)).map((line) => line.replace(/\s+#.*$/, ""));
+  return source.replaceAll("\r\n", "\n").split("\n").filter((line) => !/^\s*#/.test(line)).map((line) => line.replace(/\s+#.*$/, "").trimEnd());
 }
 
 function uniqueBody(lines, startExpression, endExpression, label, errors) {
@@ -10,13 +10,13 @@ function uniqueBody(lines, startExpression, endExpression, label, errors) {
   }
   const start = indexes[0];
   const end = lines.findIndex((line, index) => index > start && endExpression.test(line));
-  return lines.slice(start, end === -1 ? lines.length : end).join("\n");
+  return lines.slice(start, end === -1 ? lines.length : end).join("\n").trimEnd();
 }
 
 function jobBody(lines, name, errors) {
   const aliases = lines.filter((line) => new RegExp(`^  ["']${name}["']:\\s*$`).test(line));
   if (aliases.length > 0) errors.push(`job ${name} must use one unquoted exact key`);
-  return uniqueBody(lines, new RegExp(`^  ${name}:\\s*$`), /^  (?:[A-Za-z0-9_-]+|["'][A-Za-z0-9_-]+["']):\s*$/, `job ${name}`, errors);
+  return uniqueBody(lines, new RegExp(`^  ${name}:\\s*$`), /^  (?:[A-Za-z0-9_-]+|["'][A-Za-z0-9_-]+["']):\s*$/, `job ${name}`, errors).split("\n").slice(1).join("\n");
 }
 
 function stepBody(job, id, name, errors) {
@@ -31,9 +31,8 @@ function stepBody(job, id, name, errors) {
   const idIndex = ids[0];
   const start = lines.findLastIndex((line, index) => index <= idIndex && /^      - /.test(line));
   const end = lines.findIndex((line, index) => index > idIndex && /^      - /.test(line));
-  const body = lines.slice(start, end === -1 ? lines.length : end).join("\n");
+  const body = lines.slice(start, end === -1 ? lines.length : end).join("\n").trimEnd();
   if (!body.startsWith(`      - name: ${name}\n`)) errors.push(`step id ${id} must retain expected operational name`);
-  if (/^        if:/m.test(body) || /^        continue-on-error:/m.test(body)) errors.push(`step id ${id} must not be disabled or continue on error`);
   return body;
 }
 
@@ -46,15 +45,92 @@ function checkoutBody(job, errors) {
   }
   const start = indexes[0];
   const end = lines.findIndex((line, index) => index > start && /^      - /.test(line));
-  const body = lines.slice(start, end === -1 ? lines.length : end).join("\n");
-  if (!/^      - uses: actions\/checkout@[0-9a-f]{40}$/m.test(body)) errors.push("contract checkout action must remain pinned by exact commit");
-  if (/^        if:/m.test(body) || /^        continue-on-error:/m.test(body)) errors.push("contract checkout action must not be disabled or continue on error");
-  return body;
+  return lines.slice(start, end === -1 ? lines.length : end).join("\n").trimEnd();
 }
 
-function requireMatch(errors, source, expression, message) {
-  if (!expression.test(source)) errors.push(message);
+function requireExact(errors, source, expected, message) {
+  if (source !== expected) errors.push(message);
 }
+
+const canonicalCheckout = `      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: \${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}`;
+
+const canonicalRevisions = `      - name: Resolve exact comparison revisions
+        id: revisions
+        shell: bash
+        run: |
+          if [[ "\${{ github.event_name }}" == "pull_request" ]]; then
+            HEAD_SHA="\${{ github.event.pull_request.head.sha }}"
+            BASE_SHA="\${{ github.event.pull_request.base.sha }}"
+          else
+            HEAD_SHA="\${{ github.sha }}"
+            BASE_SHA="\${{ github.event.before }}"
+            if [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+              BASE_SHA="$(git rev-parse "$HEAD_SHA^")"
+            fi
+          fi
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          git cat-file -e "$BASE_SHA:sdk/typescript/openapi.snapshot.json"
+          echo "base-sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"`;
+
+const canonicalDiff = `      - name: Detect breaking /api/v1 changes with oasdiff 1.28.0
+        id: diff
+        shell: bash
+        run: |
+          set +e
+          docker run --rm -v "$RUNNER_TEMP:/work:ro" tufin/oasdiff:v1.28.0@sha256:86830f988eaafcf589acb2794ee5ab78e3300ded071d6517bf085469300cbf36 breaking /work/openapi-base.json /work/openapi-head.json --match-path '^/api/v1(?:/|$)' --fail-on ERR > "$RUNNER_TEMP/oasdiff.txt" 2>&1
+          result=$?
+          cat "$RUNNER_TEMP/oasdiff.txt"
+          if [[ $result -eq 0 ]]; then
+            echo "breaking=false" >> "$GITHUB_OUTPUT"
+          elif [[ $result -eq 1 ]]; then
+            echo "breaking=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "oasdiff failed with exit code $result; only exit code 1 is an approvable breaking-change result." >&2
+            exit "$result"
+          fi
+          exit 0`;
+
+const canonicalApproval = `    needs: contract
+    if: needs.contract.outputs.breaking == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: api-breaking-change-approved
+    steps:
+      - name: Require protected approval evidence
+        shell: bash
+        env:
+          APPROVAL_EVIDENCE: \${{ secrets.API_BREAKING_CHANGE_EVIDENCE }}
+        run: |
+          test -n "$APPROVAL_EVIDENCE"
+          {
+            echo "## Approved breaking API change"
+            echo
+            echo "- Protected environment: \\\`api-breaking-change-approved\\\`"
+            echo "- Compared target/base: \\\`\${{ needs.contract.outputs.base-sha }}\\\`"
+            echo "- Compared head: \\\`\${{ needs.contract.outputs.head-sha }}\\\`"
+            echo "- Approval evidence: supplied through the protected environment secret."
+          } >> "$GITHUB_STEP_SUMMARY"`;
+
+const canonicalGate = `    needs: [contract, breaking_change_approval]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a successful contract check and protected approval when needed
+        shell: bash
+        run: |
+          if [[ "\${{ needs.contract.result }}" != "success" ]]; then
+            echo "The OpenAPI contract job did not succeed." >&2
+            exit 1
+          fi
+          if [[ "\${{ needs.contract.outputs.breaking }}" == "true" && "\${{ needs.breaking_change_approval.result }}" != "success" ]]; then
+            echo "A breaking /api/v1 change requires successful protected approval evidence." >&2
+            exit 1
+          fi`;
 
 export function validateGovernanceContract({ workflow, documents = {} }) {
   const errors = [];
@@ -66,38 +142,30 @@ export function validateGovernanceContract({ workflow, documents = {} }) {
   const approval = jobBody(lines, "breaking_change_approval", errors);
   const gate = jobBody(lines, "contract-gate", errors);
 
-  requireMatch(errors, checkout, /ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/, "contract.checkout must use the exact PR head ref");
-  requireMatch(errors, revisions, /HEAD_SHA="\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/, "contract.revisions must bind the event PR head");
-  requireMatch(errors, revisions, /BASE_SHA="\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/, "contract.revisions must bind the exact PR base");
-  requireMatch(errors, revisions, /git cat-file -e "\$HEAD_SHA\^\{commit\}"/, "contract.revisions must verify the head commit");
-  requireMatch(errors, revisions, /test "\$\(git rev-parse HEAD\)" = "\$HEAD_SHA"/, "contract.revisions must verify checkout identity");
-  requireMatch(errors, revisions, /git cat-file -e "\$BASE_SHA:sdk\/typescript\/openapi\.snapshot\.json"/, "contract.revisions must materialize the exact base snapshot");
-  requireMatch(errors, revisions, /echo "base-sha=\$BASE_SHA"[\s\S]*echo "head-sha=\$HEAD_SHA"/, "contract.revisions must record exact base and head identities");
-  requireMatch(errors, diff, /tufin\/oasdiff:v1\.28\.0@sha256:[0-9a-f]{64}/i, "contract.diff must pin oasdiff by immutable digest");
-  requireMatch(errors, diff, /--match-path '\^\/api\/v1\(\?:\/\|\$\)'/, "contract.diff must scope comparison to /api/v1");
-  requireMatch(errors, diff, /elif \[\[ \$result -eq 1 \]\]; then[\s\S]*else[\s\S]*exit "\$result"/, "contract.diff must treat only exit 1 as breaking and tool failures as fatal");
-  requireMatch(errors, approval, /^    needs: contract$/m, "breaking_change_approval.needs must be contract");
-  requireMatch(errors, approval, /^    if: needs\.contract\.outputs\.breaking == 'true'$/m, "breaking_change_approval.if must require an exact breaking result");
-  requireMatch(errors, approval, /^      name: api-breaking-change-approved$/m, "breaking_change_approval.environment must be protected");
-  requireMatch(errors, approval, /APPROVAL_EVIDENCE: \$\{\{ secrets\.API_BREAKING_CHANGE_EVIDENCE \}\}[\s\S]*test -n "\$APPROVAL_EVIDENCE"/, "breaking_change_approval must reach and require the protected evidence secret");
-  requireMatch(errors, gate, /^    needs: \[contract, breaking_change_approval\]$/m, "contract-gate.needs must include contract and approval");
-  requireMatch(errors, gate, /^    if: always\(\)$/m, "contract-gate.if must be exactly always()");
-  requireMatch(errors, gate, /needs\.contract\.result \}\}" != "success"[\s\S]*exit 1/, "contract-gate must fail when contract is not successful");
-  requireMatch(errors, gate, /needs\.contract\.outputs\.breaking \}\}" == "true" && "\$\{\{ needs\.breaking_change_approval\.result \}\}" != "success"[\s\S]*exit 1/, "contract-gate must require successful approval for breaking changes");
+  requireExact(errors, checkout, canonicalCheckout, "contract.checkout must use the exact PR head ref in the canonical active checkout step");
+  requireExact(errors, revisions, canonicalRevisions, "contract.revisions must record exact base and head identities in the canonical active revisions step");
+  requireExact(errors, diff, canonicalDiff, "contract.diff must scope comparison to /api/v1 and treat only exit 1 as breaking while tool failures remain fatal in the canonical active oasdiff step");
+  requireExact(errors, approval, canonicalApproval, "breaking_change_approval must be the canonical active approval job");
+  requireExact(errors, gate, canonicalGate, "contract-gate must be the canonical active gate job");
 
   for (const [path, clauses] of Object.entries(governanceDocumentClauses)) {
     if (documents[path] === undefined) continue;
-    for (const clause of clauses) requireMatch(errors, documents[path], clause, `${path} is missing required governance policy`);
+    for (const clause of clauses) if (typeof clause === "string" ? !documents[path].includes(clause) : !clause.test(documents[path])) errors.push(`${path} is missing required governance policy`);
   }
   if (documents[".github/CODEOWNERS"] !== undefined) {
     const owners = documents[".github/CODEOWNERS"];
     if (!/pending activation/i.test(owners) || !/verified GitHub user or team/i.test(owners) || owners.split(/\r?\n/).some((line) => line.trim() && !line.trim().startsWith("#"))) errors.push("CODEOWNERS must remain comment-only pending verified ownership activation");
   }
   const governanceText = Object.values(documents).join("\n");
-  const affirmativeHostedClaim = governanceText.split(/[.!?]/).some((sentence) => !/\b(?:must verify|unverified|do not claim|pending activation)\b/i.test(sentence) && /(?:environment protections?|registry permissions?|CODEOWNERS|advisory|advisories|signing|NuGet trusted publishing|npm trusted publishing|publications?)\s+(?:is|are|has been)\s+(?:configured|active|enabled|complete|published)/i.test(sentence));
+  const affirmativeHostedClaim = governanceText.split(/[.!?]/).some((sentence) => !/\b(?:must verify|unverified|do not claim|pending activation)\b/i.test(sentence) && /(?:GitHub environments?|environment protections?|registry permissions?|CODEOWNERS|advisory|advisories|signing|Cosign identity (?:policy|policies)|NuGet trusted publishing|npm trusted publishing|publications?)\s+(?:is|are|has been|have been)\s+(?:configured|active|enabled|complete|protected|published)/i.test(sentence));
   if (/unverified prerequisites\.[\s\S]*; they are configured/i.test(governanceText) || affirmativeHostedClaim) errors.push("Governance documents must not claim hosted protections, ownership, signing, or publication are active/configured");
   return { ok: errors.length === 0, errors };
 }
+
+export const honestHostedPrerequisiteDisclaimers = [
+  "GitHub environment protection, registry permissions, npm/NuGet trusted publishing, advisory enablement, Cosign identity policy, and CODEOWNERS activation are unverified prerequisites.",
+  "A repository administrator must verify them in the hosted systems before a release; this file does not claim they are configured.",
+];
 
 export const governanceDocumentClauses = {
   "docs/api-compatibility.md": [
@@ -138,8 +206,7 @@ export const governanceDocumentClauses = {
     /release operator records the exact tag, source SHA, candidate artifact hashes, OCI manifest digests, and workflow run URL/i,
     /approver supplies protected approval evidence when a breaking `\/api\/v1` change or an emergency exception is requested/i,
     /backup custodian verifies the matched PostgreSQL, media, and Admin Data Protection-key backup manifest/i,
-    /GitHub environment protection, registry permissions, npm\/NuGet trusted publishing, advisory enablement, Cosign identity policy, and CODEOWNERS activation are unverified prerequisites/i,
-    /this file does not claim they are configured/i,
+    ...honestHostedPrerequisiteDisclaimers,
     /`resolve` → `build` → parallel `artifact-smoke`, `candidate-accessibility`, `dotnet-consumer`, `node-consumer`, and `upgrade-rollback` → `certify` → `promote`/i,
     /generated release manifest, `SHA256SUMS`, SPDX files, accessibility output, upgrade diagnostics, package content hashes, and each immutable digest/i,
     /Abort before promotion if any command fails/i,
