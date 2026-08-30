@@ -42,7 +42,7 @@ The master plan checkboxes are not the execution ledger. Use this handoff, Git h
 
 ## Task 12 evidence status
 
-The machine-readable [Task 12 local evidence ledger](evidence/task-12-local-verification.json) is bound to `70afef5c647f53944fd61d1b35f40ece940aacf7`. It records only local evidence and leaves every external gate false. Task 8 must repair the carried unrecognized contract-step-sequence and concessive hosted-claim-exemption breakers, then rerun and refresh the full gate. Do not describe this handoff as v1 certified or as completing repository implementation.
+The machine-readable [Task 12 local evidence ledger](evidence/task-12-local-verification.json) is bound to `70afef5c647f53944fd61d1b35f40ece940aacf7`. It records only local evidence and leaves every external gate false. Task 8 must repair the carried unrecognized contract-step-sequence and concessive hosted-claim-exemption breakers, then rerun and refresh the full gate. This handoff remains non-certifying and does not finish repository implementation.
 
 ## Completed remediation
 
