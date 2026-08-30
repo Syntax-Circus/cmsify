@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { validateGovernanceContract } from "../../scripts/release/governance-validator.mjs";
+import { governanceDocumentClauses, validateGovernanceContract } from "../../scripts/release/governance-validator.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -28,12 +28,31 @@ test("real governance validator ignores decoys outside the three OpenAPI jobs", 
   assert.ok(result.errors.some((error) => /contract-gate\.if/.test(error)));
 });
 
-test("real governance validator rejects commented, duplicate, and disabled critical structure", () => {
+test("real governance validator rejects each commented, duplicate, or disabled critical structure mutation", () => {
   const workflow = document(".github/workflows/openapi-contract.yml");
-  const commented = workflow.replace('HEAD_SHA="${{ github.event.pull_request.head.sha }}"', '# HEAD_SHA="${{ github.event.pull_request.head.sha }}"');
-  const duplicateStep = workflow.replace('      - name: Resolve exact comparison revisions', '      - name: Resolve exact comparison revisions\n        run: echo decoy\n      - name: Resolve exact comparison revisions');
-  const duplicateJob = `${workflow}\n  contract:\n    runs-on: ubuntu-latest\n`;
-  for (const candidate of [commented, duplicateStep, duplicateJob]) assert.equal(validateGovernanceContract({ workflow: candidate }).ok, false, "disabled or duplicate critical structure unexpectedly passed");
+  const mutations = [
+    ["commented PR-head binding", (source) => source.replace('HEAD_SHA="${{ github.event.pull_request.head.sha }}"', '# HEAD_SHA="${{ github.event.pull_request.head.sha }}"')],
+    ["checkout assertion replaced with inline-comment decoy", (source) => source.replace('test "$(git rev-parse HEAD)" = "$HEAD_SHA"', "true # required")],
+    ["contract gate condition replaced with inline-comment decoy", (source) => source.replace('if [[ "${{ needs.contract.result }}" != "success" ]]; then', "if false; then # required condition")],
+    ["approval gate condition replaced with inline-comment decoy", (source) => source.replace('if [[ "${{ needs.contract.outputs.breaking }}" == "true" && "${{ needs.breaking_change_approval.result }}" != "success" ]]; then', "if false; then # required condition")],
+    ["disabled decoy revisions step with operational ID reassigned", (source) => source.replace('      - name: Resolve exact comparison revisions\n        id: revisions', '      - name: Resolve exact comparison revisions # decoy\n        id: other\n      - name: decoy revisions\n        id: revisions\n        if: false')],
+    ["wrong operational revisions name hidden by comment", (source) => source.replace("      - name: Resolve exact comparison revisions", "      - name: unrelated # Resolve exact comparison revisions")],
+    ["inline-commented duplicate revisions ID", (source) => source.replace("        id: revisions", "        id: revisions\n      - name: duplicate\n        id: revisions # duplicate")],
+    ["quoted duplicate revisions ID", (source) => source.replace("        id: revisions", "        id: revisions\n      - name: duplicate\n        id: 'revisions'")],
+    ["inline-commented duplicate contract job key", (source) => `${source}\n  contract: # duplicate\n    runs-on: ubuntu-latest\n`],
+    ["quoted duplicate contract job key", (source) => `${source}\n  'contract':\n    runs-on: ubuntu-latest\n`],
+    ["revisions step disabled", (source) => source.replace("        id: revisions", "        id: revisions\n        if: false")],
+    ["revisions step continue-on-error", (source) => source.replace("        id: revisions", "        id: revisions\n        continue-on-error: false")],
+    ["diff step disabled", (source) => source.replace("        id: diff", "        id: diff\n        if: false")],
+    ["diff step continue-on-error", (source) => source.replace("        id: diff", "        id: diff\n        continue-on-error: false")],
+    ["checkout step disabled", (source) => source.replace("          fetch-depth: 0", "        if: false\n          fetch-depth: 0")],
+    ["checkout step continue-on-error", (source) => source.replace("          fetch-depth: 0", "        continue-on-error: false\n          fetch-depth: 0")],
+  ];
+  for (const [name, mutate] of mutations) {
+    const candidate = mutate(workflow);
+    assert.notEqual(candidate, workflow, `${name} mutation must change source`);
+    assert.equal(validateGovernanceContract({ workflow: candidate }).ok, false, `${name} unexpectedly passed`);
+  }
 });
 
 function requireClauses(path, clauses) {
@@ -107,6 +126,40 @@ test("governance clauses and hosted-state boundaries reject targeted contradicti
   const documents = governanceDocuments();
   documents["docs/release-runbook.md"] = documents["docs/release-runbook.md"].replace("this file does not claim they are configured", "signing is active and publication is configured");
   assert.equal(validateGovernanceContract({ workflow: document(".github/workflows/openapi-contract.yml"), documents }).ok, false, "hosted-state overclaim unexpectedly passed the real validator");
+});
+
+test("every declared document clause and hosted overclaim is checked by the shared validator", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  for (const [path, clauses] of Object.entries(governanceDocumentClauses)) for (const clause of clauses) {
+    const documents = governanceDocuments();
+    const changed = documents[path].replace(clause, "removed-governance-clause");
+    assert.notEqual(changed, documents[path], `${path} mutation must change source`);
+    documents[path] = changed;
+    assert.equal(validateGovernanceContract({ workflow, documents }).ok, false, `${path} ${clause} mutation unexpectedly passed`);
+  }
+  for (const claim of ["environment protection is configured", "environment protections are configured", "registry permission is configured", "registry permissions are configured", "CODEOWNERS is active", "advisory is enabled", "advisories are enabled", "signing is active", "NuGet trusted publishing is configured", "npm trusted publishing is configured", "publication is published", "publications are configured"]) {
+    const documents = governanceDocuments();
+    documents["docs/release-runbook.md"] = `${documents["docs/release-runbook.md"]}\n${claim}.`;
+    assert.equal(validateGovernanceContract({ workflow, documents }).ok, false, `${claim} overclaim unexpectedly passed`);
+  }
+});
+
+test("every CODEOWNERS and hosted-honesty condition is checked by the shared validator", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  const mutations = [
+    ["pending activation", (source) => source.replace(/pending activation/i, "removed-governance-clause")],
+    ["verified GitHub owner", (source) => source.replace(/verified GitHub user or team/i, "removed-governance-clause")],
+    ["comment-only ownership", (source) => `${source}\n* @unverified-owner\n`],
+    ["honest unverified prerequisite boundary", (source) => source.replace("this file does not claim they are configured", "they are configured")],
+  ];
+  for (const [name, mutate] of mutations) {
+    const documents = governanceDocuments();
+    const path = name === "comment-only ownership" || name === "pending activation" || name === "verified GitHub owner" ? ".github/CODEOWNERS" : "docs/release-runbook.md";
+    const changed = mutate(documents[path]);
+    assert.notEqual(changed, documents[path], `${name} mutation must change source`);
+    documents[path] = changed;
+    assert.equal(validateGovernanceContract({ workflow, documents }).ok, false, `${name} mutation unexpectedly passed`);
+  }
 });
 
 test("approval and gate invariants are independently fail-closed", () => {
