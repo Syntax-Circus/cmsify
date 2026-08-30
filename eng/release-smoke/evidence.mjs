@@ -1,6 +1,6 @@
-import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readlink, realpath, rename, rm } from "node:fs/promises";
 import { dirname, join, parse, relative, resolve, sep } from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 export const RELEASE_SMOKE_SCENARIOS = Object.freeze([
   "descriptor-label-identity",
@@ -31,6 +31,7 @@ const CREDENTIAL_PATTERNS = [
   /\b(?:password|secret|token|authorization)\s*[:=]\s*[^\s,;]+/gi,
 ];
 const evidenceTargetStates = new Map();
+const MAX_EVIDENCE_ENTRY_BYTES = 128 * 1024;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -88,12 +89,75 @@ function assertRealDirectoryEntry(entry, stats) {
   }
 }
 
-async function validateCanonicalOutput(output, { create = false, inspect = lstat, canonicalize = realpath } = {}) {
+function entryIdentity(stats) {
+  const kind = stats.isSymbolicLink()
+    ? "symbolic-link"
+    : stats.isDirectory()
+      ? "directory"
+      : stats.isFile()
+        ? "file"
+        : "other";
+  return Object.freeze({
+    dev: String(stats.dev),
+    ino: String(stats.ino),
+    kind,
+  });
+}
+
+function sameEntryIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.kind === right.kind;
+}
+
+async function inspectPath(path, inspect) {
+  try {
+    return { absent: false, stats: await inspect(path, { bigint: true }) };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { absent: true, stats: null };
+    throw error;
+  }
+}
+
+async function requireDirectoryIdentity(path, expectedIdentity, inspect, { invalidation = false } = {}) {
+  let current;
+  try {
+    current = await inspectPath(path, inspect);
+  } catch (error) {
+    const makeError = invalidation ? evidenceInvalidationError : evidenceTargetError;
+    throw makeError(
+      "evidence-output-unverified",
+      "Release smoke output directory identity could not be verified.",
+      ...(invalidation ? [false, error] : [error]),
+    );
+  }
+  const currentIdentity = current.absent ? null : entryIdentity(current.stats);
+  if (
+    current.absent
+    || current.stats.isSymbolicLink()
+    || !current.stats.isDirectory()
+    || !sameEntryIdentity(currentIdentity, expectedIdentity)
+  ) {
+    const makeError = invalidation ? evidenceInvalidationError : evidenceTargetError;
+    throw makeError(
+      "evidence-output-identity-changed",
+      "Release smoke output directory identity changed before evidence mutation.",
+      ...(invalidation ? [false] : []),
+    );
+  }
+  return currentIdentity;
+}
+
+async function validateCanonicalOutput(output, {
+  create = false,
+  inspect = lstat,
+  canonicalize = realpath,
+  makeDirectory = mkdir,
+} = {}) {
   const components = outputComponents(output);
+  let parentIdentity;
   for (const [index, entry] of components.entries()) {
     let stats;
     try {
-      stats = await inspect(entry);
+      stats = await inspect(entry, { bigint: true });
     } catch (error) {
       if (error?.code !== "ENOENT" || !create || index === 0) {
         throw evidenceTargetError(
@@ -105,9 +169,13 @@ async function validateCanonicalOutput(output, { create = false, inspect = lstat
         );
       }
       try {
-        await mkdir(entry, { mode: 0o700 });
-        stats = await inspect(entry);
+        const parent = components[index - 1];
+        await requireDirectoryIdentity(parent, parentIdentity, inspect);
+        await makeDirectory(entry, { mode: 0o700 });
+        await requireDirectoryIdentity(parent, parentIdentity, inspect);
+        stats = await inspect(entry, { bigint: true });
       } catch (createError) {
+        if (createError?.code === "evidence-output-identity-changed") throw createError;
         throw evidenceTargetError(
           "evidence-output-unavailable",
           "Release smoke output directory could not be created safely.",
@@ -116,6 +184,7 @@ async function validateCanonicalOutput(output, { create = false, inspect = lstat
       }
     }
     assertRealDirectoryEntry(entry, stats);
+    parentIdentity = entryIdentity(stats);
   }
 
   let canonical;
@@ -140,14 +209,15 @@ async function validateCanonicalOutput(output, { create = false, inspect = lstat
       "Release smoke output directory canonical path contains path indirection.",
     );
   }
-  return canonical;
+  await requireDirectoryIdentity(output, parentIdentity, inspect);
+  return Object.freeze({ path: canonical, identity: parentIdentity });
 }
 
 function targetState(path) {
   const key = normalizedPathKey(path);
   let state = evidenceTargetStates.get(key);
   if (!state) {
-    state = { tail: Promise.resolve(), pendingInvalidations: 0 };
+    state = { tail: Promise.resolve(), terminal: false, binding: null };
     evidenceTargetStates.set(key, state);
   }
   return state;
@@ -176,12 +246,140 @@ function evidenceInvalidationError(code, message, targetUnavailable, cause) {
 }
 
 async function inspectExactEntry(path, inspect) {
-  try {
-    return { absent: false, stats: await inspect(path) };
-  } catch (error) {
-    if (error?.code === "ENOENT") return { absent: true, stats: null };
-    throw error;
+  return inspectPath(path, inspect);
+}
+
+async function hashFileHandle(handle) {
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(8 * 1024);
+  let offset = 0;
+  while (offset <= MAX_EVIDENCE_ENTRY_BYTES) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+    if (bytesRead === 0) return hash.digest("hex");
+    hash.update(buffer.subarray(0, bytesRead));
+    offset += bytesRead;
   }
+  throw evidenceTargetError(
+    "evidence-entry-unverified",
+    "Release smoke evidence entry exceeds the bounded identity check.",
+  );
+}
+
+async function captureEvidenceEntry(path, {
+  inspect = lstat,
+  openFile = open,
+  readLink = readlink,
+} = {}) {
+  let inspected;
+  try {
+    inspected = await inspectExactEntry(path, inspect);
+  } catch (error) {
+    throw evidenceTargetError(
+      "evidence-entry-unverified",
+      "Release smoke evidence entry identity could not be verified.",
+      error,
+    );
+  }
+  if (inspected.absent) return Object.freeze({ absent: true });
+
+  const inspectedIdentity = entryIdentity(inspected.stats);
+  if (inspected.stats.isSymbolicLink()) {
+    let target;
+    let confirmed;
+    try {
+      target = await readLink(path);
+      confirmed = await inspectExactEntry(path, inspect);
+    } catch (error) {
+      throw evidenceTargetError(
+        "evidence-entry-unverified",
+        "Release smoke evidence link identity could not be verified.",
+        error,
+      );
+    }
+    if (
+      confirmed.absent
+      || !sameEntryIdentity(entryIdentity(confirmed.stats), inspectedIdentity)
+    ) {
+      throw evidenceTargetError(
+        "evidence-entry-identity-changed",
+        "Release smoke evidence entry identity changed during verification.",
+      );
+    }
+    return Object.freeze({
+      absent: false,
+      identity: inspectedIdentity,
+      digest: createHash("sha256").update(target, "utf8").digest("hex"),
+    });
+  }
+  if (!inspected.stats.isFile()) {
+    throw evidenceTargetError(
+      "evidence-entry-unavailable",
+      "Release smoke evidence entry must be a regular file or symbolic link.",
+    );
+  }
+
+  let handle;
+  try {
+    handle = await openFile(path, "r");
+    const handleStats = await handle.stat({ bigint: true });
+    const handleIdentity = entryIdentity(handleStats);
+    if (!sameEntryIdentity(handleIdentity, inspectedIdentity)) {
+      throw evidenceTargetError(
+        "evidence-entry-identity-changed",
+        "Release smoke evidence entry identity changed while it was opened.",
+      );
+    }
+    const digest = await hashFileHandle(handle);
+    const confirmedHandleStats = await handle.stat({ bigint: true });
+    const confirmed = await inspectExactEntry(path, inspect);
+    if (
+      confirmed.absent
+      || !sameEntryIdentity(entryIdentity(confirmedHandleStats), handleIdentity)
+      || !sameEntryIdentity(entryIdentity(confirmed.stats), handleIdentity)
+    ) {
+      throw evidenceTargetError(
+        "evidence-entry-identity-changed",
+        "Release smoke evidence entry identity changed during verification.",
+      );
+    }
+    return Object.freeze({ absent: false, identity: handleIdentity, digest });
+  } catch (error) {
+    if (error?.name === "EvidenceTargetError") throw error;
+    throw evidenceTargetError(
+      "evidence-entry-unverified",
+      "Release smoke evidence entry identity or content could not be verified.",
+      error,
+    );
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+function sameEvidenceEntry(left, right) {
+  return left.absent === right.absent
+    && (left.absent || (
+      sameEntryIdentity(left.identity, right.identity)
+      && left.digest === right.digest
+    ));
+}
+
+async function requireEvidenceEntry(path, expected, operations, {
+  invalidation = false,
+  code = "evidence-entry-identity-changed",
+  message = "Release smoke evidence entry identity or content changed before mutation.",
+} = {}) {
+  let current;
+  try {
+    current = await captureEvidenceEntry(path, operations);
+  } catch (error) {
+    if (!invalidation) throw error;
+    throw evidenceInvalidationError(code, message, false, error);
+  }
+  if (!sameEvidenceEntry(current, expected)) {
+    if (invalidation) throw evidenceInvalidationError(code, message, false);
+    throw evidenceTargetError(code, message);
+  }
+  return current;
 }
 
 function isoTimestamp(value, label) {
@@ -274,32 +472,78 @@ export function createEvidence(input) {
   return Object.freeze(result);
 }
 
-export async function writeEvidence(outputDirectory, evidence) {
+export async function writeEvidence(outputDirectory, evidence, operations = {}) {
   const lexical = resolveEvidenceTarget(outputDirectory);
   const state = targetState(lexical.path);
-  if (state.pendingInvalidations > 0) {
+  if (state.terminal) {
     throw evidenceTargetError(
-      "evidence-operation-conflict",
-      "Release smoke evidence cannot be written while invalidation is pending for the same target.",
+      "evidence-operation-terminal",
+      "Release smoke evidence target is permanently unavailable after invalidation began.",
     );
   }
   return enqueueTargetOperation(state, async () => {
-    const output = await validateCanonicalOutput(lexical.output, { create: true });
+    const inspect = operations.lstat ?? lstat;
+    const openFile = operations.open ?? open;
+    const readLink = operations.readlink ?? readlink;
+    const makeDirectory = operations.mkdir ?? mkdir;
+    const canonicalize = operations.realpath ?? realpath;
+    const move = operations.rename ?? rename;
+    const remove = operations.rm ?? rm;
+    const lease = await validateCanonicalOutput(lexical.output, {
+      create: true,
+      inspect,
+      canonicalize,
+      makeDirectory,
+    });
+    const output = lease.path;
     const path = resolve(output, "evidence.json");
     assert(normalizedPathKey(path) === normalizedPathKey(lexical.path), "Release smoke evidence canonical path changed unexpectedly.");
     const temporary = resolve(output, `.evidence-${process.pid}-${randomBytes(6).toString("hex")}.tmp`);
+    const entryOperations = { inspect, openFile, readLink };
+    if (state.binding && !sameEntryIdentity(lease.identity, state.binding.outputIdentity)) {
+      throw evidenceTargetError(
+        "evidence-output-identity-changed",
+        "Release smoke output directory no longer matches the directory where evidence was persisted.",
+      );
+    }
+    const expectedDestination = state.binding?.evidence
+      ?? await captureEvidenceEntry(path, entryOperations);
+    await requireEvidenceEntry(path, expectedDestination, entryOperations);
     let handle;
+    let temporaryEvidence;
+    let renamed = false;
     try {
-      handle = await open(temporary, "wx", 0o600);
+      await requireDirectoryIdentity(output, lease.identity, inspect);
+      handle = await openFile(temporary, "wx", 0o600);
       await handle.writeFile(`${JSON.stringify(evidence, null, 2)}\n`, "utf8");
       await handle.sync();
       await handle.close();
       handle = undefined;
-      await rename(temporary, path);
+      temporaryEvidence = await captureEvidenceEntry(temporary, entryOperations);
+      await requireDirectoryIdentity(output, lease.identity, inspect);
+      await requireEvidenceEntry(temporary, temporaryEvidence, entryOperations);
+      await requireEvidenceEntry(path, expectedDestination, entryOperations);
+      await move(temporary, path);
+      renamed = true;
+      await requireDirectoryIdentity(output, lease.identity, inspect);
+      const persistedEvidence = await requireEvidenceEntry(path, temporaryEvidence, entryOperations);
+      state.binding = Object.freeze({
+        outputIdentity: lease.identity,
+        evidence: persistedEvidence,
+      });
       return path;
     } finally {
       await handle?.close().catch(() => {});
-      await rm(temporary, { force: true }).catch(() => {});
+      if (!renamed && temporaryEvidence) {
+        try {
+          await requireDirectoryIdentity(output, lease.identity, inspect);
+          await requireEvidenceEntry(temporary, temporaryEvidence, entryOperations);
+          await requireDirectoryIdentity(output, lease.identity, inspect);
+          await remove(temporary, { force: true });
+        } catch {
+          // An unverified path is never cleaned through a changed output directory.
+        }
+      }
     }
   });
 }
@@ -307,80 +551,122 @@ export async function writeEvidence(outputDirectory, evidence) {
 export async function invalidateEvidence(outputDirectory, operations = {}) {
   const lexical = resolveEvidenceTarget(outputDirectory);
   const state = targetState(lexical.path);
-  state.pendingInvalidations += 1;
+  if (state.terminal) {
+    throw evidenceTargetError(
+      "evidence-operation-terminal",
+      "Release smoke evidence target is permanently unavailable after invalidation began.",
+    );
+  }
+  state.terminal = true;
   return enqueueTargetOperation(state, async () => {
-    try {
-      const inspect = operations.lstat ?? lstat;
-      const canonicalize = operations.realpath ?? realpath;
-      const output = await validateCanonicalOutput(lexical.output, { inspect, canonicalize });
-      const path = resolve(output, "evidence.json");
-      assert(normalizedPathKey(path) === normalizedPathKey(lexical.path), "Release smoke evidence canonical path changed unexpectedly.");
-      const move = operations.rename ?? rename;
-      const remove = operations.rm ?? rm;
-      const quarantine = resolve(output, `.evidence-invalid-${process.pid}-${randomBytes(6).toString("hex")}.quarantine`);
-      assert(dirname(quarantine) === output, "Release smoke evidence quarantine path escaped its output directory.");
+    const inspect = operations.lstat ?? lstat;
+    const canonicalize = operations.realpath ?? realpath;
+    const openFile = operations.open ?? open;
+    const readLink = operations.readlink ?? readlink;
+    const move = operations.rename ?? rename;
+    const remove = operations.rm ?? rm;
+    const entryOperations = { inspect, openFile, readLink };
+    const lease = await validateCanonicalOutput(lexical.output, { inspect, canonicalize });
+    const output = lease.path;
+    const path = resolve(output, "evidence.json");
+    assert(normalizedPathKey(path) === normalizedPathKey(lexical.path), "Release smoke evidence canonical path changed unexpectedly.");
+    const quarantine = resolve(output, `.evidence-invalid-${process.pid}-${randomBytes(6).toString("hex")}.quarantine`);
+    assert(dirname(quarantine) === output, "Release smoke evidence quarantine path escaped its output directory.");
 
-      let moveError;
-      let removalError;
-      let cleanupError;
-      let quarantined = false;
+    if (state.binding && !sameEntryIdentity(lease.identity, state.binding.outputIdentity)) {
+      throw evidenceTargetError(
+        "evidence-output-identity-changed",
+        "Release smoke output directory no longer matches the directory where evidence was persisted.",
+      );
+    }
+    const expectedEvidence = state.binding?.evidence
+      ?? await captureEvidenceEntry(path, entryOperations);
+    await requireDirectoryIdentity(output, lease.identity, inspect);
+    await requireEvidenceEntry(path, expectedEvidence, entryOperations);
+    if (expectedEvidence.absent) {
+      return Object.freeze({ targetUnavailable: true, quarantineRemoved: true });
+    }
+
+    let moveError;
+    let removalError;
+    let cleanupError;
+    let quarantined = false;
+    try {
+      await move(path, quarantine);
+      quarantined = true;
+    } catch (error) {
+      moveError = error;
       try {
-        await move(path, quarantine);
-        quarantined = true;
-      } catch (error) {
-        moveError = error;
+        await requireDirectoryIdentity(output, lease.identity, inspect, { invalidation: true });
+        await requireEvidenceEntry(path, expectedEvidence, entryOperations, { invalidation: true });
         try {
           await remove(path, { force: false });
         } catch (removeError) {
           if (removeError?.code !== "ENOENT") removalError = removeError;
         }
-      }
-
-      if (quarantined) {
-        try {
-          await remove(quarantine, { force: true });
-        } catch (error) {
-          cleanupError = error;
+      } catch (verificationError) {
+        if (verificationError?.code === "evidence-entry-identity-changed"
+          || verificationError?.code === "evidence-output-identity-changed") {
+          throw verificationError;
         }
+        if (verificationError?.cause?.code !== "ENOENT") throw verificationError;
       }
-
-      let finalEntry;
-      let verificationError;
-      try {
-        finalEntry = await inspectExactEntry(path, inspect);
-      } catch (error) {
-        verificationError = error;
-      }
-
-      if (cleanupError) {
-        throw evidenceInvalidationError(
-          "evidence-quarantine-cleanup-failed",
-          "Prior release smoke evidence was quarantined, but quarantine cleanup failed.",
-          verificationError === undefined && finalEntry.absent,
-          verificationError
-            ? new AggregateError([cleanupError, verificationError])
-            : cleanupError,
-        );
-      }
-      if (verificationError) {
-        throw evidenceInvalidationError(
-          "evidence-invalidation-unverified",
-          "Prior release smoke evidence invalidation could not be verified.",
-          false,
-          verificationError,
-        );
-      }
-      if (!finalEntry.absent) {
-        throw evidenceInvalidationError(
-          "evidence-invalidation-failed",
-          "Prior release smoke evidence remains available after invalidation.",
-          false,
-          removalError ? new AggregateError([moveError, removalError]) : moveError,
-        );
-      }
-      return Object.freeze({ targetUnavailable: true, quarantineRemoved: true });
-    } finally {
-      state.pendingInvalidations -= 1;
     }
+
+    if (quarantined) {
+      await requireDirectoryIdentity(output, lease.identity, inspect, { invalidation: true });
+      await requireEvidenceEntry(quarantine, expectedEvidence, entryOperations, {
+        invalidation: true,
+        code: "evidence-entry-identity-changed",
+        message: "Quarantined release smoke evidence no longer matches the captured evidence entry.",
+      });
+      try {
+        await remove(quarantine, { force: true });
+      } catch (error) {
+        cleanupError = error;
+      }
+    }
+
+    let finalEntry;
+    let finalQuarantine;
+    let verificationError;
+    try {
+      await requireDirectoryIdentity(output, lease.identity, inspect, { invalidation: true });
+      finalEntry = await inspectExactEntry(path, inspect);
+      finalQuarantine = await inspectExactEntry(quarantine, inspect);
+    } catch (error) {
+      verificationError = error;
+    }
+
+    const targetUnavailable = verificationError === undefined && finalEntry.absent;
+    if (cleanupError || (quarantined && verificationError === undefined && !finalQuarantine.absent)) {
+      const errors = [cleanupError, verificationError].filter(Boolean);
+      if (!cleanupError && !finalQuarantine.absent) {
+        errors.push(new Error("Quarantined release smoke evidence remains after cleanup."));
+      }
+      throw evidenceInvalidationError(
+        "evidence-quarantine-cleanup-failed",
+        "Prior release smoke evidence was quarantined, but quarantine cleanup failed.",
+        targetUnavailable,
+        errors.length > 1 ? new AggregateError(errors) : errors[0],
+      );
+    }
+    if (verificationError) {
+      throw evidenceInvalidationError(
+        "evidence-invalidation-unverified",
+        "Prior release smoke evidence invalidation could not be verified.",
+        false,
+        verificationError,
+      );
+    }
+    if (!finalEntry.absent) {
+      throw evidenceInvalidationError(
+        "evidence-invalidation-failed",
+        "Prior release smoke evidence remains available after invalidation.",
+        false,
+        removalError ? new AggregateError([moveError, removalError]) : moveError,
+      );
+    }
+    return Object.freeze({ targetUnavailable: true, quarantineRemoved: true });
   });
 }

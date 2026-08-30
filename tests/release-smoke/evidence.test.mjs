@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, parse, resolve } from "node:path";
 import test from "node:test";
 
@@ -121,6 +121,108 @@ test("invalidates only the exact evidence target while preserving sibling output
   }
 });
 
+test("invalidation rejects a real-directory replacement made after this process persisted evidence", async () => {
+  const root = resolve("artifacts/release-smoke/evidence-persisted-output-identity-unit-test");
+  const output = resolve(root, "output");
+  const originalOutput = resolve(root, "original-output");
+  const alternateOutput = resolve(root, "alternate-output");
+  const mutations = [];
+  await rm(root, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "original-passed" });
+    await mkdir(alternateOutput, { recursive: true });
+    await writeFile(resolve(alternateOutput, "evidence.json"), "alternate-passed", "utf8");
+    await rename(output, originalOutput);
+    await rename(alternateOutput, output);
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        rename: async (...args) => {
+          mutations.push(["rename", ...args]);
+          return rename(...args);
+        },
+        rm: async (...args) => {
+          mutations.push(["rm", ...args]);
+          return rm(...args);
+        },
+      }),
+      (error) => error.code === "evidence-output-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.deepEqual(mutations, []);
+    assert.equal(await readFile(resolve(originalOutput, "evidence.json"), "utf8"), "{\n  \"status\": \"original-passed\"\n}\n");
+    assert.equal(await readFile(resolve(output, "evidence.json"), "utf8"), "alternate-passed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("invalidation rejects an evidence replacement made after this process persisted it", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-persisted-entry-identity-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  const originalEvidence = resolve(output, "original-evidence.keep");
+  const mutations = [];
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "original-passed" });
+    await rename(evidencePath, originalEvidence);
+    await writeFile(evidencePath, "alternate-passed", "utf8");
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        rename: async (...args) => {
+          mutations.push(["rename", ...args]);
+          return rename(...args);
+        },
+        rm: async (...args) => {
+          mutations.push(["rm", ...args]);
+          return rm(...args);
+        },
+      }),
+      (error) => error.code === "evidence-entry-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.deepEqual(mutations, []);
+    assert.equal(await readFile(originalEvidence, "utf8"), "{\n  \"status\": \"original-passed\"\n}\n");
+    assert.equal(await readFile(evidencePath, "utf8"), "alternate-passed");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("a later write rejects an evidence replacement made after this process persisted it", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-write-binding-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  const originalEvidence = resolve(output, "original-evidence.keep");
+  const mutations = [];
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "original-passed" });
+    await rename(evidencePath, originalEvidence);
+    await writeFile(evidencePath, "alternate-passed", "utf8");
+
+    await assert.rejects(
+      writeEvidence(output, { status: "terminal-failed" }, {
+        rename: async (...args) => {
+          mutations.push(["rename", ...args]);
+          return rename(...args);
+        },
+        rm: async (...args) => {
+          mutations.push(["rm", ...args]);
+          return rm(...args);
+        },
+      }),
+      (error) => error.code === "evidence-entry-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.deepEqual(mutations, []);
+    assert.equal(await readFile(originalEvidence, "utf8"), "{\n  \"status\": \"original-passed\"\n}\n");
+    assert.equal(await readFile(evidencePath, "utf8"), "alternate-passed");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
 test("evidence invalidation refuses filesystem roots before touching a target", async () => {
   await assert.rejects(
     invalidateEvidence(resolve(process.cwd(), parse(process.cwd()).root)),
@@ -185,6 +287,90 @@ test("evidence invalidation rejects a Windows junction component before mutating
   }
 });
 
+test("a Windows junction swap after canonical validation preserves original and foreign evidence without mutation", { skip: process.platform !== "win32" }, async () => {
+  const root = resolve("artifacts/release-smoke/evidence-output-junction-swap-unit-test");
+  const output = resolve(root, "output");
+  const originalOutput = resolve(root, "original-output");
+  const foreignOutput = resolve(root, "foreign-output");
+  const originalEvidence = resolve(originalOutput, "evidence.json");
+  const foreignEvidence = resolve(foreignOutput, "evidence.json");
+  let swapped = false;
+  const mutations = [];
+  await rm(root, { recursive: true, force: true });
+  try {
+    await mkdir(output, { recursive: true });
+    await mkdir(foreignOutput, { recursive: true });
+    await writeFile(resolve(output, "evidence.json"), "original-passed", "utf8");
+    await writeFile(foreignEvidence, "foreign-passed", "utf8");
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        realpath: async (path) => {
+          const canonical = await realpath(path);
+          if (path === output && !swapped) {
+            swapped = true;
+            await rename(output, originalOutput);
+            await symlink(foreignOutput, output, "junction");
+          }
+          return canonical;
+        },
+        rename: async (...args) => {
+          mutations.push(["rename", ...args]);
+          return rename(...args);
+        },
+        rm: async (...args) => {
+          mutations.push(["rm", ...args]);
+          return rm(...args);
+        },
+      }),
+      (error) => error.code === "evidence-output-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.equal(swapped, true);
+    assert.deepEqual(mutations, []);
+    assert.equal(await readFile(originalEvidence, "utf8"), "original-passed");
+    assert.equal(await readFile(foreignEvidence, "utf8"), "foreign-passed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("missing-output creation rejects a parent junction swap before creating foreign output", async () => {
+  const root = resolve("artifacts/release-smoke/evidence-parent-swap-unit-test");
+  const parent = resolve(root, "parent");
+  const originalParent = resolve(root, "original-parent");
+  const foreignParent = resolve(root, "foreign-parent");
+  const output = resolve(parent, "output");
+  let swapped = false;
+  await rm(root, { recursive: true, force: true });
+  try {
+    await mkdir(parent, { recursive: true });
+    await mkdir(foreignParent, { recursive: true });
+
+    await assert.rejects(
+      writeEvidence(output, { status: "passed" }, {
+        lstat: async (path, options) => {
+          const stats = await lstat(path, options);
+          if (path === parent && !swapped) {
+            swapped = true;
+            await rename(parent, originalParent);
+            await symlink(foreignParent, parent, process.platform === "win32" ? "junction" : "dir");
+          }
+          return stats;
+        },
+      }),
+      (error) => error.code === "evidence-output-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.equal(swapped, true);
+    await assert.rejects(lstat(resolve(foreignParent, "output")), (error) => error.code === "ENOENT");
+    assert.deepEqual(await readdir(originalParent), []);
+    assert.deepEqual(await readdir(foreignParent), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("evidence invalidation rejects an output link whose canonical target is a filesystem root before mutation", async () => {
   const root = resolve("artifacts/release-smoke/evidence-output-root-link-unit-test");
   const output = resolve(root, "output-link");
@@ -235,6 +421,95 @@ test("a dangling evidence link is removed rather than misclassified as absent af
   }
 });
 
+test("evidence identity replacement after capture rejects before any invalidation mutation", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-entry-swap-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  const originalEvidence = resolve(output, "original-evidence.keep");
+  let outputInspections = 0;
+  let swapped = false;
+  const mutations = [];
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        lstat: async (path, options) => {
+          const stats = await lstat(path, options);
+          if (path === output) {
+            outputInspections += 1;
+            if (outputInspections === 3) {
+              swapped = true;
+              await rename(evidencePath, originalEvidence);
+              await writeFile(evidencePath, "replacement-evidence", "utf8");
+            }
+          }
+          return stats;
+        },
+        rename: async (...args) => {
+          mutations.push(["rename", ...args]);
+          return rename(...args);
+        },
+        rm: async (...args) => {
+          mutations.push(["rm", ...args]);
+          return rm(...args);
+        },
+      }),
+      (error) => error.code === "evidence-entry-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.equal(swapped, true);
+    assert.deepEqual(mutations, []);
+    assert.equal(await readFile(originalEvidence, "utf8"), "{\n  \"status\": \"passed\"\n}\n");
+    assert.equal(await readFile(evidencePath, "utf8"), "replacement-evidence");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("evidence content change after capture rejects before any invalidation mutation", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-content-swap-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  let outputInspections = 0;
+  let changed = false;
+  const mutations = [];
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        lstat: async (path, options) => {
+          const stats = await lstat(path, options);
+          if (path === output) {
+            outputInspections += 1;
+            if (outputInspections === 3) {
+              changed = true;
+              await writeFile(evidencePath, "changed-content", "utf8");
+            }
+          }
+          return stats;
+        },
+        rename: async (...args) => {
+          mutations.push(["rename", ...args]);
+          return rename(...args);
+        },
+        rm: async (...args) => {
+          mutations.push(["rm", ...args]);
+          return rm(...args);
+        },
+      }),
+      (error) => error.code === "evidence-entry-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.equal(changed, true);
+    assert.deepEqual(mutations, []);
+    assert.equal(await readFile(evidencePath, "utf8"), "changed-content");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
 test("cleanup-time writeEvidence reentrancy cannot recreate evidence before invalidation returns", async () => {
   const output = resolve("artifacts/release-smoke/evidence-reentrant-write-unit-test");
   const evidencePath = resolve(output, "evidence.json");
@@ -257,8 +532,125 @@ test("cleanup-time writeEvidence reentrancy cannot recreate evidence before inva
     });
 
     assert.equal(result.targetUnavailable, true);
-    assert.equal(recreationError?.code, "evidence-operation-conflict");
+    assert.equal(recreationError?.code, "evidence-operation-terminal");
     await assert.rejects(lstat(evidencePath), (error) => error.code === "ENOENT");
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("same-target recreation after final verification is rejected before invalidation settles", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-terminal-recreation-unit-test");
+  const evidencePath = resolve(output, "evidence.json");
+  let recreationPromise;
+  let scheduled = false;
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    const result = await invalidateEvidence(output, {
+      lstat: async (path, options) => {
+        try {
+          return await lstat(path, options);
+        } catch (error) {
+          if (path === evidencePath && error?.code === "ENOENT" && !scheduled) {
+            scheduled = true;
+            queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
+              recreationPromise = writeEvidence(output, { status: "recreated" });
+              recreationPromise.catch(() => {});
+            })));
+          }
+          throw error;
+        }
+      },
+    });
+
+    await new Promise((resolveTurn) => setImmediate(resolveTurn));
+    assert.equal(result.targetUnavailable, true);
+    assert.equal(scheduled, true);
+    await assert.rejects(
+      recreationPromise,
+      (error) => error.code === "evidence-operation-terminal" && error.targetUnavailable === false,
+    );
+    await assert.rejects(
+      writeEvidence(output, { status: "later-write" }),
+      (error) => error.code === "evidence-operation-terminal" && error.targetUnavailable === false,
+    );
+    await assert.rejects(
+      invalidateEvidence(output),
+      (error) => error.code === "evidence-operation-terminal" && error.targetUnavailable === false,
+    );
+    await assert.rejects(lstat(evidencePath), (error) => error.code === "ENOENT");
+  } finally {
+    await recreationPromise?.catch(() => {});
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("nested same-target invalidation rejects promptly instead of waiting behind itself", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-nested-invalidation-unit-test");
+  let nestedInvalidation;
+  let nestedOutcome;
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    const result = await invalidateEvidence(output, {
+      rm: async (path, options) => {
+        if (basename(path).startsWith(".evidence-invalid-")) {
+          nestedInvalidation = invalidateEvidence(output);
+          nestedOutcome = await Promise.race([
+            nestedInvalidation.then(
+              () => "resolved",
+              (error) => error.code,
+            ),
+            new Promise((resolveTimeout) => setTimeout(() => resolveTimeout("timeout"), 100)),
+          ]);
+        }
+        return rm(path, options);
+      },
+    });
+
+    assert.equal(result.targetUnavailable, true);
+    assert.equal(nestedOutcome, "evidence-operation-terminal");
+    await assert.rejects(
+      nestedInvalidation,
+      (error) => error.code === "evidence-operation-terminal" && error.targetUnavailable === false,
+    );
+  } finally {
+    await nestedInvalidation?.catch(() => {});
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test("quarantine replacement is never deleted when its identity differs from captured evidence", async () => {
+  const output = resolve("artifacts/release-smoke/evidence-quarantine-identity-unit-test");
+  const expectedEvidence = resolve(output, "expected-evidence.keep");
+  let quarantine;
+  let removalCalls = 0;
+  await rm(output, { recursive: true, force: true });
+  try {
+    await writeEvidence(output, { status: "passed" });
+
+    await assert.rejects(
+      invalidateEvidence(output, {
+        rename: async (source, destination) => {
+          quarantine = destination;
+          await rename(source, destination);
+          await rename(destination, expectedEvidence);
+          await writeFile(destination, "foreign-evidence", "utf8");
+        },
+        rm: async (...args) => {
+          removalCalls += 1;
+          return rm(...args);
+        },
+      }),
+      (error) => error.code === "evidence-entry-identity-changed" && error.targetUnavailable === false,
+    );
+
+    assert.equal(removalCalls, 0);
+    assert.equal(await readFile(expectedEvidence, "utf8"), "{\n  \"status\": \"passed\"\n}\n");
+    assert.equal(await readFile(quarantine, "utf8"), "foreign-evidence");
   } finally {
     await rm(output, { recursive: true, force: true });
   }
@@ -317,9 +709,11 @@ test("quarantine cleanup completes before a final no-follow verification failure
   const output = resolve("artifacts/release-smoke/evidence-final-verification-unit-test");
   const evidencePath = resolve(output, "evidence.json");
   let quarantineRemoved = false;
-  const inspect = async (path) => {
-    if (path === evidencePath) throw Object.assign(new Error("inspection refused"), { code: "EACCES" });
-    return stat(path);
+  const inspect = async (path, options) => {
+    if (path === evidencePath && quarantineRemoved) {
+      throw Object.assign(new Error("inspection refused"), { code: "EACCES" });
+    }
+    return lstat(path, options);
   };
   await rm(output, { recursive: true, force: true });
   try {
