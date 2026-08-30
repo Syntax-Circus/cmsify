@@ -456,6 +456,8 @@ function hasContradictoryTransportClaim(contents) {
   const actionSource = "certif(?:y|ies|ied|ication|ying)|upload(?:s|ed|ing)?|promot(?:e|es|ed|ion|ing)";
   const negatedListItemSource = `${actionSource}|checksum(?:s|med|ming)?`;
   const releaseAction = new RegExp(`\\b(?:${actionSource})\\b`, "gi");
+  const releaseActionInText = new RegExp(`\\b(?:${actionSource})\\b`, "i");
+  const originalArtifactSubject = /\b(?:the\s+)?original\s+OCI\s+archive\b/i;
   const allowedListText = new RegExp(`^(?:\\s|,|\\b(?:be|and|or|nor|is|are|${negatedListItemSource})\\b)*$`, "i");
   const trailingProhibition = new RegExp(`^(?:\\s|,|\\b(?:and|or|nor|${actionSource})\\b)*(?:is|are)\\s+(?:prohibited|forbidden|excluded)\\b`, "i");
   const actionIsNegated = (context, action) => {
@@ -475,8 +477,12 @@ function hasContradictoryTransportClaim(contents) {
     return trailingProhibition.test(clauseAfter);
   };
   return contents.replaceAll("\r\n", "\n").split(/\n\s*\n/).some((paragraph) => {
-    const clauses = paragraph.replaceAll("\n", " ")
-      .split(/(?:[.!?;:](?:\s+|$)|\b(?:before|after|while|whereas|but|however|yet)\b)/i)
+    const withoutEmptyTemporalAdjuncts = paragraph.replaceAll("\n", " ").replace(
+      /,\s*((?:before|after|while)\b[^,]*),/gi,
+      (fragment, adjunct) => releaseActionInText.test(adjunct) || transportSubject.test(adjunct) || originalArtifactSubject.test(adjunct) ? fragment : " ",
+    );
+    const clauses = withoutEmptyTemporalAdjuncts
+      .split(/(?:[.!?;:](?:\s+|$)|\b(?:before|after|while|whereas|but|however|yet)\b|\b(?:then|subsequently)\b(?=\s+(?:(?:the\s+)?original\s+OCI\s+archive\b|it\b|(?:this|that|the)\s+(?:archive|scratch|output|artifact)\b)))/i)
       .map((clause) => clause.trim())
       .filter(Boolean);
     let previousClauseHasTransport = false;

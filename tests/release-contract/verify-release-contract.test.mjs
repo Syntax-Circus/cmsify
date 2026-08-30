@@ -380,6 +380,20 @@ for (const [relativePath, paragraph] of [
 ]) {
   test(`accepts a temporal boundary to original-archive action in ${relativePath}`, () => expectValid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`)));
 }
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "The temporary Docker archive, after local validation, is uploaded."],
+  ["tests/upgrade/README.md", "Transport scratch, after inspection, is certified."],
+  ["tests/release-smoke/README.md", "The temporary conversion output, before deletion, is promoted."],
+  ["docs/release-runbook.md", "The temporary Docker archive is validated, then it is uploaded."],
+]) {
+  test(`rejects transport action across a continuing temporal adjunct in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`), /runbook.*exclusive.*temporary transport output/i));
+}
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "The temporary Docker archive is deleted, then the original OCI archive is certified."],
+  ["tests/upgrade/README.md", "Transport scratch is discarded; subsequently the original OCI archive is promoted by digest."],
+]) {
+  test(`accepts explicit original-archive reset after a temporal transition in ${relativePath}`, () => expectValid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`)));
+}
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(
