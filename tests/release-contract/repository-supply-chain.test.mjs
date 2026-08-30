@@ -182,6 +182,28 @@ test("supply-chain validator examines Docker commands after pipe and background 
   });
 });
 
+test("supply-chain validator examines a pipe boundary after an escaped double quote", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/escaped-double-quote-pipe.yml", String.raw`jobs:
+  test:
+    steps:
+      - run: docker build --tag cmsify-candidate:local . | printf '%s' "ignored \" quote" | docker run postgres:17-alpine
+`);
+    assert.match(validateRepositorySupplyChain(root).join("\n"), /escaped-double-quote-pipe\.yml:4: runtime image/);
+  });
+});
+
+test("supply-chain validator examines a background boundary after an escaped double quote", () => {
+  withTemporaryRepository((root) => {
+    write(root, ".github/workflows/escaped-double-quote-background.yml", String.raw`jobs:
+  test:
+    steps:
+      - run: docker build --tag cmsify-candidate:local . & printf '%s' "ignored \" quote" & docker run postgres:17-alpine
+`);
+    assert.match(validateRepositorySupplyChain(root).join("\n"), /escaped-double-quote-background\.yml:4: runtime image/);
+  });
+});
+
 test("supply-chain validator does not split quoted or escaped shell separators", () => {
   withTemporaryRepository((root) => {
     write(root, ".github/workflows/quoted-separators.yml", `jobs:

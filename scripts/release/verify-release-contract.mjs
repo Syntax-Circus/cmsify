@@ -92,7 +92,11 @@ function shellTokens(lines) {
     for (let index = 0; index < text.length; index += 1) {
       const character = text[index];
       if (quote !== undefined) {
-        if (character === quote) quote = undefined;
+        const escaped = text[index + 1];
+        if (quote === '"' && character === "\\" && ["$", "`", '"', "\\"].includes(escaped)) {
+          value += `\\${escaped}`;
+          index += 1;
+        } else if (character === quote) quote = undefined;
         else value += character;
         continue;
       }
