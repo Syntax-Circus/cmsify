@@ -1,16 +1,17 @@
-# V1 release remediation handoff after Task 11 quality and capacity
+# V1 release remediation handoff after Task 12 repository remediation
 
-This is a point-in-time resume document for moving the remediation work to another computer. Resume from the commit containing this file; do not redo Tasks 1–11.
+This is a point-in-time resume document for moving the remediation work to another computer. Resume from the commit containing this file; do not redo Tasks 1–11 or the completed Task 12 repository implementation and pre-publication review fixes.
 
 ## Resume point
 
 - Branch: `feature/readiness-audit`
+- Accepted Task 12 repository implementation source: `da3a428be6f12b9cdfbdde5a17daefab025615e0` (`Bind smoke evidence to certified manifests`). This is the source SHA bound by the preliminary evidence ledger; the evidence-only commit containing this handoff follows it.
 - Exact Task 11 reproducible-quality implementation source tested: `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4` (`Close dependency policy mutation gaps`); implementation range `a482873..bdaa0ff`.
 - Exact Task 10 Cmsify implementation source tested: `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` (`Snapshot Cmsify retry configuration`); full implementation range `29ba5a8^..b68172d`.
 - Exact sibling source tested: `e5a7c57bbd3f24eb15c66e5d740e05fffd4f1bc3` (`Clarify cancellation ownership control`) on `feature/cmsify-resilience`; full change range `5216a18..e5a7c57`.
-- State: Tasks 1–11 are implemented and validated locally. F-11, F-16, and F-17 are remediated at the source/test level. Release consumption is still blocked on the user-owned publication/replacement gate described below; outer remediation Task 12 remains open.
+- State: Tasks 1–11 are implemented and validated locally. Task 12 repository implementation and its preliminary whole-branch review fixes are implemented and source/policy-tested through the accepted SHA. F-01 through F-19 are remediated at the local source/policy level. The outer remediation Task 12 remains open only for the exact public dependency, definitive same-source candidate tuple, final clean consumers/accessibility/upgrade/smoke, hosted evidence, approvals, signing/attestation, immutable promotion, soak, stable tag, and final release.
 - Publication prerequisite: exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` bytes remain available only through the approved ignored local feed; the user must publish those bytes or approve and pin an exact stable replacement before ordinary public restore evidence can be collected.
-- The Task 11 documentation commit containing this handoff follows the tested implementation commit and changes documentation/release-contract coverage only, not runtime, generated output, package bytes, or dependency locks.
+- The evidence-only commit containing this refreshed handoff follows the accepted Task 12 implementation commit and changes documentation/release-contract evidence coverage only, not runtime, generated output, package bytes, or dependency locks.
 - No push, merge, tag, package publication, image publication, or release was performed in Task 10 or Task 11.
 
 On the new computer, first make sure this branch and the commit containing this document have been transferred or pushed by the user. Then run:
@@ -21,11 +22,12 @@ git status --short
 git log -5 --oneline
 ```
 
-Expected: a clean worktree with the Task 11 documentation commit at `HEAD` and tested implementation source `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4` in its direct history. Read `AGENTS.md` before changing anything.
+Expected: a clean worktree with this evidence refresh at `HEAD` and accepted Task 12 implementation source `da3a428be6f12b9cdfbdde5a17daefab025615e0` in its direct history. Read `AGENTS.md` before changing anything.
 
 ## Authoritative plans and audit
 
 - Master remediation plan: [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md)
+- Pre-publication review remediation plan: [`docs/superpowers/plans/2026-08-30-prepublication-review-remediation.md`](superpowers/plans/2026-08-30-prepublication-review-remediation.md)
 - Release-readiness audit: [`docs/v1-release-readiness.md`](v1-release-readiness.md)
 - Task 11 quality/capacity design: [`docs/superpowers/specs/2026-08-28-reproducible-quality-capacity-design.md`](superpowers/specs/2026-08-28-reproducible-quality-capacity-design.md)
 - Task 11 quality/capacity implementation plan: [`docs/superpowers/plans/2026-08-28-reproducible-quality-capacity.md`](superpowers/plans/2026-08-28-reproducible-quality-capacity.md)
@@ -42,7 +44,9 @@ The master plan checkboxes are not the execution ledger. Use this handoff, Git h
 
 ## Task 12 evidence status
 
-The machine-readable [Task 12 local evidence ledger](evidence/task-12-local-verification.json) is bound to `70afef5c647f53944fd61d1b35f40ece940aacf7`. It records only local evidence and leaves every external gate false. Task 8 must repair the carried unrecognized contract-step-sequence and concessive hosted-claim-exemption breakers, then rerun and refresh the full gate. This handoff remains non-certifying and does not finish repository implementation.
+The machine-readable [Task 12 local evidence ledger](evidence/task-12-local-verification.json) is bound to accepted implementation `da3a428be6f12b9cdfbdde5a17daefab025615e0`. This **preliminary local source/policy tuple** records release contracts 504/504, release-smoke source tests 91/91, upgrade unit tests 173/173, and a passing standalone semantic verifier. It also retains the earlier ignored-feed product sweep—Release build zero warnings/errors, .NET 599/599 with zero skips, and TypeScript generation/typecheck/40 tests/build—and the successful reviewed offline-loader live certification of the preserved API archive.
+
+The preserved archive proof is non-promotable: it covers only the API candidate built from `a8e2218c530b4323e8e44ca0cf25b3d22e2aea4d`, while the accepted repository source is newer and a definitive API/Admin/package tuple does not exist. The ledger leaves public restore, definitive tuple, final consumers/accessibility/upgrade/smoke, hosted accessibility, approvals, attestation, signing, immutable promotion, soak, stable tag, and final release explicitly false/unperformed. This handoff remains non-certifying.
 
 ## Completed remediation
 
@@ -64,6 +68,7 @@ Tasks 1–11 are complete through local implementation and validation. Key Cmsif
 | Task 9 | through `26bd204` plus the evidence-only documentation commit | Moving-baseline fixture, final-review compatibility/safety fixes, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
 | Task 10 | `29ba5a8^..b68172d` plus its earlier evidence-only documentation commit; sibling `5216a18..e5a7c57` | Shared request-factory resilience, direct/DI/Admin parity, construction-time configuration, atomic logical breaker completion, hard synchronous/asynchronous deadline, stable scheduled request/response snapshots, post-sender observer scheduling isolation, retry ownership, cancellation/observer exclusion, and final local package validation complete; stable publication/replacement remains gated. |
 | Task 11 | `a482873..bdaa0ff` plus the documentation commit containing this handoff | Exact SDK and twelve locks, unified xUnit v3, warning-free Release enforcement, Sass modules, bounded PostgreSQL resolved listing, deterministic media/webhook capacity invariants, open coverage/capacity trends, locked workflows/containers, and dependency automation complete locally; public restore remains gated. |
+| Task 12 repository implementation | through `da3a428` plus the evidence-only documentation commit containing this handoff | Exact candidate verification/build/promotion policy, clean consumers, production-like smoke, accessibility, compatibility/governance, supply-chain controls, offline OCI loading, isolated public-package proof, complete attestation subjects, certified-manifest smoke identity, and bounded diagnostics are implemented and source/policy-tested. Definitive public and hosted execution remains gated. |
 
 Task 5 also changed sibling packages outside this repository:
 
@@ -100,14 +105,14 @@ These are explicitly non-blocking and must remain visible for final release adju
 - Task 5 package publication and all external release evidence remain explicit-approval gates.
 - Task 10's `SyntaxCircus.Http.Resilience` stable publication/replacement and clean public restore remain explicit user-owned gates.
 - Public/CI restore remains blocked until the user publishes the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` bytes or approves and pins an exact stable replacement; the ordinary locked restore and all downstream evidence must then be rerun.
-- Outer Task 12 retains exact candidate package certification and clean consumers for every NuGet/npm artifact, plus exact candidate container certification from the promoted OCI bytes and immutable digest.
-- Outer Task 12 retains production-like PostgreSQL/API/Admin artifact smoke covering health/login plus CRUD, media, OIDC, webhook, and scheduled-publication scenario certification, including backup and restart certification.
-- Outer Task 12 retains accessibility certification with the required trigger expansion.
-- Outer Task 12 retains API and SDK compatibility evidence, a deprecation policy, and enforcement of the documented compatibility window.
-- Outer Task 12 retains governance deliverables: `SECURITY.md`, a support policy, release ownership, vulnerability reporting, a release runbook, and a rollback runbook.
-- Outer Task 12 retains repository-wide third-party action SHA review, runtime-image digest pins, SBOM generation, signing/attestation and provenance, artifact smoke, governance, and final release certification.
+- exact candidate package certification and clean consumers for every NuGet/npm artifact, plus exact candidate container certification from the promoted OCI bytes and immutable digest, are implemented as fail-closed workflow/verifier contracts; definitive candidate execution remains unperformed.
+- Production-like PostgreSQL/API/Admin artifact smoke covering health/login plus CRUD, media, OIDC, webhook, and scheduled-publication scenario certification, including backup and restart certification, is implemented and source-tested; definitive hosted execution remains unperformed.
+- accessibility certification with the required trigger expansion and bounded evidence is implemented; definitive candidate and hosted accessibility remain unperformed.
+- API and SDK compatibility evidence, a deprecation policy, and enforcement of the documented compatibility window are implemented; the definitive hosted comparison/approval result remains unperformed.
+- Governance deliverables—`SECURITY.md`, a support policy, release ownership policy, vulnerability reporting, a release runbook, and a rollback runbook—are implemented and mutation-tested. A repository-verified CODEOWNER and hosted protection evidence remain external prerequisites.
+- repository-wide third-party action SHA review, runtime-image digest pins, SBOM generation, signing/attestation and provenance contracts, artifact smoke, and governance are implemented. Actual signing/attestation, immutable promotion, soak, and final release certification remain unperformed.
 - Keep the Task 9 rollback diagnostic omission visible for final adjudication; Task 11 did not alter the upgrade/rollback harness or claim that omission was closed.
-- The default multi-project full-test command historically exposed the existing Media API fixture/initial reconciliation races. `AvailableAssetWithMissingBlob_ReturnsSanitizedProblemDetails` has intermittently returned generic not-found instead of `/media-blob-missing`; `Delete_WithStaleEtag_ReturnsPreconditionFailedWithoutTombstone` has intermittently returned 404 instead of 412. Focused reruns passed, and the historical Task 10 single-MSBuild-node `-m:1` full solution passed 527/527 after the final resilience regressions. That switch limits project orchestration to one MSBuild node; it does not serialize xUnit test cases. Keep both races visible for Task 12 rather than attributing them to Task 10 or Task 11.
+- The default multi-project full-test command historically exposed the existing Media API fixture/initial reconciliation races. `AvailableAssetWithMissingBlob_ReturnsSanitizedProblemDetails` has intermittently returned generic not-found instead of `/media-blob-missing`; `Delete_WithStaleEtag_ReturnsPreconditionFailedWithoutTombstone` has intermittently returned 404 instead of 412. Focused reruns passed, the historical Task 10 single-MSBuild-node `-m:1` full solution passed 527/527, and the latest preliminary full solution passed 599/599 with zero skips and no recurrence. The `-m:1` switch limits project orchestration to one MSBuild node; it does not serialize xUnit test cases. Keep both races visible for final candidate adjudication.
 
 ## Task 11 quality and capacity evidence
 
@@ -333,6 +338,8 @@ Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1`
 - `SyntaxCircus.Http.Resilience` remains pinned to local-only `0.2.0-cmsify.1`; unlike the storage package, no stable publication has been confirmed. Public/CI restore is blocked until the user completes the replacement gate above.
 - The candidate is a local content-addressed image, not a published release artifact. No external GitHub Actions run ID exists for this local evidence, and no release is certified solely by this handoff.
 
-## Next task: user publication gate, then outer Task 12
+## Next task: public dependency and definitive release tuple
 
-Task 11 implementation is complete locally at `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`. First complete the explicit user-owned `SyntaxCircus.Http.Resilience` publication/replacement and ordinary public-restore validation above; publication itself is not authorized by this handoff. Then resume outer Task 12 from [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md), preserving the tested Cmsify and sibling sources and all completed Tasks 1–11. Outer Task 12 owns repository-wide action pins, runtime digests, SBOM/signing, accessibility-trigger expansion, production-like artifact smoke and clean consumers, governance, the retained Task 9 rollback diagnostic omission, both media races, and final release certification. Do not push, merge, tag, publish, or release without explicit approval.
+Task 12 repository implementation and pre-publication review fixes are complete locally through accepted implementation `da3a428be6f12b9cdfbdde5a17daefab025615e0`; the preliminary evidence-only commit containing this handoff follows it. Do not redo that work. Resume with the explicit user-owned `SyntaxCircus.Http.Resilience` publication/replacement, then run the isolated ordinary public-restore gate. Publication itself is not authorized by this handoff.
+
+After the public gate passes, build one definitive same-source package/API/Admin tuple and run its clean consumers, candidate accessibility, exact-image upgrade/rollback, production-like smoke, backup/restart, hosted accessibility, protected approvals, complete artifact attestations, registry signatures, immutable promotion, authenticated soak, stable tag verification, and final release gate in the order documented by the release runbook. Preserve the Task 9 rollback diagnostic omission and both historical media races for final adjudication. Do not push, merge, tag, publish, sign, attest, promote, or release without explicit approval.

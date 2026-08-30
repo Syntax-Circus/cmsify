@@ -248,7 +248,7 @@ function validateFixture(fixture) {
     ["handoff resume", extractSection(handoff, "Resume point")],
     ["handoff carry", extractSection(handoff, "Carry to Task 12 final review")],
     ["handoff evidence", handoffEvidence],
-    ["handoff next task", extractSection(handoff, "Next task: user publication gate, then outer Task 12")],
+    ["handoff next task", extractSection(handoff, "Next task: public dependency and definitive release tuple")],
   ];
   for (const [name, section] of governed) assertNoPositiveReleaseClaim(section, name);
   assert.doesNotMatch(handoff, /AGENTS\.md requires `rtk` command prefixes/i);
