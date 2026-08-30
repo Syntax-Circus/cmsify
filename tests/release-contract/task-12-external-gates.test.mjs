@@ -136,17 +136,17 @@ const affectedAssets = [
   "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json",
 ];
 
-function publicAssets() {
+function publicAssets(libraryPacksSource) {
   const packagePath = `${packageIdentity.id.toLowerCase()}/${packageIdentity.version}`;
   const document = {
     libraries: { [`${packageIdentity.id}/${packageIdentity.version}`]: { type: "package", path: packagePath, sha512: packageIdentity.contentHash } },
     packageFolders: { "{{ARG_AFTER:--packages}}": {} },
-    project: { restore: { configFilePaths: ["{{ARG_AFTER:--configfile}}"], sources: { "C:/Program Files/dotnet/library-packs": {}, "https://api.nuget.org/v3/index.json": {} } } },
+    project: { restore: { configFilePaths: ["{{ARG_AFTER:--configfile}}"], sources: { [libraryPacksSource]: {}, "https://api.nuget.org/v3/index.json": {} } } },
   };
   return affectedAssets.map((asset) => ({ path: asset, json: document }));
 }
 
-function runPublicRestore({ downloadBytes = "public-package-bytes", expectedBytes = downloadBytes, cacheBytes = downloadBytes, mutateScript, mutateIdentity } = {}) {
+function runPublicRestore({ downloadBytes = "public-package-bytes", expectedBytes = downloadBytes, cacheBytes = downloadBytes, mutateScript, mutateIdentity, libraryPacksSource, captureTemporaryRoot = false } = {}) {
   const { root, bin } = makeRoot();
   const repo = path.join(root, "repo");
   const scriptPath = path.join(repo, "scripts/release/verify-task-12-external-gate.ps1");
@@ -163,20 +163,24 @@ function runPublicRestore({ downloadBytes = "public-package-bytes", expectedByte
   writeFileSync(evidencePath, JSON.stringify({ localFeedPackage: trackedIdentity }));
   const fixturePath = path.join(root, "commands.json");
   const logPath = path.join(root, "calls.log");
+  const temporaryRootCapturePath = path.join(root, "temporary-root.txt");
+  const trustedLibraryPacks = libraryPacksSource ?? path.join(bin, "library-packs");
   const minimalConfig = `<?xml version="1.0" encoding="utf-8"?>\n<configuration>\n  <packageSources>\n    <clear />\n    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />\n  </packageSources>\n</configuration>\n`;
   const fixture = {
     patterns: [
       { pattern: "^curl .*--output .+ https://api\\.nuget\\.org/v3-flatcontainer/syntaxcircus\\.http\\.resilience/0\\.2\\.0-cmsify\\.1/syntaxcircus\\.http\\.resilience\\.0\\.2\\.0-cmsify\\.1\\.nupkg$", response: { writeAfterArgument: { name: "--output", base64: Buffer.from(downloadBytes).toString("base64") } } },
-      { pattern: "^dotnet restore Cmsify\\.slnx --configfile .+ --packages .+ --no-http-cache --locked-mode --force-evaluate$", response: { assertFileAfterArgument: { name: "--configfile", exact: minimalConfig }, writeFiles: [...publicAssets(), { path: `{{ARG_AFTER:--packages}}/${packageIdentity.id.toLowerCase()}/${packageIdentity.version}/${packageIdentity.id.toLowerCase()}.${packageIdentity.version}.nupkg`, base64: Buffer.from(cacheBytes).toString("base64") }] } },
+      { pattern: "^dotnet restore Cmsify\\.slnx --configfile .+ --packages .+ --no-http-cache --locked-mode --force-evaluate$", response: { assertFileAfterArgument: { name: "--configfile", exact: minimalConfig }, writeFiles: [...publicAssets(trustedLibraryPacks), { path: `{{ARG_AFTER:--packages}}/${packageIdentity.id.toLowerCase()}/${packageIdentity.version}/${packageIdentity.id.toLowerCase()}.${packageIdentity.version}.nupkg`, base64: Buffer.from(cacheBytes).toString("base64") }] } },
     ],
   };
   writeFileSync(fixturePath, JSON.stringify(fixture));
   const result = spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", scriptPath, "-Gate", "public-package-restore"], {
     cwd: repo,
-    env: { ...baseEnvironment(bin), CMSIFY_TASK12_STUB_FIXTURE: fixturePath, CMSIFY_TASK12_STUB_LOG: logPath },
+    env: { ...baseEnvironment(bin), CMSIFY_TASK12_STUB_FIXTURE: fixturePath, CMSIFY_TASK12_STUB_LOG: logPath, ...(captureTemporaryRoot ? { CMSIFY_TASK12_TEMP_CAPTURE: temporaryRootCapturePath } : {}) },
     encoding: "utf8",
   });
   result.calls = existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split(/\r?\n/).filter(Boolean) : [];
+  result.capturedTemporaryRoot = existsSync(temporaryRootCapturePath) ? readFileSync(temporaryRootCapturePath, "utf8") : undefined;
+  result.temporaryRootExistsAfter = result.capturedTemporaryRoot ? existsSync(result.capturedTemporaryRoot) : undefined;
   rmSync(root, { recursive: true, force: true });
   return result;
 }
@@ -249,6 +253,8 @@ test("public restore authenticates exact public bytes in isolated NuGet state an
   assert.notEqual(wrongBytes.status, 0, wrongBytes.stdout);
   const wrongCacheBytes = runPublicRestore({ cacheBytes: "wrong-restored-cache-bytes" });
   assert.notEqual(wrongCacheBytes.status, 0, wrongCacheBytes.stdout);
+  const deceptiveLibraryPacks = runPublicRestore({ libraryPacksSource: path.join(os.tmpdir(), "attacker", "library-packs") });
+  assert.notEqual(deceptiveLibraryPacks.status, 0, deceptiveLibraryPacks.stdout);
   for (const mutateIdentity of [
     (identity) => { delete identity.contentHash; },
     (identity) => { identity.contentHash = "wrong"; },
@@ -267,6 +273,18 @@ test("public restore authenticates exact public bytes in isolated NuGet state an
     const result = runPublicRestore({ mutateScript });
     assert.notEqual(result.status, 0, `security mutation unexpectedly passed: ${result.stdout}`);
   }
+
+  const inspectionFailure = runPublicRestore({
+    captureTemporaryRoot: true,
+    mutateScript(script) {
+      return script
+        .replace('[void] (New-Item -ItemType Directory -Path $temporaryRoot)', '[void] (New-Item -ItemType Directory -Path $temporaryRoot); [IO.File]::WriteAllText($env:CMSIFY_TASK12_TEMP_CAPTURE, $temporaryRoot)')
+        .replace('$temporaryItem = Get-Item -LiteralPath $temporaryRoot -Force', 'throw "Injected temporary-root inspection failure."');
+    },
+  });
+  assert.notEqual(inspectionFailure.status, 0, inspectionFailure.stdout);
+  assert.ok(inspectionFailure.capturedTemporaryRoot, inspectionFailure.stderr);
+  assert.equal(inspectionFailure.temporaryRootExistsAfter, false, `temporary root leaked: ${inspectionFailure.capturedTemporaryRoot}`);
 });
 
 test("immutable OCI verification fails closed on a native fetch failure", () => {
@@ -387,6 +405,23 @@ test("attestation rejects link escape and linked trust root", () => {
     assert.match(linkedRoot.stderr, /trust root.*link|link.*trust root|reparse/i);
   } finally {
     removeCandidate(actualCandidate);
+  }
+
+  const parentCandidate = createValidCandidate();
+  try {
+    const linkedParent = runGate("artifact-attestation", {
+      environment: { CMSIFY_RELEASE_SOURCE_SHA: candidateSourceSha, CMSIFY_RELEASE_VERSION: candidateVersion },
+      arrange({ root, env }) {
+        const candidateParentLink = path.join(root, "linked-parent");
+        symlinkSync(path.dirname(parentCandidate), candidateParentLink, process.platform === "win32" ? "junction" : "dir");
+        env.CMSIFY_CHECKSUMS_PATH = path.join(candidateParentLink, path.basename(parentCandidate), "SHA256SUMS");
+      },
+    });
+    assert.notEqual(linkedParent.status, 0, linkedParent.stdout);
+    assert.match(linkedParent.stderr, /link|reparse/i);
+    assert.equal(linkedParent.calls.filter((call) => call.startsWith("gh attestation verify ")).length, 0);
+  } finally {
+    removeCandidate(parentCandidate);
   }
 });
 

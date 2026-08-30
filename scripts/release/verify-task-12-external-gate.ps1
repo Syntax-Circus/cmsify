@@ -202,8 +202,7 @@ function Assert-NoLinkComponents {
     foreach ($part in $relative.Split($separators, [StringSplitOptions]::RemoveEmptyEntries)) {
         $current = Join-Path $current $part
         $item = Get-Item -LiteralPath $current -Force
-        $resolvedLink = if ($item.PSIsContainer) { [IO.Directory]::ResolveLinkTarget($current, $false) } else { [IO.File]::ResolveLinkTarget($current, $false) }
-        if ($resolvedLink -or $item.LinkType -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        if ($item.LinkType -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
             throw "Candidate path contains a symbolic link or reparse point."
         }
     }
@@ -248,16 +247,18 @@ function Test-PublicPackageRestore {
 
     $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
     $temporaryRoot = [IO.Path]::GetFullPath((Join-Path $temporaryParent "cmsify-public-restore-$([Guid]::NewGuid().ToString('N'))"))
-    if ([IO.Path]::GetRelativePath($temporaryParent, $temporaryRoot).StartsWith("..") -or (Test-Path -LiteralPath $temporaryRoot)) {
-        throw "Public restore temporary root is not an exact new child of the system temporary directory."
-    }
-    [void] (New-Item -ItemType Directory -Path $temporaryRoot)
-    $temporaryItem = Get-Item -LiteralPath $temporaryRoot -Force
-    if ($temporaryItem.LinkType -or (($temporaryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-        throw "Public restore temporary root must not be a symbolic link or reparse point."
-    }
-
+    $temporaryRootCreated = $false
     try {
+        if ([IO.Path]::GetRelativePath($temporaryParent, $temporaryRoot).StartsWith("..") -or (Test-Path -LiteralPath $temporaryRoot)) {
+            throw "Public restore temporary root is not an exact new child of the system temporary directory."
+        }
+        [void] (New-Item -ItemType Directory -Path $temporaryRoot)
+        $temporaryRootCreated = $true
+        $temporaryItem = Get-Item -LiteralPath $temporaryRoot -Force
+        if ($temporaryItem.LinkType -or (($temporaryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "Public restore temporary root must not be a symbolic link or reparse point."
+        }
+
         $configPath = Join-Path $temporaryRoot "NuGet.Config"
         $packagesRoot = Join-Path $temporaryRoot "packages"
         $downloadRoot = Join-Path $temporaryRoot "download"
@@ -295,6 +296,12 @@ function Test-PublicPackageRestore {
         )
         $libraryKey = "$packageId/$packageVersion"
         $expectedPackagePath = "$lowerId/$lowerVersion"
+        $dotnetCommand = Get-Command dotnet -ErrorAction Stop
+        $dotnetPath = [IO.Path]::GetFullPath([string] $dotnetCommand.Source)
+        $resolvedDotnet = [IO.File]::ResolveLinkTarget($dotnetPath, $true)
+        if ($resolvedDotnet) { $dotnetPath = $resolvedDotnet.FullName }
+        $trustedLibraryPacks = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($dotnetPath)) "library-packs")).TrimEnd('\', '/')
+        $sourceComparison = if ($IsWindows) { [StringComparer]::OrdinalIgnoreCase } else { [StringComparer]::Ordinal }
         $verified = @()
         foreach ($relativePath in $assetPaths) {
             $assetPath = Join-Path $repositoryRoot $relativePath
@@ -322,7 +329,7 @@ function Test-PublicPackageRestore {
                 if ($_ -ceq "https://api.nuget.org/v3/index.json") { return $false }
                 try {
                     $sourcePath = [IO.Path]::GetFullPath([string] $_).TrimEnd('\', '/')
-                    return ([IO.Path]::GetFileName($sourcePath) -cne "library-packs")
+                    return (-not $sourceComparison.Equals($sourcePath, $trustedLibraryPacks))
                 }
                 catch { return $true }
             })
@@ -334,7 +341,7 @@ function Test-PublicPackageRestore {
         if ($verified.Count -ne 5) { throw "Public restore must verify exactly five affected asset graphs." }
     }
     finally {
-        if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force }
+        if ($temporaryRootCreated -and (Test-Path -LiteralPath $temporaryRoot)) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force }
     }
 }
 
@@ -415,6 +422,8 @@ function Test-ArtifactAttestation {
         throw "Candidate trust root must not be a symbolic link or reparse point."
     }
     $root = [IO.Path]::GetFullPath($rootItem.FullName)
+    $trustedAnchor = [IO.Path]::GetPathRoot($root)
+    Assert-NoLinkComponents -Root $trustedAnchor -Path $root
     $manifestPath = Join-Path $root "release-manifest.json"
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Release manifest is missing." }
     Assert-NoLinkComponents -Root $root -Path $manifestPath
