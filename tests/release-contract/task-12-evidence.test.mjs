@@ -9,17 +9,31 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const evidencePath = path.join(root, "docs/evidence/task-12-local-verification.json");
 const sha = "da3a428be6f12b9cdfbdde5a17daefab025615e0";
 const readiness = readFileSync(path.join(root, "docs/v1-release-readiness.md"), "utf8");
+const releaseRunbook = readFileSync(path.join(root, "docs/release-runbook.md"), "utf8");
+const publishWorkflow = readFileSync(path.join(root, ".github/workflows/publish-cmsify.yml"), "utf8");
 const docs = ["docs/v1-release-readiness.md", "docs/v1-release-remediation-handoff.md", "docs/superpowers/plans/2026-08-24-v1-remediation.md"].map((file) => readFileSync(path.join(root, file), "utf8")).join("\n");
 const outerPlan = readFileSync(path.join(root, "docs/superpowers/plans/2026-08-24-v1-remediation.md"), "utf8");
 const gateKeys = ["publicPackageRestore", "hostedAccessibility", "protectedApprovals", "artifactAttestation", "registrySigning", "immutableOciPromotion", "hostedSmokeSoak", "finalRelease"];
 const pendingGateKeys = ["definitivePackageOciTuple", "finalConsumersAccessibilityUpgradeSmoke", "soak", "stableTag"];
 const commandInputs = ["CMSIFY_RELEASE_RUN_ID", "CMSIFY_CHECKSUMS_PATH", "CMSIFY_API_DIGEST", "CMSIFY_ADMIN_DIGEST", "CMSIFY_RELEASE_VERSION", "CMSIFY_RELEASE_TAG", "CMSIFY_COSIGN_CERTIFICATE_IDENTITY", "CMSIFY_ATTESTATION_SIGNER_WORKFLOW", "CMSIFY_ACCESSIBILITY_JOB_ID", "CMSIFY_PROMOTE_JOB_ID", "CMSIFY_SMOKE_JOB_ID", "CMSIFY_UPGRADE_ROLLBACK_JOB_ID", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_SOAK_EVIDENCE_PATH", "CMSIFY_SOAK_EVIDENCE_SHA256"];
 const commandHashes = { publicPackageRestore: "8c5f197769a0dfb1827c8c8e591241a84b4baf5e1b86cd5ba69ea557dba90802", hostedAccessibility: "46595d036b67d564535df78fe855d955a6334ae09011143ac9cac402cb71b87a", protectedApprovals: "82015b66e81fb44874922df638a226dca0aefb3f24cc6ed758fdd4ee5c7bf6b1", artifactAttestation: "97edc3457d53334c86ba3d7093d7db95d613067a1c0448cf699a7611158f36bd", registrySigning: "f07c8b1ff5e827bcf356bb261e48e29f35922f02e15fceb174d44d8a2ca628c3", immutableOciPromotion: "791ba0b7d42776b4f02520cd0bfdcd67560a2205379e5092443ee399309f7f22", hostedSmokeSoak: "99670c79701613787772dc0b7b5626886ecaf4d14c1e87c60fd2b7d121d85022", finalRelease: "fb57f80e7a61ee08f4ca5eccff12c42fd16b846a9a69884fc8d8d8db2c2f529f" };
+const pendingCommandHashes = { definitivePackageOciTuple: "b7698f795aa9b4728638f9ec29a28674bb8ed84523f8e4b88499654fb657520b" };
+const staleReadinessClaims = [
+  /several required gates do not exist yet/i,
+  /runtime-image digest pins, repository-wide action-pin audit, SBOM\/signing, accessibility-trigger expansion, production-like artifact smoke, governance, and final release certification remain open/i,
+  /TypeScript generated schema types are exported, but the generated `createCmsifyFetchClient` factory is not exported/i,
+  /`Http\.Resilience` 0\.1\.6 is pinned but unused/i,
+  /\*\*Enhance, then adopt\*\*/i,
+  /^## Phased remediation backlog$/m,
+  /Consolidate API boundary contracts and select one pagination\/error convention/i,
+  /Complete Admin OIDC with shared authentication\/token-forwarding packages/i,
+  /Release and consume the required `SyntaxCircus\.AspNetCore\.Authentication`/i,
+];
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 
 function load() { assert.ok(existsSync(evidencePath), "Task 12 evidence manifest must exist"); return JSON.parse(readFileSync(evidencePath, "utf8")); }
 function task12Section(plan) { return plan.match(/### Task 12:[\s\S]*?(?=\n## Completion Gate)/)?.[0] ?? ""; }
-function validate(evidence, documentText = docs, planText = outerPlan) {
+function validate(evidence, documentText = docs, planText = outerPlan, readinessText = readiness) {
   assert.equal(evidence.schema, "cmsify.task12-evidence.v1");
   assert.deepEqual(evidence.certification, {
     status: "preliminary-local-non-certifying",
@@ -60,8 +74,15 @@ function validate(evidence, documentText = docs, planText = outerPlan) {
   const owners = { publicPackageRestore: "release operator", hostedAccessibility: "release operator", protectedApprovals: "approver", artifactAttestation: "release operator", registrySigning: "release operator", immutableOciPromotion: "release operator", hostedSmokeSoak: "release operator", finalRelease: "approver" };
   for (const name of gateKeys) { const gate = evidence.externalGates[name]; assert.equal(gate.passed, false, `${name} must remain false`); assert.ok(gate.reason?.trim()); assert.equal(gate.owner, owners[name]); assert.equal(digest(gate.nextCommand), commandHashes[name]); assert.equal(gate.evidenceLink, null); assert.match(gate.nextCommand, /^pwsh -NoProfile -NonInteractive -File scripts\/release\/verify-task-12-external-gate\.ps1 -Gate [a-z-]+$/); }
   assert.deepEqual(Object.keys(evidence.pendingReleaseGates).sort(), [...pendingGateKeys].sort(), "pending release gate set must be exact");
-  const pendingOwners = { definitivePackageOciTuple: "release operator", finalConsumersAccessibilityUpgradeSmoke: "release operator", soak: "release operator", stableTag: "approver and release operator" };
+  const pendingOwners = { definitivePackageOciTuple: "authorized maintainer", finalConsumersAccessibilityUpgradeSmoke: "release operator", soak: "release operator", stableTag: "approver and release operator" };
   for (const name of pendingGateKeys) { const gate = evidence.pendingReleaseGates[name]; assert.equal(gate.passed, false, `${name} must remain false`); assert.equal(gate.status, "unperformed"); assert.ok(gate.reason?.trim()); assert.equal(gate.owner, pendingOwners[name]); assert.ok(gate.nextCommand?.trim()); assert.equal(gate.evidenceLink, null); }
+  assert.equal(digest(evidence.pendingReleaseGates.definitivePackageOciTuple.nextCommand), pendingCommandHashes.definitivePackageOciTuple);
+  assert.doesNotMatch(evidence.pendingReleaseGates.definitivePackageOciTuple.nextCommand, /gh workflow run/i);
+  assert.match(evidence.pendingReleaseGates.definitivePackageOciTuple.reason, /explicit authorization/i);
+  assert.match(evidence.pendingReleaseGates.definitivePackageOciTuple.reason, /v-prefixed SemVer tag/i);
+  assert.match(releaseRunbook, /authorized maintainer pushes a validated SemVer tag to trigger the tracked `publish-cmsify\.yml` workflow/i);
+  assert.match(publishWorkflow, /^on:\s*\n\s+push:\s*\n\s+tags: \["v\*"\]/m);
+  assert.doesNotMatch(publishWorkflow, /^\s+workflow_dispatch:/m);
   assert.ok(evidence.knownDiagnostics.some((item) => /exact SyntaxCircus\.Http\.Resilience 0\.2\.0-cmsify\.1/i.test(item) && /absent/i.test(item)));
   assert.ok(evidence.knownDiagnostics.some((item) => /CODEOWNERS/i.test(item) && /verified/i.test(item)));
   assert.ok(evidence.knownDiagnostics.some((item) => /historical media/i.test(item) && /599\/599/i.test(item)));
@@ -70,11 +91,17 @@ function validate(evidence, documentText = docs, planText = outerPlan) {
   assert.doesNotMatch(documentText, /70afef5c647f53944fd61d1b35f40ece940aacf7/);
   assert.match(documentText, /preliminary local source\/policy tuple/i);
   assert.match(documentText, /offline-loader live certification/i);
+  assert.match(readinessText, /^### Historical readiness ratings \(superseded 2026-08-30\)$/m);
+  assert.match(readinessText, /^## Historical evidence collected \(superseded 2026-08-30\)$/m);
+  assert.match(readinessText, /^## Historical API and SDK surface matrix \(superseded 2026-08-30\)$/m);
+  assert.match(readinessText, /^## Current SyntaxCircus package disposition$/m);
+  assert.match(readinessText, /^## Completed repository remediation and current release remainder$/m);
+  for (const claim of staleReadinessClaims) assert.doesNotMatch(readinessText, claim);
   for (let index = 1; index <= 19; index += 1) {
     const finding = `F-${String(index).padStart(2, "0")}`;
     const section = index <= 13
-      ? readiness.match(new RegExp(`#### ${finding}[^\\n]*[\\s\\S]*?(?=\\n#### F-|\\n### Medium findings)`))?.[0] ?? ""
-      : readiness.split(/\r?\n/).find((line) => line.startsWith(`| ${finding} |`)) ?? "";
+      ? readinessText.match(new RegExp(`#### ${finding}[^\\n]*[\\s\\S]*?(?=\\n#### F-|\\n### Medium findings)`))?.[0] ?? ""
+      : readinessText.split(/\r?\n/).find((line) => line.startsWith(`| ${finding} |`)) ?? "";
     assert.match(section, /remediated (?:locally|at the (?:local )?source(?:\/policy)? level)/i, `${finding} must state its current source remediation status`);
   }
   for (const claim of [/public(?:\/CI)? restore (?:passed|succeeded|validated|green|certified)/i, /hosted (?:validation|checks|workflow) (?:passed|succeeded|validated|green|certified)/i, /v1 certified/i, /release[- ]ready/i]) assert.ok(!documentText.split(/\r?\n/).some((line) => claim.test(line)));
@@ -108,5 +135,10 @@ test("Task 12 evidence mutations are rejected", () => {
     (copy) => { delete copy.checks[1].status; },
   ]) { const copy = structuredClone(evidence); const before = JSON.stringify(copy); mutate(copy); assert.notEqual(JSON.stringify(copy), before); assert.throws(() => validate(copy)); }
   for (const claim of ["Public restore passed, but not yet.", "Hosted validation succeeded although not final.", "v1 certified.", "Release-ready."]) { const changed = `${docs}\n${claim}`; assert.notEqual(changed, docs); assert.throws(() => validate(evidence, changed)); }
+  for (const claim of ["Several required gates do not exist yet.", "**Enhance, then adopt**", "## Phased remediation backlog", "Complete Admin OIDC with shared authentication/token-forwarding packages."]) {
+    const changed = `${readiness}\n${claim}`;
+    assert.notEqual(changed, readiness);
+    assert.throws(() => validate(evidence, docs, outerPlan, changed));
+  }
   const section = task12Section(outerPlan); for (const checkbox of [...section.matchAll(/- \[ \]/g)]) { const position = checkbox.index; const changedSection = `${section.slice(0, position)}- [x]${section.slice(position + 5)}`; const changedPlan = outerPlan.replace(section, changedSection); assert.notEqual(changedPlan, outerPlan); assert.throws(() => validate(evidence, docs, changedPlan)); }
 });

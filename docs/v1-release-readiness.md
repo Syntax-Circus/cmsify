@@ -49,34 +49,38 @@ The largest v1 risks identified by that original audit were not basic feature co
 - documented Admin OIDC sign-in is not implemented; and
 - initial webhook events and scheduled publication are not safe across crashes or multiple API replicas.
 
-### Readiness ratings
+### Historical readiness ratings (superseded 2026-08-30)
+
+These ratings are the original 2026-08-24 baseline, retained to explain prioritization. They are superseded by the [preliminary Task 12 evidence ledger](evidence/task-12-local-verification.json) and the explicit F-01 through F-19 status dispositions below.
 
 | Dimension | Rating | Summary |
 | --- | --- | --- |
-| Correctness | 3/5 | Good domain and integration coverage; duplicated contracts and inconsistent error/pagination shapes remain. |
-| Security | 3/5 | Strong baseline controls; OIDC is incomplete and webhook DNS validation does not pin the validated destination. |
-| Performance | 2/5 | Useful indexes and bounded response pages exist, but resolved-content listing materializes all matching versions and performs per-item template lookups; no load budgets prove production limits. |
-| Maintainability | 3/5 | Layering is clear and several shared packages are already used; SDK and controller duplication is costly. |
-| Operational readiness | 2/5 | Health, Compose, backup guidance, and migration locking exist; upgrade, outbox, media consistency, and multi-replica guarantees do not. |
-| SDK readiness | 2/5 | The .NET SDK is broad, but contract drift is unchecked; the TypeScript facade has release-blocking correctness and coverage gaps. |
-| Release engineering | 1/5 | Stable artifacts can be published from different triggers with different versions and licenses. |
+| Correctness | 3/5 | Original audit: duplicated contracts and inconsistent error/pagination shapes required remediation. |
+| Security | 3/5 | Original audit: OIDC and webhook destination pinning required remediation. |
+| Performance | 2/5 | Original audit: resolved-content execution and production-capacity evidence required remediation. |
+| Maintainability | 3/5 | Original audit: SDK and controller duplication required remediation. |
+| Operational readiness | 2/5 | Original audit: upgrade, outbox, media consistency, and multi-replica guarantees required remediation. |
+| SDK readiness | 2/5 | Original audit: contract drift and TypeScript correctness/coverage required remediation. |
+| Release engineering | 1/5 | Original audit: artifact triggers, versions, licensing, and certification required remediation. |
 
-## Evidence collected
+Current disposition: those repository concerns are remediated at the local source/policy level. These historical scores must not be used as current readiness ratings; only the unperformed public, definitive-candidate, hosted, approval, signing, promotion, soak, tag, and final-release gates keep the decision at **not ready**.
 
-The following checks were run from a clean tracked worktree. `sdk/typescript/dist/` was created only as local build output.
+## Historical evidence collected (superseded 2026-08-30)
+
+The following checks were the original 2026-08-24 baseline from a clean tracked worktree. They are retained for provenance and are superseded by the current preliminary tuple above. `sdk/typescript/dist/` was created only as local build output.
 
 | Check | Result |
 | --- | --- |
 | `dotnet build Cmsify.slnx --configuration Release --no-restore -p:DisableGitVersionTask=true` | Passed; 58 warnings, primarily nullable-flow warnings in Admin plus Sass/Bootstrap deprecations. |
 | `dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true` | Passed: Core 52, Infrastructure 37, API integration 34, Admin integration 18, .NET SDK 29; 170 total. |
-| `npm run generate:check` | Passed against the pinned snapshot; this command is not currently a valid API-drift check, as described in F-01. |
+| `npm run generate:check` | Original audit result: passed against the pinned snapshot, which was not then a valid live API-drift check. |
 | `npm run typecheck` | Passed. |
 | `npm test` | Passed: 14 tests. |
 | `npm run build` | Passed: ESM, CommonJS, declarations, and source maps generated. |
 | `dotnet list Cmsify.slnx package --vulnerable --include-transitive` | No known NuGet vulnerabilities reported by configured sources. |
 | `npm audit --omit=dev` | No known runtime dependency vulnerabilities reported. |
 
-Passing current checks does not imply v1 readiness because several required gates do not exist yet. In particular, no current check compares live OpenAPI to the snapshot, installs the packed SDKs into clean consumers, starts the published containers, or upgrades a released database/media fixture.
+At the original audit, these checks did not cover live OpenAPI comparison, packed clean consumers, exact candidate containers, or a released database/media upgrade. Those repository gates and harnesses are now implemented and source/policy-tested. Their definitive public and hosted executions remain unperformed.
 
 ### Task 11 quality and capacity evidence
 
@@ -86,13 +90,13 @@ The [checked Task 11 evidence manifest](evidence/task-11-local-verification.json
 
 Fresh documentation-review validation ran from committed source `e72b4681158cf687f0462bb2aa29f9ed47771e49`, whose direct history contains the tested Task 11 implementation. Fresh committed-tree full solution: 587/587 passed (Core 66 + .NET client 71 + Admin 35 + Infrastructure 303 + API 112 = 587). A separate XPlat collection passed the same 587/587 tests, emitted exactly five fresh Cobertura reports, and the coverage summarizer produced `cmsify.coverage.v1` with `sourceSha` `e72b4681158cf687f0462bb2aa29f9ed47771e49`. The direct capacity filters remain API 10/10, Infrastructure 6/6, and client 4/4 at workflow implementation `ce9629417b794c9828a0e686dca6e1f846609877`. Coverage percentages remain trend-only. The committed capacity runner at `05984108b84d708f3fae90260d971a387af71960` passed its 15/15 schema/runner contracts and emitted validated `cmsify.capacity.v1` output with all blocking invariants true; a resolved-content p95 miss was represented as a warning-only diagnostic, proving timing does not replace correctness.
 
-These are local source/test results, not hosted or public certification. The public locked restore, runtime-image digest pins, repository-wide action-pin audit, SBOM/signing, accessibility-trigger expansion, production-like artifact smoke, governance, and final release certification remain open.
+These are local source/test results, not hosted or public certification. Runtime-image digest pins, the repository-wide action-pin audit, SBOM/provenance/signing contracts, accessibility triggers, production-like artifact smoke, and governance are implemented. What remains open is the exact public locked restore followed by definitive-candidate execution, clean consumers/accessibility/upgrade/smoke, hosted evidence and approvals, actual attestations/signatures, immutable promotion, soak, stable tag, and final release.
 
-## API and SDK surface matrix
+## Historical API and SDK surface matrix (superseded 2026-08-30)
 
-“Broad” means the handwritten .NET client has a service group for the concern; it does not mean parity is enforced. TypeScript generated schema types are exported, but the generated `createCmsifyFetchClient` factory is not exported from the package root, so “schema only” is not an operable generated client surface for npm consumers.
+This matrix records the original 2026-08-24 surface and proposed actions. It is historical, not a list of current missing work. The remediation exported generated TypeScript access, aligned the documented curated facade, enforced the live OpenAPI contract, and added clean-consumer certification policy.
 
-| API concern | .NET client | TypeScript high-level facade | v1 action |
+| API concern | Original .NET client | Original TypeScript facade | Original action (completed locally) |
 | --- | --- | --- | --- |
 | Authentication/session | Broad | Login and current token info only | Decide and document local-session/OIDC lifecycle; add refresh, logout, password, and typed empty-response behavior where supported. |
 | Workspaces | Broad CRUD | List plus client-side slug lookup | Require workspace ID for scoped calls or resolve slug to ID; add typed get/create/update/delete if the facade promises management. |
@@ -110,7 +114,7 @@ These are local source/test results, not hosted or public certification. The pub
 | Model packages | Broad | None | Provide generated typed access including multipart import and binary export. |
 | Health | Broad | Live/ready | Keep, with documented unauthenticated behavior and no retries by default. |
 
-Before v1, choose one explicit TypeScript product shape: a complete management facade, or a smaller delivery facade backed by a public generated client for all remaining operations. The recommended option is the smaller curated facade plus a fully exported generated client; duplicating every OpenAPI operation by hand would recreate the drift problem.
+Current disposition: the repository adopted the curated facade plus public generated-client shape and mutation-tests the API/OpenAPI/SDK boundary. The remaining TypeScript work is not source design; it is installing the definitive packed artifact in the final clean Node consumers and retaining the hosted compatibility evidence.
 
 ## Prioritized findings
 
@@ -231,24 +235,24 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 | F-18 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** Production key validation, versioned encrypted webhook secrets, online rotation, migration, metrics, configuration, and operating guidance are implemented. | Preserve rotation/readability checks in final exact-candidate smoke and hosted monitoring. |
 | F-19 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** `SECURITY.md`, `SUPPORT.md`, API compatibility policy, vulnerability reporting, release ownership policy, release runbook, and rollback runbook are present and mutation-tested. | Supply a repository-verified CODEOWNER and verify hosted environment protections/ownership before release. |
 
-## SyntaxCircus package disposition
+## Current SyntaxCircus package disposition
 
 Package reuse should remove mechanical infrastructure without forcing Cmsify’s domain rules into generic packages. Sibling changes are acceptable when the resulting abstraction is independently useful and released before Cmsify consumes it.
 
-This disposition was checked against `_template/docs/syntaxcircus/PACKAGE_CATALOG.md` and the repository's central package pins. Cmsify currently consumes `AspNetCore.Common` 0.1.9, `AspNetCore.Serilog` 0.1.3, `Blazor.Components` 0.1.1, `DotEnv` 0.1.2, and `EntityFrameworkCore.Postgres` 0.1.3. `Http.Resilience` 0.1.6 is pinned but unused. Record the exact released versions of new or enhanced packages in `Directory.Packages.props` when each implementation change is approved; do not consume sibling source directly.
+This disposition was refreshed against the repository's central package pins and project references. Cmsify consumes `AspNetCore.Common` 0.1.9, `AspNetCore.Serilog` 0.1.3, `AspNetCore.Authentication` 0.1.4, `Blazor.Auth` 0.1.6, `Blazor.Components` 0.1.1, `DotEnv` 0.1.2, `EntityFrameworkCore.Postgres` 0.1.3, `Storage` 0.2.0, and the exact ignored-feed `Http.Resilience` 0.2.0-cmsify.1. The resilience package is integrated and validated locally, but its exact public publication/restore remains the user-owned release prerequisite. No sibling source is copied into Cmsify.
 
-| Package | Decision | Cmsify action |
+| Package | Decision | Current disposition |
 | --- | --- | --- |
-| `SyntaxCircus.AspNetCore.Common` | **Keep** | Continue using correlation IDs, ProblemDetails, security headers, trusted proxies, rate-limit helpers, and health endpoints. Add contract tests for Cmsify-specific error mapping and middleware order. |
-| `SyntaxCircus.AspNetCore.Serilog` | **Keep** | Retain standard host logging; add redaction and release telemetry guidance rather than creating local bootstrap code. |
-| `SyntaxCircus.DotEnv` | **Keep** | Retain development-only dotenv loading and its precedence tests. |
-| `SyntaxCircus.EntityFrameworkCore.Postgres` | **Keep** | Retain naming and advisory-lock migration helpers. Domain mappings and migration compatibility stay in Cmsify. |
-| `SyntaxCircus.Blazor.Components` | **Keep** | Retain shared error/reconnect/not-found UI where already used; do not couple Cmsify domain UI into the package. |
-| `SyntaxCircus.AspNetCore.Authentication` | **Enhance, then adopt** | Use shared JWT registration and standard ASP.NET Core schemes. Add a safe bearer credential extractor/composite selector so Cmsify can keep database-backed `cmsify_` clients, opaque local sessions, OIDC JWTs, and workspace/role claims without an `X-Api-Key` wire change. |
-| `SyntaxCircus.Blazor.Auth` | **Enhance, then adopt** | Use it for Admin OIDC token forwarding, refresh, session-expiry state, and optional distributed token cache. Local Cmsify sessions remain a separate supported path. |
-| `SyntaxCircus.Http.Resilience` | **Enhance, then adopt** | Expose a reusable pipeline/handler that honors `Retry-After`, transport faults, jitter, circuit telemetry, caller timeout budgets, and method idempotency. Integrate it into Admin and the .NET SDK without double retries. Remove the currently unused central pin until adoption or reference it in the implementing change. |
-| `SyntaxCircus.Storage` | **Enhance, then adopt** | Add a separate S3-compatible provider package so local consumers do not inherit AWS dependencies. Support read metadata and safe disposal. Migrate Cmsify providers behind adapters while retaining Cmsify key generation, media authorization, and reconciliation policy. |
-| `SyntaxCircus.Common` | **Selective** | Consider `PeriodicBackgroundService` after it supports the required time/test seams. Keep Cmsify’s actor/workspace authorization model and v1 pagination types; the shared current-user and pagination semantics are not equivalent. |
+| `SyntaxCircus.AspNetCore.Common` | **Keep** | Retained for correlation IDs, ProblemDetails, security headers, trusted proxies, rate limiting, and health mechanics; Cmsify-specific error and middleware behavior stays covered in Cmsify. |
+| `SyntaxCircus.AspNetCore.Serilog` | **Keep** | Retained for standard host logging; Cmsify owns its redaction and release-telemetry policy. |
+| `SyntaxCircus.DotEnv` | **Keep** | Retained for development-only dotenv loading with Cmsify precedence rules. |
+| `SyntaxCircus.EntityFrameworkCore.Postgres` | **Keep** | Retained for naming and advisory-lock migration mechanics; domain mappings and migration compatibility remain in Cmsify. |
+| `SyntaxCircus.Blazor.Components` | **Keep** | Retained for shared error/reconnect/not-found UI without moving Cmsify domain UI into the package. |
+| `SyntaxCircus.AspNetCore.Authentication` | **Adopted** | Released 0.1.4 is consumed for shared JWT/scheme mechanics while Cmsify retains database API-client, local-session, OIDC, workspace, and role policy. |
+| `SyntaxCircus.Blazor.Auth` | **Adopted** | Released 0.1.6 is consumed for Admin OIDC token forwarding, refresh, session-expiry state, and optional distributed caching; local Cmsify sessions remain supported. |
+| `SyntaxCircus.Http.Resilience` | **Adopted locally; public gate pending** | Exact 0.2.0-cmsify.1 is integrated across the .NET SDK and Admin with one request pipeline and validated package identity. Publication of those exact bytes and the isolated public restore are unperformed. |
+| `SyntaxCircus.Storage` | **Adopted** | Released 0.2.0 is pinned and consumed for local and S3-compatible storage mechanics; Cmsify retains key generation, media authorization, and reconciliation policy. |
+| `SyntaxCircus.Common` | **Selective, deferred** | No additional adoption is required for v1; Cmsify retains its actor/workspace authorization, pagination, and time/test seams. |
 | `SyntaxCircus.AspNetCore.Common.MassTransit` | **Not applicable** | Cmsify has no MassTransit boundary. A durable PostgreSQL outbox does not justify adding a message bus for v1. |
 | `SyntaxCircus.Credentials` | **Not applicable** | It owns desktop/local credential storage, not server secret management. |
 | `SyntaxCircus.Email` | **Not applicable** | Cmsify currently sends no transactional email. |
@@ -257,62 +261,30 @@ This disposition was checked against `_template/docs/syntaxcircus/PACKAGE_CATALO
 | `SyntaxCircus.Maui.TokenStorage` | **Not applicable** | Cmsify ships no MAUI client. |
 | `SyntaxCircus.RevenueCat`, `.RevenueCat.Maui` | **Not applicable** | Cmsify has no purchase or entitlement boundary. |
 
-## Phased remediation backlog
+## Completed repository remediation and current release remainder
 
-### Phase 0 — Freeze a truthful public contract
+### Repository phases 0–2 — completed locally
 
-1. Consolidate API boundary contracts and select one pagination/error convention.
-2. Export live OpenAPI in CI, add non-mutating drift and breaking-change checks, and regenerate TypeScript only from the verified document.
-3. Repair the TypeScript SDK behaviors in F-02, expose generated access, complete or narrow its high-level surface, and add Node 20/22 consumer tests.
-4. Align MIT SDK and AGPL-3.0-or-later server metadata, package readmes, notices, changelog, and documentation.
-5. Replace automatic stable publication from `main` with one tag-driven release candidate/promotion workflow.
+Tasks 1–12 implemented the public contract and SDK corrections; OIDC, outbox, scheduled publication, webhook egress, media reconciliation, and upgrade/rollback guarantees; shared authentication, Admin auth, storage, and resilience adoption; warning-free/locked quality policy and capacity evidence; exact candidate, clean-consumer, accessibility, smoke, compatibility, governance, supply-chain, attestation, signing, and promotion contracts; and the reviewed offline OCI loader. The explicit F-01 through F-19 dispositions above are the current source/policy ledger.
 
-**Exit criteria:** API, OpenAPI, .NET contracts, and both SDKs have one enforced contract; all package metadata agrees; clean consumers install candidate artifacts; no v1 version is published yet.
+This completion is local and non-certifying. It does not assert that public package availability, a definitive candidate run, hosted protections, trusted publishing, signatures, attestations, promotion, soak, a stable tag, or a final release exists.
 
-### Phase 1 — Close security and data-reliability blockers
+### Release certification remainder — all unperformed
 
-1. Complete Admin OIDC with shared authentication/token-forwarding packages and end-to-end tests.
-2. Implement a transactional webhook outbox and idempotent leased dispatch.
-3. Add atomic claiming/idempotency for scheduled publishing.
-4. Pin validated webhook destinations or enforce them through a hardened egress proxy.
-5. Define media retention and add durable cleanup/reconciliation for local and S3 storage.
-6. Build and verify the latest `0.1.x` upgrade fixture.
+1. The package owner publishes the exact `SyntaxCircus.Http.Resilience` 0.2.0-cmsify.1 bytes, or approves an exact stable replacement; the release operator then runs the isolated public-package gate and preserves its five-asset identity evidence.
+2. After the tag, changelog, source SHA, public restore, and hosted prerequisites are verified and explicit authorization is given, an authorized maintainer pushes the already-created reviewed `vX.Y.Z` or `vX.Y.Z-prerelease` tag. The tag-push-only workflow—not a manual dispatch—builds the definitive same-source NuGet, npm, API OCI, and Admin OCI tuple. The exact recorded push command in the evidence ledger remains unexecuted.
+3. The definitive workflow must pass clean .NET/Node consumers, candidate accessibility, exact-image upgrade/rollback, production-like CRUD/media/OIDC/webhook/schedule/restart/backup smoke, live OpenAPI compatibility, and complete artifact verification without rebuilding candidates.
+4. Repository administrators and approvers verify CODEOWNERS/hosted protection, trusted-publishing and registry identities, required protected approvals, complete artifact attestations, OCI signatures, and immutable digest promotion.
+5. The release operator retains authenticated soak evidence, adjudicates the Task 9 rollback diagnostic omission and both historical media races, verifies the stable tag/source/release identity, and runs the final external release gate.
 
-**Exit criteria:** authentication modes work end to end; a process crash or second replica cannot silently lose/duplicate scheduled work; upgrade and storage invariants pass.
+### Current v1 go/no-go gates
 
-### Phase 2 — Consolidate shared infrastructure and quality gates
+- [ ] Exact resilience bytes pass the isolated public-package restore and five-asset identity gate.
+- [ ] One definitive API/Admin/NuGet/npm tuple is built from one reviewed tag and source SHA with exact versions, licenses, checksums, SBOMs, and manifest digests.
+- [ ] Definitive clean consumers, accessibility, upgrade/rollback, production-like smoke, backup/restart, and live OpenAPI compatibility jobs pass with immutable evidence links.
+- [ ] Hosted ownership/protection, trusted-publishing/registry identities, and protected approvals are verified.
+- [ ] Every canonical artifact subject is attested, both OCI digests are signed, and promotion copies only certified immutable descriptors.
+- [ ] The authenticated soak completes with no unresolved release blocker; retained caveats receive explicit final adjudication.
+- [ ] A stable tag and GitHub Release resolve to the exact certified source and version, and the final external gate passes.
 
-1. Release and consume the required `SyntaxCircus.AspNetCore.Authentication`, `Blazor.Auth`, `Http.Resilience`, and `Storage` enhancements.
-2. Eliminate first-party compiler/nullability warnings and obsolete Sass usage; enable warning enforcement.
-3. Add deterministic SDK/toolchain locks, dependency automation, code coverage reporting, and focused capacity tests.
-4. Add container, package-install, accessibility, and release-artifact smoke jobs.
-5. Add security/support policies, release runbook, compatibility matrix, and upgrade/rollback runbook evidence.
-
-**Exit criteria:** the release workflow certifies what it publishes, shared packages own only reusable mechanics, and CI is reproducible from a clean environment.
-
-### Phase 3 — v1 release candidate certification
-
-1. Cut a prerelease tag such as `v1.0.0-rc.1` through the unified workflow.
-2. Deploy exact candidate digests to a production-like environment and perform upgrade, backup/restore, login/OIDC, CRUD, media, webhook, schedule, and restart smoke tests.
-3. Run a soak period with release telemetry and no unresolved Blocker/High findings.
-4. Freeze OpenAPI and SDK signatures, finalize `CHANGELOG.md`, create the stable tag, and promote the already-certified artifacts without rebuilding them.
-
-**Exit criteria:** all gates below are checked with links to their immutable CI evidence and artifact digests.
-
-## v1 go/no-go gates
-
-- [ ] No unresolved Blocker or High finding in this report.
-- [ ] First-party Release build has zero compiler/analyzer/nullability warnings; unavoidable third-party tool warnings are isolated and documented.
-- [ ] Full .NET, TypeScript, accessibility, contract, upgrade, container, and clean-consumer suites pass.
-- [ ] Live OpenAPI matches the checked-in contract and reports no unapproved breaking `/api/v1` change.
-- [ ] API, Admin, NuGet, npm, GitHub Release, and Docker artifacts share one SemVer version and source commit.
-- [ ] Server artifacts declare AGPL-3.0-or-later; .NET and TypeScript SDK artifacts declare MIT.
-- [ ] .NET 10 and Node 20+ server-fetch support matrices are tested and documented.
-- [ ] Latest `0.1.x` database/media state upgrades to v1 and passes invariant checks; rollback has been rehearsed.
-- [ ] Local sessions, workspace-scoped API clients, and Admin/API OIDC pass end-to-end security tests.
-- [ ] Webhooks and scheduled publication pass crash-recovery and two-replica race tests.
-- [ ] Candidate containers pass production-like health, static asset, persistence, backup/restore, and restart tests.
-- [ ] NuGet, npm, container, and GitHub artifacts include provenance/SBOM evidence and immutable digests.
-- [ ] Documentation describes compatibility, deprecation, support, vulnerability reporting, configuration, upgrades, and rollback without prerelease contradictions.
-
-Medium findings may be deferred only with an owner, rationale, target milestone, and documented v1 limitation. Passing tests alone cannot waive a release gate whose scenario is not covered by those tests.
+Passing local source tests cannot waive any unperformed public, definitive-candidate, hosted, approval, signing, promotion, soak, tag, or final-release gate.
