@@ -10,6 +10,8 @@ This runbook describes the release evidence required before an authorized mainta
 
 GitHub environment protection, registry permissions, npm/NuGet trusted publishing, advisory enablement, Cosign identity policy, and CODEOWNERS activation are unverified prerequisites. A repository administrator must verify them in the hosted systems before a release; this file does not claim they are configured.
 
+The [Task 12 evidence ledger](evidence/task-12-local-verification.json) keeps every external gate false until its declared immutable inputs are available. Its exact `nextCommand` entries call `scripts/release/verify-task-12-external-gate.ps1`; populate those inputs only from the candidate run and retained hosted evidence, never from an unrelated or reconstructed run.
+
 ## Preflight and certify
 
 From the exact committed source, record the output of these checked commands:
