@@ -391,8 +391,8 @@ function candidate(value, label, allowUnknown) {
   assert(value && typeof value === "object" && !Array.isArray(value), `${label} candidate identity is required.`);
   assert(typeof value.reference === "string" && value.reference.length <= 256 && !/[\r\n\0]/.test(value.reference), `${label} candidate reference is invalid.`);
   assert((allowUnknown && value.imageId === null) || (typeof value.imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(value.imageId)), `${label} candidate image ID is invalid.`);
-  assert((allowUnknown && value.digest === null) || (typeof value.digest === "string" && /^sha256:[0-9a-f]{64}$/.test(value.digest)), `${label} candidate digest is invalid.`);
-  return Object.freeze({ reference: value.reference, imageId: value.imageId, digest: value.digest });
+  assert(typeof value.manifestDigest === "string" && /^sha256:[0-9a-f]{64}$/.test(value.manifestDigest), `${label} candidate manifest digest is invalid.`);
+  return Object.freeze({ reference: value.reference, imageId: value.imageId, manifestDigest: value.manifestDigest });
 }
 
 function scenarios(value) {

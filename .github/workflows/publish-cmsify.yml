@@ -164,9 +164,11 @@ jobs:
         shell: bash
         run: |
           (cd artifacts && sha256sum --check SHA256SUMS)
+          API_MANIFEST_DIGEST="$(jq -er '.oci.api.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' artifacts/release-manifest.json)"
+          ADMIN_MANIFEST_DIGEST="$(jq -er '.oci.admin.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' artifacts/release-manifest.json)"
           node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar --manifest artifacts/release-manifest.json --kind api --version "$VERSION"
           node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-admin.oci.tar --manifest artifacts/release-manifest.json --kind admin --version "$VERSION"
-          node eng/release-smoke/cli.mjs certify --api-image "docker.io/syntaxcircus/cmsify-api:$VERSION" --admin-image "docker.io/syntaxcircus/cmsify-admin:$VERSION" --version "$VERSION" --source-sha "$SOURCE_SHA" --output "$RUNNER_TEMP/cmsify-release-smoke"
+          node eng/release-smoke/cli.mjs certify --api-image "docker.io/syntaxcircus/cmsify-api:$VERSION" --admin-image "docker.io/syntaxcircus/cmsify-admin:$VERSION" --api-manifest-digest "$API_MANIFEST_DIGEST" --admin-manifest-digest "$ADMIN_MANIFEST_DIGEST" --version "$VERSION" --source-sha "$SOURCE_SHA" --output "$RUNNER_TEMP/cmsify-release-smoke"
       - name: Upload bounded release-smoke evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -200,7 +202,7 @@ jobs:
           cleanup() {
             status=$?
             trap - EXIT
-            if [ "$status" -ne 0 ]; then docker logs cmsify-admin-accessibility 2>/dev/null || true; fi
+            if [ "$status" -ne 0 ]; then docker logs --tail 200 cmsify-admin-accessibility 2>&1 | head -c 262144 >&2 || true; fi
             docker rm -f cmsify-admin-accessibility 2>/dev/null || true
             exit "$status"
           }

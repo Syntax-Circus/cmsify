@@ -7,6 +7,7 @@ import {
   RELEASE_SMOKE_SCENARIOS,
   certifyRelease,
   createDockerAdapter,
+  validateReleaseOptions,
 } from "../../eng/release-smoke/harness.mjs";
 import { writeEvidence } from "../../eng/release-smoke/evidence.mjs";
 import { createReleaseHttpAdapter, retryBounded } from "../../eng/release-smoke/http.mjs";
@@ -15,6 +16,8 @@ import { exitCodeForFailure, formatCliFailure, parseCliArguments } from "../../e
 const options = Object.freeze({
   apiImage: "syntaxcircus/cmsify-api:1.2.3",
   adminImage: "syntaxcircus/cmsify-admin:1.2.3",
+  apiManifestDigest: `sha256:${"e".repeat(64)}`,
+  adminManifestDigest: `sha256:${"f".repeat(64)}`,
   version: "1.2.3",
   sourceSha: "0123456789abcdef0123456789abcdef01234567",
   output: "artifacts/release-smoke/unit",
@@ -26,12 +29,16 @@ test("CLI accepts only the complete certify interface and rejects duplicates or 
     "certify",
     "--api-image", options.apiImage,
     "--admin-image", options.adminImage,
+    "--api-manifest-digest", options.apiManifestDigest,
+    "--admin-manifest-digest", options.adminManifestDigest,
     "--version", options.version,
     "--source-sha", options.sourceSha,
     "--output", options.output,
   ]), {
     apiImage: options.apiImage,
     adminImage: options.adminImage,
+    apiManifestDigest: options.apiManifestDigest,
+    adminManifestDigest: options.adminManifestDigest,
     version: options.version,
     sourceSha: options.sourceSha,
     output: options.output,
@@ -39,9 +46,16 @@ test("CLI accepts only the complete certify interface and rejects duplicates or 
   assert.throws(() => parseCliArguments(["certify", "--api-image", options.apiImage]), /required/i);
   assert.throws(() => parseCliArguments([
     "certify", "--api-image", options.apiImage, "--api-image", options.apiImage,
-    "--admin-image", options.adminImage, "--version", options.version, "--source-sha", options.sourceSha, "--output", options.output,
+    "--admin-image", options.adminImage, "--api-manifest-digest", options.apiManifestDigest, "--admin-manifest-digest", options.adminManifestDigest, "--version", options.version, "--source-sha", options.sourceSha, "--output", options.output,
   ]), /duplicate/i);
   assert.throws(() => parseCliArguments(["certify", "--mystery", "value"]), /unknown/i);
+});
+
+test("release options require exact lowercase certified manifest digests", () => {
+  assert.equal(validateReleaseOptions(options).apiManifestDigest, options.apiManifestDigest);
+  assert.equal(validateReleaseOptions(options).adminManifestDigest, options.adminManifestDigest);
+  assert.throws(() => validateReleaseOptions({ ...options, apiManifestDigest: undefined }), /API manifest digest/i);
+  assert.throws(() => validateReleaseOptions({ ...options, adminManifestDigest: `sha256:${"A".repeat(64)}` }), /Admin manifest digest/i);
 });
 
 test("CLI maps completed signal failures to conventional process statuses", () => {
@@ -63,14 +77,14 @@ function successfulAdapters(events, { failureAt } = {}) {
     api: {
       reference: options.apiImage,
       imageId: `sha256:${"a".repeat(64)}`,
-      digest: `sha256:${"b".repeat(64)}`,
+      manifestDigest: options.apiManifestDigest,
       version: options.version,
       sourceSha: options.sourceSha,
     },
     admin: {
       reference: options.adminImage,
       imageId: `sha256:${"c".repeat(64)}`,
-      digest: `sha256:${"d".repeat(64)}`,
+      manifestDigest: options.adminManifestDigest,
       version: options.version,
       sourceSha: options.sourceSha,
     },
@@ -594,6 +608,46 @@ test("Docker candidate commands use already-loaded immutable IDs and never build
   assert.equal(candidateRuns.length, 2);
   assert.ok(candidateRuns.every((call) => call.includes("--pull") && call.includes("never")));
 });
+
+for (const [name, repoDigests] of [
+  ["absent", []],
+  ["stale", [`syntaxcircus/cmsify-api@sha256:${"1".repeat(64)}`]],
+  ["unrelated", [`other.example/cmsify-api@sha256:${"2".repeat(64)}`]],
+  ["matching", [`syntaxcircus/cmsify-api@${options.apiManifestDigest}`]],
+  ["multiple", [
+    `other.example/cmsify-api@sha256:${"3".repeat(64)}`,
+    `syntaxcircus/cmsify-api@sha256:${"4".repeat(64)}`,
+    `syntaxcircus/cmsify-api@${options.apiManifestDigest}`,
+  ]],
+]) {
+  test(`Docker ${name} RepoDigests cannot change the supplied certified manifest identity`, async () => {
+    const run = async (_command, args) => ({
+      stdout: JSON.stringify({
+        Id: args.includes(options.apiImage) ? `sha256:${"a".repeat(64)}` : `sha256:${"c".repeat(64)}`,
+        Os: "linux",
+        Architecture: "amd64",
+        RepoDigests: args.includes(options.apiImage) ? repoDigests : [],
+        Config: { Labels: {
+          "org.opencontainers.image.version": options.version,
+          "org.opencontainers.image.revision": options.sourceSha,
+        } },
+      }),
+      stderr: "",
+      exitCode: 0,
+    });
+    const candidates = await createDockerAdapter({ run, repositoryRoot: process.cwd() }).inspectCandidates(options);
+
+    assert.deepEqual(candidates.api, {
+      reference: options.apiImage,
+      imageId: `sha256:${"a".repeat(64)}`,
+      manifestDigest: options.apiManifestDigest,
+      version: options.version,
+      sourceSha: options.sourceSha,
+    });
+    assert.equal(candidates.admin.manifestDigest, options.adminManifestDigest);
+    assert.equal("digest" in candidates.api, false);
+  });
+}
 
 test("Docker cleanup refuses a correctly-labelled resource whose name is outside the validated run scope", async () => {
   const calls = [];

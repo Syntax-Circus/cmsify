@@ -1,6 +1,6 @@
 # Offline OCI Candidate Loader Transport Design
 
-Date: 2026-08-30  
+Date: 2026-08-30
 Status: Approved
 
 ## Context

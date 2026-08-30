@@ -14,11 +14,13 @@ An actual rehearsal requires both exact candidate images to be imported first. T
 node eng/release-smoke/cli.mjs certify `
   --api-image cmsify-task12-api:local `
   --admin-image cmsify-task12-admin:local `
+  --api-manifest-digest <api-manifest-sha256> `
+  --admin-manifest-digest <admin-manifest-sha256> `
   --version 0.0.0-local `
   --source-sha (git rev-parse HEAD) `
   --output artifacts/release-smoke/local
 ```
 
-The run creates only resources bearing its generated `cmsify-smoke-*` scope and exact ownership labels. On failure it prints bounded, redacted container-log tails, writes `evidence.json` using schema `cmsify.release-smoke.v1`, and removes only resources whose names and labels match that validated scope. Dependency images are immutable digest references; the candidate `docker run` commands use `--pull never` and exact inspected image IDs.
+The two manifest digests must be copied from the already-checksummed `release-manifest.json`. They remain the certified artifact identities in each candidate's `manifestDigest` evidence field regardless of absent, stale, unrelated, matching, or multiple Docker `RepoDigests`; Docker inspection contributes only each exact runtime `imageId`, platform, version, and revision. The run creates only resources bearing its generated `cmsify-smoke-*` scope and exact ownership labels. On failure it prints bounded, redacted container-log tails, writes `evidence.json` using schema `cmsify.release-smoke.v1`, and removes only resources whose names and labels match that validated scope. Dependency images are immutable digest references; the candidate `docker run` commands use `--pull never` and exact inspected image IDs.
 
 Do not treat a failed or unperformed rehearsal as certification. In particular, the local Admin candidate remains unavailable until the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` bytes are publicly consumable or a separately approved stable replacement is pinned.

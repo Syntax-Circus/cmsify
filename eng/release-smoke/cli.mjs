@@ -13,13 +13,15 @@ import { createReleaseHttpAdapter } from "./http.mjs";
 const FLAGS = Object.freeze({
   "--api-image": "apiImage",
   "--admin-image": "adminImage",
+  "--api-manifest-digest": "apiManifestDigest",
+  "--admin-manifest-digest": "adminManifestDigest",
   "--version": "version",
   "--source-sha": "sourceSha",
   "--output": "output",
 });
 
 export function parseCliArguments(argv) {
-  if (!Array.isArray(argv) || argv[0] !== "certify") throw new Error("Usage: cli.mjs certify --api-image <repo:tag> --admin-image <repo:tag> --version <semver> --source-sha <40hex> --output <directory>.");
+  if (!Array.isArray(argv) || argv[0] !== "certify") throw new Error("Usage: cli.mjs certify --api-image <repo:tag> --admin-image <repo:tag> --api-manifest-digest <sha256:64hex> --admin-manifest-digest <sha256:64hex> --version <semver> --source-sha <40hex> --output <directory>.");
   const result = {};
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index];

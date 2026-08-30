@@ -22,6 +22,7 @@ const LABEL_RUN = "io.syntaxcircus.cmsify.release-smoke-run";
 const SOURCE_SHA = /^[0-9a-f]{40}$/;
 const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const RUN_ID = /^cmsify-smoke-[a-z0-9-]{8,32}$/;
+const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const IMAGE_REFERENCE = /^(?=.{3,255}$)(?:[a-z0-9]+(?:(?:[._-]|__)[a-z0-9]+)*(?::[0-9]+)?\/)*(?:[a-z0-9]+(?:(?:[._-]|__)[a-z0-9]+)*):[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
 const HELPER_SCRIPT = String.raw`
@@ -68,6 +69,8 @@ export function validateReleaseOptions(input) {
   assert(input && typeof input === "object" && !Array.isArray(input), "Release smoke options are required.");
   assert(typeof input.apiImage === "string" && IMAGE_REFERENCE.test(input.apiImage), "API image must be a repository:tag reference.");
   assert(typeof input.adminImage === "string" && IMAGE_REFERENCE.test(input.adminImage), "Admin image must be a repository:tag reference.");
+  assert(typeof input.apiManifestDigest === "string" && SHA256_DIGEST.test(input.apiManifestDigest), "API manifest digest must be an exact lowercase sha256 digest.");
+  assert(typeof input.adminManifestDigest === "string" && SHA256_DIGEST.test(input.adminManifestDigest), "Admin manifest digest must be an exact lowercase sha256 digest.");
   assert(typeof input.version === "string" && SEMVER.test(input.version), "Release smoke version must be valid SemVer without build metadata.");
   assert(typeof input.sourceSha === "string" && SOURCE_SHA.test(input.sourceSha), "Release smoke source SHA must be a full lowercase commit.");
   assert(typeof input.output === "string" && input.output.trim().length > 0 && !/[\0\r\n]/.test(input.output), "Release smoke output directory is required.");
@@ -78,6 +81,8 @@ export function validateReleaseOptions(input) {
   return Object.freeze({
     apiImage: input.apiImage,
     adminImage: input.adminImage,
+    apiManifestDigest: input.apiManifestDigest,
+    adminManifestDigest: input.adminManifestDigest,
     version: input.version,
     sourceSha: input.sourceSha,
     output,
@@ -87,8 +92,8 @@ export function validateReleaseOptions(input) {
 
 function unknownCandidates(options) {
   return {
-    api: { reference: options.apiImage, imageId: null, digest: null },
-    admin: { reference: options.adminImage, imageId: null, digest: null },
+    api: { reference: options.apiImage, imageId: null, manifestDigest: options.apiManifestDigest },
+    admin: { reference: options.adminImage, imageId: null, manifestDigest: options.adminManifestDigest },
   };
 }
 
@@ -366,14 +371,7 @@ function parseMappedPort(stdout) {
   return Number(match[1]);
 }
 
-function imageDigest(inspected, reference) {
-  const repository = reference.slice(0, reference.lastIndexOf(":"));
-  const match = inspected.RepoDigests?.find((value) => value.startsWith(`${repository}@sha256:`))
-    ?? inspected.RepoDigests?.find((value) => /@sha256:[0-9a-f]{64}$/.test(value));
-  return match?.split("@").at(-1) ?? inspected.Id;
-}
-
-async function inspectCandidate(execute, reference, expected) {
+async function inspectCandidate(execute, reference, manifestDigest, expected) {
   const result = await execute(["image", "inspect", "--format", "{{json .}}", reference], "candidate-image-inspect");
   let inspected;
   try { inspected = JSON.parse(String(result.stdout).trim()); } catch { throw new Error("Candidate image inspection returned invalid JSON."); }
@@ -384,7 +382,7 @@ async function inspectCandidate(execute, reference, expected) {
   return Object.freeze({
     reference,
     imageId: inspected.Id,
-    digest: imageDigest(inspected, reference),
+    manifestDigest,
     version: expected.version,
     sourceSha: expected.sourceSha,
   });
@@ -631,8 +629,8 @@ export function createDockerAdapter({ run, repositoryRoot, signal }) {
 
   return Object.freeze({
     async inspectCandidates(options) {
-      const api = await inspectCandidate(execute, options.apiImage, options);
-      const admin = await inspectCandidate(execute, options.adminImage, options);
+      const api = await inspectCandidate(execute, options.apiImage, options.apiManifestDigest, options);
+      const admin = await inspectCandidate(execute, options.adminImage, options.adminManifestDigest, options);
       return Object.freeze({ api, admin });
     },
 

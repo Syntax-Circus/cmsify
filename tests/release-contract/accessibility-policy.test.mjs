@@ -153,3 +153,12 @@ test("candidate accessibility consumes the exact downloaded Admin OCI archive wi
   assert.match(candidate, /--url http:\/\/127\.0\.0\.1:18081\/login/);
   assert.doesNotMatch(candidate, /dotnet (?:run|build|publish)|docker (?:build|pull)|docker buildx|npm pack/);
 });
+
+test("candidate accessibility failure diagnostics have independent line and byte bounds", () => {
+  const candidate = jobBody(releaseWorkflow, "candidate-accessibility");
+  assert.match(candidate, /status=\$\?/);
+  assert.match(candidate, /docker logs --tail 200 cmsify-admin-accessibility[^\n]*\| head -c 262144/);
+  assert.match(candidate, /exit "\$status"/);
+  assert.doesNotMatch(candidate, /docker logs cmsify-admin-accessibility/);
+  assert.doesNotMatch(candidate, /docker logs[^\n]*(?:artifacts|RUNNER_TEMP|GITHUB_WORKSPACE)/);
+});

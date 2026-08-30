@@ -14,8 +14,8 @@ import { RELEASE_SMOKE_SCENARIOS } from "../../eng/release-smoke/harness.mjs";
 const version = "1.2.3";
 const sourceSha = "0123456789abcdef0123456789abcdef01234567";
 const candidates = {
-  api: { reference: "repo/api:1.2.3", imageId: `sha256:${"a".repeat(64)}`, digest: `sha256:${"b".repeat(64)}` },
-  admin: { reference: "repo/admin:1.2.3", imageId: `sha256:${"c".repeat(64)}`, digest: `sha256:${"d".repeat(64)}` },
+  api: { reference: "repo/api:1.2.3", imageId: `sha256:${"a".repeat(64)}`, manifestDigest: `sha256:${"b".repeat(64)}` },
+  admin: { reference: "repo/admin:1.2.3", imageId: `sha256:${"c".repeat(64)}`, manifestDigest: `sha256:${"d".repeat(64)}` },
 };
 
 test("emits the bounded cmsify.release-smoke.v1 evidence contract", () => {
@@ -37,6 +37,7 @@ test("emits the bounded cmsify.release-smoke.v1 evidence contract", () => {
   assert.equal(evidence.version, version);
   assert.equal(evidence.sourceSha, sourceSha);
   assert.deepEqual(evidence.candidates, candidates);
+  assert.equal("digest" in evidence.candidates.api, false);
   assert.deepEqual(evidence.scenarios.map(({ name }) => name), RELEASE_SMOKE_SCENARIOS);
   assert.deepEqual(evidence.backupHashes, { postgresSha256: "1".repeat(64), mediaSha256: "2".repeat(64) });
   assert.equal(evidence.failure, null);
@@ -77,6 +78,7 @@ test("rejects malformed hashes, candidate identities, and unexpected scenario na
   };
   assert.throws(() => createEvidence({ ...base, backupHashes: { postgresSha256: "bad", mediaSha256: "2".repeat(64) } }), /backup hash/i);
   assert.throws(() => createEvidence({ ...base, candidates: { ...candidates, api: { ...candidates.api, imageId: "latest" } } }), /candidate/i);
+  assert.throws(() => createEvidence({ ...base, candidates: { ...candidates, api: { ...candidates.api, manifestDigest: "sha256:ABC" } } }), /manifest digest/i);
   assert.throws(() => createEvidence({ ...base, scenarios: [...base.scenarios.slice(0, -1), { name: "invented", status: "passed", durationMs: 1 }] }), /scenario/i);
 });
 
