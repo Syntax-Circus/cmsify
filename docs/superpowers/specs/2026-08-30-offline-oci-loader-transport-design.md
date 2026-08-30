@@ -1,7 +1,7 @@
 # Offline OCI Candidate Loader Transport Design
 
 Date: 2026-08-30  
-Status: Approved direction; pending written-spec review
+Status: Approved
 
 ## Context
 
@@ -35,7 +35,7 @@ This distinction is explicit:
    - config digest;
    - OS and architecture;
    - ordered `rootfs.diff_ids`;
-   - required release version, informational version, and source-revision labels.
+   - required title, source, release-version, source-revision, and license labels.
 5. Refuse to proceed if the canonical Docker tag already exists. Preflight the exact run-owned Skopeo container name and scratch output path.
 6. Create a run-owned scratch directory outside the certified artifact tree. Reject links/reparse points and register cleanup before each mutation.
 7. Run the digest-pinned Skopeo container with:
@@ -50,7 +50,7 @@ This distinction is explicit:
     - Docker image ID equals the verified OCI config digest;
     - OS is `linux` and architecture is `amd64`;
     - ordered Docker `RootFS.Layers` equals the verified OCI config `rootfs.diff_ids` exactly;
-    - required version, informational-version, and source-revision labels equal the candidate manifest/source identity;
+    - required title, source, version, revision, and license labels equal `Cmsify API` or `Cmsify Admin`, `https://github.com/Syntax-Circus/cmsify`, the candidate version, the candidate source SHA, and `AGPL-3.0-or-later` respectively;
     - the exact canonical tag is present.
 11. Return the canonical reference, certified OCI descriptor digest, config/image digest, and ordered DiffIDs for downstream evidence.
 12. Always remove the Skopeo helper and scratch directory. On any failure after `docker load` may have mutated the daemon, remove only the exact run-owned canonical tag. On success, leave that tag for the authorized downstream rehearsal and smoke checks.
