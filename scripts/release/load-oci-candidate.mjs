@@ -476,14 +476,16 @@ function compactError(error) {
   return String(error?.message ?? error ?? "unknown failure").replace(/[\r\n]+/g, " ").slice(0, 512);
 }
 
+function isExactDockerTargetEquivalent(actual, expected, kind) {
+  return actual === expected
+    || (kind === "image" && expected.startsWith("docker.io/") && actual === expected.slice("docker.io/".length));
+}
+
 function isMissingDockerTarget(error, kind, target) {
   if (error?.exitCode !== 1) return false;
   const output = `${error?.stderr ?? ""}\n${error?.stdout ?? ""}\n${error?.message ?? ""}`;
-  const exactTargets = kind === "image" && target.startsWith("docker.io/")
-    ? [target, target.slice("docker.io/".length)]
-    : [target];
   const diagnostic = new RegExp(`No such ${kind}:\\s*(\\S+)(?:\\s|$)`, "gi");
-  return [...output.matchAll(diagnostic)].some((match) => exactTargets.includes(match[1]));
+  return [...output.matchAll(diagnostic)].some((match) => isExactDockerTargetEquivalent(match[1], target, kind));
 }
 
 export async function loadOciCandidate(options, dependencies = {}) {
@@ -561,7 +563,8 @@ export async function loadOciCandidate(options, dependencies = {}) {
     assert(Array.isArray(loaded.RootFS?.Layers)
       && loaded.RootFS.Layers.length === input.diffIds.length
       && loaded.RootFS.Layers.every((value, index) => value === input.diffIds[index]), "Loaded RootFS DiffIDs must equal OCI config order.");
-    assert(Array.isArray(loaded.RepoTags) && loaded.RepoTags.includes(input.canonicalRef), "Loaded candidate must have the exact canonical tag.");
+    assert(Array.isArray(loaded.RepoTags)
+      && loaded.RepoTags.some((value) => isExactDockerTargetEquivalent(value, input.canonicalRef, "image")), "Loaded candidate must have the exact canonical tag.");
     for (const [key, expected] of Object.entries(input.expectedLabels)) {
       const label = key.slice("org.opencontainers.image.".length).replace("licenses", "license");
       assert(loaded.Config?.Labels?.[key] === expected, `Loaded candidate ${label} label must equal ${expected}.`);

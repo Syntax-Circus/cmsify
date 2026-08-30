@@ -85,6 +85,7 @@ function processBoundary({
   occupiedPreflight,
   cleanupTargetsAlreadyAbsent = false,
   dockerHubShortCanonicalDiagnostic = false,
+  dockerHubShortLoadedTag = false,
   mutateLoadedImage,
   failCreateScratchAfterCreate = false,
   failScratchCleanup = false,
@@ -98,7 +99,7 @@ function processBoundary({
     Os: "linux",
     Architecture: "amd64",
     RootFS: { Layers: [...evidence.diffIds] },
-    RepoTags: [canonicalRef],
+    RepoTags: [dockerHubShortLoadedTag ? canonicalRef.slice("docker.io/".length) : canonicalRef],
     Config: { Labels: { ...evidence.labels } },
   };
   mutateLoadedImage?.(loadedImage);
@@ -373,6 +374,59 @@ for (const [name, mutate, diagnostic] of [
       await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), diagnostic);
       assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
       assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot]);
+    } finally { removeCandidate(root); }
+  });
+}
+
+test("accepts the exact Docker Hub-short RepoTag while returning the fully qualified canonical ref", async () => {
+  const root = createValidCandidate();
+  try {
+    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const boundary = processBoundary({
+      evidence: readOciFixtureEvidence(root, "api"),
+      dockerHubShortLoadedTag: true,
+    });
+    const { loadOciCandidate } = await loaderModule();
+
+    const result = await loadOciCandidate(options(root), loaderDependencies(boundary));
+
+    assert.deepEqual(result, {
+      ref: "docker.io/syntaxcircus/cmsify-api:1.2.3",
+      digest: manifest.oci.api.digest,
+      imageId: boundary.configDigest,
+      diffIds: boundary.diffIds,
+    });
+    assert.deepEqual(boundary.calls.find((call) => call.phase === "oci-loader-canonical-inspect")?.args, [
+      "image", "inspect", "--format", "{{json .}}", "docker.io/syntaxcircus/cmsify-api:1.2.3",
+    ]);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), false);
+  } finally { removeCandidate(root); }
+});
+
+for (const [name, repoTag] of [
+  ["attacker prefix", "attacker.invalid/syntaxcircus/cmsify-api:1.2.3"],
+  ["attacker suffix", "syntaxcircus/cmsify-api:1.2.3-attacker"],
+  ["other registry", "ghcr.io/syntaxcircus/cmsify-api:1.2.3"],
+  ["other repository", "syntaxcircus/cmsify-admin:1.2.3"],
+  ["other tag", "syntaxcircus/cmsify-api:9.9.9"],
+  ["digest reference", `syntaxcircus/cmsify-api@sha256:${"f".repeat(64)}`],
+  ["basename only", "cmsify-api:1.2.3"],
+  ["arbitrary basename only", "candidate:1.2.3"],
+]) {
+  test(`rejects non-equivalent loaded RepoTag ${name}`, async () => {
+    const root = createValidCandidate();
+    try {
+      const boundary = processBoundary({
+        evidence: readOciFixtureEvidence(root, "api"),
+        mutateLoadedImage(image) { image.RepoTags = [repoTag]; },
+      });
+      const { loadOciCandidate } = await loaderModule();
+
+      await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), /exact canonical tag/i);
+      assert.deepEqual(boundary.calls.find((call) => call.phase === "oci-loader-canonical-inspect")?.args, [
+        "image", "inspect", "--format", "{{json .}}", "docker.io/syntaxcircus/cmsify-api:1.2.3",
+      ]);
+      assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
     } finally { removeCandidate(root); }
   });
 }
