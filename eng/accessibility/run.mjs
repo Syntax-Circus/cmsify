@@ -2,6 +2,7 @@
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
 import { parse, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 
@@ -67,6 +68,13 @@ async function waitForLogin(url, waitTimeoutMs = WAIT_TIMEOUT_MS) {
   throw new Error(`Admin /login did not become ready within ${waitTimeoutMs}ms (${lastStatus}).`);
 }
 
+export async function waitForLoginUi(page, timeout = WAIT_TIMEOUT_MS) {
+  await page.getByRole("heading", { name: /login/i }).waitFor({ state: "visible", timeout });
+  await page.locator("#email, input[name='email']").waitFor({ state: "visible", timeout });
+  await page.locator("#password, input[name='password']").waitFor({ state: "visible", timeout });
+  await page.locator("form").filter({ has: page.locator("#email, input[name='email']") }).waitFor({ state: "visible", timeout });
+}
+
 function sanitizeViolation(violation) {
   return Object.freeze({
     id: boundedText(violation.id, 128),
@@ -104,17 +112,22 @@ async function writeEvidence(directory, report) {
   ]);
 }
 
-async function scan(url) {
+export async function scan(url, {
+  browser = chromium,
+  browserOptions = { headless: true, channel: process.env.CMSIFY_ACCESSIBILITY_BROWSER_CHANNEL ?? "chrome" },
+  loginUiTimeoutMs = WAIT_TIMEOUT_MS,
+} = {}) {
   await waitForLogin(url);
-  const browser = await chromium.launch({ headless: true, channel: process.env.CMSIFY_ACCESSIBILITY_BROWSER_CHANNEL ?? "chrome" });
+  const browserInstance = await browser.launch(browserOptions);
   try {
-    const context = await browser.newContext();
+    const context = await browserInstance.newContext();
     const page = await context.newPage();
     page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
     page.setDefaultTimeout(AXE_TIMEOUT_MS);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
     if (new URL(page.url()).pathname !== "/login") throw new Error("Accessibility navigation did not remain on /login.");
     await page.locator("body").waitFor({ state: "attached", timeout: NAVIGATION_TIMEOUT_MS });
+    await waitForLoginUi(page, loginUiTimeoutMs);
     await page.addScriptTag({ path: AXE_PATH });
     const evaluation = page.evaluate(async (tags) => globalThis.axe.run(document, {
       runOnly: { type: "tag", values: tags },
@@ -130,7 +143,7 @@ async function scan(url) {
       clearTimeout(axeTimeout);
     }
   } finally {
-    await browser.close();
+    await browserInstance.close();
   }
 }
 
@@ -176,4 +189,4 @@ async function main() {
   }
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

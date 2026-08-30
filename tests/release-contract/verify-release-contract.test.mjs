@@ -14,6 +14,9 @@ const contractFiles = [
   "LICENSE",
   "CHANGELOG.md",
   "Directory.Build.props",
+  "Directory.Packages.props",
+  "global.json",
+  "Cmsify.slnx",
   "sdk/typescript/package.json",
   "sdk/typescript/package-lock.json",
   "sdk/typescript/LICENSE",
@@ -207,11 +210,12 @@ test("rejects Docker Hub preflight without all OCI and Docker manifest media typ
 test("rejects Docker Hub preflight that treats HTTP 200 as absent", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("case \"$status\" in 404) ;; *)", "case \"$status\" in 404|200) ;; *)")), /Docker Hub.*only HTTP 404/i));
 test("rejects a missing exact npm-version absence preflight", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("https://registry.npmjs.org/@cmsify%2Fclient/$VERSION", "https://registry.npmjs.org/@cmsify%2Fclient/latest")), /npm.*exact-version.*404/i));
 test("rejects a NuGet preflight that treats HTTP 200 as absent", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('case "$http_code" in 404) ;; 200) exit 1 ;;', 'case "$http_code" in 404|200) ;;')), /NuGet.*only.*HTTP 404/i));
+test("rejects a NuGet preflight that preserves uppercase prerelease versions", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('NUGET_VERSION="${VERSION,,}"', 'NUGET_VERSION="$VERSION"')), /NuGet.*normalize.*flat-container.*version/i));
 test("rejects package publication before OCI digest-preserving copy and equality", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras cp --from-oci-layout-path artifacts/oci/api", "dotnet nuget push premature.nupkg\n          oras cp --from-oci-layout-path artifacts/oci/api")), /OCI.*remote digest equality.*before.*NuGet.*npm/i));
 test("rejects release npm packing without the resolved source SHA", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('npm pkg set version="$VERSION" gitHead="$SOURCE_SHA"', 'npm pkg set version="$VERSION"')), /npm candidate.*gitHead.*SOURCE_SHA/i));
 test("rejects NuGet packing without explicit source SHA binding", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replaceAll(' -p:RepositoryCommit="$SOURCE_SHA"', "")), /three NuGet candidates.*RepositoryCommit.*SOURCE_SHA/i));
-test("rejects OCI layouts whose platform descriptor can be obscured by inline Buildx provenance", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" --provenance=false", "")), /OCI candidate.*provenance=false.*single linux\/amd64 manifest/i));
-test("rejects an OCI Dockerfile with a wrong qualified image identity label", () => expectInvalid((root) => { const path = resolve(root, "src/Cmsify.Api/Dockerfile"); writeFileSync(path, readFileSync(path, "utf8").replace("syntaxcircus/cmsify-api:${BUILD_VERSION}", "syntaxcircus/cmsify-admin:${BUILD_VERSION}")); }, /API Dockerfile.*ref.name.*qualified image identity/i));
+test("rejects OCI layouts whose platform descriptor can be obscured by inline Buildx provenance", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" --provenance=false", "")), /OCI candidate.*provenance=false.*BuildKit descriptor annotations/i));
+test("rejects OCI output without the tag and containerd full-name annotations", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('--annotation "manifest-descriptor:io.containerd.image.name=syntaxcircus/cmsify-api:$VERSION" ', "")), /OCI candidate.*containerd.*full identity/i));
 test("rejects SBOM generation without stable identity finalization", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node scripts\/release\/finalize-spdx\.mjs[^\n]*/, "")), /four SPDX[\s\S]*stable[\s\S]*identit/i));
 test("rejects artifact smoke without candidate-root checksum verification", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          (cd artifacts && sha256sum --check SHA256SUMS)\n", "")), /artifact smoke.*checksums/i));
 test("rejects artifact smoke that omits the exact Admin archive", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          docker load --input artifacts/oci/cmsify-admin.oci.tar\n", "")), /artifact smoke.*load both exact OCI archives/i));

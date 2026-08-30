@@ -13,6 +13,10 @@ const requiredPaths = [
   "src/Cmsify.Core/**",
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/**",
   "eng/accessibility/**",
+  "Directory.Build.props",
+  "Directory.Packages.props",
+  "global.json",
+  "Cmsify.slnx",
   ".github/workflows/admin-accessibility.yml",
 ];
 
@@ -60,6 +64,9 @@ test("the harness waits and navigates with timeouts, scans /login at WCAG 2.0/2.
   assert.match(runner, /\/login/);
   assert.match(runner, /WAIT_TIMEOUT_MS|waitTimeoutMs/);
   assert.match(runner, /NAVIGATION_TIMEOUT_MS|navigationTimeoutMs/);
+  assert.match(runner, /getByRole\("heading"[^\n]*Login|#email|\[name="email"\]/);
+  assert.match(runner, /#password|\[name="password"\]/);
+  assert.match(runner, /form/);
   assert.match(runner, /MAX_(?:VIOLATIONS|NODES|REPORT_BYTES)/);
   assert.match(runner, /accessibility\.json/);
   assert.match(runner, /accessibility\.junit\.xml/);

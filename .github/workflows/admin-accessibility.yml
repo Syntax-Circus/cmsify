@@ -10,6 +10,10 @@ on:
       - "src/Cmsify.Core/**"
       - "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/**"
       - "eng/accessibility/**"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+      - "Cmsify.slnx"
       - ".github/workflows/admin-accessibility.yml"
   pull_request:
     paths:
@@ -18,6 +22,10 @@ on:
       - "src/Cmsify.Core/**"
       - "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/**"
       - "eng/accessibility/**"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+      - "Cmsify.slnx"
       - ".github/workflows/admin-accessibility.yml"
 
 permissions:

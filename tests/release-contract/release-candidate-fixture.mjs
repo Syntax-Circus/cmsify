@@ -244,7 +244,6 @@ function imageState(kind) {
       config: {
         Labels: {
           "org.opencontainers.image.title": `Cmsify ${kind === "api" ? "API" : "Admin"}`,
-          "org.opencontainers.image.ref.name": `${repository}:${VERSION}`,
           "org.opencontainers.image.source": "https://github.com/Syntax-Circus/cmsify",
           "org.opencontainers.image.revision": SOURCE_SHA,
           "org.opencontainers.image.version": VERSION,
@@ -325,18 +324,18 @@ function renderOci(root, state) {
         digest: manifestDigest,
         size: manifest.length,
         platform: image.descriptorPlatform,
-        annotations: { "org.opencontainers.image.ref.name": image.ref },
+        annotations: { "org.opencontainers.image.ref.name": VERSION, "io.containerd.image.name": image.ref },
       };
       write(staging, "oci-layout", json({ imageLayoutVersion: "1.0.0" }));
       write(staging, "index.json", json({ schemaVersion: 2, manifests: [
-        { ...descriptor, annotations: { "org.opencontainers.image.ref.name": `unrelated/${kind}:old` } },
+        { ...descriptor, annotations: { "org.opencontainers.image.ref.name": "old", "io.containerd.image.name": `unrelated/${kind}:old` } },
         descriptor,
       ] }));
       const target = resolve(root, `oci/cmsify-${kind}.oci.tar`);
       mkdirSync(dirname(target), { recursive: true });
       execFileSync("tar", ["-cf", target, "-C", staging, "oci-layout", "index.json", "blobs"]);
       write(root, `oci/cmsify-${kind}.metadata.json`, json({ "containerimage.descriptor": descriptor }));
-      manifests[kind] = { repository: image.repository, ref: image.ref, ...descriptor };
+      manifests[kind] = { repository: image.repository, ref: image.ref, tag: VERSION, imageName: image.ref, ...descriptor };
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
@@ -429,7 +428,7 @@ export function mutateOciLayout(root, kind, mutate) {
     const indexPath = resolve(staging, "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8"));
     const expectedRef = `syntaxcircus/cmsify-${kind}:${VERSION}`;
-    const descriptor = index.manifests.find((candidate) => candidate.annotations?.["org.opencontainers.image.ref.name"] === expectedRef);
+    const descriptor = index.manifests.find((candidate) => candidate.annotations?.["io.containerd.image.name"] === expectedRef);
     const manifestPath = descriptor?.digest?.startsWith("sha256:") ? resolve(staging, `blobs/sha256/${descriptor.digest.slice(7)}`) : undefined;
     const manifest = manifestPath && statSync(manifestPath).isFile() ? JSON.parse(readFileSync(manifestPath, "utf8")) : undefined;
     const configPath = manifest?.config?.digest?.startsWith("sha256:") ? resolve(staging, `blobs/sha256/${manifest.config.digest.slice(7)}`) : undefined;

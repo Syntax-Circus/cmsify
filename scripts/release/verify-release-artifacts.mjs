@@ -221,8 +221,8 @@ function verifyOci(expectedFiles, releaseManifest) {
       expect(existsSync(resolve(layout, "oci-layout")) && existsSync(resolve(layout, "index.json")), `OCI ${label} archive must be a complete OCI layout.`);
       const index = parseJsonFile(resolve(layout, "index.json"), `OCI ${label} index`);
       if (!index) continue;
-      const descriptors = (index.manifests ?? []).filter((candidate) => candidate.annotations?.["org.opencontainers.image.ref.name"] === expectedRef);
-      expect(descriptors.length === 1, `OCI ${label} index must select exactly one descriptor by exact ref ${expectedRef}.`);
+      const descriptors = (index.manifests ?? []).filter((candidate) => candidate.annotations?.["org.opencontainers.image.ref.name"] === version && candidate.annotations?.["io.containerd.image.name"] === expectedRef);
+      expect(descriptors.length === 1, `OCI ${label} index must select exactly one descriptor by tag ref.name and exact containerd image name ${expectedRef}.`);
       if (descriptors.length !== 1) continue;
       const descriptor = descriptors[0];
       expect(descriptor.mediaType === OCI_MANIFEST, `OCI ${label} descriptor media type must be ${OCI_MANIFEST}.`);
@@ -264,17 +264,18 @@ function verifyOci(expectedFiles, releaseManifest) {
       }
       const labels = config.config?.Labels ?? {};
       expect(labels["org.opencontainers.image.title"] === `Cmsify ${label}`, `OCI ${label} title label must be exactly Cmsify ${label}.`);
-      expect(labels["org.opencontainers.image.ref.name"] === expectedRef, `OCI ${label} ref.name label must be exactly ${expectedRef}.`);
       expect(labels["org.opencontainers.image.source"] === REPOSITORY_SOURCE, `OCI ${label} source label must be exactly ${REPOSITORY_SOURCE}.`);
       expect(labels["org.opencontainers.image.revision"] === sourceSha, `OCI ${label} revision label must equal source SHA ${sourceSha}.`);
       expect(labels["org.opencontainers.image.version"] === version, `OCI ${label} version label must equal ${version}.`);
       expect(labels["org.opencontainers.image.licenses"] === "AGPL-3.0-or-later", `OCI ${label} license label must be AGPL-3.0-or-later.`);
 
       const metadata = parseJsonFile(metadataPath, `OCI ${label} metadata`)?.["containerimage.descriptor"];
-      expect(metadata?.digest === descriptor.digest && metadata?.size === descriptor.size && metadata?.mediaType === descriptor.mediaType, `OCI ${label} metadata descriptor must exactly match the selected layout descriptor.`);
+      expect(metadata?.digest === descriptor.digest && metadata?.size === descriptor.size && metadata?.mediaType === descriptor.mediaType && metadata?.annotations?.["org.opencontainers.image.ref.name"] === version && metadata?.annotations?.["io.containerd.image.name"] === expectedRef, `OCI ${label} Buildx metadata descriptor must exactly match the selected layout descriptor and full identity.`);
       const certified = releaseManifest?.oci?.[kind];
       expect(certified?.repository === expectedRepository, `Release manifest OCI ${label} repository must be ${expectedRepository}.`);
       expect(certified?.ref === expectedRef, `Release manifest OCI ${label} ref must be ${expectedRef}.`);
+      expect(certified?.tag === version, `Release manifest OCI ${label} tag must be ${version}.`);
+      expect(certified?.imageName === expectedRef, `Release manifest OCI ${label} containerd image name must be ${expectedRef}.`);
       expect(certified?.digest === descriptor.digest, `Release manifest OCI ${label} digest must bind the selected descriptor digest.`);
       expect(certified?.size === descriptor.size, `Release manifest OCI ${label} size must bind the selected descriptor size.`);
       expect(certified?.mediaType === descriptor.mediaType, `Release manifest OCI ${label} media type must bind the selected descriptor media type.`);

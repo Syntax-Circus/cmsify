@@ -69,8 +69,8 @@ jobs:
       - name: Build exact OCI layouts once
         run: |
           mkdir -p artifacts/oci
-          docker buildx build --platform linux/amd64 --provenance=false --tag "syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --metadata-file artifacts/oci/cmsify-api.metadata.json --output type=oci,dest=artifacts/oci/cmsify-api.oci.tar,name=syntaxcircus/cmsify-api:$VERSION .
-          docker buildx build --platform linux/amd64 --provenance=false --tag "syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --metadata-file artifacts/oci/cmsify-admin.metadata.json --output type=oci,dest=artifacts/oci/cmsify-admin.oci.tar,name=syntaxcircus/cmsify-admin:$VERSION .
+          docker buildx build --platform linux/amd64 --provenance=false --tag "syntaxcircus/cmsify-api:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --metadata-file artifacts/oci/cmsify-api.metadata.json --output type=oci,dest=artifacts/oci/cmsify-api.oci.tar,name=syntaxcircus/cmsify-api:$VERSION .
+          docker buildx build --platform linux/amd64 --provenance=false --tag "syntaxcircus/cmsify-admin:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --metadata-file artifacts/oci/cmsify-admin.metadata.json --output type=oci,dest=artifacts/oci/cmsify-admin.oci.tar,name=syntaxcircus/cmsify-admin:$VERSION .
       - name: Generate four named SPDX SBOMs with pinned Syft
         run: |
           mkdir -p artifacts/sbom
@@ -85,7 +85,10 @@ jobs:
           API_DIGEST="$(jq -r '."containerimage.descriptor".digest' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_DIGEST="$(jq -r '."containerimage.descriptor".digest' artifacts/oci/cmsify-admin.metadata.json)"
           API_SIZE="$(jq -r '."containerimage.descriptor".size' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_SIZE="$(jq -r '."containerimage.descriptor".size' artifacts/oci/cmsify-admin.metadata.json)"
           API_MEDIA="$(jq -r '."containerimage.descriptor".mediaType' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_MEDIA="$(jq -r '."containerimage.descriptor".mediaType' artifacts/oci/cmsify-admin.metadata.json)"
-          jq -n --arg version "$VERSION" --arg sourceSha "$SOURCE_SHA" --arg api "$API_DIGEST" --arg admin "$ADMIN_DIGEST" --arg apiSize "$API_SIZE" --arg adminSize "$ADMIN_SIZE" --arg apiMedia "$API_MEDIA" --arg adminMedia "$ADMIN_MEDIA" '{version:$version,sourceSha:$sourceSha,oci:{api:{repository:"syntaxcircus/cmsify-api",ref:("syntaxcircus/cmsify-api:"+$version),digest:$api,size:($apiSize|tonumber),mediaType:$apiMedia,platform:{os:"linux",architecture:"amd64"}},admin:{repository:"syntaxcircus/cmsify-admin",ref:("syntaxcircus/cmsify-admin:"+$version),digest:$admin,size:($adminSize|tonumber),mediaType:$adminMedia,platform:{os:"linux",architecture:"amd64"}}}}' > artifacts/release-manifest.json
+          API_TAG="$(jq -er '."containerimage.descriptor".annotations["org.opencontainers.image.ref.name"]' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_TAG="$(jq -er '."containerimage.descriptor".annotations["org.opencontainers.image.ref.name"]' artifacts/oci/cmsify-admin.metadata.json)"
+          API_NAME="$(jq -er '."containerimage.descriptor".annotations["io.containerd.image.name"]' artifacts/oci/cmsify-api.metadata.json)"; ADMIN_NAME="$(jq -er '."containerimage.descriptor".annotations["io.containerd.image.name"]' artifacts/oci/cmsify-admin.metadata.json)"
+          test "$API_TAG" = "$VERSION" && test "$ADMIN_TAG" = "$VERSION" && test "$API_NAME" = "syntaxcircus/cmsify-api:$VERSION" && test "$ADMIN_NAME" = "syntaxcircus/cmsify-admin:$VERSION"
+          jq -n --arg version "$VERSION" --arg sourceSha "$SOURCE_SHA" --arg api "$API_DIGEST" --arg admin "$ADMIN_DIGEST" --arg apiSize "$API_SIZE" --arg adminSize "$ADMIN_SIZE" --arg apiMedia "$API_MEDIA" --arg adminMedia "$ADMIN_MEDIA" --arg apiTag "$API_TAG" --arg adminTag "$ADMIN_TAG" --arg apiName "$API_NAME" --arg adminName "$ADMIN_NAME" '{version:$version,sourceSha:$sourceSha,oci:{api:{repository:"syntaxcircus/cmsify-api",ref:("syntaxcircus/cmsify-api:"+$version),tag:$apiTag,imageName:$apiName,digest:$api,size:($apiSize|tonumber),mediaType:$apiMedia,platform:{os:"linux",architecture:"amd64"}},admin:{repository:"syntaxcircus/cmsify-admin",ref:("syntaxcircus/cmsify-admin:"+$version),tag:$adminTag,imageName:$adminName,digest:$admin,size:($adminSize|tonumber),mediaType:$adminMedia,platform:{os:"linux",architecture:"amd64"}}}}' > artifacts/release-manifest.json
           (cd artifacts && find . -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum) > artifacts/SHA256SUMS
       - run: node scripts/release/verify-release-artifacts.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -332,8 +335,8 @@ jobs:
         run: |
           mkdir -p artifacts/oci/api artifacts/oci/admin && tar -xf artifacts/oci/cmsify-api.oci.tar -C artifacts/oci/api && tar -xf artifacts/oci/cmsify-admin.oci.tar -C artifacts/oci/admin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)" = "$API_EXPECTED"
-          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)" = "$ADMIN_EXPECTED"
+          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api@$API_EXPECTED" | jq -r .digest)" = "$API_EXPECTED"
+          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin@$ADMIN_EXPECTED" | jq -r .digest)" = "$ADMIN_EXPECTED"
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
           ACCEPT_MANIFESTS="application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json"
           for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do
@@ -348,7 +351,8 @@ jobs:
       - name: Reject existing NuGet versions before promotion
         shell: bash
         run: |
-          for package in syntaxcircus.cmsify.contracts syntaxcircus.cmsify.client syntaxcircus.cmsify.client.distributedcaching; do http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://api.nuget.org/v3-flatcontainer/$package/$VERSION/$package.$VERSION.nupkg")" || exit 1; case "$http_code" in 404) ;; 200) exit 1 ;; *) echo "Unexpected NuGet preflight HTTP $http_code"; exit 1 ;; esac; done
+          NUGET_VERSION="${VERSION,,}"
+          for package in syntaxcircus.cmsify.contracts syntaxcircus.cmsify.client syntaxcircus.cmsify.client.distributedcaching; do http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://api.nuget.org/v3-flatcontainer/$package/$NUGET_VERSION/$package.$NUGET_VERSION.nupkg")" || exit 1; case "$http_code" in 404) ;; 200) exit 1 ;; *) echo "Unexpected NuGet preflight HTTP $http_code"; exit 1 ;; esac; done
       - name: Reject existing npm exact version before promotion
         shell: bash
         run: |
@@ -363,8 +367,8 @@ jobs:
         run: |
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          oras cp --from-oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api:$VERSION" "docker.io/syntaxcircus/cmsify-api:$VERSION"
-          oras cp --from-oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin:$VERSION" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
+          oras cp --from-oci-layout-path artifacts/oci/api "syntaxcircus/cmsify-api@$API_EXPECTED" "docker.io/syntaxcircus/cmsify-api:$VERSION"
+          oras cp --from-oci-layout-path artifacts/oci/admin "syntaxcircus/cmsify-admin@$ADMIN_EXPECTED" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
           API_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)"; ADMIN_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)"
           test "$API_REMOTE" = "$API_EXPECTED" && test "$ADMIN_REMOTE" = "$ADMIN_EXPECTED"
           API_SUBJECT="docker.io/syntaxcircus/cmsify-api@$API_REMOTE"; ADMIN_SUBJECT="docker.io/syntaxcircus/cmsify-admin@$ADMIN_REMOTE"
