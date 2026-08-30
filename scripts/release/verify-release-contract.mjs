@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const defaultRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -18,6 +18,82 @@ function file(relativePath) {
 
 function expect(condition, message) {
   if (!condition) errors.push(message);
+}
+
+function supplyChainFiles(root) {
+  const files = [];
+  const visit = (directory) => {
+    if (!existsSync(directory)) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if ([".git", "artifacts", "bin", "node_modules", "obj"].includes(entry.name)) continue;
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) visit(entryPath);
+      else {
+        const repositoryPath = relative(root, entryPath).replaceAll("\\", "/");
+        if ((repositoryPath.startsWith(".github/workflows/") && /\.ya?ml$/i.test(repositoryPath))
+          || /(?:^|\/)(?:docker-)?compose[^/]*\.ya?ml$/i.test(repositoryPath)
+          || ["src/Cmsify.Api/Dockerfile", "src/Cmsify.Admin/Dockerfile"].includes(repositoryPath)) files.push(repositoryPath);
+      }
+    }
+  };
+  visit(root);
+  return files.sort();
+}
+
+function supplyChainError(relativePath, line, message) {
+  return `${relativePath}:${line}: ${message}`;
+}
+
+function hasPinnedDigest(reference) {
+  return /@sha256:[0-9a-f]{64}$/i.test(reference);
+}
+
+function workflowImageReferences(line) {
+  if (!/\bdocker\s+run\b/.test(line)) return [];
+  return line.split(/\s+/).map((token) => token.replaceAll(/^["']|["',;]$/g, ""))
+    .filter((token) => !token.startsWith("-") && !token.startsWith("$") && !token.includes("=")
+      && !token.startsWith("/") && !token.startsWith("2>")
+      && /(?:\/|:|@sha256)/.test(token)
+      && /^(?:(?:[a-z0-9.-]+(?::\d+)?\/)?[a-z][a-z0-9._-]*)(?::[a-z0-9._$-]+)?(?:@sha256:[0-9a-f]{64})?$/i.test(token));
+}
+
+export function validateRepositorySupplyChain(root) {
+  const violations = [];
+  for (const relativePath of supplyChainFiles(root)) {
+    const contents = readFileSync(resolve(root, relativePath), "utf8");
+    const isWorkflow = relativePath.startsWith(".github/workflows/");
+    const stageAliases = new Set(["scratch"]);
+    const workflowBuiltImages = new Set([...contents.matchAll(/(?:--tag|-t)\s+["']?([^\s"']+)/g)].map((match) => match[1]));
+    for (const [index, line] of contents.replaceAll("\r\n", "\n").split("\n").entries()) {
+      const lineNumber = index + 1;
+      const action = line.match(/^\s*(?:-\s+)?uses:\s*([^\s#]+)/);
+      if (action && !action[1].startsWith("./") && !/^[^/\s]+\/[^@\s]+@[0-9a-f]{40}$/i.test(action[1])) {
+        violations.push(supplyChainError(relativePath, lineNumber, `action reference must use owner/repository@40-hex-SHA: ${action[1]}`));
+      }
+
+      const from = line.match(/^\s*FROM\s+([^\s]+)(?:\s+AS\s+([^\s]+))?/i);
+      if (from) {
+        const [, reference, alias] = from;
+        if (!stageAliases.has(reference) && !hasPinnedDigest(reference)) {
+          violations.push(supplyChainError(relativePath, lineNumber, `runtime image must use @sha256:<64 hex>: ${reference}`));
+        }
+        if (alias) stageAliases.add(alias);
+      }
+
+      const composeImage = line.match(/^\s*image:\s*["']?([^\s"'#]+)["']?/);
+      const imageReferences = [
+        ...(composeImage ? [composeImage[1]] : []),
+        ...(isWorkflow ? workflowImageReferences(line) : []),
+      ];
+      for (const reference of imageReferences) {
+        if (reference.includes("${") || stageAliases.has(reference) || workflowBuiltImages.has(reference)) continue;
+        if (!hasPinnedDigest(reference)) {
+          violations.push(supplyChainError(relativePath, lineNumber, `runtime image must use @sha256:<64 hex>: ${reference}`));
+        }
+      }
+    }
+  }
+  return violations;
 }
 
 function projectMetadata(relativePath) {
@@ -258,6 +334,8 @@ expect(/pull_request:/i.test(branchWorkflow) && /verify-release-contract\.mjs/i.
 expect(/node --test tests\/upgrade\/unit\/\*\.test\.mjs tests\/release-contract\/\*\.test\.mjs/.test(branchWorkflow), "Branch validation must execute fast upgrade unit tests and all release-contract tests.");
 expect(/node eng\/upgrade-tests\/cli\.mjs verify-fixture --fixture tests\/upgrade\/fixtures\/v0\.1\.3/.test(branchWorkflow), "Branch validation must verify the checked-in upgrade fixture.");
 expect(!/generate-fixture/.test(branchWorkflow), "Branch validation must not regenerate the Docker-backed fixture.");
+
+errors.push(...validateRepositorySupplyChain(repositoryRoot));
 
 if (errors.length > 0) {
   process.stderr.write(`${errors.join("\n")}\n`);

@@ -24,6 +24,8 @@ const testProjectPaths = [
   "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj",
 ];
 const pinnedUploadArtifact = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+const pinnedCheckout = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
+const pinnedSetupDotnet = "actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d";
 
 function solutionProjectPaths() {
   return [...readRepositoryFile("Cmsify.slnx").matchAll(/<Project Path="([^"]+)"/g)]
@@ -66,8 +68,8 @@ function validatePullRequestWorkflow(workflow) {
   const steps = workflow.jobs?.test?.steps;
   assert.equal(Array.isArray(steps), true, "dotnet-test.yml: jobs.test.steps must be a sequence");
   assert.deepEqual(steps.map(stepLabel), [
-    "actions/checkout@v4",
-    "actions/setup-dotnet@v4",
+    pinnedCheckout,
+    pinnedSetupDotnet,
     "Restore locked dependencies",
     "Build Release binaries",
     "Run full test suite",
@@ -81,7 +83,7 @@ function validatePullRequestWorkflow(workflow) {
     "Run .NET client capacity invariants",
   ]);
   assert.deepEqual(steps[1], {
-    uses: "actions/setup-dotnet@v4",
+    uses: pinnedSetupDotnet,
     with: { "global-json-file": "global.json" },
   });
   assert.equal(steps[2].run, "dotnet restore Cmsify.slnx --locked-mode");
@@ -445,7 +447,7 @@ function validateReleaseConsumer(workflow) {
     },
   });
   assert.deepEqual(steps[1], {
-    uses: "actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7",
+    uses: pinnedSetupDotnet,
     with: { "global-json-file": "source/global.json" },
   });
   assert.deepEqual(steps[2], {
@@ -537,7 +539,7 @@ function dockerCopy(instruction, sourceName) {
 function validateDockerfilePolicy(source, dockerfile, project) {
   const instructions = parseDockerfile(source, dockerfile);
   const buildFrom = instructions.findIndex(({ instruction, arguments: value }) =>
-    instruction === "FROM" && value === "mcr.microsoft.com/dotnet/sdk:10.0.400 AS build");
+    instruction === "FROM" && /^mcr\.microsoft\.com\/dotnet\/sdk:10\.0\.400@sha256:[0-9a-f]{64} AS build$/i.test(value));
   assert.notEqual(buildFrom, -1, `${dockerfile}: exact SDK build stage`);
   const nextFrom = instructions.findIndex(({ instruction }, index) => index > buildFrom && instruction === "FROM");
   const buildStageEnd = nextFrom === -1 ? instructions.length : nextFrom;
@@ -1049,8 +1051,8 @@ test("auto-merge policy recursively rejects a Dependabot-triggered write-capable
 test("Docker policy rejects restore inputs moved outside the selected SDK stage", () => {
   const dockerfile = readRepositoryFile("src/Cmsify.Api/Dockerfile");
   const wrongStage = dockerfile.replace(
-    "FROM mcr.microsoft.com/dotnet/sdk:10.0.400 AS build",
-    "FROM mcr.microsoft.com/dotnet/sdk:10.0.400 AS build\nFROM scratch AS misplaced-restore",
+    "FROM mcr.microsoft.com/dotnet/sdk:10.0.400@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS build",
+    "FROM mcr.microsoft.com/dotnet/sdk:10.0.400@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS build\nFROM scratch AS misplaced-restore",
   );
   assert.notEqual(wrongStage, dockerfile);
   assert.throws(

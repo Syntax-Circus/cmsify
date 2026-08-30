@@ -112,6 +112,13 @@ test("rejects branch publication", () => expectInvalid((root) => mutateWorkflow(
 test("rejects the legacy npm repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /@cmsify\/client.*repository.*Syntax-Circus/i));
 test("rejects the legacy npm lockfile repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package-lock.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /package-lock.*repository.*Syntax-Circus/i));
 test("rejects an unpinned release action", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@v4")), /pinned/i));
+test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
+  const path = resolve(root, ".github/workflows/dotnet-test.yml");
+  writeFileSync(path, readFileSync(path, "utf8").replace(
+    "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+    "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af68",
+  ));
+}, /dotnet-test\.yml:\d+: action reference/i));
 test("rejects a promotion rebuild", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('REMOTE_SHA="${PEELED_SHA:-$LIGHTWEIGHT_SHA}";', 'docker buildx build --push .\n          REMOTE_SHA="${PEELED_SHA:-$LIGHTWEIGHT_SHA}";')), /Promotion must not rebuild/i));
 
 test("rejects a missing dedicated upgrade and rollback workflow", () => expectInvalid((root) => {

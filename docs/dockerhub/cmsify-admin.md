@@ -7,7 +7,7 @@ Cmsify Admin is the server-rendered Blazor administration UI for the Cmsify head
 Deploy this image together with `syntaxcircus/cmsify-api` by using the production Compose template. The template configures the Admin-to-API connection, persistent Data Protection keys, and the PostgreSQL and media services required by the API.
 
 1. Follow the [production deployment guide](https://docs.cmsify.dev/operations/) to prepare configuration and secrets.
-2. Copy [`docker-compose.prod.env.example`](https://github.com/Syntax-Circus/cmsify/blob/main/docker-compose.prod.env.example) to a private environment file and set an exact `CMSIFY_VERSION`.
+2. Copy [`docker-compose.prod.env.example`](https://github.com/Syntax-Circus/cmsify/blob/main/docker-compose.prod.env.example) to a private environment file and set the exact `CMSIFY_VERSION`, `CMSIFY_API_IMAGE_DIGEST`, and `CMSIFY_ADMIN_IMAGE_DIGEST` values published for that release.
 3. Start the paired services with the [production Compose template](https://github.com/Syntax-Circus/cmsify/blob/main/docker-compose.prod.yml).
 
 Use a versioned tag in production. The moving `latest` tag is provided for evaluation and development only. Persist the Admin Data Protection key volume across restarts so active sessions remain valid.

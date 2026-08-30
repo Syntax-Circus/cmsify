@@ -27,13 +27,13 @@ jobs:
       base-sha: ${{ steps.revisions.outputs.base-sha }}
       head-sha: ${{ steps.revisions.outputs.head-sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with:
           global-json-file: global.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "22"
           cache: npm
@@ -71,7 +71,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          docker run --rm -v "$RUNNER_TEMP:/work:ro" tufin/oasdiff:v1.28.0 breaking /work/openapi-base.json /work/openapi-head.json --match-path '^/api/v1(?:/|$)' --fail-on ERR > "$RUNNER_TEMP/oasdiff.txt" 2>&1
+          docker run --rm -v "$RUNNER_TEMP:/work:ro" tufin/oasdiff:v1.28.0@sha256:86830f988eaafcf589acb2794ee5ab78e3300ded071d6517bf085469300cbf36 breaking /work/openapi-base.json /work/openapi-head.json --match-path '^/api/v1(?:/|$)' --fail-on ERR > "$RUNNER_TEMP/oasdiff.txt" 2>&1
           result=$?
           cat "$RUNNER_TEMP/oasdiff.txt"
           if [[ $result -eq 0 ]]; then

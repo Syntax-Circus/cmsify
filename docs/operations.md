@@ -8,7 +8,7 @@ Use environment-specific secret management in production. Do not commit credenti
 
 ## Container deployment
 
-The repository's [`docker-compose.prod.yml`](../docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and named volumes for database data, local media, and Admin Data Protection keys. A reviewed SemVer tag promotes matching versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images from one immutable commit; branch builds never publish. The template defaults to the versioned image pair; use `CMSIFY_IMAGE_PREFIX` to pull from a private registry/repository instead.
+The repository's [`docker-compose.prod.yml`](../docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and named volumes for database data, local media, and Admin Data Protection keys. A reviewed SemVer tag promotes matching versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images from one immutable commit; branch builds never publish. The template requires the versioned image pair and their exact manifest digests; use `CMSIFY_IMAGE_PREFIX` to pull from a private registry/repository instead.
 
 ```powershell
 # Build both local images (including amd64 and arm64 tags).
@@ -19,7 +19,7 @@ docker login registry.example.internal
 ./Build-CmsifyDocker.ps1 -ImageTag 0.1.0-test -Registry registry.example.internal/cmsify -Push
 ```
 
-Copy [`docker-compose.prod.env.example`](../docker-compose.prod.env.example) to a private environment file, set `CMSIFY_VERSION` to an exact Docker Hub release tag (or `local` for locally built images), set `CMSIFY_IMAGE_PREFIX` to the registry prefix when applicable, replace all placeholder secrets, then run Compose with `--env-file`. The script requires `-Registry` whenever `-Push` is used, and it never accepts registry credentials; authenticate with `docker login` first.
+Copy [`docker-compose.prod.env.example`](../docker-compose.prod.env.example) to a private environment file, set `CMSIFY_VERSION` to an exact Docker Hub release tag (or `local` for locally built images), set `CMSIFY_API_IMAGE_DIGEST` and `CMSIFY_ADMIN_IMAGE_DIGEST` to the matching 64-character manifest digests, set `CMSIFY_IMAGE_PREFIX` to the registry prefix when applicable, replace all placeholder secrets, then run Compose with `--env-file`. The script requires `-Registry` whenever `-Push` is used, and it never accepts registry credentials; authenticate with `docker login` first.
 
 Bind the API and Admin ports to loopback and terminate TLS at a host reverse proxy. If ports are published publicly instead, secure them with TLS and configure the proxy/trusted-forwarded-header settings for that deployment.
 
@@ -36,7 +36,7 @@ Use this checklist before each production upgrade:
 1. Confirm `/health/ready` is healthy and identify the current image tag.
 2. Back up PostgreSQL and media together. For the supplied Compose deployment, back up the `postgres_data` and `media_data` volumes; for S3, back up the bucket or confirm its versioning and recovery policy.
 3. Record the Admin Data Protection key volume (`admin_data_protection_keys`) as part of the deployment backup. Losing it signs out existing Admin sessions.
-4. Update `CMSIFY_VERSION`, then run `docker compose --env-file .env.prod -f docker-compose.prod.yml pull` when using a registry image, followed by `up -d`.
+4. Update `CMSIFY_VERSION`, `CMSIFY_API_IMAGE_DIGEST`, and `CMSIFY_ADMIN_IMAGE_DIGEST`, then run `docker compose --env-file .env.prod -f docker-compose.prod.yml pull` when using a registry image, followed by `up -d`.
 5. Verify `/health/live`, `/health/ready`, Admin sign-in, and a representative media download.
 
 To restore, stop application traffic, restore the database and its matching media snapshot, restore Data Protection keys when retaining sessions matters, then start the stack and wait for readiness. Do not restore only one of the database and media snapshots: content can otherwise point at missing or mismatched files. If the upgraded stack does not become ready, return to the prior image tag and restore the matched backup before accepting traffic.

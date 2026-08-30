@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.0.0
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with: { global-json-file: global.json }
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with: { node-version: "22", cache: npm, cache-dependency-path: sdk/typescript/package-lock.json }
@@ -89,7 +89,7 @@ jobs:
             exit "$status"
           }
           trap cleanup EXIT
-          docker run -d --name cmsify-postgres-smoke --network cmsify-smoke -e POSTGRES_DB=cmsify -e POSTGRES_USER=cmsify -e POSTGRES_PASSWORD=cmsify postgres:17-alpine
+          docker run -d --name cmsify-postgres-smoke --network cmsify-smoke -e POSTGRES_DB=cmsify -e POSTGRES_USER=cmsify -e POSTGRES_PASSWORD=cmsify postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
           postgres_ready=false
           for attempt in {1..30}; do
             if docker exec cmsify-postgres-smoke pg_isready -U cmsify -d cmsify; then postgres_ready=true; break; fi
@@ -131,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false, path: source }
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.0.0
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with: { global-json-file: source/global.json }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
@@ -220,7 +220,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.0.0
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with: { global-json-file: global.json }
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with: { node-version: "22", registry-url: https://registry.npmjs.org }

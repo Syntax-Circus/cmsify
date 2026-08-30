@@ -155,25 +155,25 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 
 ## Run in production with Docker
 
-The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. A reviewed SemVer tag publishes matching versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images from one immutable commit; branch builds never publish. The template uses a pinned version instead of `latest`, so upgrades are deliberate and reversible; `CMSIFY_IMAGE_PREFIX` can point it at a private registry instead.
+The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. A reviewed SemVer tag publishes matching versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images from one immutable commit; branch builds never publish. The template requires both a version and the exact API/Admin manifest digests, so upgrades are deliberate and reversible; `CMSIFY_IMAGE_PREFIX` can point it at a private registry instead.
 
 On the production host, copy the environment template and replace every placeholder with a real value. Keep the resulting file outside source control.
 
 ```bash
 cp docker-compose.prod.env.example .env.prod
 cp docker-compose.prod.keyring.env.example .env.prod.keyring
-# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, keyring-file path (`./.env.prod.keyring` after copying), and CORS origin.
+# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, CMSIFY_API_IMAGE_DIGEST, CMSIFY_ADMIN_IMAGE_DIGEST, database/admin passwords, keyring-file path (`./.env.prod.keyring` after copying), and CORS origin.
 # Edit the untracked keyring file: set its active key and retain every referenced older v2 key.
 # Pull the exact published CMSIFY_VERSION from Docker Hub (or the configured registry).
 docker compose --env-file .env.prod -f docker-compose.prod.yml pull
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
 
-When using locally built images, run `./Build-CmsifyDocker.ps1 -ImageTag local`, set `CMSIFY_VERSION=local`, and run only `up -d`; see [Operating Cmsify](docs/operations.md#container-deployment) for private-registry publishing commands.
+When using locally built images, run `./Build-CmsifyDocker.ps1 -ImageTag local`, set `CMSIFY_VERSION=local`, set the API/Admin image-digest values from `docker image inspect`, and run only `up -d`; see [Operating Cmsify](docs/operations.md#container-deployment) for private-registry publishing commands.
 
 The Compose sample binds the Admin and API ports to `127.0.0.1` (`5001` and `5000` by default). Put a TLS-terminating reverse proxy such as Caddy or Nginx on the host in front of those ports; configure its public Admin origin as `CORS_ALLOWED_ORIGIN`. To expose the containers directly instead, remove `127.0.0.1:` from the two `ports` mappings and provide TLS outside this sample. Do not expose the PostgreSQL service publicly.
 
-The template defaults to the named local-media volume. Set `Storage__Provider=s3` and its `Storage__S3__*` values to use S3-compatible object storage instead. To upgrade, set `CMSIFY_VERSION` to the next published version, back up PostgreSQL and the media volume, then rerun `pull` and `up -d`. The API applies database migrations at startup. Check `/health/live` for process health and `/health/ready` for database and storage readiness.
+The template defaults to the named local-media volume. Set `Storage__Provider=s3` and its `Storage__S3__*` values to use S3-compatible object storage instead. To upgrade, set `CMSIFY_VERSION` and both matching image digests to the next published release, back up PostgreSQL and the media volume, then rerun `pull` and `up -d`. The API applies database migrations at startup. Check `/health/live` for process health and `/health/ready` for database and storage readiness.
 
 The production Compose template reads signing-secret configuration only into the API container from `CMSIFY_API_KEYRING_ENV_FILE`; it does not pass the main Compose interpolation file through to the container. Copy [`docker-compose.prod.keyring.env.example`](docker-compose.prod.keyring.env.example) to an untracked deployment-only file, set `CMSIFY_API_KEYRING_ENV_FILE` to that path, and replace its active-key placeholder with a stable ID and canonical Base64 32-byte CSPRNG key. Add and retain every older `Secrets__EncryptionKeys__<keyId>` entry that may still be referenced by `v2` ciphertext. Missing, malformed, or placeholder keyring configuration fails API startup; never commit the deployment keyring file.
 
