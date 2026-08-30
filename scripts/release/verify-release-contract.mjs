@@ -349,6 +349,9 @@ function accessibilityEventPaths(event) {
   const paths = body.match(/^    paths:[ \t]*\r?\n((?:      - "[^"\r\n]+"[ \t]*(?:\r?\n|$))*)/m);
   return paths ? [...paths[1].matchAll(/^      - "([^"\r\n]+)"[ \t]*$/gm)].map((match) => match[1]) : [];
 }
+for (const event of ["push", "pull_request"]) {
+  expect(!accessibilityEventPaths(event).some((path) => path.startsWith("!")), `Accessibility ${event} path triggers must not contain negative entries.`);
+}
 for (const requiredPath of [
   "src/Cmsify.Admin/**",
   "src/Cmsify.Contracts/**",

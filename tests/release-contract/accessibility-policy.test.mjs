@@ -35,7 +35,8 @@ function eventPaths(workflow, event) {
   const nextEvent = following.search(/^  [A-Za-z0-9_-]+:/m);
   const body = nextEvent === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + nextEvent);
   const paths = body.match(/^    paths:[ \t]*\r?\n((?:      - "[^"\r\n]+"[ \t]*(?:\r?\n|$))*)/m);
-  return paths ? [...paths[1].matchAll(/^      - "([^"\r\n]+)"[ \t]*$/gm)].map((match) => match[1]) : [];
+  const entries = paths ? [...paths[1].matchAll(/^      - "([^"\r\n]+)"[ \t]*$/gm)].map((match) => match[1]) : [];
+  return entries.some((path) => path.startsWith("!")) ? [] : entries;
 }
 
 test("branch accessibility runs manually and for relevant main/PR changes", () => {
@@ -50,9 +51,20 @@ test("branch accessibility runs manually and for relevant main/PR changes", () =
 });
 
 test("paths-ignore is not accepted as an accessibility path trigger", () => {
-  const ignoredPaths = branchWorkflow.replaceAll("    paths:", "    paths-ignore:");
   for (const event of ["push", "pull_request"]) {
+    const ignoredPaths = event === "push"
+      ? branchWorkflow.replace("  push:\n    branches: [main]\n    paths:", "  push:\n    branches: [main]\n    paths-ignore:")
+      : branchWorkflow.replace("  pull_request:\n    paths:", "  pull_request:\n    paths-ignore:");
     assert.deepEqual(eventPaths(ignoredPaths, event), [], `${event} paths-ignore must not be treated as paths`);
+  }
+});
+
+test("negative paths invalidate each accessibility event path list", () => {
+  for (const event of ["push", "pull_request"]) {
+    const negatedPaths = event === "push"
+      ? branchWorkflow.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - "!src/Cmsify.Admin/**"\n')
+      : branchWorkflow.replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n', '  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n      - "!src/Cmsify.Admin/**"\n');
+    assert.deepEqual(eventPaths(negatedPaths, event), [], `${event} negative path must invalidate its path list`);
   }
 });
 

@@ -92,6 +92,17 @@ function mutateAccessibilityWorkflow(root, mutate) {
   writeFileSync(path, mutate(readFileSync(path, "utf8")));
 }
 
+function mutateAccessibilityEventPaths(root, event, mutate) {
+  mutateAccessibilityWorkflow(root, (workflow) => {
+    const start = workflow.search(new RegExp(`^  ${event}:\\s*$`, "m"));
+    assert.notEqual(start, -1, `missing ${event} event in test fixture`);
+    const following = workflow.slice(start + 1);
+    const nextEvent = following.search(/^  [A-Za-z0-9_-]+:/m);
+    const end = nextEvent === -1 ? workflow.length : start + 1 + nextEvent;
+    return `${workflow.slice(0, start)}${mutate(workflow.slice(start, end))}${workflow.slice(end)}`;
+  });
+}
+
 function verify(root) {
   return spawnSync(process.execPath, [verifier, "--root", root], { encoding: "utf8" });
 }
@@ -134,10 +145,11 @@ test("requires canonical Docker Hub names in Buildx archive annotations", () => 
 
 test("rejects branch publication", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('tags: ["v*"]', "branches: [main]")), /tag-only/i));
 test("rejects tag-only branch accessibility", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow.replace("workflow_dispatch:", 'push:\n    tags: ["v*"]')), /accessibility.*manual.*main.*pull request/i));
-test("rejects paths-ignore substituted for push and pull-request accessibility paths", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow.replaceAll("    paths:", "    paths-ignore:")), /Accessibility path triggers.*main pushes.*pull requests/i));
-test("rejects accessibility paths duplicated under push while absent from pull requests", () => expectInvalid((root) => mutateAccessibilityWorkflow(root, (workflow) => workflow
-  .replace('      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Admin/**"\n')
-  .replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '  pull_request:\n    paths:\n      - "src/Cmsify.Contracts/**"\n      - "src/Cmsify.Contracts/**"\n')), /Accessibility path triggers.*main pushes.*pull requests/i));
+for (const event of ["push", "pull_request"]) {
+  test(`rejects paths-ignore substituted for ${event} accessibility paths`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace("    paths:", "    paths-ignore:")), /Accessibility path triggers.*main pushes.*pull requests/i));
+  test(`rejects duplicated ${event} accessibility paths`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Admin/**"\n')), /Accessibility path triggers.*main pushes.*pull requests/i));
+  test(`rejects a negated required ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - "!src/Cmsify.Admin/**"\n')), new RegExp(`Accessibility ${event} path triggers must not contain negative entries`, "i")));
+}
 test("rejects source-built release accessibility", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace("docker load --input artifacts/oci/cmsify-admin.oci.tar", "dotnet run --project src/Cmsify.Admin/Cmsify.Admin.csproj")), /candidate accessibility.*exact.*Admin OCI archive|candidate accessibility.*must not rebuild/i));
 test("rejects an omitted clean candidate package", () => expectInvalid((root) => mutateReleaseJob(root, "dotnet-consumer", (job) => job.replace('            <package pattern="SyntaxCircus.Cmsify.Contracts" />\n', "")), /clean \.NET consumer.*all three.*local source/i));
 test("rejects an unsigned promoted destination", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace(/\n\s*cosign sign --yes "\$API_SUBJECT"/, "")), /Cosign.*sign.*verify.*digest/i));
