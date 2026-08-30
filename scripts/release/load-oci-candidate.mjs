@@ -1,32 +1,27 @@
 #!/usr/bin/env node
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   closeSync,
   fstatSync,
   lstatSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readSync,
   realpathSync,
+  rmSync,
 } from "node:fs";
-import { dirname, parse, relative, resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, parse, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { runProcess } from "../../eng/upgrade-tests/process.mjs";
 
-export const REGISTRY_IMAGE = "docker.io/library/registry:2.8.3@sha256:46faa9a1ae6813194b53921a370f2f4f8c5e1aae228a89bceafef5847a6a3278";
 export const SKOPEO_IMAGE = "quay.io/skopeo/stable:v1.22.2@sha256:f7cfa282082cbfc25b754905225985584d1fbc410fef99e1b498c9b64087b755";
 export const LOADER_CONTRACT = Object.freeze({
   schema: "cmsify.oci-loader.v1",
-  registryImage: REGISTRY_IMAGE,
   skopeoImage: SKOPEO_IMAGE,
-  topology: Object.freeze({
-    importer: "internal",
-    relay: "loopback-published",
-    registry: "relay+importer",
-    skopeo: "importer-only",
-  }),
+  transport: "offline-docker-archive",
 });
 
 const FLAGS = Object.freeze({
@@ -40,7 +35,21 @@ const DOCKER_TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 const CANONICAL_REF = /^docker\.io\/syntaxcircus\/cmsify-(?:api|admin):[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
+const OCI_CONFIG = "application/vnd.oci.image.config.v1+json";
+const LAYER_MEDIA_TYPES = new Set([
+  "application/vnd.oci.image.layer.v1.tar",
+  "application/vnd.oci.image.layer.v1.tar+gzip",
+  "application/vnd.oci.image.layer.v1.tar+zstd",
+  "application/vnd.oci.image.layer.nondistributable.v1.tar",
+  "application/vnd.oci.image.layer.nondistributable.v1.tar+gzip",
+  "application/vnd.oci.image.layer.nondistributable.v1.tar+zstd",
+  "application/vnd.docker.image.rootfs.diff.tar",
+  "application/vnd.docker.image.rootfs.diff.tar.gzip",
+  "application/vnd.docker.image.rootfs.foreign.diff.tar",
+  "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip",
+]);
 const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_DOCKER_ARCHIVE_BYTES = 8 * 1024 * 1024 * 1024;
 const PROCESS_TIMEOUT_MS = 2 * 60 * 1000;
 const LABEL_OWNER = "io.syntaxcircus.cmsify.oci-loader=true";
 const LABEL_RUN = "io.syntaxcircus.cmsify.oci-loader-run";
@@ -68,7 +77,56 @@ function assertRegularNonLinkFile(input, label) {
   assert(entry.isFile() && !entry.isSymbolicLink(), `${label} path must be a regular non-link file.`);
   assert(normalizedPath(realpathSync.native(absolute)) === normalizedPath(absolute), `${label} path must not resolve through a link or reparse point.`);
   assert(!absolute.includes(","), `${label} path must not contain a comma.`);
-  return { path: absolute, size: entry.size };
+  return { path: absolute, size: entry.size, links: entry.nlink };
+}
+
+function assertRegularNonLinkDirectory(input, label) {
+  assert(typeof input === "string" && input.length > 0, `${label} path is required.`);
+  const absolute = resolve(input);
+  const root = parse(absolute).root;
+  let current = root;
+  for (const segment of relative(root, absolute).split(/[\\/]+/).filter(Boolean)) {
+    current = resolve(current, segment);
+    const entry = lstatSync(current);
+    assert(!entry.isSymbolicLink(), `${label} path must not contain a link or reparse point.`);
+  }
+  const entry = lstatSync(absolute);
+  assert(entry.isDirectory() && !entry.isSymbolicLink(), `${label} path must be a regular non-link directory.`);
+  assert(normalizedPath(realpathSync.native(absolute)) === normalizedPath(absolute), `${label} path must not resolve through a link or reparse point.`);
+  assert(!absolute.includes(","), `${label} path must not contain a comma.`);
+  return absolute;
+}
+
+function validateScratchRoot(input, prefix) {
+  const absolute = assertRegularNonLinkDirectory(input, "OCI loader scratch root");
+  const absolutePrefix = resolve(prefix);
+  assert(normalizedPath(dirname(absolute)) === normalizedPath(dirname(absolutePrefix))
+    && basename(absolute).startsWith(basename(absolutePrefix))
+    && basename(absolute).length > basename(absolutePrefix).length, "OCI loader scratch root is outside the exact run-owned prefix.");
+  return absolute;
+}
+
+function defaultCreateScratch(prefix, registerCreated) {
+  const scratchRoot = mkdtempSync(prefix);
+  registerCreated(scratchRoot);
+  return scratchRoot;
+}
+
+function defaultValidateScratchArchive(input, scratchRoot, maximumBytes) {
+  const exactRoot = assertRegularNonLinkDirectory(scratchRoot, "OCI loader scratch root");
+  const expected = resolve(exactRoot, "candidate.docker.tar");
+  assert(normalizedPath(resolve(input)) === normalizedPath(expected), "Scratch Docker archive must be inside the exact run-owned scratch root.");
+  const checked = assertRegularNonLinkFile(input, "Scratch Docker archive");
+  assert(normalizedPath(dirname(checked.path)) === normalizedPath(exactRoot), "Scratch Docker archive must be directly inside the exact run-owned scratch root.");
+  assert(checked.links === 1, "Scratch Docker archive must not be a hard link.");
+  assert(Number.isSafeInteger(checked.size) && checked.size > 0, "Scratch Docker archive must be a non-empty file with a safe size.");
+  assert(Number.isSafeInteger(maximumBytes) && maximumBytes > 0 && checked.size <= maximumBytes, "Scratch Docker archive size must not exceed 8 GiB.");
+  return checked.path;
+}
+
+function defaultRemoveScratch(scratchRoot, prefix) {
+  const exactRoot = validateScratchRoot(scratchRoot, prefix);
+  rmSync(exactRoot, { recursive: true, force: true });
 }
 
 function parseJsonFile(input, label) {
@@ -103,42 +161,152 @@ function readExactly(file, buffer, position) {
   return offset;
 }
 
-function readOciArchiveDocuments(input) {
+function readArchiveEntries(file, actualSize) {
+  const entriesByName = new Map();
+  let position = 0;
+  let entries = 0;
+  while (position + 512 <= actualSize) {
+    assert(entries++ < 100_000, "OCI archive contains too many tar entries.");
+    const header = Buffer.alloc(512);
+    assert(readExactly(file, header, position) === 512, "OCI archive ended in a partial tar header.");
+    if (header.every((byte) => byte === 0)) break;
+    const name = [tarText(header, 345, 155), tarText(header, 0, 100)].filter(Boolean).join("/").replace(/^\.\//, "");
+    const size = tarSize(header);
+    const body = position + 512;
+    const next = body + Math.ceil(size / 512) * 512;
+    assert(next <= actualSize, `OCI archive entry ${name || "<unnamed>"} exceeds the archive boundary.`);
+    const matches = entriesByName.get(name) ?? [];
+    matches.push({ body, size, type: tarText(header, 156, 1) });
+    entriesByName.set(name, matches);
+    position = next;
+  }
+  return entriesByName;
+}
+
+function readArchiveEntry(file, entriesByName, name, label) {
+  const matches = entriesByName.get(name) ?? [];
+  assert(matches.length === 1, `${label} must appear exactly once in the OCI archive.`);
+  const entry = matches[0];
+  assert(entry.type === "" || entry.type === "0", `${label} must be a regular non-link tar entry.`);
+  assert(entry.size > 0 && entry.size <= MAX_JSON_BYTES, `${label} must be non-empty and no larger than one MiB.`);
+  const payload = Buffer.alloc(entry.size);
+  assert(readExactly(file, payload, entry.body) === entry.size, `${label} ended unexpectedly.`);
+  return payload;
+}
+
+function parseJsonBytes(bytes, label) {
+  try { return JSON.parse(bytes.toString("utf8")); }
+  catch { throw new Error(`${label} must contain valid JSON.`); }
+}
+
+function sha256Digest(bytes) {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function validateBlobDescriptor(value, mediaType, label) {
+  assert(value?.mediaType === mediaType, `${label} media type is invalid.`);
+  assert(DIGEST.test(value?.digest ?? ""), `${label} digest must be sha256.`);
+  assert(Number.isSafeInteger(value?.size) && value.size > 0 && value.size <= MAX_JSON_BYTES, `${label} size is unsafe.`);
+  return value;
+}
+
+function assertRequiredJsonPropertiesOnce(bytes, properties, label) {
+  const text = bytes.toString("utf8");
+  for (const property of properties) {
+    const token = JSON.stringify(property);
+    let count = 0;
+    let position = 0;
+    while ((position = text.indexOf(token, position)) >= 0) {
+      let cursor = position + token.length;
+      while (/\s/.test(text[cursor] ?? "")) cursor += 1;
+      if (text[cursor] === ":") count += 1;
+      position += token.length;
+    }
+    const propertyLabel = property.slice("org.opencontainers.image.".length).replace("licenses", "license");
+    assert(count === 1, count > 1
+      ? `${label} contains a duplicate ${propertyLabel} label; it must appear exactly once.`
+      : `${label} ${propertyLabel} label must appear exactly once.`);
+  }
+}
+
+function readVerifiedJsonBlob(file, entriesByName, descriptor, label, requiredProperties = []) {
+  const name = `blobs/sha256/${descriptor.digest.slice("sha256:".length)}`;
+  const bytes = readArchiveEntry(file, entriesByName, name, `${label} blob`);
+  assert(sha256Digest(bytes) === descriptor.digest, `${label} digest must equal the selected blob bytes.`);
+  assert(bytes.length === descriptor.size, `${label} size must equal the selected blob byte length.`);
+  const value = parseJsonBytes(bytes, label);
+  assertRequiredJsonPropertiesOnce(bytes, requiredProperties, label);
+  return value;
+}
+
+function validateLayerDescriptor(value, index) {
+  const label = `OCI manifest layer ${index + 1}`;
+  assert(LAYER_MEDIA_TYPES.has(value?.mediaType), `${label} media type is invalid.`);
+  assert(DIGEST.test(value?.digest ?? ""), `${label} digest must be sha256.`);
+  assert(Number.isSafeInteger(value?.size) && value.size > 0, `${label} size must be a positive safe integer.`);
+}
+
+function expectedImageLabels(kind, version, sourceSha) {
+  return Object.freeze({
+    "org.opencontainers.image.title": `Cmsify ${kind === "api" ? "API" : "Admin"}`,
+    "org.opencontainers.image.source": "https://github.com/Syntax-Circus/cmsify",
+    "org.opencontainers.image.revision": sourceSha,
+    "org.opencontainers.image.version": version,
+    "org.opencontainers.image.licenses": "AGPL-3.0-or-later",
+  });
+}
+
+function readOciArchiveEvidence(input, { canonicalRef, certified, kind, sourceSha, version }) {
   const checked = assertRegularNonLinkFile(input, "OCI archive");
   assert(checked.size >= 1536, "OCI archive is too small to contain an OCI layout.");
   const file = openSync(checked.path, "r");
-  const documents = new Map();
   try {
     const actualSize = fstatSync(file).size;
     assert(actualSize === checked.size, "OCI archive changed while it was being opened.");
-    let position = 0;
-    let entries = 0;
-    while (position + 512 <= actualSize) {
-      assert(entries++ < 100_000, "OCI archive contains too many tar entries.");
-      const header = Buffer.alloc(512);
-      assert(readExactly(file, header, position) === 512, "OCI archive ended in a partial tar header.");
-      if (header.every((byte) => byte === 0)) break;
-      const name = [tarText(header, 345, 155), tarText(header, 0, 100)].filter(Boolean).join("/").replace(/^\.\//, "");
-      const size = tarSize(header);
-      const body = position + 512;
-      const next = body + Math.ceil(size / 512) * 512;
-      assert(next <= actualSize, `OCI archive entry ${name || "<unnamed>"} exceeds the archive boundary.`);
-      if (["index.json", "oci-layout"].includes(name)) {
-        assert(!documents.has(name), `OCI archive must contain exactly one ${name}.`);
-        assert(size > 0 && size <= MAX_JSON_BYTES, `OCI archive ${name} must be non-empty and no larger than one MiB.`);
-        const payload = Buffer.alloc(size);
-        assert(readExactly(file, payload, body) === size, `OCI archive ${name} ended unexpectedly.`);
-        try { documents.set(name, JSON.parse(payload.toString("utf8"))); }
-        catch { throw new Error(`OCI archive ${name} must contain valid JSON.`); }
-      }
-      position = next;
+    const entriesByName = readArchiveEntries(file, actualSize);
+    const layout = parseJsonBytes(readArchiveEntry(file, entriesByName, "oci-layout", "OCI archive oci-layout"), "OCI archive oci-layout");
+    const index = parseJsonBytes(readArchiveEntry(file, entriesByName, "index.json", "OCI archive index.json"), "OCI archive index.json");
+    assert(layout?.imageLayoutVersion === "1.0.0", "OCI archive must contain OCI layout version 1.0.0.");
+
+    const selected = (index?.manifests ?? []).filter((descriptor) => descriptor?.annotations?.["org.opencontainers.image.ref.name"] === version
+      && descriptor?.annotations?.["io.containerd.image.name"] === canonicalRef);
+    assert(selected.length === 1, `OCI archive index must select exactly one descriptor by tag and canonical containerd name for ${kind}.`);
+    const descriptor = validateBlobDescriptor(selected[0], OCI_MANIFEST, "OCI manifest descriptor");
+    assert(descriptor.digest === certified.digest, `OCI archive selected descriptor digest must equal the release-manifest ${kind} digest.`);
+    assert(descriptor.mediaType === certified.mediaType && descriptor.size === certified.size, `OCI archive selected descriptor metadata must equal the release-manifest ${kind} descriptor.`);
+    assert(descriptor.platform?.os === "linux" && descriptor.platform?.architecture === "amd64", `OCI archive selected descriptor must be linux/amd64.`);
+
+    const manifest = readVerifiedJsonBlob(file, entriesByName, descriptor, "OCI manifest");
+    assert(manifest?.schemaVersion === 2, "OCI manifest schema version must be 2.");
+    assert(manifest?.mediaType === OCI_MANIFEST, "OCI manifest media type is invalid.");
+    const configDescriptor = validateBlobDescriptor(manifest.config, OCI_CONFIG, "OCI config");
+    assert(Array.isArray(manifest.layers) && manifest.layers.length > 0, "OCI manifest layer list must be a non-empty array.");
+    manifest.layers.forEach(validateLayerDescriptor);
+
+    const expectedLabels = expectedImageLabels(kind, version, sourceSha);
+    const config = readVerifiedJsonBlob(file, entriesByName, configDescriptor, "OCI config", Object.keys(expectedLabels));
+    assert(config?.os === "linux" && config?.architecture === "amd64", "OCI config platform must be linux/amd64.");
+    assert(config?.rootfs?.type === "layers", "OCI config rootfs type must be layers.");
+    const diffIds = config?.rootfs?.diff_ids;
+    assert(Array.isArray(diffIds) && diffIds.length > 0, "OCI config DiffID list must be a non-empty array.");
+    assert(diffIds.length === manifest.layers.length, "OCI config DiffID count must equal the manifest layer count.");
+    diffIds.forEach((value, index) => assert(DIGEST.test(value ?? ""), `OCI config DiffID ${index + 1} must be sha256.`));
+
+    const labels = config?.config?.Labels;
+    for (const [key, expected] of Object.entries(expectedLabels)) {
+      const label = key.slice("org.opencontainers.image.".length).replace("licenses", "license");
+      assert(labels?.[key] === expected, `OCI config ${label} label must equal ${expected}.`);
     }
+    assert(fstatSync(file).size === actualSize, "OCI archive changed while its evidence was being read.");
+    return {
+      path: checked.path,
+      configDigest: configDescriptor.digest,
+      diffIds: [...diffIds],
+      expectedLabels,
+    };
   } finally {
     closeSync(file);
   }
-  assert(documents.get("oci-layout")?.imageLayoutVersion === "1.0.0", "OCI archive must contain OCI layout version 1.0.0.");
-  assert(documents.has("index.json"), "OCI archive must contain index.json.");
-  return { path: checked.path, index: documents.get("index.json") };
 }
 
 function isStrictSemVer(value) {
@@ -155,8 +323,9 @@ function validateInputs(options) {
   assert(isStrictSemVer(options.version), "OCI loader version must be strict SemVer 2.0 without leading-zero numeric identifiers.");
   assert(Buffer.byteLength(options.version, "utf8") <= 128 && DOCKER_TAG.test(options.version), "OCI loader version must be a valid Docker tag no longer than 128 bytes.");
   const manifest = parseJsonFile(options.manifest, "Release manifest");
-  const archive = readOciArchiveDocuments(options.archive);
   assert(manifest.value?.version === options.version, `Release manifest version must equal ${options.version}.`);
+  const sourceSha = manifest.value?.sourceSha;
+  assert(/^[0-9a-f]{40}$/.test(sourceSha ?? ""), "Release manifest source SHA must be an exact lowercase 40-character commit SHA.");
   const certified = manifest.value?.oci?.[options.kind];
   const repository = `docker.io/syntaxcircus/cmsify-${options.kind}`;
   const canonicalRef = `${repository}:${options.version}`;
@@ -167,41 +336,28 @@ function validateInputs(options) {
   assert(DIGEST.test(certified.digest ?? ""), `Release manifest ${options.kind} digest must be an exact sha256 digest.`);
   assert(certified.mediaType === OCI_MANIFEST, `Release manifest ${options.kind} must bind an OCI image manifest.`);
   assert(Number.isSafeInteger(certified.size) && certified.size > 0, `Release manifest ${options.kind} descriptor size must be a positive safe integer.`);
+  assert(certified.size <= MAX_JSON_BYTES, `Release manifest ${options.kind} descriptor size is unsafe.`);
   assert(certified.platform?.os === "linux" && certified.platform?.architecture === "amd64", `Release manifest ${options.kind} must bind linux/amd64.`);
-  const selected = (archive.index?.manifests ?? []).filter((descriptor) => descriptor?.annotations?.["org.opencontainers.image.ref.name"] === options.version
-    && descriptor?.annotations?.["io.containerd.image.name"] === canonicalRef);
-  assert(selected.length === 1, `OCI archive index must select exactly one descriptor by tag and canonical containerd name for ${options.kind}.`);
-  const descriptor = selected[0];
-  assert(descriptor.digest === certified.digest, `OCI archive selected descriptor digest must equal the release-manifest ${options.kind} digest.`);
-  assert(Number.isSafeInteger(descriptor.size) && descriptor.size > 0, `OCI archive selected descriptor size must be a positive safe integer.`);
-  assert(descriptor.mediaType === certified.mediaType && descriptor.size === certified.size, `OCI archive selected descriptor metadata must equal the release-manifest ${options.kind} descriptor.`);
-  assert(descriptor.platform?.os === "linux" && descriptor.platform?.architecture === "amd64", `OCI archive selected descriptor must be linux/amd64.`);
-  return { archivePath: archive.path, canonicalRef, certified };
+  const archive = readOciArchiveEvidence(options.archive, {
+    canonicalRef,
+    certified,
+    kind: options.kind,
+    sourceSha,
+    version: options.version,
+  });
+  return {
+    archivePath: archive.path,
+    canonicalRef,
+    certified,
+    configDigest: archive.configDigest,
+    diffIds: archive.diffIds,
+    expectedLabels: archive.expectedLabels,
+  };
 }
 
 function parseDockerJson(result, phase) {
   try { return JSON.parse(String(result.stdout).trim()); }
   catch { throw new Error(`Docker returned invalid JSON during ${phase}.`); }
-}
-
-function parseRegistryPort(result) {
-  const match = /^127\.0\.0\.1:(\d{1,5})$/.exec(String(result.stdout).trim());
-  const port = Number(match?.[1]);
-  assert(Number.isInteger(port) && port >= 1 && port <= 65535, "Isolated registry must publish one loopback TCP port.");
-  return port;
-}
-
-async function defaultWaitForRegistry(url) {
-  let lastError;
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
-      if (response.status === 200) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) { lastError = error; }
-    await delay(250);
-  }
-  throw new Error(`Isolated registry did not become ready: ${String(lastError?.message ?? "no response").replace(/[\r\n]+/g, " ").slice(0, 256)}`);
 }
 
 function safeRunId(value) {
@@ -226,29 +382,24 @@ function isMissingDockerTarget(error, kind, target) {
   const exactTargets = kind === "image" && target.startsWith("docker.io/")
     ? [target, target.slice("docker.io/".length)]
     : [target];
-  const diagnostic = kind === "network"
-    ? /No such network:\s*(\S+)(?:\s|$)|network\s+(\S+)\s+not found(?:\s|$)/gi
-    : new RegExp(`No such ${kind}:\\s*(\\S+)(?:\\s|$)`, "gi");
-  return [...output.matchAll(diagnostic)].some((match) => exactTargets.includes(match[1] ?? match[2]));
+  const diagnostic = new RegExp(`No such ${kind}:\\s*(\\S+)(?:\\s|$)`, "gi");
+  return [...output.matchAll(diagnostic)].some((match) => exactTargets.includes(match[1]));
 }
 
 export async function loadOciCandidate(options, dependencies = {}) {
   const input = validateInputs(options);
   const run = dependencies.run ?? runProcess;
-  const waitForRegistry = dependencies.waitForRegistry ?? defaultWaitForRegistry;
   const runId = safeRunId(dependencies.runId);
-  const importerNetworkName = runResourceName(runId, "importer-network");
-  const relayNetworkName = runResourceName(runId, "relay-network");
-  const registryName = runResourceName(runId, "registry");
   const skopeoName = runResourceName(runId, "skopeo");
-  let importerNetworkCleanupIntent = false;
-  let relayNetworkCleanupIntent = false;
-  let registryCleanupIntent = false;
+  const scratchPrefix = resolve(tmpdir(), "cmsify-oci-loader-");
+  const createScratch = dependencies.createScratch ?? defaultCreateScratch;
+  const validateScratchArchive = dependencies.validateScratchArchive ?? defaultValidateScratchArchive;
+  const removeScratch = dependencies.removeScratch ?? ((scratchRoot) => defaultRemoveScratch(scratchRoot, scratchPrefix));
   let skopeoCleanupIntent = false;
-  let intermediateRef;
-  let intermediateCleanupIntent = false;
+  let scratchRoot;
+  let scratchCleanupIntent = false;
   let canonicalCleanupIntent = false;
-  let completed = false;
+  let loadedVerified = false;
   let primaryError;
   const cleanupErrors = [];
   const execute = (args, phase) => run("docker", args, { timeoutMs: PROCESS_TIMEOUT_MS, phase });
@@ -267,68 +418,73 @@ export async function loadOciCandidate(options, dependencies = {}) {
       cleanupErrors.push(`${phase}: ${compactError(error)}`);
     }
   };
+  const registerScratch = (created) => {
+    const exactRoot = validateScratchRoot(created, scratchPrefix);
+    if (scratchCleanupIntent) {
+      assert(normalizedPath(exactRoot) === normalizedPath(scratchRoot), "OCI loader scratch creation returned conflicting roots.");
+      return;
+    }
+    scratchRoot = exactRoot;
+    scratchCleanupIntent = true;
+  };
 
   try {
     await assertAbsent(["image", "inspect", input.canonicalRef], "oci-loader-canonical-preflight", "image", input.canonicalRef, "Canonical candidate ref");
-    await assertAbsent(["network", "inspect", importerNetworkName], "oci-loader-importer-network-preflight", "network", importerNetworkName, "Run-owned importer network");
-    await assertAbsent(["network", "inspect", relayNetworkName], "oci-loader-relay-network-preflight", "network", relayNetworkName, "Run-owned relay network");
-    await assertAbsent(["container", "inspect", registryName], "oci-loader-registry-preflight", "container", registryName, "Run-owned Registry container");
     await assertAbsent(["container", "inspect", skopeoName], "oci-loader-skopeo-preflight", "container", skopeoName, "Run-owned Skopeo container");
-    await execute(["image", "pull", "--platform", "linux/amd64", REGISTRY_IMAGE], "oci-loader-registry-image-pull");
     await execute(["image", "pull", "--platform", "linux/amd64", SKOPEO_IMAGE], "oci-loader-skopeo-image-pull");
-    importerNetworkCleanupIntent = true;
-    const importerNetwork = await execute(["network", "create", "--internal", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, importerNetworkName], "oci-loader-importer-network-create");
-    const returnedImporterNetworkId = String(importerNetwork.stdout).trim();
-    assert(/^[a-f0-9]{12,64}$|^network-id$/.test(returnedImporterNetworkId), "Docker did not return a safe internal importer network ID.");
-    relayNetworkCleanupIntent = true;
-    const relayNetwork = await execute(["network", "create", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, relayNetworkName], "oci-loader-relay-network-create");
-    const returnedRelayNetworkId = String(relayNetwork.stdout).trim();
-    assert(/^[a-f0-9]{12,64}$|^network-id$/.test(returnedRelayNetworkId), "Docker did not return a safe loopback relay network ID.");
-    registryCleanupIntent = true;
-    const registry = await execute([
-      "run", "--detach", "--pull=never", "--platform", "linux/amd64", "--name", registryName,
-      "--network", relayNetworkName, "--publish", "127.0.0.1::5000",
-      "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`, REGISTRY_IMAGE,
-    ], "oci-loader-registry-start");
-    const returnedRegistryId = String(registry.stdout).trim();
-    assert(/^[a-f0-9]{12,64}$|^registry-container-id$/.test(returnedRegistryId), "Docker did not return a safe isolated registry container ID.");
-    await execute(["network", "connect", "--alias", registryName, importerNetworkName, registryName], "oci-loader-registry-attach");
-    const published = await execute(["container", "port", registryName, "5000/tcp"], "oci-loader-registry-port");
-    const port = parseRegistryPort(published);
-    await waitForRegistry(`http://127.0.0.1:${port}/v2/`);
-    const localRepository = `127.0.0.1:${port}/cmsify-${options.kind}`;
-    intermediateRef = `${localRepository}:${runId}`;
-    await assertAbsent(["image", "inspect", intermediateRef], "oci-loader-intermediate-preflight", "image", intermediateRef, "Run-owned loopback image tag");
+
+    const createdScratch = createScratch(scratchPrefix, registerScratch);
+    if (!scratchCleanupIntent) registerScratch(createdScratch);
+    else assert(normalizedPath(resolve(createdScratch)) === normalizedPath(scratchRoot), "OCI loader scratch creation returned a different root than it registered.");
+    const dockerArchive = resolve(scratchRoot, "candidate.docker.tar");
+
     skopeoCleanupIntent = true;
     await execute([
       "run", "--rm", "--pull=never", "--platform", "linux/amd64", "--name", skopeoName,
-      "--network", importerNetworkName, "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`,
+      "--network", "none", "--label", LABEL_OWNER, "--label", `${LABEL_RUN}=${runId}`,
       "--mount", `type=bind,source=${input.archivePath},target=/candidate.oci.tar,readonly`,
-      SKOPEO_IMAGE, "copy", "--preserve-digests", "--dest-tls-verify=false",
-      `oci-archive:/candidate.oci.tar:${options.version}`, `docker://${registryName}:5000/cmsify-${options.kind}:${runId}`,
+      "--mount", `type=bind,source=${scratchRoot},target=/scratch`,
+      SKOPEO_IMAGE, "copy",
+      `oci-archive:/candidate.oci.tar:${options.version}`,
+      `docker-archive:/scratch/candidate.docker.tar:${input.canonicalRef}`,
     ], "oci-loader-skopeo-copy");
-    intermediateCleanupIntent = true;
-    await execute(["image", "pull", "--platform", "linux/amd64", intermediateRef], "oci-loader-candidate-pull");
-    const inspected = parseDockerJson(await execute(["image", "inspect", "--format", "{{json .}}", intermediateRef], "oci-loader-candidate-inspect"), "candidate inspection");
-    const expectedRepoDigest = `${localRepository}@${input.certified.digest}`;
-    assert(Array.isArray(inspected.RepoDigests) && inspected.RepoDigests.includes(expectedRepoDigest), `Loopback candidate RepoDigest must equal certified destination digest ${input.certified.digest}.`);
-    assert(/^sha256:[0-9a-f]{64}$/.test(inspected.Id ?? ""), "Loopback candidate must have an immutable Docker image ID.");
+
+    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);
     canonicalCleanupIntent = true;
-    await execute(["image", "tag", inspected.Id, input.canonicalRef], "oci-loader-canonical-tag");
-    const canonical = parseDockerJson(await execute(["image", "inspect", "--format", "{{json .}}", input.canonicalRef], "oci-loader-canonical-inspect"), "canonical candidate inspection");
-    assert(canonical.Id === inspected.Id && Array.isArray(canonical.RepoTags) && canonical.RepoTags.includes(input.canonicalRef), "Canonical candidate tag must resolve to the exact digest-verified image ID.");
-    completed = true;
-    return { ref: input.canonicalRef, digest: input.certified.digest, imageId: inspected.Id };
+    await execute(["image", "load", "--input", dockerArchive, "--platform", "linux/amd64"], "oci-loader-docker-load");
+    const loaded = parseDockerJson(
+      await execute(["image", "inspect", "--format", "{{json .}}", input.canonicalRef], "oci-loader-canonical-inspect"),
+      "canonical candidate inspection",
+    );
+    assert(loaded.Id === input.configDigest, `Loaded image ID must equal OCI config digest ${input.configDigest}.`);
+    assert(loaded.Os === "linux" && loaded.Architecture === "amd64", "Loaded candidate must be linux/amd64.");
+    assert(Array.isArray(loaded.RootFS?.Layers)
+      && loaded.RootFS.Layers.length === input.diffIds.length
+      && loaded.RootFS.Layers.every((value, index) => value === input.diffIds[index]), "Loaded RootFS DiffIDs must equal OCI config order.");
+    assert(Array.isArray(loaded.RepoTags) && loaded.RepoTags.includes(input.canonicalRef), "Loaded candidate must have the exact canonical tag.");
+    for (const [key, expected] of Object.entries(input.expectedLabels)) {
+      const label = key.slice("org.opencontainers.image.".length).replace("licenses", "license");
+      assert(loaded.Config?.Labels?.[key] === expected, `Loaded candidate ${label} label must equal ${expected}.`);
+    }
+    loadedVerified = true;
+    return {
+      ref: input.canonicalRef,
+      digest: input.certified.digest,
+      imageId: input.configDigest,
+      diffIds: [...input.diffIds],
+    };
   } catch (error) {
     primaryError = error;
     throw error;
   } finally {
-    if (canonicalCleanupIntent && !completed) await cleanup(["image", "rm", input.canonicalRef], "oci-loader-cleanup-canonical", "image", input.canonicalRef);
-    if (intermediateCleanupIntent) await cleanup(["image", "rm", intermediateRef], "oci-loader-cleanup-intermediate", "image", intermediateRef);
     if (skopeoCleanupIntent) await cleanup(["container", "rm", "--force", skopeoName], "oci-loader-cleanup-skopeo", "container", skopeoName);
-    if (registryCleanupIntent) await cleanup(["container", "rm", "--force", registryName], "oci-loader-cleanup-registry", "container", registryName);
-    if (importerNetworkCleanupIntent) await cleanup(["network", "rm", importerNetworkName], "oci-loader-cleanup-importer-network", "network", importerNetworkName);
-    if (relayNetworkCleanupIntent) await cleanup(["network", "rm", relayNetworkName], "oci-loader-cleanup-relay-network", "network", relayNetworkName);
+    if (scratchCleanupIntent) {
+      try { removeScratch(scratchRoot); }
+      catch (error) { cleanupErrors.push(`oci-loader-cleanup-scratch: ${compactError(error)}`); }
+    }
+    if (canonicalCleanupIntent && (!loadedVerified || cleanupErrors.length > 0)) {
+      await cleanup(["image", "rm", input.canonicalRef], "oci-loader-cleanup-canonical", "image", input.canonicalRef);
+    }
     if (cleanupErrors.length > 0) {
       const message = `${primaryError ? `${compactError(primaryError)} ` : ""}OCI loader cleanup failed: ${cleanupErrors.join("; ").slice(0, 1024)}`;
       if (!primaryError) throw new Error(message);

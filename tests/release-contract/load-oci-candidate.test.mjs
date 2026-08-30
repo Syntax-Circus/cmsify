@@ -1,23 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 import {
+  SOURCE_SHA,
   VERSION,
   candidatePath,
   createValidCandidate,
   mutateJsonFile,
   mutateOciLayout,
+  readOciFixtureEvidence,
   removeCandidate,
 } from "./release-candidate-fixture.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const loaderUrl = pathToFileURL(resolve(repositoryRoot, "scripts", "release", "load-oci-candidate.mjs")).href;
-const registryImage = "docker.io/library/registry:2.8.3@sha256:46faa9a1ae6813194b53921a370f2f4f8c5e1aae228a89bceafef5847a6a3278";
 const skopeoImage = "quay.io/skopeo/stable:v1.22.2@sha256:f7cfa282082cbfc25b754905225985584d1fbc410fef99e1b498c9b64087b755";
+const RUN_ID = "cmsify-oci-loader-test123";
 
 async function loaderModule() {
   return import(`${loaderUrl}?test=${Date.now()}-${Math.random()}`);
@@ -42,10 +44,11 @@ function bindApiVersion(root, version) {
     manifest.oci.api.imageName = ref;
     manifest.oci.api.tag = version;
   });
-  mutateOciLayout(root, "api", ({ descriptor }) => {
+  mutateOciLayout(root, "api", ({ descriptor, config }) => {
     descriptor.annotations["org.opencontainers.image.ref.name"] = version;
     descriptor.annotations["io.containerd.image.name"] = ref;
-  });
+    config.config.Labels["org.opencontainers.image.version"] = version;
+  }, { resealConfig: true, resealManifest: true });
 }
 
 function dockerMissing(message) {
@@ -63,187 +66,328 @@ function dockerTimeout(phase) {
   return error;
 }
 
-function processBoundary({ digest, kind = "api", version = VERSION, failPhase, existingCanonical = false, occupiedPreflight, cleanupTargetsAlreadyAbsent = false, dockerHubShortCanonicalDiagnostic = false } = {}) {
+function processBoundary({
+  evidence = {
+    configDigest: `sha256:${"a".repeat(64)}`,
+    diffIds: [`sha256:${"b".repeat(64)}`],
+    labels: {
+      "org.opencontainers.image.title": "Cmsify API",
+      "org.opencontainers.image.source": "https://github.com/Syntax-Circus/cmsify",
+      "org.opencontainers.image.revision": SOURCE_SHA,
+      "org.opencontainers.image.version": VERSION,
+      "org.opencontainers.image.licenses": "AGPL-3.0-or-later",
+    },
+  },
+  kind = "api",
+  version = VERSION,
+  failPhase,
+  existingCanonical = false,
+  occupiedPreflight,
+  cleanupTargetsAlreadyAbsent = false,
+  dockerHubShortCanonicalDiagnostic = false,
+  mutateLoadedImage,
+  failCreateScratchAfterCreate = false,
+  failScratchCleanup = false,
+} = {}) {
   const calls = [];
-  const runId = "cmsify-oci-loader-test123";
+  const runId = RUN_ID;
   const canonicalRef = `docker.io/syntaxcircus/cmsify-${kind}:${version}`;
-  const importerNetworkName = `${runId}-importer-network`;
-  const relayNetworkName = `${runId}-relay-network`;
-  const registryName = `${runId}-registry`;
   const skopeoName = `${runId}-skopeo`;
-  const intermediateRef = `127.0.0.1:43123/cmsify-${kind}:${runId}`;
-  const imageId = `sha256:${"a".repeat(64)}`;
+  const loadedImage = {
+    Id: evidence.configDigest,
+    Os: "linux",
+    Architecture: "amd64",
+    RootFS: { Layers: [...evidence.diffIds] },
+    RepoTags: [canonicalRef],
+    Config: { Labels: { ...evidence.labels } },
+  };
+  mutateLoadedImage?.(loadedImage);
   const canonicalMissingTarget = dockerHubShortCanonicalDiagnostic ? canonicalRef.replace(/^docker\.io\//, "") : canonicalRef;
+  const scratchValidations = [];
+  const scratchRemovals = [];
+  let scratchRoot;
+  let dockerArchive;
+  const createScratch = (prefix, registerCreated) => {
+    scratchRoot = mkdtempSync(prefix);
+    registerCreated?.(scratchRoot);
+    if (failCreateScratchAfterCreate) throw new Error("injected create-then-throw scratch failure");
+    return scratchRoot;
+  };
+  const validateScratchArchive = (archive, root, maximumBytes) => {
+    dockerArchive = archive;
+    scratchValidations.push({ archive, root, maximumBytes });
+  };
+  const removeScratch = (root) => {
+    scratchRemovals.push(root);
+    if (failScratchCleanup) throw new Error("injected scratch cleanup failure");
+    rmSync(root, { recursive: true, force: true });
+  };
   const run = async (command, args, processOptions) => {
     const call = { command, args: [...args], phase: processOptions.phase };
     calls.push(call);
     if (processOptions.phase === failPhase) throw dockerTimeout(failPhase);
     if (cleanupTargetsAlreadyAbsent && processOptions.phase.startsWith("oci-loader-cleanup-")) {
-      if (processOptions.phase === "oci-loader-cleanup-importer-network") throw dockerMissing(`network ${importerNetworkName} not found`);
-      if (processOptions.phase === "oci-loader-cleanup-relay-network") throw dockerMissing(`network ${relayNetworkName} not found`);
-      if (processOptions.phase === "oci-loader-cleanup-registry") throw dockerMissing(`No such container: ${registryName}`);
       if (processOptions.phase === "oci-loader-cleanup-skopeo") throw dockerMissing(`No such container: ${skopeoName}`);
-      if (processOptions.phase === "oci-loader-cleanup-intermediate") throw dockerMissing(`No such image: ${intermediateRef}`);
       if (processOptions.phase === "oci-loader-cleanup-canonical") throw dockerMissing(`No such image: ${canonicalMissingTarget}`);
     }
     switch (processOptions.phase) {
       case "oci-loader-canonical-preflight":
         if (!existingCanonical && occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such image: ${canonicalMissingTarget}`);
         return { exitCode: 0, stdout: `${JSON.stringify({ Id: `sha256:${"b".repeat(64)}` })}\n`, stderr: "", durationMs: 1 };
-      case "oci-loader-importer-network-preflight":
-        if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`network ${importerNetworkName} not found`);
-        return { exitCode: 0, stdout: `${JSON.stringify({ Name: importerNetworkName })}\n`, stderr: "", durationMs: 1 };
-      case "oci-loader-relay-network-preflight":
-        if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`network ${relayNetworkName} not found`);
-        return { exitCode: 0, stdout: `${JSON.stringify({ Name: relayNetworkName })}\n`, stderr: "", durationMs: 1 };
-      case "oci-loader-registry-preflight":
-        if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such container: ${registryName}`);
-        return { exitCode: 0, stdout: `${JSON.stringify({ Name: `/${registryName}` })}\n`, stderr: "", durationMs: 1 };
       case "oci-loader-skopeo-preflight":
         if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such container: ${skopeoName}`);
         return { exitCode: 0, stdout: `${JSON.stringify({ Name: `/${skopeoName}` })}\n`, stderr: "", durationMs: 1 };
-      case "oci-loader-intermediate-preflight":
-        if (occupiedPreflight !== processOptions.phase) throw dockerMissing(`No such image: ${intermediateRef}`);
-        return { exitCode: 0, stdout: `${JSON.stringify({ Id: `sha256:${"c".repeat(64)}` })}\n`, stderr: "", durationMs: 1 };
-      case "oci-loader-importer-network-create": return { exitCode: 0, stdout: "network-id\n", stderr: "", durationMs: 1 };
-      case "oci-loader-relay-network-create": return { exitCode: 0, stdout: "network-id\n", stderr: "", durationMs: 1 };
-      case "oci-loader-registry-start": return { exitCode: 0, stdout: "registry-container-id\n", stderr: "", durationMs: 1 };
-      case "oci-loader-registry-port": return { exitCode: 0, stdout: "127.0.0.1:43123\n", stderr: "", durationMs: 1 };
-      case "oci-loader-candidate-inspect":
-        return { exitCode: 0, stdout: `${JSON.stringify({ Id: imageId, RepoDigests: [`127.0.0.1:43123/cmsify-${kind}@${digest}`] })}\n`, stderr: "", durationMs: 1 };
       case "oci-loader-canonical-inspect":
-        return { exitCode: 0, stdout: `${JSON.stringify({ Id: imageId, RepoTags: [canonicalRef] })}\n`, stderr: "", durationMs: 1 };
+        return { exitCode: 0, stdout: `${JSON.stringify(loadedImage)}\n`, stderr: "", durationMs: 1 };
       default: return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
     }
   };
-  return { calls, run, canonicalRef, intermediateRef, imageId, importerNetworkName, relayNetworkName, registryName, skopeoName };
+  return {
+    calls,
+    run,
+    runId,
+    canonicalRef,
+    configDigest: evidence.configDigest,
+    diffIds: [...evidence.diffIds],
+    labels: { ...evidence.labels },
+    skopeoName,
+    createScratch,
+    validateScratchArchive,
+    removeScratch,
+    scratchValidations,
+    scratchRemovals,
+    get scratchRoot() { return scratchRoot; },
+    get dockerArchive() { return dockerArchive; },
+  };
 }
 
 function commandText(call) {
   return [call.command, ...call.args].join(" ");
 }
 
-test("imports a real OCI-layout fixture without native docker load, rebuilding, a Docker socket mount, or an external candidate pull", async () => {
+function loaderDependencies(boundary, overrides = {}) {
+  return {
+    run: boundary.run,
+    runId: RUN_ID,
+    createScratch: boundary.createScratch,
+    validateScratchArchive: boundary.validateScratchArchive,
+    removeScratch: boundary.removeScratch,
+    ...overrides,
+  };
+}
+
+function evidenceTest(name, mutate, diagnostic, mutationOptions) {
+  test(`rejects mismatched ${name} before Docker`, async () => {
+    const root = createValidCandidate();
+    try {
+      mutateOciLayout(root, "api", mutate, mutationOptions);
+      const releaseManifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+      const boundary = processBoundary({ digest: releaseManifest.oci.api.digest });
+      const { loadOciCandidate } = await loaderModule();
+
+      await assert.rejects(loadOciCandidate(options(root), {
+        run: boundary.run,
+        runId: RUN_ID,
+      }), diagnostic);
+      assert.equal(boundary.calls.length, 0, `${name} reached the Docker process boundary`);
+    } finally { removeCandidate(root); }
+  });
+}
+
+for (const [name, mutate, diagnostic, mutationOptions] of [
+  ["manifest bytes", ({ manifest }) => { manifest.layers[0].size += 1; }, /manifest.*digest|manifest.*size/i],
+  ["config bytes", ({ config }) => { config.os = "windows"; }, /config.*digest|config.*platform/i],
+  ["manifest schema version", ({ manifest }) => { manifest.schemaVersion = 1; }, /manifest.*schema.*2/i, { resealManifest: true }],
+  ["manifest media type", ({ manifest }) => { manifest.mediaType = "application\/octet-stream"; }, /manifest.*media type/i, { resealManifest: true }],
+  ["config media type", ({ manifest }) => { manifest.config.mediaType = "application\/octet-stream"; }, /config.*media type/i, { resealManifest: true }],
+  ["empty layer list", ({ manifest }) => { manifest.layers = []; }, /layer.*non-empty|manifest.*layer/i, { resealManifest: true }],
+  ["layer media type", ({ manifest }) => { manifest.layers[0].mediaType = "application\/octet-stream"; }, /layer.*media type/i, { resealManifest: true }],
+  ["layer digest", ({ manifest }) => { manifest.layers[0].digest = "sha256:not-a-digest"; }, /layer.*digest/i, { resealManifest: true }],
+  ["layer size", ({ manifest }) => { manifest.layers[0].size = 0; }, /layer.*size/i, { resealManifest: true }],
+  ["rootfs type", ({ config }) => { config.rootfs.type = "unknown"; }, /rootfs.*layers/i, { resealConfig: true, resealManifest: true }],
+  ["unsafe DiffID", ({ config }) => { config.rootfs.diff_ids[0] = "sha256:not-a-digest"; }, /DiffID/i, { resealConfig: true, resealManifest: true }],
+  ["DiffID layer count", ({ config }) => { config.rootfs.diff_ids.pop(); }, /DiffID.*layer|layer.*DiffID/i, { resealConfig: true, resealManifest: true }],
+]) evidenceTest(name, mutate, diagnostic, mutationOptions);
+
+for (const [name, mutate, diagnostic, mutationOptions] of [
+  ["manifest descriptor size", ({ descriptor }) => { descriptor.size += 1; }, /manifest.*size/i, { syncReleaseDescriptor: true }],
+  ["manifest descriptor digest", ({ descriptor, manifestPath, writeBlob }) => {
+    const digest = `sha256:${"1".repeat(64)}`;
+    writeBlob(digest, readFileSync(manifestPath));
+    descriptor.digest = digest;
+  }, /manifest.*digest/i, { syncReleaseDescriptor: true }],
+  ["absent selected manifest blob", ({ manifestPath, omitBlob }) => { omitBlob(manifestPath); }, /manifest.*blob|manifest.*exactly one/i],
+  ["duplicate selected manifest blob", ({ manifestPath, duplicateBlob }) => { duplicateBlob(manifestPath); }, /manifest.*blob|manifest.*exactly one|duplicate/i],
+  ["config descriptor size", ({ manifest }) => { manifest.config.size += 1; }, /config.*size/i, { resealManifest: true }],
+  ["config descriptor digest", ({ manifest, configPath, writeBlob }) => {
+    const digest = `sha256:${"2".repeat(64)}`;
+    writeBlob(digest, readFileSync(configPath));
+    manifest.config.digest = digest;
+  }, /config.*digest/i, { resealManifest: true }],
+  ["absent selected config blob", ({ configPath, omitBlob }) => { omitBlob(configPath); }, /config.*blob|config.*exactly one/i],
+  ["duplicate selected config blob", ({ configPath, duplicateBlob }) => { duplicateBlob(configPath); }, /config.*blob|config.*exactly one|duplicate/i],
+  ["config OS", ({ config }) => { config.os = "windows"; }, /config.*linux\/amd64|config.*platform/i, { resealConfig: true, resealManifest: true }],
+  ["config architecture", ({ config }) => { config.architecture = "arm64"; }, /config.*linux\/amd64|config.*platform/i, { resealConfig: true, resealManifest: true }],
+  ["non-array DiffID list", ({ config }) => { config.rootfs.diff_ids = "sha256:not-an-array"; }, /DiffID.*array/i, { resealConfig: true, resealManifest: true }],
+  ["empty DiffID list", ({ config }) => { config.rootfs.diff_ids = []; }, /DiffID.*non-empty|DiffID.*array/i, { resealConfig: true, resealManifest: true }],
+  ["malformed DiffID list", ({ config }) => { config.rootfs.diff_ids[1] = "sha256:not-a-digest"; }, /DiffID/i, { resealConfig: true, resealManifest: true }],
+]) evidenceTest(name, mutate, diagnostic, mutationOptions);
+
+for (const [label, key, value, diagnostic] of [
+  ["title", "org.opencontainers.image.title", "Cmsify Admin", /title label/i],
+  ["source", "org.opencontainers.image.source", "https:\/\/attacker.invalid\/cmsify", /source label/i],
+  ["revision", "org.opencontainers.image.revision", "f".repeat(40), /revision label/i],
+  ["version", "org.opencontainers.image.version", "9.9.9", /version label/i],
+  ["license", "org.opencontainers.image.licenses", "MIT", /license label/i],
+]) {
+  evidenceTest(`required OCI label ${label}`, ({ config }) => {
+    config.config.Labels[key] = value;
+  }, diagnostic, { resealConfig: true, resealManifest: true });
+}
+
+evidenceTest("duplicate required OCI label", ({ config, setConfigBytes }) => {
+  const key = "org.opencontainers.image.version";
+  const encoded = JSON.stringify(config);
+  const original = `${JSON.stringify(key)}:${JSON.stringify(VERSION)}`;
+  assert.equal(encoded.includes(original), true);
+  setConfigBytes(`${encoded.replace(original, `${JSON.stringify(key)}:"9.9.9",${original}`)}\n`);
+}, /duplicate.*version label|version label.*exactly once/i, { resealConfig: true, resealManifest: true });
+
+evidenceTest("missing required OCI label", ({ config }) => {
+  delete config.config.Labels["org.opencontainers.image.version"];
+}, /version label.*exactly once/i, { resealConfig: true, resealManifest: true });
+
+evidenceTest("malformed config JSON", ({ setConfigBytes }) => {
+  setConfigBytes("{\n");
+}, /config.*valid JSON/i, { resealConfig: true, resealManifest: true });
+
+test("loads through an offline Docker archive with Skopeo network none", async () => {
   const root = createValidCandidate();
   try {
     const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: manifest.oci.api.digest });
+    const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api") });
     const { loadOciCandidate } = await loaderModule();
 
-    const result = await loadOciCandidate(options(root), {
-      run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    });
+    const result = await loadOciCandidate(options(root), loaderDependencies(boundary));
 
-    assert.deepEqual(result, { ref: boundary.canonicalRef, digest: manifest.oci.api.digest, imageId: boundary.imageId });
+    assert.deepEqual(result, {
+      ref: boundary.canonicalRef,
+      digest: manifest.oci.api.digest,
+      imageId: boundary.configDigest,
+      diffIds: boundary.diffIds,
+    });
     const commands = boundary.calls.map(commandText);
-    assert.equal(commands.some((command) => /\bdocker (?:image )?load\b/.test(command)), false);
     assert.equal(commands.some((command) => /\bdocker (?:build|buildx)\b/.test(command)), false);
     assert.equal(commands.some((command) => /docker(?:_engine|\.sock)|\/var\/run\/docker\.sock/i.test(command)), false);
+    assert.equal(commands.some((command) => /\bdocker network\b|registry:|\bdocker:\/\//i.test(command)), false);
     const pulls = boundary.calls.filter((call) => call.args[0] === "image" && call.args[1] === "pull").map((call) => call.args.at(-1));
-    assert.deepEqual(pulls, [registryImage, skopeoImage, boundary.intermediateRef]);
-    assert.equal(pulls.some((reference) => reference === boundary.canonicalRef), false);
+    assert.deepEqual(pulls, [skopeoImage]);
+
     const copy = boundary.calls.find((call) => call.phase === "oci-loader-skopeo-copy");
     assert.ok(copy, "Skopeo copy process boundary was not exercised");
-    assert.equal(copy.args.includes(skopeoImage), true);
-    assert.equal(copy.args.includes("--preserve-digests"), true);
-    assert.equal(copy.args.some((argument) => argument.includes("readonly")), true);
-    assert.equal(copy.args.includes(`oci-archive:/candidate.oci.tar:${VERSION}`), true);
-    assert.equal(copy.args[copy.args.indexOf("--name") + 1], boundary.skopeoName);
-    assert.equal(copy.args.includes("--label"), true);
-    assert.equal(copy.args.includes("io.syntaxcircus.cmsify.oci-loader=true"), true);
-    assert.equal(copy.args.includes("io.syntaxcircus.cmsify.oci-loader-run=cmsify-oci-loader-test123"), true);
-    assert.deepEqual(boundary.calls.filter((call) => call.phase.endsWith("-preflight")).map((call) => call.phase), [
-      "oci-loader-canonical-preflight",
-      "oci-loader-importer-network-preflight",
-      "oci-loader-relay-network-preflight",
-      "oci-loader-registry-preflight",
-      "oci-loader-skopeo-preflight",
-      "oci-loader-intermediate-preflight",
+    assert.deepEqual(copy.args, [
+      "run", "--rm", "--pull=never", "--platform", "linux/amd64", "--name", boundary.skopeoName,
+      "--network", "none",
+      "--label", "io.syntaxcircus.cmsify.oci-loader=true",
+      "--label", `io.syntaxcircus.cmsify.oci-loader-run=${RUN_ID}`,
+      "--mount", `type=bind,source=${options(root).archive},target=/candidate.oci.tar,readonly`,
+      "--mount", `type=bind,source=${boundary.scratchRoot},target=/scratch`,
+      skopeoImage,
+      "copy",
+      `oci-archive:/candidate.oci.tar:${VERSION}`,
+      `docker-archive:/scratch/candidate.docker.tar:${boundary.canonicalRef}`,
     ]);
+
+    const load = boundary.calls.find((call) => call.phase === "oci-loader-docker-load");
+    assert.deepEqual(load?.args, ["image", "load", "--input", boundary.dockerArchive, "--platform", "linux/amd64"]);
+    assert.notEqual(boundary.dockerArchive, options(root).archive);
+    assert.deepEqual(boundary.calls.find((call) => call.phase === "oci-loader-canonical-inspect")?.args, [
+      "image", "inspect", "--format", "{{json .}}", boundary.canonicalRef,
+    ]);
+    assert.deepEqual(boundary.scratchValidations, [{
+      archive: boundary.dockerArchive,
+      root: boundary.scratchRoot,
+      maximumBytes: 8 * 1024 * 1024 * 1024,
+    }]);
+    assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot]);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), false);
+    assert.deepEqual(boundary.calls.find((call) => call.phase === "oci-loader-cleanup-skopeo")?.args, ["container", "rm", "--force", boundary.skopeoName]);
   } finally { removeCandidate(root); }
 });
 
-test("creates exact labeled internal-importer and loopback-relay networks", async () => {
+test("offline Docker archive transport never creates networks or Registry and never pulls a candidate", async () => {
   const root = createValidCandidate();
   try {
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: manifest.oci.api.digest });
+    const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api") });
     const { loadOciCandidate } = await loaderModule();
 
-    await loadOciCandidate(options(root), {
-      run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    });
+    await loadOciCandidate(options(root), loaderDependencies(boundary));
 
-    const importerPreflight = boundary.calls.find((call) => call.phase === "oci-loader-importer-network-preflight");
-    const relayPreflight = boundary.calls.find((call) => call.phase === "oci-loader-relay-network-preflight");
-    const importerCreate = boundary.calls.find((call) => call.phase === "oci-loader-importer-network-create");
-    const relayCreate = boundary.calls.find((call) => call.phase === "oci-loader-relay-network-create");
-    assert.deepEqual(importerPreflight?.args, ["network", "inspect", boundary.importerNetworkName]);
-    assert.deepEqual(relayPreflight?.args, ["network", "inspect", boundary.relayNetworkName]);
-    assert.deepEqual(importerCreate?.args, [
-      "network", "create", "--internal", "--label", "io.syntaxcircus.cmsify.oci-loader=true",
-      "--label", "io.syntaxcircus.cmsify.oci-loader-run=cmsify-oci-loader-test123", boundary.importerNetworkName,
-    ]);
-    assert.deepEqual(relayCreate?.args, [
-      "network", "create", "--label", "io.syntaxcircus.cmsify.oci-loader=true",
-      "--label", "io.syntaxcircus.cmsify.oci-loader-run=cmsify-oci-loader-test123", boundary.relayNetworkName,
-    ]);
+    const commands = boundary.calls.map(commandText);
+    assert.equal(commands.some((command) => /\bdocker network (?:create|connect|rm)\b/i.test(command)), false);
+    assert.equal(commands.some((command) => /registry|127\.0\.0\.1|localhost/i.test(command)), false);
+    assert.equal(commands.some((command) => /\bdocker image pull\b.*cmsify-(?:api|admin)/i.test(command)), false);
+    assert.equal(commands.some((command) => /\bdocker image load\b.*candidate\.oci\.tar/i.test(command)), false);
+    assert.equal(commands.some((command) => /docker:\/\//i.test(command)), false);
   } finally { removeCandidate(root); }
 });
 
-test("starts Registry on the relay then attaches it to the importer under its run-owned name", async () => {
-  const root = createValidCandidate();
-  try {
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: manifest.oci.api.digest });
-    const { loadOciCandidate } = await loaderModule();
+for (const [name, mutate, diagnostic] of [
+  ["ID", (image) => { image.Id = `sha256:${"f".repeat(64)}`; }, /image ID.*OCI config digest/i],
+  ["OS", (image) => { image.Os = "windows"; }, /linux\/amd64/i],
+  ["architecture", (image) => { image.Architecture = "arm64"; }, /linux\/amd64/i],
+  ["canonical tag", (image) => { image.RepoTags = ["docker.io/syntaxcircus/cmsify-api:other"]; }, /exact canonical tag/i],
+]) {
+  test(`rejects mismatched loaded image identity ${name}`, async () => {
+    const root = createValidCandidate();
+    try {
+      const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api"), mutateLoadedImage: mutate });
+      const { loadOciCandidate } = await loaderModule();
 
-    await loadOciCandidate(options(root), {
-      run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    });
+      await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), diagnostic);
+      assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
+      assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot]);
+    } finally { removeCandidate(root); }
+  });
+}
 
-    const registryStart = boundary.calls.find((call) => call.phase === "oci-loader-registry-start");
-    assert.equal(registryStart?.args[registryStart.args.indexOf("--network") + 1], boundary.relayNetworkName);
-    assert.equal(registryStart?.args.includes(boundary.importerNetworkName), false);
-    assert.equal(registryStart?.args.includes("127.0.0.1::5000"), true);
-    const registryAttach = boundary.calls.find((call) => call.phase === "oci-loader-registry-attach");
-    assert.deepEqual(registryAttach?.args, [
-      "network", "connect", "--alias", boundary.registryName,
-      boundary.importerNetworkName, boundary.registryName,
-    ]);
-    assert.equal(boundary.calls.filter((call) => call.phase === "oci-loader-registry-attach").length, 1);
-    assert.equal(boundary.calls.indexOf(registryAttach) > boundary.calls.indexOf(registryStart), true);
-  } finally { removeCandidate(root); }
-});
+for (const [label, key] of [
+  ["title", "org.opencontainers.image.title"],
+  ["source", "org.opencontainers.image.source"],
+  ["revision", "org.opencontainers.image.revision"],
+  ["version", "org.opencontainers.image.version"],
+  ["license", "org.opencontainers.image.licenses"],
+]) {
+  test(`rejects mismatched loaded image identity ${label} label`, async () => {
+    const root = createValidCandidate();
+    try {
+      const boundary = processBoundary({
+        evidence: readOciFixtureEvidence(root, "api"),
+        mutateLoadedImage(image) { image.Config.Labels[key] = "wrong"; },
+      });
+      const { loadOciCandidate } = await loaderModule();
 
-test("runs Skopeo only on the internal importer and addresses the run-owned Registry alias", async () => {
-  const root = createValidCandidate();
-  try {
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: manifest.oci.api.digest });
-    const { loadOciCandidate } = await loaderModule();
+      await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), new RegExp(`${label} label`, "i"));
+      assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
+    } finally { removeCandidate(root); }
+  });
+}
 
-    await loadOciCandidate(options(root), {
-      run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    });
+for (const index of [0, 1]) {
+  test(`rejects mismatched loaded image identity RootFS DiffID ${index + 1}`, async () => {
+    const root = createValidCandidate();
+    try {
+      const boundary = processBoundary({
+        evidence: readOciFixtureEvidence(root, "api"),
+        mutateLoadedImage(image) { image.RootFS.Layers[index] = `sha256:${String(index + 8).repeat(64)}`; },
+      });
+      const { loadOciCandidate } = await loaderModule();
 
-    const copy = boundary.calls.find((call) => call.phase === "oci-loader-skopeo-copy");
-    assert.equal(copy?.args[copy.args.indexOf("--network") + 1], boundary.importerNetworkName);
-    assert.equal(copy?.args.includes(boundary.relayNetworkName), false);
-    assert.equal(copy?.args.includes(`docker://${boundary.registryName}:5000/cmsify-api:cmsify-oci-loader-test123`), true);
-    const relayConsumers = boundary.calls.filter((call) => (call.args[0] === "run" || (call.args[0] === "network" && call.args[1] === "connect"))
-      && call.args.includes(boundary.relayNetworkName));
-    assert.deepEqual(relayConsumers.map((call) => call.phase), ["oci-loader-registry-start"]);
-  } finally { removeCandidate(root); }
-});
+      await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), /RootFS DiffIDs.*OCI config order/i);
+      assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
+    } finally { removeCandidate(root); }
+  });
+}
 
 test("rejects a release-manifest digest that does not select the archive descriptor before Docker", async () => {
   const root = createValidCandidate();
@@ -251,7 +395,7 @@ test("rejects a release-manifest digest that does not select the archive descrip
     mutateJsonFile(root, "release-manifest.json", (manifest) => { manifest.oci.api.digest = `sha256:${"f".repeat(64)}`; });
     const boundary = processBoundary({ digest: `sha256:${"f".repeat(64)}` });
     const { loadOciCandidate } = await loaderModule();
-    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /descriptor.*digest|digest.*descriptor/i);
+    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: RUN_ID }), /descriptor.*digest|digest.*descriptor/i);
     assert.equal(boundary.calls.length, 0);
   } finally { removeCandidate(root); }
 });
@@ -268,8 +412,7 @@ test("rejects non-positive, fractional, non-numeric, and unsafe certified descri
 
     await assert.rejects(loadOciCandidate(options(root), {
       run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
+      runId: RUN_ID,
     }), /descriptor size.*positive safe integer/i);
     assert.equal(boundary.calls.length, 0, `invalid descriptor size ${JSON.stringify(size)} reached Docker`);
   }
@@ -295,8 +438,7 @@ test("rejects non-strict SemVer, build metadata, and overlong Docker tags before
 
     await assert.rejects(loadOciCandidate({ ...options(root), version }, {
       run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
+      runId: RUN_ID,
     }), /(?:exact|strict) SemVer|build metadata|Docker tag|canonical ref/i);
     assert.equal(boundary.calls.length, 0, `invalid version ${version} reached Docker`);
   }
@@ -311,7 +453,7 @@ test("rejects an OCI descriptor with the wrong selected tag before Docker", asyn
   try {
     const boundary = processBoundary({ digest: JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8")).oci.api.digest });
     const { loadOciCandidate } = await loaderModule();
-    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /select exactly one descriptor|tag/i);
+    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: RUN_ID }), /select exactly one descriptor|tag/i);
     assert.equal(boundary.calls.length, 0);
   } finally { removeCandidate(root); }
 });
@@ -322,7 +464,7 @@ test("rejects unsafe canonical refs before Docker", async () => {
     mutateJsonFile(root, "release-manifest.json", (manifest) => { manifest.oci.api.ref = `docker.io/syntaxcircus/cmsify-api:${VERSION};docker pull attacker.invalid/image`; });
     const boundary = processBoundary({ digest: JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8")).oci.api.digest });
     const { loadOciCandidate } = await loaderModule();
-    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /canonical.*ref|unsafe.*ref/i);
+    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: RUN_ID }), /canonical.*ref|unsafe.*ref/i);
     assert.equal(boundary.calls.length, 0);
   } finally { removeCandidate(root); }
 });
@@ -336,12 +478,11 @@ test("rejects a pre-existing canonical tag before mutation and never removes or 
 
     await assert.rejects(loadOciCandidate(options(root), {
       run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
+      runId: RUN_ID,
     }), /canonical.*already exists|ref.*collision/i);
 
     assert.deepEqual(boundary.calls.map((call) => call.phase), ["oci-loader-canonical-preflight"]);
-    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-canonical-tag"), false);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-docker-load"), false);
     assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), false);
   } finally { removeCandidate(root); }
 });
@@ -350,30 +491,28 @@ test("accepts only the exact Docker Hub-short spelling of a missing canonical im
   const root = createValidCandidate();
   try {
     const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const evidence = readOciFixtureEvidence(root, "api");
     const { loadOciCandidate } = await loaderModule();
     const normalized = processBoundary({
-      digest: manifest.oci.api.digest,
+      evidence,
       dockerHubShortCanonicalDiagnostic: true,
     });
 
-    const result = await loadOciCandidate(options(root), {
-      run: normalized.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    });
+    const result = await loadOciCandidate(options(root), loaderDependencies(normalized));
     assert.deepEqual(result, {
       ref: normalized.canonicalRef,
       digest: manifest.oci.api.digest,
-      imageId: normalized.imageId,
+      imageId: normalized.configDigest,
+      diffIds: normalized.diffIds,
     });
-    assert.equal(normalized.calls.some((call) => call.phase === "oci-loader-canonical-tag"), true);
+    assert.equal(normalized.calls.some((call) => call.phase === "oci-loader-docker-load"), true);
 
     const shortCanonicalRef = normalized.canonicalRef.replace(/^docker\.io\//, "");
     for (const target of [
       `attacker.invalid/${shortCanonicalRef}`,
       `${shortCanonicalRef}-attacker`,
     ]) {
-      const rejected = processBoundary({ digest: manifest.oci.api.digest });
+      const rejected = processBoundary({ evidence });
       const phases = [];
       const run = async (command, args, processOptions) => {
         phases.push(processOptions.phase);
@@ -382,13 +521,12 @@ test("accepts only the exact Docker Hub-short spelling of a missing canonical im
       };
       await assert.rejects(loadOciCandidate(options(root), {
         run,
-        runId: "cmsify-oci-loader-test123",
-        waitForRegistry: async () => {},
+        runId: RUN_ID,
       }), /No such image/i);
       assert.deepEqual(phases, ["oci-loader-canonical-preflight"], `accepted a non-exact missing-image target ${target}`);
     }
 
-    const nonExitOne = processBoundary({ digest: manifest.oci.api.digest });
+    const nonExitOne = processBoundary({ evidence });
     const nonExitOnePhases = [];
     await assert.rejects(loadOciCandidate(options(root), {
       run: async (command, args, processOptions) => {
@@ -400,22 +538,17 @@ test("accepts only the exact Docker Hub-short spelling of a missing canonical im
         }
         return nonExitOne.run(command, args, processOptions);
       },
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
+      runId: RUN_ID,
     }), /No such image/i);
     assert.deepEqual(nonExitOnePhases, ["oci-loader-canonical-preflight"]);
 
     const cleanup = processBoundary({
-      digest: manifest.oci.api.digest,
+      evidence,
       failPhase: "oci-loader-canonical-inspect",
       cleanupTargetsAlreadyAbsent: true,
       dockerHubShortCanonicalDiagnostic: true,
     });
-    await assert.rejects(loadOciCandidate(options(root), {
-      run: cleanup.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    }), (error) => {
+    await assert.rejects(loadOciCandidate(options(root), loaderDependencies(cleanup)), (error) => {
       assert.match(error.message, /injected oci-loader-canonical-inspect timeout/i);
       assert.doesNotMatch(error.message, /OCI loader cleanup failed/i);
       return true;
@@ -429,8 +562,7 @@ test("rejects a case-different missing canonical image target at preflight", asy
   try {
     const version = "1.0.0-RC";
     bindApiVersion(root, version);
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: manifest.oci.api.digest, version });
+    const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api", version), version });
     const diagnosticTarget = "syntaxcircus/cmsify-api:1.0.0-rc";
     const phases = [];
     const { loadOciCandidate } = await loaderModule();
@@ -441,8 +573,7 @@ test("rejects a case-different missing canonical image target at preflight", asy
         if (processOptions.phase === "oci-loader-canonical-preflight") throw dockerMissing(`No such image: ${diagnosticTarget}`);
         return boundary.run(command, args, processOptions);
       },
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
+      runId: RUN_ID,
     }), /No such image/i);
     assert.deepEqual(phases, ["oci-loader-canonical-preflight"]);
   } finally { removeCandidate(root); }
@@ -453,9 +584,8 @@ test("does not suppress cleanup failure for a case-different canonical image tar
   try {
     const version = "1.0.0-RC";
     bindApiVersion(root, version);
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
     const boundary = processBoundary({
-      digest: manifest.oci.api.digest,
+      evidence: readOciFixtureEvidence(root, "api", version),
       version,
       failPhase: "oci-loader-canonical-inspect",
       cleanupTargetsAlreadyAbsent: true,
@@ -463,40 +593,28 @@ test("does not suppress cleanup failure for a case-different canonical image tar
     const diagnosticTarget = "syntaxcircus/cmsify-api:1.0.0-rc";
     const { loadOciCandidate } = await loaderModule();
 
-    await assert.rejects(loadOciCandidate({ ...options(root), version }, {
+    await assert.rejects(loadOciCandidate({ ...options(root), version }, loaderDependencies(boundary, {
       run: async (command, args, processOptions) => {
         if (processOptions.phase === "oci-loader-cleanup-canonical") throw dockerMissing(`No such image: ${diagnosticTarget}`);
         return boundary.run(command, args, processOptions);
       },
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    }), /cleanup failed.*cleanup-canonical.*No such image/i);
+    })), /cleanup failed.*cleanup-canonical.*No such image/i);
   } finally { removeCandidate(root); }
 });
 
-test("rejects collisions on exact run-owned resource names before their create commands", async (context) => {
+test("rejects an exact run-owned Skopeo name collision before scratch creation", async (context) => {
   const root = createValidCandidate();
   context.after(() => removeCandidate(root));
-  const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
   const { loadOciCandidate } = await loaderModule();
-  const cases = [
-    ["oci-loader-importer-network-preflight", "oci-loader-importer-network-create", true],
-    ["oci-loader-relay-network-preflight", "oci-loader-relay-network-create", true],
-    ["oci-loader-registry-preflight", "oci-loader-registry-start"],
-    ["oci-loader-skopeo-preflight", "oci-loader-skopeo-copy"],
-    ["oci-loader-intermediate-preflight", "oci-loader-candidate-pull"],
-  ];
+  const boundary = processBoundary({
+    evidence: readOciFixtureEvidence(root, "api"),
+    occupiedPreflight: "oci-loader-skopeo-preflight",
+  });
 
-  for (const [occupiedPreflight, forbiddenMutation, beforeMutation = false] of cases) {
-    const boundary = processBoundary({ digest: manifest.oci.api.digest, occupiedPreflight });
-    await assert.rejects(loadOciCandidate(options(root), {
-      run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    }), /already exists|collision/i);
-    if (beforeMutation) assert.equal(boundary.calls.every((call) => call.args[1] === "inspect"), true, `${occupiedPreflight} allowed mutation before both network names were cleared`);
-    assert.equal(boundary.calls.some((call) => call.phase === forbiddenMutation), false, `${occupiedPreflight} allowed ${forbiddenMutation}`);
-  }
+  await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), /Skopeo.*already exists|collision/i);
+  assert.deepEqual(boundary.calls.map((call) => call.phase), ["oci-loader-canonical-preflight", "oci-loader-skopeo-preflight"]);
+  assert.equal(boundary.scratchRoot, undefined);
+  assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-skopeo-copy"), false);
 });
 
 test("rejects linked archive and manifest ancestors before Docker", async () => {
@@ -507,8 +625,8 @@ test("rejects linked archive and manifest ancestors before Docker", async () => 
     symlinkSync(root, linkedRoot, process.platform === "win32" ? "junction" : "dir");
     const boundary = processBoundary({ digest: JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8")).oci.api.digest });
     const { loadOciCandidate } = await loaderModule();
-    await assert.rejects(loadOciCandidate({ ...options(root), archive: candidatePath(linkedRoot, "oci/cmsify-api.oci.tar") }, { run: boundary.run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /link|reparse/i);
-    await assert.rejects(loadOciCandidate({ ...options(root), manifest: candidatePath(linkedRoot, "release-manifest.json") }, { run: boundary.run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /link|reparse/i);
+    await assert.rejects(loadOciCandidate({ ...options(root), archive: candidatePath(linkedRoot, "oci/cmsify-api.oci.tar") }, { run: boundary.run, runId: RUN_ID }), /link|reparse/i);
+    await assert.rejects(loadOciCandidate({ ...options(root), manifest: candidatePath(linkedRoot, "release-manifest.json") }, { run: boundary.run, runId: RUN_ID }), /link|reparse/i);
     assert.equal(boundary.calls.length, 0);
   } finally {
     rmSync(linkParent, { recursive: true, force: true });
@@ -516,113 +634,137 @@ test("rejects linked archive and manifest ancestors before Docker", async () => 
   }
 });
 
-test("rejects a loopback pull whose RepoDigest differs from the certified descriptor", async () => {
+test("scratch cleanup covers Skopeo copy, Docker load, and loaded image identity failures", async (context) => {
+  const root = createValidCandidate();
+  context.after(() => removeCandidate(root));
+  const evidence = readOciFixtureEvidence(root, "api");
+  const { loadOciCandidate } = await loaderModule();
+  for (const [failPhase, canonicalCleanupExpected] of [
+    ["oci-loader-skopeo-copy", false],
+    ["oci-loader-docker-load", true],
+    ["oci-loader-canonical-inspect", true],
+  ]) {
+    const boundary = processBoundary({ evidence, failPhase });
+    await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), new RegExp(`injected ${failPhase}`));
+    assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot], `${failPhase} did not remove its exact scratch root`);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-skopeo"), true, `${failPhase} omitted Skopeo cleanup`);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), canonicalCleanupExpected, `${failPhase} canonical cleanup intent was wrong`);
+  }
+});
+
+test("create-then-throw scratch creation still removes only the registered exact root", async () => {
   const root = createValidCandidate();
   try {
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: `sha256:${"e".repeat(64)}` });
+    const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api"), failCreateScratchAfterCreate: true });
     const { loadOciCandidate } = await loaderModule();
-    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /RepoDigest.*certified|destination.*digest/i);
-    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-canonical-tag"), false);
-    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-intermediate"), true);
+
+    await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), /create-then-throw scratch failure/i);
+    assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot]);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-skopeo-copy"), false);
   } finally { removeCandidate(root); }
 });
 
-test("cleans exact run-owned resources when create commands time out after side effects and when later phases fail", async (context) => {
+test("scratch cleanup runs when archive validation rejects before Docker load", async () => {
   const root = createValidCandidate();
-  context.after(() => removeCandidate(root));
-  const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-  const { loadOciCandidate } = await loaderModule();
-  const cases = [
-    ["oci-loader-importer-network-create", ["oci-loader-cleanup-importer-network"]],
-    ["oci-loader-relay-network-create", ["oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-registry-start", ["oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-registry-attach", ["oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-registry-port", ["oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-skopeo-copy", ["oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-candidate-pull", ["oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-candidate-inspect", ["oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-canonical-tag", ["oci-loader-cleanup-canonical", "oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-    ["oci-loader-canonical-inspect", ["oci-loader-cleanup-canonical", "oci-loader-cleanup-intermediate", "oci-loader-cleanup-skopeo", "oci-loader-cleanup-registry", "oci-loader-cleanup-importer-network", "oci-loader-cleanup-relay-network"]],
-  ];
-  for (const [failPhase, expectedCleanup] of cases) {
-    const boundary = processBoundary({ digest: manifest.oci.api.digest, failPhase });
-    await assert.rejects(loadOciCandidate(options(root), { run: boundary.run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), new RegExp(`injected ${failPhase}`));
-    const phases = boundary.calls.map((call) => call.phase);
-    for (const cleanup of expectedCleanup) assert.equal(phases.includes(cleanup), true, `${failPhase} omitted ${cleanup}`);
-    const failureIndex = phases.indexOf(failPhase);
-    assert.equal(expectedCleanup.every((cleanup) => phases.indexOf(cleanup) > failureIndex), true, `${failPhase} cleanup did not run after failure`);
-    const targets = boundary.calls.filter((call) => expectedCleanup.includes(call.phase)).map((call) => call.args.at(-1));
-    const expectedTargets = expectedCleanup.map((cleanup) => ({
-      "oci-loader-cleanup-canonical": boundary.canonicalRef,
-      "oci-loader-cleanup-intermediate": boundary.intermediateRef,
-      "oci-loader-cleanup-skopeo": boundary.skopeoName,
-      "oci-loader-cleanup-registry": boundary.registryName,
-      "oci-loader-cleanup-importer-network": boundary.importerNetworkName,
-      "oci-loader-cleanup-relay-network": boundary.relayNetworkName,
-    })[cleanup]);
-    assert.deepEqual(targets, expectedTargets, `${failPhase} cleanup selected an unexpected target`);
-  }
+  try {
+    const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api") });
+    const { loadOciCandidate } = await loaderModule();
+
+    await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary, {
+      validateScratchArchive() { throw new Error("injected scratch archive validation failure"); },
+    })), /scratch archive validation failure/i);
+    assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot]);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-docker-load"), false);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), false);
+  } finally { removeCandidate(root); }
+});
+
+test("scratch cleanup failure preserves the bounded primary diagnostic and removes the loaded tag", async () => {
+  const root = createValidCandidate();
+  try {
+    const boundary = processBoundary({
+      evidence: readOciFixtureEvidence(root, "api"),
+      failPhase: "oci-loader-canonical-inspect",
+      failScratchCleanup: true,
+    });
+    const { loadOciCandidate } = await loaderModule();
+
+    await assert.rejects(loadOciCandidate(options(root), loaderDependencies(boundary)), /canonical-inspect.*cleanup failed.*scratch/i);
+    assert.deepEqual(boundary.scratchRemovals, [boundary.scratchRoot]);
+    assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
+    rmSync(boundary.scratchRoot, { recursive: true, force: true });
+  } finally { removeCandidate(root); }
 });
 
 test("treats already-absent exact cleanup targets as clean while real cleanup errors remain blocking", async () => {
   const root = createValidCandidate();
   try {
     const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const evidence = readOciFixtureEvidence(root, "api");
     const { loadOciCandidate } = await loaderModule();
-    const absent = processBoundary({ digest: manifest.oci.api.digest, cleanupTargetsAlreadyAbsent: true });
-    const result = await loadOciCandidate(options(root), {
-      run: absent.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
+    const absent = processBoundary({ evidence, cleanupTargetsAlreadyAbsent: true });
+    const result = await loadOciCandidate(options(root), loaderDependencies(absent));
+    assert.deepEqual(result, {
+      ref: absent.canonicalRef,
+      digest: manifest.oci.api.digest,
+      imageId: absent.configDigest,
+      diffIds: absent.diffIds,
     });
-    assert.deepEqual(result, { ref: absent.canonicalRef, digest: manifest.oci.api.digest, imageId: absent.imageId });
     assert.equal(absent.calls.some((call) => call.phase === "oci-loader-cleanup-skopeo"), true);
 
-    const blocked = processBoundary({ digest: manifest.oci.api.digest, failPhase: "oci-loader-cleanup-relay-network" });
-    await assert.rejects(loadOciCandidate(options(root), {
-      run: blocked.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => {},
-    }), /cleanup failed.*cleanup-relay-network.*injected/i);
+    const blocked = processBoundary({ evidence, failPhase: "oci-loader-cleanup-skopeo" });
+    await assert.rejects(loadOciCandidate(options(root), loaderDependencies(blocked)), /cleanup failed.*cleanup-skopeo.*injected/i);
+    assert.equal(blocked.calls.some((call) => call.phase === "oci-loader-cleanup-canonical"), true);
   } finally { removeCandidate(root); }
 });
 
-test("cleans the registry and both networks when readiness fails outside the process runner", async () => {
-  const root = createValidCandidate();
-  try {
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: manifest.oci.api.digest });
-    const { loadOciCandidate } = await loaderModule();
-    await assert.rejects(loadOciCandidate(options(root), {
-      run: boundary.run,
-      runId: "cmsify-oci-loader-test123",
-      waitForRegistry: async () => { throw new Error("injected registry readiness failure"); },
-    }), /registry readiness failure/i);
-    const phases = boundary.calls.map((call) => call.phase);
-    assert.equal(phases.includes("oci-loader-cleanup-registry"), true);
-    assert.equal(phases.includes("oci-loader-cleanup-importer-network"), true);
-    assert.equal(phases.includes("oci-loader-cleanup-relay-network"), true);
-  } finally { removeCandidate(root); }
-});
+for (const [name, createArtifact, diagnostic] of [
+  ["zero-length file", (archive) => { writeFileSync(archive, ""); }, /non-empty|zero length/i],
+  ["directory", (archive) => { mkdirSync(archive); }, /regular non-link file/i],
+  ["reparse point", (archive) => {
+    const target = mkdtempSync(resolve(tmpdir(), "cmsify-oci-loader-link-target-"));
+    symlinkSync(target, archive, process.platform === "win32" ? "junction" : "dir");
+    return () => rmSync(target, { recursive: true, force: true });
+  }, /link|reparse/i],
+  ["over-8-GiB file", (archive) => {
+    writeFileSync(archive, "x");
+    truncateSync(archive, 8 * 1024 * 1024 * 1024 + 1);
+  }, /8 GiB|maximum|size/i],
+]) {
+  test(`rejects unsafe scratch archive ${name} and performs scratch cleanup`, async () => {
+    const root = createValidCandidate();
+    let scratchRoot;
+    let disposeArtifact = () => {};
+    try {
+      const boundary = processBoundary({ evidence: readOciFixtureEvidence(root, "api") });
+      const run = async (command, args, processOptions) => {
+        if (processOptions.phase === "oci-loader-skopeo-copy") {
+          const scratchMount = args.find((arg) => typeof arg === "string" && arg.endsWith(",target=/scratch"));
+          if (scratchMount) {
+            scratchRoot = scratchMount.slice("type=bind,source=".length, -",target=/scratch".length);
+            disposeArtifact = createArtifact(resolve(scratchRoot, "candidate.docker.tar")) ?? disposeArtifact;
+          }
+        }
+        return boundary.run(command, args, processOptions);
+      };
+      const { loadOciCandidate } = await loaderModule();
 
-test("uses only known run-owned names for cleanup when Docker returns malformed resource IDs", async () => {
-  const root = createValidCandidate();
-  try {
-    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
-    const boundary = processBoundary({ digest: manifest.oci.api.digest });
-    const run = async (command, args, processOptions) => {
-      const result = await boundary.run(command, args, processOptions);
-      if (processOptions.phase === "oci-loader-registry-start") return { ...result, stdout: "../untrusted-target\n" };
-      return result;
-    };
-    const { loadOciCandidate } = await loaderModule();
-    await assert.rejects(loadOciCandidate(options(root), { run, runId: "cmsify-oci-loader-test123", waitForRegistry: async () => {} }), /safe isolated registry container ID/i);
-    const registryCleanup = boundary.calls.find((call) => call.phase === "oci-loader-cleanup-registry");
-    const importerCleanup = boundary.calls.find((call) => call.phase === "oci-loader-cleanup-importer-network");
-    const relayCleanup = boundary.calls.find((call) => call.phase === "oci-loader-cleanup-relay-network");
-    assert.deepEqual(registryCleanup?.args, ["container", "rm", "--force", "cmsify-oci-loader-test123-registry"]);
-    assert.deepEqual(importerCleanup?.args, ["network", "rm", "cmsify-oci-loader-test123-importer-network"]);
-    assert.deepEqual(relayCleanup?.args, ["network", "rm", "cmsify-oci-loader-test123-relay-network"]);
-  } finally { removeCandidate(root); }
+      await assert.rejects(loadOciCandidate(options(root), { run, runId: RUN_ID }), diagnostic);
+      assert.equal(boundary.calls.some((call) => call.phase === "oci-loader-docker-load"), false);
+      assert.equal(existsSync(scratchRoot), false);
+    } finally {
+      disposeArtifact();
+      if (scratchRoot) rmSync(scratchRoot, { recursive: true, force: true });
+      removeCandidate(root);
+    }
+  });
+}
+
+test("describes the offline Docker archive contract without registry topology", async () => {
+  const { LOADER_CONTRACT } = await loaderModule();
+  assert.deepEqual(LOADER_CONTRACT, {
+    schema: "cmsify.oci-loader.v1",
+    skopeoImage,
+    transport: "offline-docker-archive",
+  });
 });

@@ -420,7 +420,27 @@ export function mutateJsonFile(root, relativePath, mutate) {
   writeFileSync(path, json(document));
 }
 
-export function mutateOciLayout(root, kind, mutate) {
+export function readOciFixtureEvidence(root, kind, version = VERSION) {
+  const archive = resolve(root, `oci/cmsify-${kind}.oci.tar`);
+  const staging = mkdtempSync(resolve(tmpdir(), `cmsify-${kind}-oci-evidence-`));
+  try {
+    execFileSync("tar", ["-xf", archive, "-C", staging]);
+    const index = JSON.parse(readFileSync(resolve(staging, "index.json"), "utf8"));
+    const expectedRef = `docker.io/syntaxcircus/cmsify-${kind}:${version}`;
+    const descriptor = index.manifests.find((candidate) => candidate.annotations?.["io.containerd.image.name"] === expectedRef);
+    const manifest = JSON.parse(readFileSync(resolve(staging, `blobs/sha256/${descriptor.digest.slice(7)}`), "utf8"));
+    const config = JSON.parse(readFileSync(resolve(staging, `blobs/sha256/${manifest.config.digest.slice(7)}`), "utf8"));
+    return {
+      configDigest: manifest.config.digest,
+      diffIds: [...config.rootfs.diff_ids],
+      labels: { ...config.config.Labels },
+    };
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+export function mutateOciLayout(root, kind, mutate, { resealConfig = false, resealManifest = false, syncReleaseDescriptor = false } = {}) {
   const archive = resolve(root, `oci/cmsify-${kind}.oci.tar`);
   const staging = mkdtempSync(resolve(tmpdir(), `cmsify-${kind}-oci-mutation-`));
   try {
@@ -433,11 +453,58 @@ export function mutateOciLayout(root, kind, mutate) {
     const manifest = manifestPath && statSync(manifestPath).isFile() ? JSON.parse(readFileSync(manifestPath, "utf8")) : undefined;
     const configPath = manifest?.config?.digest?.startsWith("sha256:") ? resolve(staging, `blobs/sha256/${manifest.config.digest.slice(7)}`) : undefined;
     const config = configPath && statSync(configPath).isFile() ? JSON.parse(readFileSync(configPath, "utf8")) : undefined;
-    mutate({ staging, index, descriptor, manifest, config, manifestPath, configPath });
+    const omittedBlobs = new Set();
+    const duplicateBlobs = [];
+    let configBytes;
+    const omitBlob = (path) => omittedBlobs.add(resolve(path));
+    const duplicateBlob = (path) => duplicateBlobs.push(relative(staging, resolve(path)).replaceAll("\\", "/"));
+    const setConfigBytes = (contents) => { configBytes = Buffer.from(contents); };
+    const writeBlob = (digest, contents) => {
+      const path = resolve(staging, `blobs/sha256/${digest.slice(7)}`);
+      writeFileSync(path, contents);
+      return path;
+    };
+    mutate({ staging, index, descriptor, manifest, config, manifestPath, configPath, omitBlob, duplicateBlob, setConfigBytes, writeBlob });
+
+    if (config && configPath) {
+      const contents = configBytes ?? json(config);
+      if (resealConfig) {
+        const digest = sha256(contents);
+        write(staging, `blobs/sha256/${digest.slice(7)}`, contents);
+        manifest.config.digest = digest;
+        manifest.config.size = contents.length;
+      } else if (!omittedBlobs.has(resolve(configPath))) {
+        writeFileSync(configPath, contents);
+      }
+    }
+
+    if (manifest && manifestPath) {
+      const contents = json(manifest);
+      if (resealManifest) {
+        const digest = sha256(contents);
+        write(staging, `blobs/sha256/${digest.slice(7)}`, contents);
+        descriptor.digest = digest;
+        descriptor.size = contents.length;
+        syncReleaseDescriptor = true;
+      } else if (!omittedBlobs.has(resolve(manifestPath))) {
+        writeFileSync(manifestPath, contents);
+      }
+    }
+
+    for (const path of omittedBlobs) rmSync(path, { force: true });
     writeFileSync(indexPath, json(index));
-    if (manifest && manifestPath) writeFileSync(manifestPath, json(manifest));
-    if (config && configPath) writeFileSync(configPath, json(config));
-    execFileSync("tar", ["-cf", archive, "-C", staging, "oci-layout", "index.json", "blobs"]);
+    if (syncReleaseDescriptor) {
+      const releaseManifestPath = resolve(root, "release-manifest.json");
+      const releaseManifest = JSON.parse(readFileSync(releaseManifestPath, "utf8"));
+      Object.assign(releaseManifest.oci[kind], {
+        digest: descriptor.digest,
+        mediaType: descriptor.mediaType,
+        size: descriptor.size,
+        platform: descriptor.platform,
+      });
+      writeFileSync(releaseManifestPath, json(releaseManifest));
+    }
+    execFileSync("tar", ["-cf", archive, "-C", staging, "oci-layout", "index.json", "blobs", ...duplicateBlobs]);
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
