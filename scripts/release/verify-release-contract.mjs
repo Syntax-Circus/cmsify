@@ -341,16 +341,32 @@ for (const match of upgradeWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
 
 expect(/workflow_dispatch:/i.test(accessibilityWorkflow) && /push:\s*\n\s+branches:\s*\[main\]/i.test(accessibilityWorkflow) && /pull_request:/i.test(accessibilityWorkflow) && !/tags:/i.test(accessibilityWorkflow), "Accessibility workflow must run on manual dispatch, relevant main pushes, and pull requests, never tags only.");
 function accessibilityEventPaths(event) {
-  const start = accessibilityWorkflow.search(new RegExp(`^  ${event}:\\s*$`, "m"));
-  if (start === -1) return [];
-  const following = accessibilityWorkflow.slice(start + 1);
-  const nextEvent = following.search(/^  [A-Za-z0-9_-]+:/m);
-  const body = nextEvent === -1 ? accessibilityWorkflow.slice(start) : accessibilityWorkflow.slice(start, start + 1 + nextEvent);
-  const paths = body.match(/^    paths:[ \t]*\r?\n((?:      - "[^"\r\n]+"[ \t]*(?:\r?\n|$))*)/m);
-  return paths ? [...paths[1].matchAll(/^      - "([^"\r\n]+)"[ \t]*$/gm)].map((match) => match[1]) : [];
+  const lines = accessibilityWorkflow.replaceAll("\r\n", "\n").split("\n");
+  const eventIndex = lines.findIndex((line) => new RegExp(`^  ${event}:\\s*$`).test(line));
+  if (eventIndex === -1) return { entries: [], error: "must contain a direct paths block" };
+  let eventEnd = lines.length;
+  for (let index = eventIndex + 1; index < lines.length; index += 1) {
+    if (!/^[ \t]*(?:#.*)?$/.test(lines[index]) && /^(?:[^ \t]| {2}\S)/.test(lines[index])) { eventEnd = index; break; }
+  }
+  const eventLines = lines.slice(eventIndex, eventEnd);
+  const pathIndex = eventLines.findIndex((line) => /^    paths:[ \t]*(?:#.*)?$/.test(line));
+  if (pathIndex === -1) return { entries: [], error: "must contain a direct paths block" };
+  const entries = [];
+  for (const line of eventLines.slice(pathIndex + 1)) {
+    if (/^[ \t]*(?:#.*)?$/.test(line)) continue;
+    if (/^(?:[^ \t]| {2}[A-Za-z0-9_.-]+:| {4}[A-Za-z0-9_.-]+:)/.test(line)) break;
+    const item = /^ {6}- (.*)$/.exec(line)?.[1];
+    const quoted = /^"([^"\r\n]*)"(?:[ \t]+#.*)?$/.exec(item ?? "");
+    const singleQuoted = /^'([^'\r\n]*)'(?:[ \t]+#.*)?$/.exec(item ?? "");
+    if (quoted?.[1].startsWith("!") || singleQuoted?.[1].startsWith("!")) return { entries, error: "must not contain negative entries" };
+    if (!quoted) return { entries, error: "must contain only double-quoted path sequence entries" };
+    entries.push(quoted[1]);
+  }
+  return { entries };
 }
+const accessibilityPaths = Object.fromEntries(["push", "pull_request"].map((event) => [event, accessibilityEventPaths(event)]));
 for (const event of ["push", "pull_request"]) {
-  expect(!accessibilityEventPaths(event).some((path) => path.startsWith("!")), `Accessibility ${event} path triggers must not contain negative entries.`);
+  expect(!accessibilityPaths[event].error, `Accessibility ${event} path triggers ${accessibilityPaths[event].error}.`);
 }
 for (const requiredPath of [
   "src/Cmsify.Admin/**",
@@ -364,7 +380,7 @@ for (const requiredPath of [
   "Cmsify.slnx",
   ".github/workflows/admin-accessibility.yml",
 ]) {
-  expect(accessibilityEventPaths("push").filter((path) => path === requiredPath).length === 1 && accessibilityEventPaths("pull_request").filter((path) => path === requiredPath).length === 1, `Accessibility path triggers must include ${requiredPath} exactly once for both main pushes and pull requests.`);
+  expect(accessibilityPaths.push.entries.filter((path) => path === requiredPath).length === 1 && accessibilityPaths.pull_request.entries.filter((path) => path === requiredPath).length === 1, `Accessibility path triggers must include ${requiredPath} exactly once for both main pushes and pull requests.`);
 }
 expect(/npm ci --prefix eng\/accessibility/.test(accessibilityWorkflow) && !/npx\s+--yes|npm install(?!\s+--global)/.test(accessibilityWorkflow), "Accessibility workflow must install only the committed harness lock with npm ci.");
 expect(/node eng\/accessibility\/run\.mjs[^\n]*--url http:\/\/127\.0\.0\.1:5177\/login[^\n]*--output artifacts\/accessibility/.test(accessibilityWorkflow), "Accessibility workflow must run the locked harness against the Admin /login page.");

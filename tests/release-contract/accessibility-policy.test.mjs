@@ -29,14 +29,26 @@ function jobBody(workflow, name) {
 }
 
 function eventPaths(workflow, event) {
-  const start = workflow.search(new RegExp(`^  ${event}:\\s*$`, "m"));
-  if (start === -1) return [];
-  const following = workflow.slice(start + 1);
-  const nextEvent = following.search(/^  [A-Za-z0-9_-]+:/m);
-  const body = nextEvent === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + nextEvent);
-  const paths = body.match(/^    paths:[ \t]*\r?\n((?:      - "[^"\r\n]+"[ \t]*(?:\r?\n|$))*)/m);
-  const entries = paths ? [...paths[1].matchAll(/^      - "([^"\r\n]+)"[ \t]*$/gm)].map((match) => match[1]) : [];
-  return entries.some((path) => path.startsWith("!")) ? [] : entries;
+  const lines = workflow.replaceAll("\r\n", "\n").split("\n");
+  const eventIndex = lines.findIndex((line) => new RegExp(`^  ${event}:\\s*$`).test(line));
+  if (eventIndex === -1) return [];
+  let eventEnd = lines.length;
+  for (let index = eventIndex + 1; index < lines.length; index += 1) {
+    if (!/^[ \t]*(?:#.*)?$/.test(lines[index]) && /^(?:[^ \t]| {2}\S)/.test(lines[index])) { eventEnd = index; break; }
+  }
+  const eventLines = lines.slice(eventIndex, eventEnd);
+  const pathIndex = eventLines.findIndex((line) => /^    paths:[ \t]*(?:#.*)?$/.test(line));
+  if (pathIndex === -1) return [];
+  const entries = [];
+  for (const line of eventLines.slice(pathIndex + 1)) {
+    if (/^[ \t]*(?:#.*)?$/.test(line)) continue;
+    if (/^(?:[^ \t]| {2}[A-Za-z0-9_.-]+:| {4}[A-Za-z0-9_.-]+:)/.test(line)) break;
+    const item = /^ {6}- (.*)$/.exec(line)?.[1];
+    const quoted = /^"([^"\r\n]*)"(?:[ \t]+#.*)?$/.exec(item ?? "");
+    if (!quoted || quoted[1].startsWith("!")) return [];
+    entries.push(quoted[1]);
+  }
+  return entries;
 }
 
 test("branch accessibility runs manually and for relevant main/PR changes", () => {
@@ -65,6 +77,20 @@ test("negative paths invalidate each accessibility event path list", () => {
       ? branchWorkflow.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - "!src/Cmsify.Admin/**"\n')
       : branchWorkflow.replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n', '  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n      - "!src/Cmsify.Admin/**"\n');
     assert.deepEqual(eventPaths(negatedPaths, event), [], `${event} negative path must invalidate its path list`);
+  }
+});
+
+test("single-quoted and separated negative paths invalidate each accessibility event path list", () => {
+  for (const event of ["push", "pull_request"]) {
+    const mutate = event === "push"
+      ? (replacement) => branchWorkflow.replace('      - "src/Cmsify.Admin/**"\n', replacement)
+      : (replacement) => branchWorkflow.replace('  pull_request:\n    paths:\n      - "src/Cmsify.Admin/**"\n', `  pull_request:\n    paths:\n${replacement}`);
+    for (const [name, replacement] of [
+      ["single-quoted", '      - "src/Cmsify.Admin/**"\n      - \'!src/Cmsify.Admin/**\'\n'],
+      ["separated", '      - "src/Cmsify.Admin/**"\n\n      # later path entry\n      - "!src/Cmsify.Admin/**"\n'],
+    ]) {
+      assert.deepEqual(eventPaths(mutate(replacement), event), [], `${event} ${name} negative path must invalidate its path list`);
+    }
   }
 });
 
