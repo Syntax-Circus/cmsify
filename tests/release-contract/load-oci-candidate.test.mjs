@@ -355,6 +355,56 @@ test("accepts only the exact Docker Hub-short spelling of a missing canonical im
   } finally { removeCandidate(root); }
 });
 
+test("rejects a case-different missing canonical image target at preflight", async () => {
+  const root = createValidCandidate();
+  try {
+    const version = "1.0.0-RC";
+    bindApiVersion(root, version);
+    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const boundary = processBoundary({ digest: manifest.oci.api.digest, version });
+    const diagnosticTarget = "syntaxcircus/cmsify-api:1.0.0-rc";
+    const phases = [];
+    const { loadOciCandidate } = await loaderModule();
+
+    await assert.rejects(loadOciCandidate({ ...options(root), version }, {
+      run: async (command, args, processOptions) => {
+        phases.push(processOptions.phase);
+        if (processOptions.phase === "oci-loader-canonical-preflight") throw dockerMissing(`No such image: ${diagnosticTarget}`);
+        return boundary.run(command, args, processOptions);
+      },
+      runId: "cmsify-oci-loader-test123",
+      waitForRegistry: async () => {},
+    }), /No such image/i);
+    assert.deepEqual(phases, ["oci-loader-canonical-preflight"]);
+  } finally { removeCandidate(root); }
+});
+
+test("does not suppress cleanup failure for a case-different canonical image target", async () => {
+  const root = createValidCandidate();
+  try {
+    const version = "1.0.0-RC";
+    bindApiVersion(root, version);
+    const manifest = JSON.parse(readFileSync(candidatePath(root, "release-manifest.json"), "utf8"));
+    const boundary = processBoundary({
+      digest: manifest.oci.api.digest,
+      version,
+      failPhase: "oci-loader-canonical-inspect",
+      cleanupTargetsAlreadyAbsent: true,
+    });
+    const diagnosticTarget = "syntaxcircus/cmsify-api:1.0.0-rc";
+    const { loadOciCandidate } = await loaderModule();
+
+    await assert.rejects(loadOciCandidate({ ...options(root), version }, {
+      run: async (command, args, processOptions) => {
+        if (processOptions.phase === "oci-loader-cleanup-canonical") throw dockerMissing(`No such image: ${diagnosticTarget}`);
+        return boundary.run(command, args, processOptions);
+      },
+      runId: "cmsify-oci-loader-test123",
+      waitForRegistry: async () => {},
+    }), /cleanup failed.*cleanup-canonical.*No such image/i);
+  } finally { removeCandidate(root); }
+});
+
 test("rejects collisions on exact run-owned resource names before their create commands", async (context) => {
   const root = createValidCandidate();
   context.after(() => removeCandidate(root));

@@ -214,21 +214,16 @@ function compactError(error) {
   return String(error?.message ?? error ?? "unknown failure").replace(/[\r\n]+/g, " ").slice(0, 512);
 }
 
-function escapedRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function isMissingDockerTarget(error, kind, target) {
   if (error?.exitCode !== 1) return false;
   const output = `${error?.stderr ?? ""}\n${error?.stdout ?? ""}\n${error?.message ?? ""}`;
   const exactTargets = kind === "image" && target.startsWith("docker.io/")
     ? [target, target.slice("docker.io/".length)]
     : [target];
-  const targetPattern = exactTargets.map(escapedRegExp).join("|");
   const diagnostic = kind === "network"
-    ? `(?:No such network:\\s*${targetPattern}|network\\s+${targetPattern}\\s+not found)`
-    : `No such ${kind}:\\s*(?:${targetPattern})`;
-  return new RegExp(`${diagnostic}(?:\\s|$)`, "i").test(output);
+    ? /No such network:\s*(\S+)(?:\s|$)|network\s+(\S+)\s+not found(?:\s|$)/gi
+    : new RegExp(`No such ${kind}:\\s*(\\S+)(?:\\s|$)`, "gi");
+  return [...output.matchAll(diagnostic)].some((match) => exactTargets.includes(match[1] ?? match[2]));
 }
 
 export async function loadOciCandidate(options, dependencies = {}) {
