@@ -10,7 +10,7 @@ import { loadExpectedData } from "./expected.mjs";
 import { createDockerHttpAdapter } from "./http.mjs";
 import { loadFixtureManifest, verifyFixtureGenerationProvenance } from "./manifest.mjs";
 import { assertTrustedRunScope, createRunScope } from "./paths.mjs";
-import { assertPhysicalPath, ensureSafeDirectory, openSafeRegularFile, readSafeFile, writeSafeAtomically } from "./safe-files.mjs";
+import { assertPhysicalPath, ensureSafeDirectory, openSafeRegularFile, readSafeFile, writeBoundedJsonAtomically, writeSafeAtomically } from "./safe-files.mjs";
 
 export const REHEARSAL_PHASES = Object.freeze([
   "preflight",
@@ -700,11 +700,12 @@ export class RehearsalFailure extends Error {
 }
 
 async function writeReportAtomically(path, report) {
-  await writeSafeAtomically(report.repositoryRoot, path, `${JSON.stringify(report.value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await writeBoundedJsonAtomically(report.repositoryRoot, path, report.value, { encoding: "utf8", mode: 0o600 });
 }
 
 function createReport(scope, options, now) {
   return {
+    schema: "cmsify.upgrade-diagnostics.v1",
     schemaVersion: 1,
     runId: scope.runId,
     status: "running",
@@ -713,12 +714,20 @@ function createReport(scope, options, now) {
     completedAt: null,
     fixtureDigest: null,
     baselineImage: null,
+    source: {
+      fixtureDigest: null,
+      baselineImage: null,
+      fixture: null,
+    },
     candidate: {
       reference: null,
       version: null,
       sourceSha: null,
     },
     canaryId: null,
+    failedStage: null,
+    failureEvidence: null,
+    cleanup: null,
     diagnostics: null,
     phases: REHEARSAL_PHASES.map((name) => ({
       name,
@@ -726,6 +735,19 @@ function createReport(scope, options, now) {
       startedAt: null,
       completedAt: null,
     })),
+  };
+}
+
+function retainFirstFailure(next, phaseName, evidence) {
+  if (next.failedStage !== null) return;
+  next.failedStage = phaseName;
+  next.failureEvidence = safeEvidence(evidence) ?? null;
+}
+
+function recordCleanupOutcome(next, status, error) {
+  next.cleanup = {
+    status,
+    ...(error === undefined ? {} : { errorCode: failureSummary(error, "cleanup", "cleanup").code }),
   };
 }
 
@@ -804,6 +826,7 @@ export async function rehearse(options) {
           phase.error = summary.message.slice(0, 256);
           phase.errorCode = summary.code;
         }
+        if (status === "failed") retainFirstFailure(next, phaseName, evidence);
       }
       if (reportMutation) reportMutation(next);
     });
@@ -822,6 +845,7 @@ export async function rehearse(options) {
         phase.errorCode = summary.code;
         const allowedEvidence = safeEvidence(error?.safeEvidence);
         if (allowedEvidence) phase.evidence = allowedEvidence;
+        retainFirstFailure(next, phaseName, error?.safeEvidence);
       }
       next.status = "failed";
       if (phaseName === "cleanup") next.completedAt = now();
@@ -869,6 +893,11 @@ export async function rehearse(options) {
           && value.baselineImage.platform === "linux/amd64", "Preflight did not return the exact baseline image identity.");
         next.fixtureDigest = value.fixtureDigest;
         next.baselineImage = structuredClone(value.baselineImage);
+        next.source = {
+          fixtureDigest: value.fixtureDigest,
+          baselineImage: structuredClone(value.baselineImage),
+          fixture: context.fixtureIdentity ? structuredClone(context.fixtureIdentity) : null,
+        };
         next.candidate = {
           reference: options.candidateImage,
           version: value.version,
@@ -907,6 +936,7 @@ export async function rehearse(options) {
           next.status = primaryFailure === undefined && startFailure === undefined && cleanupFailure === undefined ? "passed" : "failed";
           next.result = next.status;
           next.completedAt = now();
+          recordCleanupOutcome(next, cleanupFailure === undefined ? "passed" : "failed", cleanupFailure);
         }, cleanupFailure === undefined ? undefined : "cleanup");
       } else if (cleanupPhase.status === "pending") {
         await commit("cleanup", "failed", (next) => {
@@ -920,6 +950,8 @@ export async function rehearse(options) {
           next.status = "failed";
           next.result = "failed";
           next.completedAt = now();
+          retainFirstFailure(next, "cleanup", startFailure ?? cleanupFailure);
+          recordCleanupOutcome(next, "failed", startFailure ?? cleanupFailure);
         });
       }
     } catch (error) {

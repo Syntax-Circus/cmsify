@@ -3,6 +3,8 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
+export const MAX_SAFE_JSON_BYTES = 64 * 1024;
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -114,4 +116,13 @@ export async function writeSafeAtomically(root, path, contents, options = {}) {
     if (handle) await handle.close().catch(() => undefined);
     await rm(temporary, { force: true }).catch(() => undefined);
   }
+}
+
+/** Serializes bounded JSON through the same safe atomic file path as other run artifacts. */
+export async function writeBoundedJsonAtomically(root, path, value, options = {}) {
+  const { maxBytes = MAX_SAFE_JSON_BYTES, ...writeOptions } = options;
+  assert(Number.isSafeInteger(maxBytes) && maxBytes > 0 && maxBytes <= MAX_SAFE_JSON_BYTES, "Safe JSON size limit is invalid.");
+  const contents = `${JSON.stringify(value, null, 2)}\n`;
+  assert(Buffer.byteLength(contents, "utf8") <= maxBytes, "Safe JSON artifact exceeds its size limit.");
+  await writeSafeAtomically(root, path, contents, writeOptions);
 }

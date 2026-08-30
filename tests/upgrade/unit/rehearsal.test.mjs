@@ -1188,6 +1188,58 @@ test("persists allow-listed partial evidence when an assertion phase fails", asy
   }
 });
 
+test("final rollback diagnostics retain safe failure evidence after cleanup", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rollback-diagnostics-"));
+  const runId = "rollback-diagnostics-001";
+  const events = [];
+  const secret = "cmsify-rollback-sentinel-secret";
+  const connectionString = "Host=rollback-secret;Password=cmsify-rollback-sentinel-secret";
+  const operations = successfulOperations(events);
+  operations.rollback = async () => {
+    events.push("rollback");
+    const error = new Error(`Invariant exact-migration-history failed: ${secret}; ${connectionString}`);
+    error.safeEvidence = {
+      readiness: [{ service: "baseline-api", status: "ready", attempts: 2, header: `Bearer ${secret}` }],
+      assertions: [{ name: "exact-migration-history", status: "failed", connectionString }],
+      environment: { CMSIFY_TOKEN: secret },
+    };
+    throw error;
+  };
+
+  try {
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory: resolve(repositoryRoot, "fixture"),
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId,
+      operations,
+    }), /rollback phase invariant/i);
+
+    const report = JSON.parse(readFileSync(resolve(repositoryRoot, "artifacts", "upgrade-tests", runId, "report.json"), "utf8"));
+    assert.equal(report.schema, "cmsify.upgrade-diagnostics.v1");
+    assert.deepEqual(report.source, {
+      fixtureDigest,
+      baselineImage,
+      fixture: null,
+    });
+    assert.equal(report.failedStage, "rollback");
+    assert.deepEqual(report.failureEvidence, {
+      readiness: [{ service: "baseline-api", status: "ready", attempts: 2 }],
+      assertions: [{ name: "exact-migration-history", status: "failed" }],
+    });
+    assert.deepEqual(report.cleanup, { status: "passed" });
+    assert.equal(report.candidate.sourceSha, candidateSourceSha);
+    assert.deepEqual(report.phases.find(({ name }) => name === "rollback").evidence, report.failureEvidence);
+    assert.deepEqual(events.slice(-2), ["diagnostics:capture", "owned-resources:cleanup"]);
+    const serialized = JSON.stringify(report);
+    for (const forbidden of [secret, "Host=rollback-secret", "Bearer"]) assert.equal(serialized.includes(forbidden), false);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
 test("keeps diagnostic-capture failure as bounded secondary evidence", async () => {
   const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-diagnostic-secondary-"));
   const snapshots = [];

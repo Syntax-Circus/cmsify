@@ -52,6 +52,8 @@ Prepare and deploy in this order:
 3. Build or load the exact candidate once, record its immutable image ID/digest and source SHA, and run the [full rehearsal](../tests/upgrade/README.md#build-and-rehearse-an-exact-candidate) from the verified fixture. Require all eleven phases, both clean passes, matched-backup rollback, exact media validation, and an empty ownership-label cleanup audit.
 4. Deploy that exact rehearsed candidate while retaining the verified matched backup and exact prior image digest. Do not overwrite, age out, or detach either backup member during the rollback window. Validate `/health/live`, `/health/ready`, Admin sign-in, representative authenticated content reads, and byte-for-byte representative media downloads before restoring traffic.
 
+When a rehearsal fails, inspect its run-owned `artifacts/upgrade-tests/<run-id>/report.json`. The bounded atomic `cmsify.upgrade-diagnostics.v1` report records the fixture/baseline source and exact candidate identity, the first `failedStage` with allow-listed `failureEvidence`, and the separate `cleanup` outcome. A successful cleanup never replaces rollback failure evidence. The report excludes raw exceptions, environment values, request headers, connection strings, tokens, and secrets.
+
 If the v1 deployment fails, do not merely change the image tag against the upgraded volumes:
 
 1. Stop traffic and all API/Admin/worker processes. Preserve candidate diagnostics and record the failure time, candidate identity, migration/readiness state, and correlation IDs without copying secrets or response bodies.
