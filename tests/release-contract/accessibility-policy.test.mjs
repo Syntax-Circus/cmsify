@@ -147,7 +147,8 @@ test("candidate accessibility consumes the exact downloaded Admin OCI archive wi
   assert.match(candidate, /needs:\s*\[resolve, build\]/);
   assert.match(candidate, /download-artifact@[0-9a-f]{40}[\s\S]*release-candidate-/);
   assert.match(candidate, /sha256sum --check SHA256SUMS/);
-  assert.match(candidate, /docker load --input artifacts\/oci\/cmsify-admin\.oci\.tar/);
+  assert.match(candidate, /node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-admin\.oci\.tar --manifest artifacts\/release-manifest\.json --kind admin --version "\$VERSION"/);
+  assert.doesNotMatch(candidate, /docker (?:image )?load/);
   assert.match(candidate, /docker run[^\n]*--pull=never[^\n]*"docker\.io\/syntaxcircus\/cmsify-admin:\$VERSION"/);
   assert.match(candidate, /--url http:\/\/127\.0\.0\.1:18081\/login/);
   assert.doesNotMatch(candidate, /dotnet (?:run|build|publish)|docker (?:build|pull)|docker buildx|npm pack/);

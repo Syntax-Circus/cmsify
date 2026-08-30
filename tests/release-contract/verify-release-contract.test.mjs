@@ -23,6 +23,8 @@ const contractFiles = [
   "eng/accessibility/package.json",
   "eng/accessibility/package-lock.json",
   "eng/accessibility/run.mjs",
+  "eng/upgrade-tests/process.mjs",
+  "scripts/release/load-oci-candidate.mjs",
   "src/Cmsify.Contracts/Cmsify.Contracts.csproj",
   "src/Cmsify.Api/Dockerfile",
   "src/Cmsify.Admin/Dockerfile",
@@ -178,7 +180,7 @@ for (const event of ["push", "pull_request"]) {
     }), new RegExp(`Accessibility ${event} path triggers must not contain YAML escape sequences`, "i")));
   }
 }
-test("rejects source-built release accessibility", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace("docker load --input artifacts/oci/cmsify-admin.oci.tar", "dotnet run --project src/Cmsify.Admin/Cmsify.Admin.csproj")), /candidate accessibility.*exact.*Admin OCI archive|candidate accessibility.*must not rebuild/i));
+test("rejects source-built release accessibility", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace(/node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-admin\.oci\.tar[^\n]*/, "dotnet run --project src/Cmsify.Admin/Cmsify.Admin.csproj")), /candidate accessibility.*Admin.*archive|candidate accessibility.*must not rebuild/i));
 test("rejects an omitted clean candidate package", () => expectInvalid((root) => mutateReleaseJob(root, "dotnet-consumer", (job) => job.replace('            <package pattern="SyntaxCircus.Cmsify.Contracts" />\n', "")), /clean \.NET consumer.*all three.*local source/i));
 test("rejects an unsigned promoted destination", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace(/\n\s*cosign sign --yes "\$API_SUBJECT"/, "")), /Cosign.*sign.*verify.*digest/i));
 test("rejects certification that skips artifact smoke", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("artifact-smoke, ", "")), /certify.*depend.*artifact-smoke/i));
@@ -192,6 +194,13 @@ test("rejects an npm lockfile without the source private marker", () => expectIn
   writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`);
 }, /package-lock.*private/i));
 test("rejects an unpinned release action", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@v4")), /pinned/i));
+test("rejects a mutable OCI loader helper image", () => expectInvalid((root) => {
+  const path = resolve(root, "scripts/release/load-oci-candidate.mjs");
+  writeFileSync(path, readFileSync(path, "utf8").replace(
+    /quay\.io\/skopeo\/stable:v1\.22\.2@sha256:[0-9a-f]{64}/,
+    "quay.io/skopeo/stable:v1.22.2",
+  ));
+}, /OCI loader.*Skopeo.*immutable|versioned.*digest/i));
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(
@@ -228,6 +237,26 @@ test("rejects rehearsal without a preceding deterministic fixture check", () => 
 
 test("rejects a release rehearsal that rebuilds the candidate", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("          (cd artifacts && sha256sum --check SHA256SUMS)", "          docker build --tag replacement .\n          (cd artifacts && sha256sum --check SHA256SUMS)")), /release upgrade.*must not rebuild/i));
 
+test("rejects native docker load consumption of an OCI-layout candidate", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace(
+  '          node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar --manifest artifacts/release-manifest.json --kind api --version "$VERSION"',
+  "          docker load --input artifacts/oci/cmsify-api.oci.tar",
+)), /artifact smoke.*OCI loader|native docker load/i));
+
+test("rejects artifact smoke without both exact loader invocations", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace(
+  /\n\s*node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-admin\.oci\.tar[^\n]*/,
+  "",
+)), /artifact smoke.*both exact.*OCI/i));
+
+test("rejects candidate accessibility with the wrong loader kind", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace(
+  "--kind admin --version",
+  "--kind api --version",
+)), /candidate accessibility.*(?:Admin.*OCI loader|OCI loader.*Admin)/i));
+
+test("rejects release upgrade without the descriptor-bound manifest argument", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(
+  " --manifest artifacts/release-manifest.json",
+  "",
+)), /release upgrade.*OCI loader.*manifest/i));
+
 test("rejects certification that does not depend on upgrade-rollback", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace(", upgrade-rollback]", "]")), /certify.*depend.*upgrade-rollback/i));
 
 test("rejects a release rehearsal without failure diagnostics upload", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("path: artifacts/upgrade-tests/**", "path: artifacts/not-upgrade-tests/**")), /release upgrade.*diagnostics.*failure/i));
@@ -244,11 +273,10 @@ test("rejects promote job bypass conditions", () => expectInvalid((root) => muta
 test("rejects promotion step error continuation", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace("      - name: Copy certified OCI descriptors and compare remote digests\n        shell: bash", "      - name: Copy certified OCI descriptors and compare remote digests\n        continue-on-error: true\n        shell: bash")), /promotion.*continue-on-error.*fail closed/i));
 test("rejects promotion step bypass conditions", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace("      - name: Copy certified OCI descriptors and compare remote digests\n        shell: bash", "      - name: Copy certified OCI descriptors and compare remote digests\n        if: always()\n        shell: bash")), /promotion.*step condition.*success.*certify/i));
 
-test("rejects a release gate that does not load the exact built OCI archive", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => {
-  const marker = "docker load --input artifacts/oci/cmsify-api.oci.tar";
-  const index = workflow.lastIndexOf(marker);
-  return `${workflow.slice(0, index)}docker pull syntaxcircus/cmsify-api:$VERSION${workflow.slice(index + marker.length)}`;
-}), /release upgrade.*exact.*OCI archive/i));
+test("rejects a release gate that does not import the exact built OCI archive", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(
+  /node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-api\.oci\.tar[^\n]*/,
+  "docker pull docker.io/syntaxcircus/cmsify-api:$VERSION",
+)), /release upgrade.*exact.*API archive|release upgrade.*OCI loader/i));
 
 test("rejects a release gate without moving-baseline verification", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node eng\/upgrade-tests\/cli\.mjs verify-release-baseline[^\n]*/, "")), /release upgrade.*moving baseline/i));
 
@@ -257,13 +285,13 @@ test("rejects a release gate that omits the exact historical API pull", () => ex
 test("rejects a release gate that omits the exact PostgreSQL pull", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(/\n\s*docker pull --platform linux\/amd64 "\$POSTGRES_IMAGE"/, "")), /release upgrade.*pull.*PostgreSQL/i));
 test("rejects a release gate that omits the exact MinIO pull", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(/\n\s*docker pull --platform linux\/amd64 "\$MINIO_IMAGE"/, "")), /release upgrade.*pull.*MinIO/i));
 test("rejects prerequisite pulls without an explicit linux/amd64 platform", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace('docker pull --platform linux/amd64 "$POSTGRES_IMAGE"', 'docker pull "$POSTGRES_IMAGE"')), /release upgrade.*pull.*linux\/amd64/i));
-test("rejects loading the candidate archive before all prerequisite pulls", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(
-  '          docker pull --platform linux/amd64 "$MINIO_IMAGE"\n          docker load --input artifacts/oci/cmsify-api.oci.tar',
- '          docker load --input artifacts/oci/cmsify-api.oci.tar\n          docker pull --platform linux/amd64 "$MINIO_IMAGE"',
+test("rejects importing the candidate archive before all prerequisite pulls", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(
+  '          docker pull --platform linux/amd64 "$MINIO_IMAGE"\n          node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar --manifest artifacts/release-manifest.json --kind api --version "$VERSION"',
+  '          node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar --manifest artifacts/release-manifest.json --kind api --version "$VERSION"\n          docker pull --platform linux/amd64 "$MINIO_IMAGE"',
 )), /release upgrade.*pull.*archive/i));
 
 test("rejects release rehearsal candidate-variable drift", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace('--candidate-image "$CANDIDATE_IMAGE"', '--candidate-image "syntaxcircus/cmsify-api:latest"')), /release upgrade.*exact loaded candidate.*CANDIDATE_IMAGE/i));
-test("rejects a pull between exact archive load and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("          docker load --input artifacts/oci/cmsify-api.oci.tar", "          docker load --input artifacts/oci/cmsify-api.oci.tar\n          docker image pull \"$CANDIDATE_IMAGE\"")), /release upgrade.*pull.*between.*load.*rehearsal/i));
+test("rejects a pull between exact archive import and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace(/(\s*node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-api\.oci\.tar[^\n]*)/, '$1\n          docker image pull "$CANDIDATE_IMAGE"')), /release upgrade.*pull.*between.*load.*rehearsal/i));
 test("rejects a re-tag between exact archive load and rehearsal", () => expectInvalid((root) => mutateReleaseJob(root, "upgrade-rollback", (job) => job.replace("          node eng/upgrade-tests/cli.mjs rehearse", "          docker image tag syntaxcircus/cmsify-api:other \"$CANDIDATE_IMAGE\"\n          node eng/upgrade-tests/cli.mjs rehearse")), /release upgrade.*re-tag.*between.*load.*rehearsal/i));
 
 test("rejects combined ORAS boolean and path flags", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api", "oras manifest fetch --descriptor --oci-layout --oci-layout-path artifacts/oci/api")), /ORAS.*combined.*--oci-layout/i));
@@ -281,11 +309,11 @@ test("rejects OCI layouts whose platform descriptor can be obscured by inline Bu
 test("rejects OCI output without the canonical Docker Hub tag and containerd annotations", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('--annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-api:$VERSION" ', "")), /OCI candidate.*canonical Docker Hub/i));
 test("rejects SBOM generation without stable identity finalization", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(/\n\s*node scripts\/release\/finalize-spdx\.mjs[^\n]*/, "")), /four SPDX[\s\S]*stable[\s\S]*identit/i));
 test("rejects artifact smoke without candidate-root checksum verification", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          (cd artifacts && sha256sum --check SHA256SUMS)\n", "")), /artifact smoke.*checksums/i));
-test("rejects artifact smoke that omits the exact Admin archive", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          docker load --input artifacts/oci/cmsify-admin.oci.tar\n", "")), /artifact smoke.*load both exact OCI archives/i));
+test("rejects artifact smoke that omits the exact Admin archive", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace(/\s*node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-admin\.oci\.tar[^\n]*\n/, "\n")), /artifact smoke.*both exact.*OCI/i));
 test("rejects artifact smoke that duplicates the old shell instead of Task 4", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          node eng/release-smoke/cli.mjs certify", "          docker run syntaxcircus/cmsify-api:$VERSION\n          node eng/release-smoke/cli.mjs certify")), /artifact smoke.*Task 4|must not rebuild or pull/i));
-test("rejects artifact smoke replacement-image pulls", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("          docker load --input artifacts/oci/cmsify-api.oci.tar", "          docker pull syntaxcircus/cmsify-api:$VERSION\n          docker load --input artifacts/oci/cmsify-api.oci.tar")), /artifact smoke.*must not rebuild or pull/i));
+test("rejects artifact smoke replacement-image pulls", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace(/(\s*node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-api\.oci\.tar[^\n]*)/, '          docker pull docker.io/syntaxcircus/cmsify-api:$VERSION\n$1')), /artifact smoke.*must not rebuild or pull/i));
 test("rejects artifact smoke error continuation", () => expectInvalid((root) => mutateReleaseJob(root, "artifact-smoke", (job) => job.replace("    runs-on: ubuntu-latest", "    runs-on: ubuntu-latest\n    continue-on-error: true")), /artifact smoke.*fail closed/i));
-test("rejects candidate accessibility replacement-image pulls", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace("          docker load --input artifacts/oci/cmsify-admin.oci.tar", "          docker pull syntaxcircus/cmsify-admin:$VERSION\n          docker load --input artifacts/oci/cmsify-admin.oci.tar")), /candidate accessibility.*must not rebuild or pull/i));
+test("rejects candidate accessibility replacement-image pulls", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace(/(\s*node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-admin\.oci\.tar[^\n]*)/, '          docker pull docker.io/syntaxcircus/cmsify-admin:$VERSION\n$1')), /candidate accessibility.*must not rebuild or pull/i));
 test("rejects candidate accessibility without pull-never", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace("docker run -d --pull=never", "docker run -d")), /candidate accessibility.*without pulling/i));
 test("rejects candidate accessibility error continuation", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace("    runs-on: ubuntu-latest", "    runs-on: ubuntu-latest\n    continue-on-error: true")), /candidate accessibility.*fail closed/i));
 test("rejects provenance that does not attest SHA256SUMS subjects", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("subject-checksums: artifacts/SHA256SUMS", "subject-path: artifacts/release-manifest.json")), /attest.*exact checked candidate subjects/i));

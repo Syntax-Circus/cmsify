@@ -25,6 +25,18 @@ node eng/upgrade-tests/cli.mjs verify-release-baseline --fixture tests/upgrade/f
 
 Confirm the tag resolves to the recorded source SHA, every lock resolves as documented, and the candidate workflow follows `resolve` → `build` → parallel `artifact-smoke`, `candidate-accessibility`, `dotnet-consumer`, `node-consumer`, and `upgrade-rollback` → `certify` → `promote`. Preserve the generated release manifest, `SHA256SUMS`, SPDX files, accessibility output, upgrade diagnostics, package content hashes, and each immutable digest as evidence.
 
+Buildx produces OCI-layout tarballs, not Docker-save archives. Certification jobs must import those layouts with the repository loader after checking `SHA256SUMS`; direct `docker load` is unsupported for this artifact format:
+
+```powershell
+node scripts/release/load-oci-candidate.mjs load `
+  --archive artifacts/oci/cmsify-api.oci.tar `
+  --manifest artifacts/release-manifest.json `
+  --kind api `
+  --version $version
+```
+
+The loader validates regular non-link archive and manifest paths, the manifest kind/ref/version/digest, and the selected OCI index descriptor before Docker access. It uses the versioned digest-pinned Registry 2.8.3 and Skopeo 1.22.2 helper images, an isolated run-owned network and loopback registry, and a read-only archive mount. It never mounts the Docker socket into Skopeo, rebuilds the candidate, or pulls the candidate from an external registry. After the loopback pull it requires the exact certified RepoDigest before exposing the canonical candidate tag, then removes only its intermediate tag, registry container, and network. Every failure path performs the same bounded run-owned cleanup.
+
 Abort before promotion if any command fails, a source SHA/tag/digest differs, a required protected approval is absent, a backup manifest is incomplete, public restore remains unproved, or any candidate would be rebuilt. Do not rebuild a candidate to repair evidence and do not publish or promote without the required approval; restart the authorized process from a newly recorded candidate instead.
 
 ## Promote only certified bytes

@@ -102,7 +102,7 @@ node eng/upgrade-tests/cli.mjs rehearse \
   --candidate-source-sha "${source_sha}"
 ```
 
-The preflight inspects the candidate tag once, then binds the run to its immutable image ID. It requires `linux/amd64`, the exact OCI version and revision labels, and the exact build informational version. A later retag cannot change the image already selected for that run.
+The preflight inspects the candidate tag once, then binds the run to its immutable image ID. It requires `linux/amd64`, the exact OCI version and revision labels, and the exact build informational version. A later retag cannot change the image already selected for that run. In the release workflow, the already-built OCI layout is exposed under that canonical tag only by `scripts/release/load-oci-candidate.mjs`, which validates the release manifest and archive descriptor, copies through a run-owned isolated registry with digest-pinned Skopeo, verifies the loopback RepoDigest, and cleans its intermediates. The release rehearsal never rebuilds or externally pulls the candidate.
 
 For the release-style repeatability proof, the opt-in integration test runs the same rehearsal twice with separately generated run IDs:
 

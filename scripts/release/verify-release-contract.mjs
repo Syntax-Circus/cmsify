@@ -330,6 +330,25 @@ const supportPolicy = file("SUPPORT.md");
 const codeOwners = file(".github/CODEOWNERS");
 const releaseRunbook = file("docs/release-runbook.md");
 const rollbackRunbook = file("docs/rollback-runbook.md");
+const ociLoaderPath = "scripts/release/load-oci-candidate.mjs";
+const ociLoaderSource = file(ociLoaderPath);
+let ociLoaderContract;
+if (ociLoaderSource) {
+  try {
+    ociLoaderContract = JSON.parse(execFileSync(process.execPath, [resolve(repositoryRoot, ociLoaderPath), "--describe"], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 10_000,
+      maxBuffer: 64 * 1024,
+    }));
+  } catch {
+    errors.push("OCI loader must execute its bounded --describe contract without Docker access.");
+  }
+}
+expect(ociLoaderContract?.schema === "cmsify.oci-loader.v1", "OCI loader must expose schema cmsify.oci-loader.v1.");
+expect(ociLoaderContract?.registryImage === "docker.io/library/registry:2.8.3@sha256:46faa9a1ae6813194b53921a370f2f4f8c5e1aae228a89bceafef5847a6a3278", "OCI loader Registry helper must use the approved immutable versioned tag and linux/amd64 digest.");
+expect(ociLoaderContract?.skopeoImage === "quay.io/skopeo/stable:v1.22.2@sha256:f7cfa282082cbfc25b754905225985584d1fbc410fef99e1b498c9b64087b755", "OCI loader Skopeo helper must use the approved immutable versioned tag and linux/amd64 digest.");
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
 expect(/\bpush:\s*\n\s+tags:/m.test(workflow) && !/\bbranches:/m.test(workflow), "Release workflow must be tag-only; branch builds never publish or tag.");
 expect(/node scripts\/release\/validate-release-tag\.mjs\s+"?\$\{\{\s*github\.ref_name\s*\}\}"?/i.test(workflow) || /validate-release-tag\.mjs/i.test(workflow), "Release workflow must validate the vX.Y.Z or vX.Y.Z-prerelease tag.");
@@ -472,6 +491,29 @@ function jobBody(name) {
   return nextJob === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + nextJob);
 }
 
+function loaderInvocations(job) {
+  return workflowRunCommands(job)
+    .flatMap((command) => shellCommandSegments(command))
+    .map((command) => command.map((token) => token.value))
+    .filter((command) => command[0] === "node" && command[1] === ociLoaderPath);
+}
+
+function exactLoaderInvocation(kind) {
+  return [
+    "node", ociLoaderPath, "load",
+    "--archive", `artifacts/oci/cmsify-${kind}.oci.tar`,
+    "--manifest", "artifacts/release-manifest.json",
+    "--kind", kind,
+    "--version", "$VERSION",
+  ];
+}
+
+function hasExactLoaderInvocation(job, kind) {
+  const expected = exactLoaderInvocation(kind);
+  return loaderInvocations(job).filter((invocation) => invocation.length === expected.length
+    && invocation.every((value, index) => value === expected[index])).length === 1;
+}
+
 function normalizedCondition(value) {
   return value.trim()
     .replace(/^(["'])|(["'])$/g, "")
@@ -500,10 +542,11 @@ const artifactSmoke = jobBody("artifact-smoke");
 expect(/needs:\s*\[resolve, build\]/.test(artifactSmoke), "Artifact smoke must consume resolve and the single build candidate.");
 expect(/actions\/download-artifact@[0-9a-f]{40}[\s\S]*name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/s.test(artifactSmoke), "Artifact smoke must download the single exact build candidate artifact.");
 const artifactChecksum = artifactSmoke.indexOf("(cd artifacts && sha256sum --check SHA256SUMS)");
-const artifactApiLoad = artifactSmoke.indexOf("docker load --input artifacts/oci/cmsify-api.oci.tar");
-const artifactAdminLoad = artifactSmoke.indexOf("docker load --input artifacts/oci/cmsify-admin.oci.tar");
+const artifactApiLoad = artifactSmoke.indexOf("node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar");
+const artifactAdminLoad = artifactSmoke.indexOf("node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-admin.oci.tar");
 const artifactCli = artifactSmoke.indexOf("node eng/release-smoke/cli.mjs certify");
-expect(artifactChecksum >= 0 && artifactApiLoad > artifactChecksum && artifactAdminLoad > artifactApiLoad && artifactCli > artifactAdminLoad, "Artifact smoke must verify candidate-root checksums, load both exact OCI archives, then invoke the Task 4 CLI.");
+expect(loaderInvocations(artifactSmoke).length === 2 && hasExactLoaderInvocation(artifactSmoke, "api") && hasExactLoaderInvocation(artifactSmoke, "admin") && !/\bdocker (?:image )?load\b/i.test(artifactSmoke), "Artifact smoke must use the repository OCI loader for both exact descriptor-bound OCI archives and must not use native docker load.");
+expect(artifactChecksum >= 0 && artifactApiLoad > artifactChecksum && artifactAdminLoad > artifactApiLoad && artifactCli > artifactAdminLoad, "Artifact smoke must verify candidate-root checksums, import both exact OCI archives, then invoke the Task 4 CLI.");
 expect(/cli\.mjs certify[^\n]*--api-image "docker\.io\/syntaxcircus\/cmsify-api:\$VERSION"[^\n]*--admin-image "docker\.io\/syntaxcircus\/cmsify-admin:\$VERSION"[^\n]*--version "\$VERSION"[^\n]*--source-sha "\$SOURCE_SHA"[^\n]*--output "\$RUNNER_TEMP\/cmsify-release-smoke"/.test(artifactSmoke), "Artifact smoke must pass canonical exact loaded image, version, source, and run-owned output identities to Task 4.");
 expect(!/\b(docker (?:image )?pull|docker run|docker buildx build|docker build|dotnet (?:build|pack|publish)|npm pack)\b/i.test(artifactSmoke), "Artifact smoke must not rebuild or pull a replacement candidate or duplicate Task 4 shell orchestration.");
 expect(jobConditionRequiresSuccess(artifactSmoke) && continueOnErrorIsDisabled(artifactSmoke), "Artifact smoke must fail closed after build.");
@@ -515,10 +558,11 @@ expect(/needs:\s*\[resolve, build\]/.test(candidateAccessibility), "Candidate ac
 expect(/actions\/download-artifact@[0-9a-f]{40}[\s\S]*name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/s.test(candidateAccessibility), "Candidate accessibility must download the single exact build candidate artifact.");
 expect(/npm ci --prefix eng\/accessibility/.test(candidateAccessibility), "Candidate accessibility must install the committed accessibility lock.");
 const accessibilityChecksum = candidateAccessibility.indexOf("(cd artifacts && sha256sum --check SHA256SUMS)");
-const accessibilityLoad = candidateAccessibility.indexOf("docker load --input artifacts/oci/cmsify-admin.oci.tar");
+const accessibilityLoad = candidateAccessibility.indexOf("node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-admin.oci.tar");
 const accessibilityRun = candidateAccessibility.indexOf("docker run -d --pull=never --name cmsify-admin-accessibility");
 const accessibilityScan = candidateAccessibility.indexOf("node eng/accessibility/run.mjs");
-expect(accessibilityChecksum >= 0 && accessibilityLoad > accessibilityChecksum && accessibilityRun > accessibilityLoad && accessibilityScan > accessibilityRun, "Candidate accessibility must checksum and load the exact Admin OCI archive before scanning it.");
+expect(loaderInvocations(candidateAccessibility).length === 1 && hasExactLoaderInvocation(candidateAccessibility, "admin") && !/\bdocker (?:image )?load\b/i.test(candidateAccessibility), "Candidate accessibility must use the repository OCI loader for the exact descriptor-bound Admin archive and must not use native docker load.");
+expect(accessibilityChecksum >= 0 && accessibilityLoad > accessibilityChecksum && accessibilityRun > accessibilityLoad && accessibilityScan > accessibilityRun, "Candidate accessibility must checksum and import the exact Admin OCI archive before scanning it.");
 expect(/docker run[^\n]*--pull=never[^\n]*"docker\.io\/syntaxcircus\/cmsify-admin:\$VERSION"/.test(candidateAccessibility) && /--url http:\/\/127\.0\.0\.1:18081\/login/.test(candidateAccessibility), "Candidate accessibility must scan /login from the canonical exact loaded versioned Admin image without pulling.");
 expect(!/\b(dotnet (?:run|build|publish)|docker (?:image )?pull|docker buildx build|docker build|npm pack)\b/i.test(candidateAccessibility), "Candidate accessibility must not rebuild or pull a replacement Admin candidate.");
 expect(jobConditionRequiresSuccess(candidateAccessibility) && continueOnErrorIsDisabled(candidateAccessibility), "Candidate accessibility must fail closed after build.");
@@ -548,9 +592,9 @@ expect(jobConditionRequiresSuccess(nodeConsumer) && continueOnErrorIsDisabled(no
 const releaseUpgrade = jobBody("upgrade-rollback");
 expect(/needs:\s*\[resolve, build\]/.test(releaseUpgrade), "Release upgrade job must consume resolve and build outputs.");
 expect(/actions\/download-artifact@[0-9a-f]{40}[\s\S]*name:\s*release-candidate-\$\{\{ needs\.resolve\.outputs\.version \}\}-\$\{\{ needs\.resolve\.outputs\.source_sha \}\}[\s\S]*path:\s*artifacts/s.test(releaseUpgrade), "Release upgrade job must download the single exact build candidate artifact.");
-expect(/docker load --input artifacts\/oci\/cmsify-api\.oci\.tar/.test(releaseUpgrade), "Release upgrade job must load the exact built OCI archive.");
+expect(loaderInvocations(releaseUpgrade).length === 1 && hasExactLoaderInvocation(releaseUpgrade, "api") && !/\bdocker (?:image )?load\b/i.test(releaseUpgrade), "Release upgrade job must use the repository OCI loader with the exact API archive, descriptor-bound manifest, kind, and version; native docker load is forbidden.");
 expect(/verify-release-baseline --fixture tests\/upgrade\/fixtures\/v0\.1\.3 --candidate-version "\$VERSION" --github-token-env GITHUB_TOKEN/.test(releaseUpgrade), "Release upgrade job must enforce the moving baseline before rehearsal.");
-expect(/CANDIDATE_IMAGE:\s*syntaxcircus\/cmsify-api:\$\{\{ needs\.resolve\.outputs\.version \}\}/.test(releaseUpgrade), "Release upgrade job must bind CANDIDATE_IMAGE to the exact versioned image loaded from the OCI archive.");
+expect(/CANDIDATE_IMAGE:\s*docker\.io\/syntaxcircus\/cmsify-api:\$\{\{ needs\.resolve\.outputs\.version \}\}/.test(releaseUpgrade), "Release upgrade job must bind CANDIDATE_IMAGE to the canonical exact versioned image imported from the OCI archive.");
 expect(/cli\.mjs rehearse[^\n]*--candidate-image "\$CANDIDATE_IMAGE"[^\n]*--candidate-version "\$VERSION"[^\n]*--candidate-source-sha "\$SOURCE_SHA"/.test(releaseUpgrade), "Release upgrade rehearsal must use the exact loaded candidate through $CANDIDATE_IMAGE.");
 expect(/FIXTURE_MANIFEST="tests\/upgrade\/fixtures\/v0\.1\.3\/manifest\.json"/.test(releaseUpgrade), "Release upgrade prerequisite images must be derived from the verified fixture manifest.");
 for (const [variable, manifestPath, description] of [
@@ -563,14 +607,14 @@ for (const [variable, manifestPath, description] of [
   const exactPull = `docker pull --platform linux/amd64 "$${variable}"`;
   expect(releaseUpgrade.split(exactPull).length === 2, `Release upgrade must pull the exact ${description} image once with explicit linux/amd64.`);
 }
-const releaseLoad = releaseUpgrade.indexOf("docker load --input artifacts/oci/cmsify-api.oci.tar");
+const releaseLoad = releaseUpgrade.indexOf("node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar");
 const releaseBaseline = releaseUpgrade.indexOf("verify-release-baseline");
 const releaseFixture = releaseUpgrade.indexOf("verify-fixture");
 const releaseBaselinePull = releaseUpgrade.indexOf('docker pull --platform linux/amd64 "$BASELINE_API_IMAGE"');
 const releasePostgresPull = releaseUpgrade.indexOf('docker pull --platform linux/amd64 "$POSTGRES_IMAGE"');
 const releaseMinioPull = releaseUpgrade.indexOf('docker pull --platform linux/amd64 "$MINIO_IMAGE"');
 const releaseRehearsal = releaseUpgrade.indexOf("cli.mjs rehearse");
-expect(releaseBaseline >= 0 && releaseFixture > releaseBaseline && releaseBaselinePull > releaseFixture && releasePostgresPull > releaseBaselinePull && releaseMinioPull > releasePostgresPull && releaseLoad > releaseMinioPull && releaseRehearsal > releaseLoad, "Release upgrade job must verify the moving baseline and fixture, pull every exact linux/amd64 prerequisite, load the candidate archive, then rehearse that image.");
+expect(releaseBaseline >= 0 && releaseFixture > releaseBaseline && releaseBaselinePull > releaseFixture && releasePostgresPull > releaseBaselinePull && releaseMinioPull > releasePostgresPull && releaseLoad > releaseMinioPull && releaseRehearsal > releaseLoad, "Release upgrade job must verify the moving baseline and fixture, pull every exact linux/amd64 prerequisite, import the candidate archive, then rehearse that image.");
 const loadedCandidateWindow = releaseLoad >= 0 && releaseRehearsal > releaseLoad ? releaseUpgrade.slice(releaseLoad, releaseRehearsal) : "";
 expect(!/^\s*docker\s+(?:image\s+)?pull\b/im.test(loadedCandidateWindow), "Release upgrade job must not pull between exact archive load and rehearsal.");
 expect(!/^\s*docker\s+(?:image\s+)?tag\b/im.test(loadedCandidateWindow), "Release upgrade job must not re-tag between exact archive load and rehearsal.");

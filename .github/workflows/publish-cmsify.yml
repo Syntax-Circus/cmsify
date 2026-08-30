@@ -112,8 +112,8 @@ jobs:
         shell: bash
         run: |
           (cd artifacts && sha256sum --check SHA256SUMS)
-          docker load --input artifacts/oci/cmsify-api.oci.tar
-          docker load --input artifacts/oci/cmsify-admin.oci.tar
+          node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar --manifest artifacts/release-manifest.json --kind api --version "$VERSION"
+          node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-admin.oci.tar --manifest artifacts/release-manifest.json --kind admin --version "$VERSION"
           node eng/release-smoke/cli.mjs certify --api-image "docker.io/syntaxcircus/cmsify-api:$VERSION" --admin-image "docker.io/syntaxcircus/cmsify-admin:$VERSION" --version "$VERSION" --source-sha "$SOURCE_SHA" --output "$RUNNER_TEMP/cmsify-release-smoke"
       - name: Upload bounded release-smoke evidence
         if: always()
@@ -144,7 +144,7 @@ jobs:
         shell: bash
         run: |
           (cd artifacts && sha256sum --check SHA256SUMS)
-          docker load --input artifacts/oci/cmsify-admin.oci.tar
+          node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-admin.oci.tar --manifest artifacts/release-manifest.json --kind admin --version "$VERSION"
           cleanup() {
             status=$?
             trap - EXIT
@@ -252,7 +252,7 @@ jobs:
     env:
       VERSION: ${{ needs.resolve.outputs.version }}
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
-      CANDIDATE_IMAGE: syntaxcircus/cmsify-api:${{ needs.resolve.outputs.version }}
+      CANDIDATE_IMAGE: docker.io/syntaxcircus/cmsify-api:${{ needs.resolve.outputs.version }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -273,7 +273,7 @@ jobs:
           docker pull --platform linux/amd64 "$BASELINE_API_IMAGE"
           docker pull --platform linux/amd64 "$POSTGRES_IMAGE"
           docker pull --platform linux/amd64 "$MINIO_IMAGE"
-          docker load --input artifacts/oci/cmsify-api.oci.tar
+          node scripts/release/load-oci-candidate.mjs load --archive artifacts/oci/cmsify-api.oci.tar --manifest artifacts/release-manifest.json --kind api --version "$VERSION"
           node eng/upgrade-tests/cli.mjs rehearse --fixture tests/upgrade/fixtures/v0.1.3 --candidate-image "$CANDIDATE_IMAGE" --candidate-version "$VERSION" --candidate-source-sha "$SOURCE_SHA"
       - name: Upload sanitized upgrade diagnostics on failure
         if: failure()

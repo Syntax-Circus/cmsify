@@ -8,7 +8,7 @@ node --test tests/release-smoke/*.test.mjs
 
 The tests inject process, Docker, HTTP, clock, retry, cleanup-registration, and evidence-writing boundaries. They do not require Docker. They enforce the exact certification scenario order, validation before resource creation, bounded retries and logs, unchanged candidate image identity across restart, backup before destructive state loss, restoration into fresh volumes, cleanup at every failure boundary, and credential-free evidence.
 
-An actual rehearsal requires both exact candidate images to be loaded first. The harness never builds or pulls either candidate:
+An actual rehearsal requires both exact candidate images to be imported first. Release OCI layouts are imported through `scripts/release/load-oci-candidate.mjs` with their descriptor-bound `release-manifest.json`; they must not be passed to native `docker load`. The loader exposes the canonical tags only after a digest-preserving isolated-registry transfer and exact RepoDigest verification. The harness itself never builds or pulls either candidate:
 
 ```powershell
 node eng/release-smoke/cli.mjs certify `
