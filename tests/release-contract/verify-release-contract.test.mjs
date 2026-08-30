@@ -42,6 +42,8 @@ const contractFiles = [
   "docs/release-runbook.md",
   "docs/rollback-runbook.md",
   "docs/README.md",
+  "tests/upgrade/README.md",
+  "tests/release-smoke/README.md",
   workflowPath,
 ];
 
@@ -106,6 +108,14 @@ function mutateAccessibilityWorkflow(root, mutate) {
 function mutateOpenApiWorkflow(root, mutate) {
   const path = resolve(root, ".github/workflows/openapi-contract.yml");
   writeFileSync(path, mutate(readFileSync(path, "utf8")));
+}
+
+function mutateFile(root, relativePath, mutate) {
+  const path = resolve(root, relativePath);
+  const source = readFileSync(path, "utf8");
+  const mutated = mutate(source);
+  assert.notEqual(mutated, source, `${relativePath} mutation must change the fixture`);
+  writeFileSync(path, mutated);
 }
 
 function mutateAccessibilityEventPaths(root, event, mutate) {
@@ -201,13 +211,26 @@ test("rejects a mutable OCI loader helper image", () => expectInvalid((root) => 
     "quay.io/skopeo/stable:v1.22.2",
   ));
 }, /OCI loader.*Skopeo.*immutable|versioned.*digest/i));
-test("rejects OCI loader topology contract drift", () => expectInvalid((root) => {
-  const path = resolve(root, "scripts/release/load-oci-candidate.mjs");
-  writeFileSync(path, readFileSync(path, "utf8").replace(
-    'registry: "relay+importer"',
-    'registry: "importer"',
-  ));
-}, /OCI loader.*Registry.*relay.*importer/i));
+for (const [name, mutate, diagnostic] of [
+  ["Skopeo network access", (source) => source.replace('"--network", "none"', '"--network", importerNetworkName'), /Skopeo.*without network access/i],
+  ["registry relay", (source) => source.replace('"image", "load"', '"image", "pull"'), /Docker.*load.*scratch Docker archive|registry relay/i],
+  ["Docker socket", (source) => source.replace('"--network", "none"', '"--mount", "type=bind,source=\/var\/run\/docker.sock,target=\/var\/run\/docker.sock"'), /Docker socket/i],
+  ["direct OCI load", (source) => source.replace('"--input", dockerArchive', '"--input", input.archivePath'), /Docker.*load.*scratch Docker archive/i],
+  ["missing DiffID proof", (source) => source.replace('loaded.RootFS?.Layers', 'input.diffIds'), /DiffID/i],
+]) {
+  test(`rejects OCI loader ${name}`, () => expectInvalid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", mutate), diagnostic));
+}
+test("rejects workflow upload of disposable OCI transport scratch", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "path: artifacts, if-no-files-found: error",
+  "path: ${{ runner.temp }}/cmsify-oci-loader-scratch/candidate.docker.tar, if-no-files-found: error",
+)), /transport scratch.*(?:upload|certif)/i));
+for (const [relativePath, claim] of [
+  ["docs/release-runbook.md", "The registry relay is the certified release image."],
+  ["tests/upgrade/README.md", "The rebuilt candidate image is certified for promotion."],
+  ["tests/release-smoke/README.md", "The registry relay is the certified release image."],
+]) {
+  test(`rejects certified transport substitution in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${claim}\n`), /runbook.*original OCI archive|transport scratch.*not.*certif/i));
+}
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");
   writeFileSync(path, readFileSync(path, "utf8").replace(

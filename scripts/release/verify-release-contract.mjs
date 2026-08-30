@@ -329,6 +329,8 @@ const securityPolicy = file("SECURITY.md");
 const supportPolicy = file("SUPPORT.md");
 const codeOwners = file(".github/CODEOWNERS");
 const releaseRunbook = file("docs/release-runbook.md");
+const upgradeRunbook = file("tests/upgrade/README.md");
+const releaseSmokeRunbook = file("tests/release-smoke/README.md");
 const rollbackRunbook = file("docs/rollback-runbook.md");
 const ociLoaderPath = "scripts/release/load-oci-candidate.mjs";
 const ociLoaderSource = file(ociLoaderPath);
@@ -347,13 +349,35 @@ if (ociLoaderSource) {
   }
 }
 expect(ociLoaderContract?.schema === "cmsify.oci-loader.v1", "OCI loader must expose schema cmsify.oci-loader.v1.");
-expect(ociLoaderContract?.registryImage === "docker.io/library/registry:2.8.3@sha256:46faa9a1ae6813194b53921a370f2f4f8c5e1aae228a89bceafef5847a6a3278", "OCI loader Registry helper must use the approved immutable versioned tag and linux/amd64 digest.");
 expect(ociLoaderContract?.skopeoImage === "quay.io/skopeo/stable:v1.22.2@sha256:f7cfa282082cbfc25b754905225985584d1fbc410fef99e1b498c9b64087b755", "OCI loader Skopeo helper must use the approved immutable versioned tag and linux/amd64 digest.");
-expect(ociLoaderContract?.topology?.importer === "internal", "OCI loader importer network must be internal.");
-expect(ociLoaderContract?.topology?.relay === "loopback-published", "OCI loader relay network must publish only through loopback.");
-expect(ociLoaderContract?.topology?.registry === "relay+importer", "OCI loader Registry must join the relay and importer networks.");
-expect(ociLoaderContract?.topology?.skopeo === "importer-only", "OCI loader Skopeo must join only the internal importer network.");
+expect(ociLoaderContract?.transport === "offline-docker-archive" && ociLoaderSource.includes('transport: "offline-docker-archive"'), "OCI loader must declare offline Docker-archive transport.");
+expect(ociLoaderSource.includes('"--network", "none"'), "Skopeo must run without network access.");
+expect(ociLoaderSource.includes("docker-archive:/scratch/candidate.docker.tar:"), "Skopeo must write only disposable Docker transport scratch.");
+expect(ociLoaderSource.includes('["image", "load", "--input", dockerArchive, "--platform", "linux/amd64"]'), "Docker must load the scratch Docker archive for linux/amd64.");
+expect(!/REGISTRY_IMAGE|registry-port|network-create|docker:\/\/.*registry/i.test(ociLoaderSource), "OCI loader must not use a registry relay.");
+expect(!/docker\.sock|docker_engine/i.test(ociLoaderSource), "OCI loader must not mount the Docker socket.");
+expect(!/\["image",\s*"pull",\s*"--input"|docker buildx?\b|dotnet (?:build|publish)\b/i.test(ociLoaderSource), "OCI loader must not rebuild or pull a candidate image.");
+expect(ociLoaderSource.includes("loaded.Id === input.configDigest"), "OCI loader must prove the loaded image ID from the OCI config digest.");
+expect(ociLoaderSource.includes("loaded.RootFS?.Layers") && ociLoaderSource.includes("value === input.diffIds[index]"), "OCI loader must prove ordered runtime DiffIDs from the OCI config.");
+expect(ociLoaderSource.includes('loaded.Os === "linux"') && ociLoaderSource.includes('loaded.Architecture === "amd64"'), "OCI loader must prove the loaded linux/amd64 platform.");
+expect(ociLoaderSource.includes("loaded.Config?.Labels?.[key] === expected"), "OCI loader must prove every required runtime label.");
+expect(ociLoaderSource.includes("loaded.RepoTags") && ociLoaderSource.includes("input.canonicalRef"), "OCI loader must prove the exact canonical runtime tag.");
+
+const offlineTransportRunbooks = [
+  ["release runbook", releaseRunbook],
+  ["upgrade runbook", upgradeRunbook],
+  ["release-smoke runbook", releaseSmokeRunbook],
+];
+for (const [name, contents] of offlineTransportRunbooks) {
+  expect(/original OCI archive[^.\n]*(?:certified|release artifact)/i.test(contents), `${name} must identify the original OCI archive as the certified release artifact.`);
+  expect(/pinned Skopeo[\s\S]{0,240}offline[^.\n]*run-owned Docker transport scratch/i.test(contents), `${name} must document pinned offline Skopeo conversion into run-owned Docker transport scratch.`);
+  expect(/Docker loads[^.\n]*transport scratch/i.test(contents), `${name} must document Docker loading only the transport scratch.`);
+  expect(/config digest[^.\n]*ordered DiffIDs[^.\n]*platform[^.\n]*labels[^.\n]*canonical tag/i.test(contents), `${name} must document the complete runtime identity proof.`);
+  expect(/scratch[^.\n]*(?:deleted|removed)[^.\n]*never (?:checksummed|added to SHA256SUMS)[^.\n]*uploaded[^.\n]*promoted/i.test(contents), `${name} must document deletion and exclusion of transport scratch from checksums, uploads, and promotion.`);
+  expect(!/(?:registry relay|rebuilt (?:candidate )?image)[^.\n]*(?:certif|promot)/i.test(contents), `${name} must keep the original OCI archive certified and transport scratch non-certifying.`);
+}
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
+expect(!/cmsify-oci-loader|candidate\.docker\.tar|docker-archive:\/scratch/i.test(workflow), "Disposable OCI transport scratch must never be certified or uploaded by the release workflow.");
 expect(/\bpush:\s*\n\s+tags:/m.test(workflow) && !/\bbranches:/m.test(workflow), "Release workflow must be tag-only; branch builds never publish or tag.");
 expect(/node scripts\/release\/validate-release-tag\.mjs\s+"?\$\{\{\s*github\.ref_name\s*\}\}"?/i.test(workflow) || /validate-release-tag\.mjs/i.test(workflow), "Release workflow must validate the vX.Y.Z or vX.Y.Z-prerelease tag.");
 expect(/validate-release-tag\.mjs[^\n]*--require-changelog/i.test(workflow), "Reviewed tag promotion must require an exact dated changelog entry.");
