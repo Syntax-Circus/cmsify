@@ -13,6 +13,10 @@ function document(path) {
   return readFileSync(fullPath, "utf8");
 }
 
+function governanceDocuments() {
+  return Object.fromEntries(["docs/api-compatibility.md", "SECURITY.md", "SUPPORT.md", ".github/CODEOWNERS", "docs/release-runbook.md", "docs/rollback-runbook.md"].map((path) => [path, document(path)]));
+}
+
 test("real governance validator ignores decoys outside the three OpenAPI jobs", () => {
   const workflow = document(".github/workflows/openapi-contract.yml");
   const decoy = `# HEAD_SHA="${"${{ github.event.pull_request.head.sha }}"}"\n${workflow}`
@@ -22,6 +26,14 @@ test("real governance validator ignores decoys outside the three OpenAPI jobs", 
   assert.equal(result.ok, false);
   assert.ok(result.errors.some((error) => /breaking_change_approval\.if/.test(error)));
   assert.ok(result.errors.some((error) => /contract-gate\.if/.test(error)));
+});
+
+test("real governance validator rejects commented, duplicate, and disabled critical structure", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  const commented = workflow.replace('HEAD_SHA="${{ github.event.pull_request.head.sha }}"', '# HEAD_SHA="${{ github.event.pull_request.head.sha }}"');
+  const duplicateStep = workflow.replace('      - name: Resolve exact comparison revisions', '      - name: Resolve exact comparison revisions\n        run: echo decoy\n      - name: Resolve exact comparison revisions');
+  const duplicateJob = `${workflow}\n  contract:\n    runs-on: ubuntu-latest\n`;
+  for (const candidate of [commented, duplicateStep, duplicateJob]) assert.equal(validateGovernanceContract({ workflow: candidate }).ok, false, "disabled or duplicate critical structure unexpectedly passed");
 });
 
 function requireClauses(path, clauses) {
@@ -88,13 +100,25 @@ test("governance clauses and hosted-state boundaries reject targeted contradicti
     ["docs/rollback-runbook.md", /Do not rebuild/i],
   ];
   for (const [path, clause] of clauses) {
-    const contents = document(path);
-    const mutated = contents.replace(clause, "removed-governance-clause");
-    assert.throws(() => assert.match(mutated, clause, `${path} is missing required governance policy`), /missing required governance policy/);
+    const documents = governanceDocuments();
+    documents[path] = documents[path].replace(clause, "removed-governance-clause");
+    assert.equal(validateGovernanceContract({ workflow: document(".github/workflows/openapi-contract.yml"), documents }).ok, false, `${path} mutation unexpectedly passed the real validator`);
   }
-  const releaseRunbook = document("docs/release-runbook.md");
-  const hostedOverclaim = releaseRunbook.replace("this file does not claim they are configured", "they are configured");
-  assert.throws(() => assert.doesNotMatch(hostedOverclaim, /unverified prerequisites\.[\s\S]*; they are configured/i), /expected to not match/);
+  const documents = governanceDocuments();
+  documents["docs/release-runbook.md"] = documents["docs/release-runbook.md"].replace("this file does not claim they are configured", "signing is active and publication is configured");
+  assert.equal(validateGovernanceContract({ workflow: document(".github/workflows/openapi-contract.yml"), documents }).ok, false, "hosted-state overclaim unexpectedly passed the real validator");
+});
+
+test("approval and gate invariants are independently fail-closed", () => {
+  const workflow = document(".github/workflows/openapi-contract.yml");
+  const mutations = [
+    (source) => source.replace("needs: contract\n    if: needs.contract.outputs.breaking == 'true'", "needs: build\n    if: needs.contract.outputs.breaking == 'true'"),
+    (source) => source.replace("if: needs.contract.outputs.breaking == 'true'", "if: always()"),
+    (source) => source.replace("if: always()\n    runs-on: ubuntu-latest\n    steps:\n      - name: Require a successful contract check", "if: success()\n    runs-on: ubuntu-latest\n    steps:\n      - name: Require a successful contract check"),
+    (source) => source.replace('if [[ "${{ needs.contract.result }}" != "success" ]]; then', "if false; then"),
+    (source) => source.replace('"${{ needs.breaking_change_approval.result }}" != "success"', '"${{ needs.breaking_change_approval.result }}" == "success"'),
+  ];
+  for (const mutate of mutations) assert.equal(validateGovernanceContract({ workflow: mutate(workflow) }).ok, false, "approval/gate mutation unexpectedly passed");
 });
 
 test("OpenAPI compatibility comparison is exact, scoped, pinned, and fail-closed", () => {
