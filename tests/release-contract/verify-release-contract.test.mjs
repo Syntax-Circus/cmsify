@@ -252,6 +252,22 @@ test("accepts fake execute calls inside loader strings and comments", () => expe
   "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
   '    const harmlessExecuteText = "execute([\\"network\\", \\"create\\", \\"relay\\"])";\n    // execute(["build", "--tag", input.canonicalRef, "."], "comment-only");\n    assert(harmlessExecuteText.length > 0, "Fixture text must remain non-empty.");\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);',
 ))));
+test("rejects an OCI loader execute call hidden in a template interpolation", () => expectInvalid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", (source) => source.replace(
+  "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
+  '    const hiddenPull = `candidate ${await execute(["image", "pull", input.canonicalRef], "hidden-template-pull")}`;\n    assert(hiddenPull.length > 0, "Fixture output must remain non-empty.");\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);',
+)), /OCI loader.*execute operations/i));
+test("rejects an optional-call OCI loader execute invocation", () => expectInvalid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", (source) => source.replace(
+  "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
+  '    await execute /* optional boundary */ ?. /* invocation */ (["network", "create", "relay"], "hidden-optional-network");\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);',
+)), /OCI loader.*execute operations/i));
+test("accepts fake execute calls in raw template text", () => expectValid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", (source) => source.replace(
+  "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
+  '    const harmlessTemplate = `execute(["network", "create", "relay"], "raw-template-only")`;\n    assert(harmlessTemplate.length > 0, "Fixture text must remain non-empty.");\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);',
+))));
+test("accepts fake execute calls in nested interpolation literals and comments", () => expectValid((root) => mutateFile(root, "scripts/release/load-oci-candidate.mjs", (source) => source.replace(
+  "    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);",
+  '    const harmlessNested = `fixture ${(() => { const text = "execute([\\"image\\", \\"pull\\", input.canonicalRef])"; /* execute(["network", "create", "relay"]) */ return `nested execute(["build", "."]) ${text}`; })()}`;\n    assert(harmlessNested.length > 0, "Fixture text must remain non-empty.");\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);',
+))));
 test("rejects workflow upload of disposable OCI transport scratch", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
   "path: artifacts, if-no-files-found: error",
   "path: ${{ runner.temp }}/cmsify-oci-loader-scratch/candidate.docker.tar, if-no-files-found: error",
@@ -276,6 +292,22 @@ test("accepts an approved upload with quoted uses and case-variant action identi
 test("rejects an unpinned action behind a quoted uses key", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
   "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
   '"uses": actions/checkout@v4 # v4.2.2',
+)), /action reference.*40-hex/i));
+test("rejects scratch upload behind a Unicode-escaped uses key", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace(
+  "    steps:\n",
+  '    steps:\n      - "u\\u0073es": "Actions/Upload-Artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4.6.2\n        with: { name: converted-candidate, path: ${{ runner.temp }}/renamed-transport.tar, if-no-files-found: error, retention-days: 14 }\n',
+)), /release workflow.*upload.*allowlist|transport scratch.*(?:upload|certif)/i));
+test("accepts an approved upload with a double-quoted action value", () => expectValid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "- uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
+  '- "uses": "Actions/Upload-Artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4.6.2',
+))));
+test("accepts an approved upload with single-quoted case-variant scalars", () => expectValid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "- uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
+  "- 'UsEs': 'Actions/Upload-Artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # v4.6.2",
+))));
+test("rejects a double-quoted mutable action value", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
+  "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
+  '"uses": "actions/checkout@v4" # v4.2.2',
 )), /action reference.*40-hex/i));
 for (const [relativePath, claim] of [
   ["docs/release-runbook.md", "The registry relay is the certified release image."],
@@ -304,6 +336,20 @@ for (const [relativePath, paragraph] of [
   ["tests/release-smoke/README.md", "Conversion output is non-certifying. Upload and promotion are prohibited."],
 ]) {
   test(`accepts split-sentence negative transport rule in ${relativePath}`, () => expectValid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`)));
+}
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "The temporary Docker archive is uploaded, not retained."],
+  ["tests/upgrade/README.md", "Transport scratch is certified, but never promoted."],
+]) {
+  test(`rejects action-scoped transport contradiction in ${relativePath}`, () => expectInvalid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`), /runbook.*exclusive.*temporary transport output/i));
+}
+for (const [relativePath, paragraph] of [
+  ["docs/release-runbook.md", "The temporary Docker archive is neither certified nor uploaded."],
+  ["tests/upgrade/README.md", "Transport scratch must not be certified, uploaded, or promoted."],
+  ["tests/release-smoke/README.md", "Conversion output cannot be certified or uploaded and is excluded from promotion."],
+  ["docs/release-runbook.md", "Temporary transport output is prohibited from certification and forbidden from promotion."],
+]) {
+  test(`accepts action-scoped negative transport rule in ${relativePath}`, () => expectValid((root) => mutateFile(root, relativePath, (source) => `${source.trimEnd()}\n\n${paragraph}\n`)));
 }
 test("rejects a one-character repository action-pin mutation with file evidence", () => expectInvalid((root) => {
   const path = resolve(root, ".github/workflows/dotnet-test.yml");

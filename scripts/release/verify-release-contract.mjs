@@ -120,10 +120,22 @@ function skipJavaScriptQuoted(source, start) {
   return source.length;
 }
 
-function executeArraySignatures(source) {
-  const signatures = [];
-  let previousIdentifier;
-  for (let index = 0; index < source.length;) {
+function scanJavaScriptTemplate(source, start, signatures) {
+  for (let index = start + 1; index < source.length;) {
+    if (source[index] === "\\") { index += 2; continue; }
+    if (source[index] === "`") return index + 1;
+    if (source[index] === "$" && source[index + 1] === "{") {
+      index = scanJavaScriptCode(source, index + 2, signatures, true);
+      continue;
+    }
+    index += 1;
+  }
+  return source.length;
+}
+
+function scanJavaScriptCode(source, start, signatures, stopAtClosingBrace = false) {
+  let braceDepth = 0;
+  for (let index = start; index < source.length;) {
     if (/\s/.test(source[index])) { index += 1; continue; }
     if (source.startsWith("//", index)) {
       const end = source.indexOf("\n", index + 2);
@@ -135,28 +147,45 @@ function executeArraySignatures(source) {
       index = end === -1 ? source.length : end + 2;
       continue;
     }
-    if (["'", '"', "`"].includes(source[index])) {
+    if (["'", '"'].includes(source[index])) {
       index = skipJavaScriptQuoted(source, index);
+      continue;
+    }
+    if (source[index] === "`") {
+      index = scanJavaScriptTemplate(source, index, signatures);
+      continue;
+    }
+    if (source[index] === "{") { braceDepth += 1; index += 1; continue; }
+    if (source[index] === "}") {
+      if (stopAtClosingBrace && braceDepth === 0) return index + 1;
+      braceDepth = Math.max(0, braceDepth - 1);
+      index += 1;
       continue;
     }
     if (/[A-Za-z_$]/.test(source[index])) {
       let end = index + 1;
       while (end < source.length && /[A-Za-z0-9_$]/.test(source[end])) end += 1;
       const identifier = source.slice(index, end);
-      if (identifier === "execute" && previousIdentifier !== "function") {
-        const openParenthesis = skipJavaScriptTrivia(source, end);
+      if (identifier === "execute") {
+        let openParenthesis = skipJavaScriptTrivia(source, end);
+        if (source.startsWith("?.", openParenthesis)) openParenthesis = skipJavaScriptTrivia(source, openParenthesis + 2);
         if (source[openParenthesis] === "(") {
           const start = skipJavaScriptTrivia(source, openParenthesis + 1);
           const array = source[start] === "[" ? readJavaScriptArray(source, start) : undefined;
           if (array) signatures.push(JSON.stringify(splitJavaScriptArray(array.source)));
         }
       }
-      previousIdentifier = identifier;
       index = end;
       continue;
     }
     index += 1;
   }
+  return source.length;
+}
+
+function executeArraySignatures(source) {
+  const signatures = [];
+  scanJavaScriptCode(source, 0, signatures);
   return signatures;
 }
 
@@ -310,8 +339,45 @@ function workflowRunCommands(contents) {
   return commands;
 }
 
+function decodeYamlScalar(source) {
+  const scalar = source.trim();
+  if (scalar.startsWith('"')) {
+    try { return JSON.parse(scalar); } catch { return undefined; }
+  }
+  if (scalar.startsWith("'")) {
+    if (!scalar.endsWith("'")) return undefined;
+    return scalar.slice(1, -1).replaceAll("''", "'");
+  }
+  return scalar;
+}
+
+function yamlScalarPrefix(source) {
+  const value = source.trimStart();
+  if (value[0] === '"') {
+    let escaped = false;
+    for (let index = 1; index < value.length; index += 1) {
+      if (escaped) escaped = false;
+      else if (value[index] === "\\") escaped = true;
+      else if (value[index] === '"') return value.slice(0, index + 1);
+    }
+    return value;
+  }
+  if (value[0] === "'") {
+    for (let index = 1; index < value.length; index += 1) {
+      if (value[index] !== "'") continue;
+      if (value[index + 1] === "'") { index += 1; continue; }
+      return value.slice(0, index + 1);
+    }
+    return value;
+  }
+  return /^[^\s#]+/.exec(value)?.[0];
+}
+
 function workflowActionReference(line) {
-  return /^\s*(?:-\s+)?(?:(?:"uses"|'uses')|uses)\s*:\s*([^\s#]+)/.exec(line)?.[1];
+  const mapping = /^\s*(?:-\s+)?((?:"(?:\\.|[^"\\])*"|'(?:''|[^'])*'|[^\s:#]+))\s*:\s*(.*)$/.exec(line);
+  if (!mapping || decodeYamlScalar(mapping[1])?.toLowerCase() !== "uses") return undefined;
+  const scalar = yamlScalarPrefix(mapping[2]);
+  return scalar === undefined ? undefined : decodeYamlScalar(scalar);
 }
 
 function workflowUploadArtifactSteps(contents) {
@@ -362,14 +428,32 @@ function workflowUploadArtifactSteps(contents) {
 
 function hasContradictoryTransportClaim(contents) {
   const transportSubject = /(?:temporary|transport|conversion)[^\n]{0,100}(?:archive|scratch|output)|(?:archive|scratch|output)[^\n]{0,100}(?:temporary|transport|conversion)/i;
-  const releaseAction = /\b(?:certif(?:y|ies|ied|ication|ying)|upload(?:s|ed|ing)?|promot(?:e|es|ed|ion|ing))\b/i;
-  const negativeRule = /\b(?:never|not|cannot|can't|must\s+not|may\s+not|shall\s+not|prohibited|forbidden|non-certifying|excluded(?:\s+from)?)\b/i;
+  const actionSource = "certif(?:y|ies|ied|ication|ying)|upload(?:s|ed|ing)?|promot(?:e|es|ed|ion|ing)";
+  const negatedListItemSource = `${actionSource}|checksum(?:s|med|ming)?`;
+  const releaseAction = new RegExp(`\\b(?:${actionSource})\\b`, "gi");
+  const allowedListText = new RegExp(`^(?:\\s|,|\\b(?:be|and|or|nor|is|are|${negatedListItemSource})\\b)*$`, "i");
+  const trailingProhibition = new RegExp(`^(?:\\s|,|\\b(?:and|or|nor|${actionSource})\\b)*(?:is|are)\\s+(?:prohibited|forbidden|excluded)\\b`, "i");
+  const actionIsNegated = (context, action) => {
+    const before = context.slice(0, action.index);
+    const after = context.slice(action.index + action[0].length);
+    const sentenceStart = Math.max(before.lastIndexOf("."), before.lastIndexOf("!"), before.lastIndexOf("?"), before.lastIndexOf(";")) + 1;
+    const priorSentence = before.slice(sentenceStart);
+    const adversaries = [...priorSentence.matchAll(/\b(?:but|however|yet)\b/gi)];
+    const clauseStart = sentenceStart + (adversaries.at(-1)?.index ?? -1) + (adversaries.length > 0 ? adversaries.at(-1)[0].length : 1);
+    const clauseBefore = before.slice(clauseStart);
+    const nextBoundary = /[.!?;]|\b(?:but|however|yet)\b/i.exec(after)?.index ?? after.length;
+    const clauseAfter = after.slice(0, nextBoundary);
+    if (context.slice(Math.max(0, action.index - 4), action.index).endsWith("non-")) return true;
+    const markers = [...clauseBefore.matchAll(/\b(?:neither|not|(?:must|may|shall)\s+not(?:\s+be)?|cannot(?:\s+be)?|can't(?:\s+be)?|never(?:\s+be)?|(?:prohibited|forbidden|excluded)(?:\s+from)?)\b/gi)];
+    const leading = markers.at(-1);
+    if (leading && allowedListText.test(clauseBefore.slice(leading.index + leading[0].length))) return true;
+    return trailingProhibition.test(clauseAfter);
+  };
   return contents.replaceAll("\r\n", "\n").split(/\n\s*\n/).some((paragraph) => {
     const subject = transportSubject.exec(paragraph);
     if (!subject) return false;
     const transportContext = paragraph.slice(subject.index);
-    return transportContext.split(/(?:[.!?;]\s+|\b(?:but|however|yet)\b)/i)
-      .some((clause) => releaseAction.test(clause) && !negativeRule.test(clause));
+    return [...transportContext.matchAll(releaseAction)].some((action) => !actionIsNegated(transportContext, action));
   });
 }
 
