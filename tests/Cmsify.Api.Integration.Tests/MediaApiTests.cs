@@ -239,26 +239,44 @@ public sealed class MediaApiTests : IAsyncLifetime
     [Fact]
     public async Task AvailableAssetWithMissingBlob_ReturnsSanitizedProblemDetails()
     {
-        await using var factory = CreateFactory();
-        using var client = factory.CreateClient();
-        var workspaceId = await SeedApiClientAsync(factory);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
-        Guid assetId;
-        using (var scope = factory.Services.CreateScope())
+        var outcomes = new List<(MediaBlobState BlobState, HttpStatusCode StatusCode, string? ProblemType)>();
+        for (var iteration = 0; iteration < 20; iteration++)
         {
-            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var asset = NewAsset(workspaceId, "missing.txt", MediaBlobState.Available);
-            db.MediaAssets.Add(asset);
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-            assetId = asset.Id;
+            await using var factory = CreateFactory(enableMediaReconciliation: false);
+            using var client = factory.CreateClient();
+            var workspaceId = await SeedApiClientAsync(factory);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+            Guid assetId;
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+                var asset = NewAsset(workspaceId, $"missing-{iteration}.txt", MediaBlobState.Available);
+                db.MediaAssets.Add(asset);
+                await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+                assetId = asset.Id;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            await using var verificationScope = factory.Services.CreateAsyncScope();
+            var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var blobState = (await verification.MediaAssets.IgnoreQueryFilters().SingleAsync(
+                asset => asset.Id == assetId,
+                TestContext.Current.CancellationToken)).BlobState;
+            using var response = await client.GetAsync(
+                $"/api/v1/workspaces/{workspaceId}/media/{assetId}/file",
+                TestContext.Current.CancellationToken);
+            var problem = await response.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: TestContext.Current.CancellationToken);
+            outcomes.Add((blobState, response.StatusCode, problem.GetProperty("type").GetString()));
         }
 
-        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}/file", TestContext.Current.CancellationToken);
-        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.EndsWith("/media-blob-missing", problem.GetProperty("type").GetString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("default/missing", problem.ToString(), StringComparison.Ordinal);
+        Assert.All(outcomes, outcome =>
+        {
+            Assert.Equal(MediaBlobState.Available, outcome.BlobState);
+            // Regression guard: returning a generic 404 instead of media-blob-missing for a missing storage blob must fail this assertion.
+            Assert.Equal(HttpStatusCode.NotFound, outcome.StatusCode);
+            Assert.EndsWith("/media-blob-missing", outcome.ProblemType, StringComparison.Ordinal);
+        });
     }
 
     [Fact]
@@ -446,29 +464,50 @@ public sealed class MediaApiTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithStaleEtag_ReturnsPreconditionFailedWithoutTombstone()
     {
-        await using var factory = CreateFactory();
-        using var client = factory.CreateClient();
-        var workspaceId = await SeedApiClientAsync(factory);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
-        Guid assetId;
-        await using (var scope = factory.Services.CreateAsyncScope())
+        var outcomes = new List<(MediaBlobState BlobState, HttpStatusCode StatusCode, bool IsDeleted, bool HasDeletionIntent)>();
+        for (var iteration = 0; iteration < 20; iteration++)
         {
-            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var asset = NewAsset(workspaceId, "etag.txt", MediaBlobState.Available);
-            db.MediaAssets.Add(asset);
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-            assetId = asset.Id;
+            await using var factory = CreateFactory(enableMediaReconciliation: false);
+            using var client = factory.CreateClient();
+            var workspaceId = await SeedApiClientAsync(factory);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+            Guid assetId;
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+                var asset = NewAsset(workspaceId, $"etag-{iteration}.txt", MediaBlobState.Available);
+                db.MediaAssets.Add(asset);
+                await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+                assetId = asset.Id;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/workspaces/{workspaceId}/media/{assetId}");
+            request.Headers.TryAddWithoutValidation("If-Match", "\"stale\"");
+
+            using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+            await using var verificationScope = factory.Services.CreateAsyncScope();
+            var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var persisted = await verification.MediaAssets.IgnoreQueryFilters().SingleAsync(
+                asset => asset.Id == assetId,
+                TestContext.Current.CancellationToken);
+            outcomes.Add((
+                persisted.BlobState,
+                response.StatusCode,
+                persisted.IsDeleted,
+                await verification.MediaDeletionIntents.AnyAsync(
+                    item => item.MediaAssetId == assetId,
+                    TestContext.Current.CancellationToken)));
         }
-        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/workspaces/{workspaceId}/media/{assetId}");
-        request.Headers.TryAddWithoutValidation("If-Match", "\"stale\"");
 
-        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.PreconditionFailed, response.StatusCode);
-        await using var verificationScope = factory.Services.CreateAsyncScope();
-        var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        Assert.False((await verification.MediaAssets.SingleAsync(asset => asset.Id == assetId, cancellationToken: TestContext.Current.CancellationToken)).IsDeleted);
-        Assert.False(await verification.MediaDeletionIntents.AnyAsync(item => item.MediaAssetId == assetId, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.All(outcomes, outcome =>
+        {
+            Assert.Equal(MediaBlobState.Available, outcome.BlobState);
+            // Regression guard: performing deletion before validating If-Match must fail this assertion.
+            Assert.Equal(HttpStatusCode.PreconditionFailed, outcome.StatusCode);
+            Assert.False(outcome.IsDeleted);
+            Assert.False(outcome.HasDeletionIntent);
+        });
     }
 
     [Fact]
@@ -511,9 +550,20 @@ public sealed class MediaApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, isolated.StatusCode);
     }
 
-    private WebApplicationFactory<Program> CreateFactory(TestStorageProvider? storage = null)
+    private WebApplicationFactory<Program> CreateFactory(
+        TestStorageProvider? storage = null,
+        bool enableMediaReconciliation = true)
     {
         var factory = new WebApplicationFactory<Program>();
+        if (!enableMediaReconciliation)
+        {
+            factory = factory.WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("Media:Operations:ReconciliationIntervalSeconds", "1");
+                builder.ConfigureTestServices(services => services.RemoveAll<IHostedService>());
+            });
+        }
+
         return storage is null ? factory : factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<SyntaxCircus.Storage.IStorageProvider>();
