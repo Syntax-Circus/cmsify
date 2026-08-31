@@ -7,6 +7,7 @@ public sealed class UserPreferencesState
 {
     private readonly BrowserStorage storage;
     private readonly CmsifyClient cmsify;
+    private bool themeInitialized;
     private bool initialized;
 
     public UserPreferencesState(BrowserStorage storage, CmsifyClient cmsify)
@@ -30,9 +31,7 @@ public sealed class UserPreferencesState
             return;
         }
 
-        var themeState = await storage.InitializeThemeAsync();
-        Theme = NormalizeTheme(themeState.Theme);
-        EffectiveTheme = NormalizeEffectiveTheme(themeState.EffectiveTheme);
+        await InitializeThemeAsync();
 
         try
         {
@@ -47,6 +46,20 @@ public sealed class UserPreferencesState
 
         EffectiveTheme = NormalizeEffectiveTheme(await storage.SetThemeAsync(Theme));
         initialized = true;
+        Changed?.Invoke();
+    }
+
+    public async Task InitializeThemeAsync()
+    {
+        if (themeInitialized)
+        {
+            return;
+        }
+
+        var themeState = await storage.InitializeThemeAsync();
+        Theme = NormalizeTheme(themeState.Theme);
+        EffectiveTheme = NormalizeEffectiveTheme(themeState.EffectiveTheme);
+        themeInitialized = true;
         Changed?.Invoke();
     }
 

@@ -37,10 +37,12 @@ jobs:
     env:
       VERSION: ${{ needs.resolve.outputs.version }}
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
-      SBOM_STAGING_ROOT: ${{ runner.temp }}/cmsify-sbom-inputs
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with: { global-json-file: global.json }
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -70,9 +72,11 @@ jobs:
       - name: Build exact OCI layouts once
         run: |
           mkdir -p artifacts/oci
-          docker buildx build --platform linux/amd64 --provenance=false --tag "docker.io/syntaxcircus/cmsify-api:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --metadata-file artifacts/oci/cmsify-api.metadata.json --output type=oci,dest=artifacts/oci/cmsify-api.oci.tar,name=docker.io/syntaxcircus/cmsify-api:$VERSION .
-          docker buildx build --platform linux/amd64 --provenance=false --tag "docker.io/syntaxcircus/cmsify-admin:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --metadata-file artifacts/oci/cmsify-admin.metadata.json --output type=oci,dest=artifacts/oci/cmsify-admin.oci.tar,name=docker.io/syntaxcircus/cmsify-admin:$VERSION .
+          docker buildx build --platform linux/amd64 --provenance=false --tag "docker.io/syntaxcircus/cmsify-api:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-api:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Api/Dockerfile --metadata-file artifacts/oci/cmsify-api.metadata.json --output "type=oci,dest=artifacts/oci/cmsify-api.oci.tar,name=docker.io/syntaxcircus/cmsify-api:$VERSION" .
+          docker buildx build --platform linux/amd64 --provenance=false --tag "docker.io/syntaxcircus/cmsify-admin:$VERSION" --annotation "manifest-descriptor:org.opencontainers.image.ref.name=$VERSION" --annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-admin:$VERSION" --build-arg "BUILD_VERSION=$VERSION" --build-arg "BUILD_INFORMATIONAL_VERSION=$VERSION+$SOURCE_SHA" --build-arg "BUILD_SOURCE_REVISION=$SOURCE_SHA" --file src/Cmsify.Admin/Dockerfile --metadata-file artifacts/oci/cmsify-admin.metadata.json --output "type=oci,dest=artifacts/oci/cmsify-admin.oci.tar,name=docker.io/syntaxcircus/cmsify-admin:$VERSION" .
       - name: Restore exact package candidates into isolated SBOM trees
+        env:
+          SBOM_STAGING_ROOT: ${{ runner.temp }}/cmsify-sbom-inputs
         shell: bash
         run: |
           test ! -e "$SBOM_STAGING_ROOT"
@@ -120,6 +124,8 @@ jobs:
           npm init --yes
           NPM_CONFIG_CACHE="$SBOM_STAGING_ROOT/npm-cache" npm install --ignore-scripts --no-audit --no-fund "$TARBALL"
       - name: Generate four named SPDX SBOMs with pinned Syft
+        env:
+          SBOM_STAGING_ROOT: ${{ runner.temp }}/cmsify-sbom-inputs
         run: |
           mkdir -p artifacts/sbom
           NUGET_CACHE="$SBOM_STAGING_ROOT/nuget/packages"
@@ -144,7 +150,11 @@ jobs:
           (cd artifacts && find . -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum) > artifacts/SHA256SUMS
       - run: node scripts/release/verify-release-artifacts.mjs --artifacts artifacts --version "$VERSION" --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts, if-no-files-found: error, retention-days: 14 }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 14
 
   artifact-smoke:
     needs: [resolve, build]
@@ -155,11 +165,16 @@ jobs:
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with: { node-version: "22" }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
       - name: Certify the exact loaded release archives with the Task 4 CLI
         shell: bash
         run: |
@@ -186,11 +201,16 @@ jobs:
       VERSION: ${{ needs.resolve.outputs.version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with: { node-version: "22", cache: npm, cache-dependency-path: eng/accessibility/package-lock.json }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
       - name: Install locked accessibility harness
         run: npm ci --prefix eng/accessibility
       - name: Load and scan the exact Admin candidate
@@ -225,13 +245,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false, path: source }
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: source
       - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with: { global-json-file: source/global.json }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
       - name: Restore all three candidates through an isolated local source
-        env: { VERSION: ${{ needs.resolve.outputs.version }} }
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
         shell: bash
         run: |
           (cd artifacts && sha256sum --check SHA256SUMS)
@@ -281,11 +308,15 @@ jobs:
     strategy: { matrix: { node-version: ["20", "22"] } }
     steps:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with: { node-version: ${{ matrix.node-version }} }
+        with:
+          node-version: ${{ matrix.node-version }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
       - name: Install only the candidate tarball and its declared dependencies
-        env: { VERSION: ${{ needs.resolve.outputs.version }} }
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
         shell: bash
         run: |
           (cd artifacts && sha256sum --check SHA256SUMS)
@@ -310,11 +341,16 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with: { node-version: "22" }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
       - name: Load and verify the exact release candidate
         run: |
           (cd artifacts && sha256sum --check SHA256SUMS)
@@ -344,7 +380,9 @@ jobs:
     permissions: { contents: read, attestations: write, id-token: write }
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
       - run: (cd artifacts && sha256sum --check SHA256SUMS)
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with: { subject-checksums: artifacts/SHA256SUMS }
@@ -361,7 +399,10 @@ jobs:
       IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { ref: ${{ needs.resolve.outputs.source_sha }}, fetch-depth: 1, persist-credentials: false }
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with: { global-json-file: global.json }
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -369,7 +410,9 @@ jobs:
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with: { cosign-release: v3.0.6 }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}, path: artifacts }
+        with:
+          name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
+          path: artifacts
       - name: Revalidate remote tag and certified candidate
         shell: bash
         run: |
@@ -398,10 +441,13 @@ jobs:
             status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 --header "Authorization: Bearer $bearer" --header "Accept: $ACCEPT_MANIFESTS" "https://registry-1.docker.io/v2/$image/manifests/$VERSION")" || exit 1
             case "$status" in 404) ;; *) echo "OCI tag must be absent; registry returned HTTP $status"; exit 1 ;; esac
           done
-        env: { DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}, DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }} }
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: nuget_login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
-        with: { user: ${{ secrets.NUGET_USER }} }
+        with:
+          user: ${{ secrets.NUGET_USER }}
       - name: Reject existing NuGet versions before promotion
         shell: bash
         run: |
@@ -437,7 +483,8 @@ jobs:
         run: npm install --global npm@11.11.0 && test "$(npm --version)" = 11.11.0
       - run: npm publish artifacts/npm/*.tgz --access public --provenance --tag "$NPM_CHANNEL"
       - name: Create correct prerelease/stable GitHub Release
-        env: { GH_TOKEN: ${{ github.token }} }
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           args=(); if [ "$IS_PRERELEASE" = true ]; then args+=(--prerelease); fi
