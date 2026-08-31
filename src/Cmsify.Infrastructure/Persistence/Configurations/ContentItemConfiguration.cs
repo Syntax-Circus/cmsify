@@ -19,6 +19,7 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
         builder.HasIndex(content => content.TranslationGroupId);
         builder.HasIndex(content => new { content.Status, content.PublishAt });
         builder.HasIndex(content => new { content.Status, content.PublishAt, content.PendingEffectiveStartAt, content.PendingEffectiveEndAt });
+        builder.HasIndex(content => new { content.Status, content.PublishAt, content.PublishLeaseExpiresAt });
         builder.HasIndex(content => content.WorkspaceId);
         builder.HasIndex(content => content.SearchVector).HasMethod("GIN");
 
@@ -35,6 +36,7 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
         builder.Property(content => content.Status).HasConversion<string>().HasMaxLength(50);
         builder.Property(content => content.Slug).HasMaxLength(200);
         builder.Property(content => content.LocaleCode).HasMaxLength(20);
+        builder.Property(content => content.PublishLeaseOwner).HasMaxLength(200);
 #pragma warning disable CS0618
         builder.Property(content => content.SearchVector)
             .HasColumnType("tsvector")

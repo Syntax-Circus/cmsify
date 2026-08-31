@@ -3,13 +3,15 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
+using SyntaxCircus.Cmsify.Contracts;
+using CompositionMode = SyntaxCircus.Cmsify.Contracts.CompositionMode;
+using PrimitiveType = SyntaxCircus.Cmsify.Contracts.PrimitiveType;
 
 namespace Cmsify.Api.Integration.Tests;
 
@@ -24,7 +26,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
@@ -35,9 +37,9 @@ public sealed class TemplateApiTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        await postgres.DisposeAsync().AsTask();
+        await postgres.DisposeAsync();
         ClearEnvironment();
     }
 
@@ -50,20 +52,16 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var createResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/templates",
-            new CreateTemplateRequest("Test Template", $"test-template-{Guid.NewGuid():N}", null));
+        var createResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates", new CreateTemplateRequest("Test Template", $"test-template-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
-        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions);
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(template);
         Assert.NotNull(template.CurrentVersion);
 
-        var addSectionResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/sections",
-            new TemplateSectionRequest("New Section", null, 0, true));
+        var addSectionResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/sections", new TemplateSectionRequest("New Section", null, 0, true), cancellationToken: TestContext.Current.CancellationToken);
         addSectionResponse.EnsureSuccessStatusCode();
-        var section = await addSectionResponse.Content.ReadFromJsonAsync<TemplateSectionResponse>(ApiJsonOptions);
+        var section = await addSectionResponse.Content.ReadFromJsonAsync<TemplateSectionResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(section);
         Assert.Equal("New Section", section.Name);
@@ -78,20 +76,16 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var createResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/templates",
-            new CreateTemplateRequest("Field Template", $"field-template-{Guid.NewGuid():N}", null));
+        var createResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates", new CreateTemplateRequest("Field Template", $"field-template-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
-        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions);
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(template);
         Assert.NotNull(template.CurrentVersion);
 
-        var addFieldResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields",
-            new TemplateFieldRequest(null, "title", "Title", null, 0, false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null));
+        var addFieldResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields", new TemplateFieldRequest(null, "title", "Title", null, 0, false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null), cancellationToken: TestContext.Current.CancellationToken);
         addFieldResponse.EnsureSuccessStatusCode();
-        var field = await addFieldResponse.Content.ReadFromJsonAsync<TemplateFieldResponse>(ApiJsonOptions);
+        var field = await addFieldResponse.Content.ReadFromJsonAsync<TemplateFieldResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(field);
         Assert.Equal("title", field.Key);
@@ -106,25 +100,19 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var createResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/templates",
-            new CreateTemplateRequest("Duplicate Field Template", $"duplicate-field-template-{Guid.NewGuid():N}", null));
+        var createResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates", new CreateTemplateRequest("Duplicate Field Template", $"duplicate-field-template-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
-        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions);
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(template);
         Assert.NotNull(template.CurrentVersion);
 
         var request = new TemplateFieldRequest(null, "title", "Title", null, 0, false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null);
 
-        using var firstResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields",
-            request);
+        using var firstResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields", request, cancellationToken: TestContext.Current.CancellationToken);
         firstResponse.EnsureSuccessStatusCode();
 
-        using var duplicateResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields",
-            request);
+        using var duplicateResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields", request, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.Conflict, duplicateResponse.StatusCode);
     }
@@ -167,10 +155,10 @@ public sealed class TemplateApiTests : IAsyncLifetime
                     ])
             ]);
 
-        using var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest);
+        using var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest, cancellationToken: TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var body = await response.Content.ReadFromJsonAsync<PackageImportResponse>();
+        var body = await response.Content.ReadFromJsonAsync<PackageImportResponse>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(body);
         Assert.Equal(2, body.Imported.Count);
 
@@ -179,7 +167,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var templates = await dbContext.Templates
             .Where(template => template.WorkspaceId == workspaceId && template.PackageNamespace == "test" && template.PackageId == "base")
             .OrderBy(template => template.Slug)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Collection(
             templates,
@@ -213,22 +201,21 @@ public sealed class TemplateApiTests : IAsyncLifetime
                 ])
             ]);
 
-        using var importResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest);
+        using var importResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest, cancellationToken: TestContext.Current.CancellationToken);
         importResponse.EnsureSuccessStatusCode();
-        var importBody = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        var importBody = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(importBody);
-        Assert.NotNull(importBody.PickLists);
-        Assert.Single(importBody.PickLists!);
-        Assert.Equal("imported", importBody.PickLists![0].Action);
+        Assert.Single(importBody.PickLists);
+        Assert.Equal("imported", importBody.PickLists[0].Action);
 
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var picklist = await dbContext.PickLists.Include(item => item.Options).FirstAsync(item => item.WorkspaceId == workspaceId && item.Slug == "rating");
+        var picklist = await dbContext.PickLists.Include(item => item.Options).FirstAsync(item => item.WorkspaceId == workspaceId && item.Slug == "rating", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, picklist.Options.Count);
 
         var field = await dbContext.TemplateFields.AsNoTracking()
-            .Where(item => item.Key == "rating" && item.PrimitiveType == PrimitiveType.PickList)
-            .FirstAsync();
+            .Where(item => item.Key == "rating" && item.PrimitiveType == Cmsify.Core.Domain.Enums.PrimitiveType.PickList)
+            .FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(field.FieldConfig);
         Assert.True(field.FieldConfig!.Value.TryGetProperty("picklistId", out var idElement));
         Assert.Equal(picklist.Id.ToString(), idElement.GetString());
@@ -246,23 +233,19 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var first = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Hero", $"hero-{Guid.NewGuid():N}", null));
-        Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
-        var hero = await first.Content.ReadFromJsonAsync<ComponentResponse>(ApiJsonOptions);
-        var second = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Call to action", $"cta-{Guid.NewGuid():N}", null));
-        Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
-        var cta = await second.Content.ReadFromJsonAsync<ComponentResponse>(ApiJsonOptions);
+        var first = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Hero", $"hero-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var hero = await first.Content.ReadFromJsonAsync<ComponentResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        var second = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components", new ComponentRequest("Call to action", $"cta-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var cta = await second.Content.ReadFromJsonAsync<ComponentResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(hero?.CurrentVersion);
         Assert.NotNull(cta?.CurrentVersion);
 
-        using var heroFields = await client.PutAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/components/{hero.Id}/versions/{hero.CurrentVersion.VersionNumber}/fields",
-            new[] { new ComponentFieldRequest("cta", "CTA", null, 0, false, 0, 1, null, cta.Id, null) });
-        Assert.True(heroFields.IsSuccessStatusCode, await heroFields.Content.ReadAsStringAsync());
+        using var heroFields = await client.PutAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components/{hero.Id}/versions/{hero.CurrentVersion.VersionNumber}/fields", new[] { new ComponentFieldRequest("cta", "CTA", null, 0, false, 0, 1, null, cta.Id, null) }, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(heroFields.IsSuccessStatusCode, await heroFields.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
 
-        using var circularFields = await client.PutAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/components/{cta.Id}/versions/{cta.CurrentVersion.VersionNumber}/fields",
-            new[] { new ComponentFieldRequest("hero", "Hero", null, 0, false, 0, 1, null, hero.Id, null) });
+        using var circularFields = await client.PutAsJsonAsync($"/api/v1/workspaces/{workspaceId}/components/{cta.Id}/versions/{cta.CurrentVersion.VersionNumber}/fields", new[] { new ComponentFieldRequest("hero", "Hero", null, 0, false, 0, 1, null, hero.Id, null) }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, circularFields.StatusCode);
     }
 
@@ -275,9 +258,9 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        using var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/picklists", new PickListRequest("Status", $"status-{Guid.NewGuid():N}", null, [new PickListOptionRequest("Draft", "draft", 0)]));
+        using var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/picklists", new PickListRequest("Status", $"status-{Guid.NewGuid():N}", null, [new PickListOptionRequest("Draft", "draft", 0)]), cancellationToken: TestContext.Current.CancellationToken);
         create.EnsureSuccessStatusCode();
-        var created = await create.Content.ReadFromJsonAsync<PickListResponse>();
+        var created = await create.Content.ReadFromJsonAsync<PickListResponse>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(created?.CurrentRevisionId);
         var etag = create.Headers.ETag?.Tag;
         Assert.False(string.IsNullOrWhiteSpace(etag));
@@ -287,15 +270,15 @@ public sealed class TemplateApiTests : IAsyncLifetime
             Content = JsonContent.Create(new PickListRequest("Status", created.Slug, null, [new PickListOptionRequest("Published", "published", 0)]))
         };
         updateRequest.Headers.TryAddWithoutValidation("If-Match", etag);
-        using var update = await client.SendAsync(updateRequest);
+        using var update = await client.SendAsync(updateRequest, TestContext.Current.CancellationToken);
         update.EnsureSuccessStatusCode();
-        var updated = await update.Content.ReadFromJsonAsync<PickListResponse>();
+        var updated = await update.Content.ReadFromJsonAsync<PickListResponse>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(updated?.CurrentRevisionId);
         Assert.NotEqual(created.CurrentRevisionId, updated.CurrentRevisionId);
 
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var revisions = await dbContext.PickListRevisions.Include(revision => revision.Options).Where(revision => revision.PickListId == created.Id).OrderBy(revision => revision.VersionNumber).ToListAsync();
+        var revisions = await dbContext.PickListRevisions.Include(revision => revision.Options).Where(revision => revision.PickListId == created.Id).OrderBy(revision => revision.VersionNumber).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Collection(revisions,
             revision => Assert.Equal("Draft", Assert.Single(revision.Options).Label),
             revision => Assert.Equal("Published", Assert.Single(revision.Options).Label));
@@ -310,13 +293,11 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        using (var seedResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/picklists",
-            new PickListRequest("Severity", "severity", null,
+        using (var seedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/picklists", new PickListRequest("Severity", "severity", null,
             [
                 new PickListOptionRequest("Low", "low", 0),
                 new PickListOptionRequest("High", "high", 1)
-            ])))
+            ]), cancellationToken: TestContext.Current.CancellationToken))
         {
             seedResponse.EnsureSuccessStatusCode();
         }
@@ -338,12 +319,12 @@ public sealed class TemplateApiTests : IAsyncLifetime
                 ])
             ]);
 
-        using var unresolvedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", conflictingManifest);
+        using var unresolvedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", conflictingManifest, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(System.Net.HttpStatusCode.Conflict, unresolvedResponse.StatusCode);
 
-        using var previewResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import/preview", conflictingManifest);
+        using var previewResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import/preview", conflictingManifest, cancellationToken: TestContext.Current.CancellationToken);
         previewResponse.EnsureSuccessStatusCode();
-        var preview = await previewResponse.Content.ReadFromJsonAsync<PackageImportPreviewResponse>();
+        var preview = await previewResponse.Content.ReadFromJsonAsync<PackageImportPreviewResponse>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(preview);
         var severityPreview = Assert.Single(preview!.PickLists);
         Assert.Equal("conflict", severityPreview.Status);
@@ -354,9 +335,9 @@ public sealed class TemplateApiTests : IAsyncLifetime
             manifest = conflictingManifest,
             resolutions = new { pickLists = new Dictionary<string, string> { ["severity"] = "importAsNew" } }
         };
-        using var resolvedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", envelope);
+        using var resolvedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", envelope, cancellationToken: TestContext.Current.CancellationToken);
         resolvedResponse.EnsureSuccessStatusCode();
-        var resolvedBody = await resolvedResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        var resolvedBody = await resolvedResponse.Content.ReadFromJsonAsync<PackageImportResponse>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(resolvedBody);
         var picklistResult = Assert.Single(resolvedBody!.PickLists!);
         Assert.Equal("importedAsNew", picklistResult.Action);
@@ -367,7 +348,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var picklists = await dbContext.PickLists.AsNoTracking()
             .Where(item => item.WorkspaceId == workspaceId && !item.IsDeleted)
             .OrderBy(item => item.Slug)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, picklists.Count);
         Assert.Equal("severity", picklists[0].Slug);
         Assert.Equal("severity-2", picklists[1].Slug);
@@ -382,12 +363,10 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        using (var seedResponse = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/picklists",
-            new PickListRequest("Priority", "priority", null,
+        using (var seedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/picklists", new PickListRequest("Priority", "priority", null,
             [
                 new PickListOptionRequest("Low", "low", 0)
-            ])))
+            ]), cancellationToken: TestContext.Current.CancellationToken))
         {
             seedResponse.EnsureSuccessStatusCode();
         }
@@ -415,13 +394,13 @@ public sealed class TemplateApiTests : IAsyncLifetime
             manifest,
             resolutions = new { pickLists = new Dictionary<string, string> { ["priority"] = "replace" } }
         };
-        using var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", envelope);
+        using var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", envelope, cancellationToken: TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
         var picklist = await dbContext.PickLists.Include(item => item.Options).AsNoTracking()
-            .FirstAsync(item => item.WorkspaceId == workspaceId && item.Slug == "priority");
+            .FirstAsync(item => item.WorkspaceId == workspaceId && item.Slug == "priority", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(3, picklist.Options.Count);
         Assert.Contains(picklist.Options, option => option.Value == "high");
     }
@@ -452,18 +431,18 @@ public sealed class TemplateApiTests : IAsyncLifetime
                 ])
             ]);
 
-        using var importResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest);
+        using var importResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", manifest, cancellationToken: TestContext.Current.CancellationToken);
         importResponse.EnsureSuccessStatusCode();
-        var importBody = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        var importBody = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>(cancellationToken: TestContext.Current.CancellationToken);
         var templateId = importBody!.Imported.Single().TemplateId;
 
-        using var exportResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/packages/export?templateIds={templateId}&packageNamespace=test&id=export-out&version=1.0.0");
+        using var exportResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/packages/export?templateIds={templateId}&packageNamespace=test&id=export-out&version=1.0.0", TestContext.Current.CancellationToken);
         exportResponse.EnsureSuccessStatusCode();
         var exportJsonOptions = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
         {
             Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
         };
-        var exported = await exportResponse.Content.ReadFromJsonAsync<CtpPackageManifest>(exportJsonOptions);
+        var exported = await exportResponse.Content.ReadFromJsonAsync<CtpPackageManifest>(exportJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(exported);
         Assert.NotNull(exported!.PickLists);
         Assert.Single(exported.PickLists!);
@@ -488,12 +467,12 @@ public sealed class TemplateApiTests : IAsyncLifetime
         using (var scope = factory.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            var session = await dbContext.UserSessions.FirstAsync(candidate => candidate.TokenHash == tokenHash);
+            var session = await dbContext.UserSessions.FirstAsync(candidate => candidate.TokenHash == tokenHash, cancellationToken: TestContext.Current.CancellationToken);
             session.ExpiresAt = nearExpiry;
-            await dbContext.SaveChangesAsync();
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        using var response = await client.GetAsync("/api/v1/auth/me");
+        using var response = await client.GetAsync("/api/v1/auth/me", TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
 
         Assert.True(response.Headers.TryGetValues(SessionExpiresAtHeaderName, out var values));
@@ -503,7 +482,7 @@ public sealed class TemplateApiTests : IAsyncLifetime
 
         using var verifyScope = factory.Services.CreateScope();
         var verifyDbContext = verifyScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var updatedSession = await verifyDbContext.UserSessions.AsNoTracking().FirstAsync(candidate => candidate.TokenHash == tokenHash);
+        var updatedSession = await verifyDbContext.UserSessions.AsNoTracking().FirstAsync(candidate => candidate.TokenHash == tokenHash, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True((updatedSession.ExpiresAt - headerExpiry).Duration() < TimeSpan.FromSeconds(1));
     }
 
@@ -516,17 +495,21 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var login = await LoginAsync(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        using var listResponse = await client.GetAsync("/api/v1/packages/official");
+        using var listResponse = await client.GetAsync("/api/v1/packages/official", TestContext.Current.CancellationToken);
         listResponse.EnsureSuccessStatusCode();
-        var packages = await listResponse.Content.ReadFromJsonAsync<IReadOnlyList<OfficialPackageResponse>>();
-        var foundation = Assert.Single(packages!, package => package.Id == "foundation");
+        var packages = await listResponse.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(packages);
+        Assert.Equal(1, packages.Page);
+        Assert.Equal(20, packages.PageSize);
+        Assert.True(packages.TotalPages >= 1);
+        var foundation = Assert.Single(packages.Items, package => package.Id == "foundation");
         Assert.Equal(0, foundation.TemplateCount);
         Assert.Equal(3, foundation.ComponentCount);
         Assert.Equal(3, foundation.PickListCount);
 
-        using var importResponse = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/packages/import/official/foundation", null);
-        Assert.True(importResponse.IsSuccessStatusCode, await importResponse.Content.ReadAsStringAsync());
-        var imported = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>();
+        using var importResponse = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/packages/import/official/foundation", null, TestContext.Current.CancellationToken);
+        Assert.True(importResponse.IsSuccessStatusCode, await importResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var imported = await importResponse.Content.ReadFromJsonAsync<PackageImportResponse>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(imported);
         Assert.Empty(imported!.Imported);
         Assert.Equal(3, imported.PickLists.Count);
@@ -535,11 +518,11 @@ public sealed class TemplateApiTests : IAsyncLifetime
 
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        Assert.Equal(3, await dbContext.PickLists.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation"));
-        Assert.Equal(3, await dbContext.Components.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation"));
+        Assert.Equal(3, await dbContext.PickLists.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation", cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(3, await dbContext.Components.CountAsync(item => item.WorkspaceId == workspaceId && item.PackageId == "foundation", cancellationToken: TestContext.Current.CancellationToken));
 
         var callToActionStyle = await dbContext.ComponentFields.AsNoTracking()
-            .SingleAsync(field => field.Key == "style" && field.PrimitiveType == PrimitiveType.PickList);
+            .SingleAsync(field => field.Key == "style" && field.PrimitiveType == Cmsify.Core.Domain.Enums.PrimitiveType.PickList, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(callToActionStyle.FieldConfig);
         Assert.True(callToActionStyle.FieldConfig!.Value.TryGetProperty("picklistId", out var picklistId));
         Assert.NotEqual(Guid.Empty.ToString(), picklistId.GetString());

@@ -19,9 +19,21 @@ Read this file before changing Cmsify. Keep changes scoped, preserve existing us
 Run from the repository root unless a command changes directory explicitly:
 
 ```powershell
-dotnet build Cmsify.slnx
-dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
+dotnet --version
+dotnet restore Cmsify.slnx --locked-mode
+dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental --verbosity minimal
+dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```
+
+`dotnet --version` must report `10.0.400`. Ordinary public locked restore is still gated by the unpublished `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package. The current ignored package was built from sibling feature-branch source and is local evidence only; do not publish it. Follow the [post-merge release handoff](docs/superpowers/plans/2026-08-30-post-merge-release-handoff.md): merge the sibling work, pack and approve the candidate from its default branch, reconcile any changed identity/locks into Cmsify, and publish only through the trusted default-branch/release workflow. Until that sequence completes or the user separately approves an identity-reviewed replacement, maintainers with the approved ignored feed use:
+
+```powershell
+dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --locked-mode
+```
+
+While that public package gate is open, hosted pull-request validation restores and tests the public-independent Core, Infrastructure, and API projects and runs the complete OpenAPI and TypeScript checks from the API project graph. Package-dependent Admin/.NET-client and Admin accessibility checks are reported as deferred on pull requests. Pushes to `main` and release workflows retain the full public locked-solution restore and must not treat the partial pull-request result as public-package evidence.
+
+Never track that feed configuration, package bytes, or package cache. Use [`docs/performance.md`](docs/performance.md) for safe `--force-evaluate` lock regeneration, focused capacity filters, XPlat coverage aggregation, the scheduled timing runner, and the single-MSBuild-node final command. Latency and coverage are trends; query counts, database paging, batch/lease bounds, upload rejection, and streaming/ownership assertions are blocking.
 
 Useful focused commands:
 
@@ -33,6 +45,7 @@ dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.cspr
 For the TypeScript client:
 
 ```powershell
+dotnet restore Cmsify.slnx --locked-mode
 Set-Location sdk/typescript
 npm ci
 npm run generate:check
@@ -40,6 +53,8 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+The OpenAPI generation check builds `Cmsify.Api` with `--no-restore`; complete the applicable public or approved ignored-feed locked solution restore from the repository root before running it.
 
 The API and infrastructure integration tests use Testcontainers PostgreSQL. Admin integration tests use a fake API handler where documented. Do not skip tests merely because they need Docker; report the environment limitation.
 

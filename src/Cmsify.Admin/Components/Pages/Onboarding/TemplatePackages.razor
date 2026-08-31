@@ -71,7 +71,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        packages = await Packages.ListOfficialAsync();
+        packages = await Packages.ListAllOfficialAsync();
     }
 
     private void Toggle(string packageId, bool isSelected)
@@ -88,7 +88,7 @@ else
 
     private async Task InstallSelectedAsync()
     {
-        if (Workspace.Current is null)
+        if (Workspace.Current is not { } workspace)
         {
             return;
         }
@@ -102,13 +102,15 @@ else
             var imported = 0;
             foreach (var packageId in selected)
             {
-                var result = await Packages.ImportOfficialAsync(Workspace.Current.Id, packageId);
+                var result = ApiResponse.Required(
+                    await Packages.ImportOfficialAsync(workspace.Id, packageId),
+                    "importing an official package");
                 imported += result.Imported.Count;
             }
 
             message = $"Installed {imported} templates.";
             Toasts.Success(message);
-            Navigation.NavigateTo($"/workspaces/{Workspace.Current.Id}/templates");
+            Navigation.NavigateTo($"/workspaces/{workspace.Id}/templates");
         }
         catch (CmsifyApiException ex)
         {

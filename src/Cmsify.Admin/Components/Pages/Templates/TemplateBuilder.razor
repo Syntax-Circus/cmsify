@@ -234,13 +234,15 @@
 
     private async Task LoadAsync()
     {
-        var result = await Templates.GetAsync(WorkspaceId, TemplateId);
+        var result = ApiResponse.Required(
+            await Templates.GetAsync(WorkspaceId, TemplateId),
+            "loading a template");
         template = result;
         version = template.CurrentVersion ?? await EnsureDraftAsync();
         try
         {
-            picklists = (await PickLists.ListAsync(WorkspaceId)).ToList();
-            components = (await Components.ListAsync(WorkspaceId)).ToList();
+            picklists = (await PickLists.ListAllAsync(WorkspaceId)).ToList();
+            components = (await Components.ListAllAsync(WorkspaceId)).ToList();
         }
         catch (CmsifyApiException) { }
         RestoreSelection();
@@ -248,11 +250,15 @@
 
     private async Task<TemplateVersionResponse> EnsureDraftAsync()
     {
-        var versions = await Templates.ListVersionsAsync(WorkspaceId, TemplateId);
+        var versions = await Templates.ListAllVersionsAsync(WorkspaceId, TemplateId);
         var draft = versions.FirstOrDefault(v => v.Status == TemplateVersionStatus.Draft);
         return draft is null
-            ? await Templates.CreateDraftAsync(WorkspaceId, TemplateId, "Initial draft")
-            : await Templates.GetVersionAsync(WorkspaceId, TemplateId, draft.VersionNumber);
+            ? ApiResponse.Required(
+                await Templates.CreateDraftAsync(WorkspaceId, TemplateId, "Initial draft"),
+                "creating a template draft")
+            : ApiResponse.Required(
+                await Templates.GetVersionAsync(WorkspaceId, TemplateId, draft.VersionNumber),
+                "loading a template draft");
     }
 
     private void Select(TemplateFieldResponse field)
@@ -280,7 +286,9 @@
 
         await RunMutationAsync(async () =>
         {
-            var created = await Templates.AddSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, new TemplateSectionRequest("New Section", null, NextSectionOrder(), true));
+            var created = ApiResponse.Required(
+                await Templates.AddSectionAsync(WorkspaceId, TemplateId, version.VersionNumber, new TemplateSectionRequest("New Section", null, NextSectionOrder(), true)),
+                "adding a template section");
             selectedSectionId = created.Id;
             selectedFieldId = null;
             await LoadAsync();
@@ -299,11 +307,13 @@
             var sectionId = GetAddFieldSectionId();
             var key = BuildNextFieldKey();
             var label = BuildNextFieldLabel(key);
-            var created = await Templates.AddFieldAsync(
-                WorkspaceId,
-                TemplateId,
-                version.VersionNumber,
-                new TemplateFieldRequest(sectionId, key, label, null, NextFieldOrder(sectionId), false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null));
+            var created = ApiResponse.Required(
+                await Templates.AddFieldAsync(
+                    WorkspaceId,
+                    TemplateId,
+                    version.VersionNumber,
+                    new TemplateFieldRequest(sectionId, key, label, null, NextFieldOrder(sectionId), false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null)),
+                "adding a template field");
             selectedFieldId = created.Id;
             selectedSectionId = created.SectionId;
             await LoadAsync();

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17
+    image: postgres:17@sha256:67f41722b7a8cbdb868a44a4995c846eddfdc2973bccb291ce937dce88ad5675
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cmsify}
       POSTGRES_USER: ${POSTGRES_USER:-cmsify}
@@ -15,28 +15,42 @@ services:
       retries: 10
 
   api:
-    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
+    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:d82c8333b3b6cf8a479858bdbe63a304bcca66fa2be2b22ada7ea099863e5301
+    env_file:
+      - ${CMSIFY_API_KEYRING_ENV_FILE:?CMSIFY_API_KEYRING_ENV_FILE is required}
     ports:
       - "127.0.0.1:${CMSIFY_API_PORT:-5000}:8080"
     environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Cmsify: Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
-      Seed__Admin__Email: ${SEED_ADMIN_EMAIL:-admin@example.com}
-      Seed__Admin__DisplayName: ${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
-      Seed__Admin__Password: ${Seed__Admin__Password:?Seed__Admin__Password is required}
-      Secrets__EncryptionKey: ${Secrets__EncryptionKey:?Secrets__EncryptionKey is required}
-      Storage__Provider: ${Storage__Provider:-local}
-      Storage__Local__BasePath: /var/cmsify/media
-      Storage__Local__RootPath: /var/cmsify/media
-      Storage__S3__BucketName: ${Storage__S3__BucketName:-}
-      Storage__S3__Region: ${Storage__S3__Region:-us-east-1}
-      Storage__S3__AccessKey: ${Storage__S3__AccessKey:-}
-      Storage__S3__SecretKey: ${Storage__S3__SecretKey:-}
-      Storage__S3__ServiceUrl: ${Storage__S3__ServiceUrl:-}
-      Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
-      TrustedProxy__RequireTrustedProxiesInProduction: ${TrustedProxy__RequireTrustedProxiesInProduction:-false}
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__Cmsify=Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
+      - Seed__Admin__Email=${SEED_ADMIN_EMAIL:-admin@example.com}
+      - Seed__Admin__DisplayName=${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
+      - Seed__Admin__Password=${Seed__Admin__Password:?Seed__Admin__Password is required}
+      - Secrets__Rotation__Enabled=${Secrets__Rotation__Enabled:-false}
+      - Secrets__Rotation__BatchSize=${Secrets__Rotation__BatchSize:-100}
+      - Secrets__Rotation__DelaySeconds=${Secrets__Rotation__DelaySeconds:-5}
+      - Storage__Provider=${Storage__Provider:-local}
+      - Storage__Local__BasePath=/var/cmsify/media
+      - Storage__Local__RootPath=/var/cmsify/media
+      - Storage__S3__BucketName=${Storage__S3__BucketName:-}
+      - Storage__S3__Region=${Storage__S3__Region:-us-east-1}
+      - Storage__S3__AccessKey=${Storage__S3__AccessKey:-}
+      - Storage__S3__SecretKey=${Storage__S3__SecretKey:-}
+      - Storage__S3__ServiceUrl=${Storage__S3__ServiceUrl:-}
+      - Media__Operations__ReconciliationIntervalSeconds=${Media__Operations__ReconciliationIntervalSeconds:-300}
+      - Media__Operations__LeaseDurationSeconds=${Media__Operations__LeaseDurationSeconds:-300}
+      - Media__Operations__BatchSize=${Media__Operations__BatchSize:-100}
+      - Media__Operations__RetryBaseSeconds=${Media__Operations__RetryBaseSeconds:-30}
+      - Media__Operations__RetryCapSeconds=${Media__Operations__RetryCapSeconds:-3600}
+      - Media__Operations__RetentionDays=${Media__Operations__RetentionDays:-30}
+      - Media__Operations__OrphanGraceHours=${Media__Operations__OrphanGraceHours:-24}
+      - Media__Operations__AbandonedUploadMinutes=${Media__Operations__AbandonedUploadMinutes:-30}
+      - Media__Operations__ManagedPrefixes__0=cmsify/media/
+      - Media__Operations__ManagedPrefixes__1=default/
+      - Api__SwaggerEnabled=${Api__SwaggerEnabled:-false}
+      - TrustedProxy__RequireTrustedProxiesInProduction=${TrustedProxy__RequireTrustedProxiesInProduction:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,7 +64,7 @@ services:
       retries: 12
 
   admin:
-    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}
+    image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:476d21907c1b5583d95dd04cad815dc582a531a5eb1f0795dd04c35ff9e4cf6e
     ports:
       - "127.0.0.1:${CMSIFY_ADMIN_PORT:-5001}:8080"
     environment:

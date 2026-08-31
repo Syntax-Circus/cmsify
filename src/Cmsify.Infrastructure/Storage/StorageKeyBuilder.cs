@@ -4,6 +4,13 @@ namespace Cmsify.Infrastructure.Storage;
 
 public static partial class StorageKeyBuilder
 {
+    public static string Build(Guid workspaceId, Guid assetId, string fileName, DateTimeOffset? now = null)
+    {
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        var safeFileName = UnsafeFileNameCharacters().Replace(Path.GetFileName(fileName), "-");
+        return $"cmsify/media/{workspaceId}/{timestamp.Year:0000}/{timestamp.Month:00}/{assetId}_{safeFileName}";
+    }
+
     public static string Build(string fileName, DateTimeOffset? now = null)
     {
         var timestamp = now ?? DateTimeOffset.UtcNow;

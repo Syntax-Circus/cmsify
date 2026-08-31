@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using Cmsify.Admin.Auth;
 using Cmsify.Admin.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using SyntaxCircus.Blazor.Auth;
 
 namespace Cmsify.Admin.Integration.Tests;
 
@@ -9,9 +12,9 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
 {
     private readonly AdminAuthTestFactory factory = new();
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         await factory.DisposeAsync();
     }
@@ -35,6 +38,89 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
         MustChangePassword: mustChangePassword,
         User: new UserSummary(Guid.NewGuid(), "admin@example.com", "Admin", "Admin", IsSuperAdmin: true));
 
+    [Theory]
+    [InlineData("Production", "cmsify-smoke-1234abcd")]
+    [InlineData("Development", null)]
+    [InlineData("Development", "cmsify-smoke-invalid_value")]
+    public void ReleaseSmokeProtectedPath_IsUnavailableOutsideAnExactDevelopmentRun(string environmentName, string? runId)
+    {
+        AdminAuthEndpoints.ReleaseSmokeProtectedPath(environmentName, runId).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ReleaseSmokeProtectedRoute_RequiresLocalSessionAndCallsApiWithItsToken()
+    {
+        const string runId = "cmsify-smoke-1234abcd";
+        factory.EnvironmentName = "Development";
+        factory.ReleaseSmokeRunId = runId;
+        factory.Responder = request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/auth/login" => AdminAuthTestFactory.JsonOk(SuccessfulLogin()),
+            "/api/v1/workspaces" => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = new[] { new { id = Guid.Parse("11111111-1111-4111-8111-111111111111"), name = "Release Smoke Workspace", slug = "release-smoke" } },
+                    totalCount = 1,
+                    page = 1,
+                    pageSize = 20
+                })
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        };
+        var client = CreateClient();
+        var path = $"/admin-auth/release-smoke/{runId}/protected-workspaces";
+
+        using (var anonymous = await client.GetAsync(path, TestContext.Current.CancellationToken))
+        {
+            anonymous.StatusCode.ShouldBe(HttpStatusCode.Found);
+            anonymous.Headers.Location!.AbsolutePath.ShouldBe("/login");
+        }
+        var token = await FetchAntiforgeryTokenAsync(client);
+        using (await client.PostAsync("/admin-auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token,
+            ["email"] = "admin@example.com",
+            ["password"] = "correct",
+            ["returnUrl"] = "/workspaces"
+        }), TestContext.Current.CancellationToken)) { }
+
+        using var proof = await client.GetAsync(path, TestContext.Current.CancellationToken);
+
+        proof.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await proof.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("Release Smoke Workspace");
+        factory.ObservedApiRequests.ShouldContain(request => request.Path == "/api/v1/workspaces" && request.Authorization == "Bearer api-token-abc");
+    }
+
+    [Fact]
+    public async Task ReleaseSmokeProtectedRoute_CallsApiWithOidcSessionToken()
+    {
+        const string runId = "cmsify-smoke-1234abcd";
+        factory.EnvironmentName = "Development";
+        factory.ReleaseSmokeRunId = runId;
+        factory.OidcEnabled = true;
+        factory.Responder = request => request.RequestUri!.AbsolutePath == "/api/v1/workspaces"
+            ? new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = new[] { new { id = Guid.Parse("11111111-1111-4111-8111-111111111111"), name = "Release Smoke Workspace", slug = "release-smoke" } },
+                    totalCount = 1,
+                    page = 1,
+                    pageSize = 20
+                })
+            }
+            : new HttpResponseMessage(HttpStatusCode.NotFound);
+        var client = CreateClient();
+        using (await BeginOidcSignInAsync(client)) { }
+
+        using var proof = await client.GetAsync($"/admin-auth/release-smoke/{runId}/protected-workspaces", TestContext.Current.CancellationToken);
+
+        proof.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await proof.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("Release Smoke Workspace");
+        factory.ObservedApiRequests.ShouldContain(request => request.Path == "/api/v1/workspaces" && request.Authorization == "Bearer initial-access-token");
+    }
+
     [Fact]
     public async Task Login_WithMissingCredentials_RedirectsToLoginWithError()
     {
@@ -47,7 +133,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = string.Empty,
             ["password"] = string.Empty,
             ["returnUrl"] = "/workspaces"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldContain("error=missing-credentials");
@@ -68,7 +154,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "wrong",
             ["returnUrl"] = "/workspaces"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldContain("error=invalid-credentials");
@@ -88,7 +174,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces/abc"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldBe("/workspaces/abc");
@@ -112,7 +198,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldStartWith("/account/change-password?returnUrl=");
@@ -132,10 +218,149 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "//evil.example.com/path"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldBe("/workspaces");
+    }
+
+    [Fact]
+    public async Task OidcLogin_WhenEnabled_ChallengesTheConfiguredProviderAndPreservesLocalReturnUrl()
+    {
+        factory.OidcEnabled = true;
+        var client = CreateClient();
+
+        using var response = await client.GetAsync("/admin-auth/oidc-login?returnUrl=%2Fworkspaces", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/");
+        response.Headers.Location.Query.ShouldContain("redirect_uri=");
+        response.Headers.Location.Query.ShouldContain("state=");
+    }
+
+    [Fact]
+    public async Task OidcCallback_SavesTokensAndForwardsTheAccessTokenToTheApi()
+    {
+        factory.OidcEnabled = true;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+        var client = CreateClient();
+
+        var callback = await BeginOidcSignInAsync(client);
+
+        callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        callback.Headers.Location!.OriginalString.ShouldBe("/workspaces");
+        callback.Headers.GetValues("Set-Cookie").ShouldContain(cookie =>
+            cookie.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal));
+        factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "authorization_code");
+
+        using var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken);
+        apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        factory.ObservedRequests.Any(request =>
+            request.Headers.Authorization is { Scheme: "Bearer", Parameter: "initial-access-token" }).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task OidcExpiredAccessToken_RefreshesAndForwardsTheReplacementToken()
+    {
+        factory.OidcEnabled = true;
+        factory.OidcAccessTokenExpiresImmediately = true;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+        var client = CreateClient();
+
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        using var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken);
+        apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "refresh_token" && request.RefreshToken == "refresh-token");
+        factory.ObservedRequests.Any(request =>
+            request.Headers.Authorization is { Scheme: "Bearer", Parameter: "refreshed-access-token" }).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task OidcRefreshFailure_ExpiresTheUsableApiSession()
+    {
+        factory.OidcEnabled = true;
+        factory.OidcAccessTokenExpiresImmediately = true;
+        factory.OidcRefreshSucceeds = false;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.Unauthorized);
+        var client = CreateClient();
+
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        using var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken);
+        apiCall.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        factory.OidcTokenRequests.ShouldContain(request => request.GrantType == "refresh_token");
+        factory.ObservedRequests.Last().Headers.Authorization.ShouldBeNull();
+        var cache = factory.Services.GetRequiredService<IServerTokenCache>();
+        (await cache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task OidcLogout_EvictsTheCachedTokenBeforeRemoteSignOut()
+    {
+        factory.OidcEnabled = true;
+        factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+        var client = CreateClient();
+
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        using (var apiCall = await client.GetAsync("/test/api-call", TestContext.Current.CancellationToken))
+        {
+            apiCall.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        var cache = factory.Services.GetRequiredService<IServerTokenCache>();
+        (await cache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldNotBeNull();
+
+        var token = await FetchAntiforgeryTokenAsync(client);
+        using var logout = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token
+        }), TestContext.Current.CancellationToken);
+
+        (await cache.GetAsync("user:oidc-admin", TestContext.Current.CancellationToken)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task OidcLogout_RemotelySignsOutAndClearsTheLocalCookie()
+    {
+        factory.OidcEnabled = true;
+        var client = CreateClient();
+        using (var callback = await BeginOidcSignInAsync(client))
+        {
+            callback.StatusCode.ShouldBe(HttpStatusCode.Found);
+        }
+
+        var token = await FetchAntiforgeryTokenAsync(client);
+        using var response = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(
+            [new KeyValuePair<string, string>("__RequestVerificationToken", token)]), TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.AbsoluteUri.ShouldStartWith("http://identity.test/connect/logout");
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(response.Headers.Location.Query);
+        query["post_logout_redirect_uri"].ToString().ShouldBe("http://localhost/login");
+        response.Headers.GetValues("Set-Cookie").ShouldContain(cookie =>
+            cookie.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal)
+            && cookie.Contains("expires=Thu, 01 Jan 1970", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task<HttpResponseMessage> BeginOidcSignInAsync(HttpClient client)
+    {
+        using var challenge = await client.GetAsync("/admin-auth/oidc-login?returnUrl=%2Fworkspaces");
+        challenge.StatusCode.ShouldBe(HttpStatusCode.Found);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(challenge.Headers.Location!.Query);
+        var state = query["state"].ToString();
+        state.ShouldNotBeNullOrWhiteSpace();
+        return await client.GetAsync($"/signin-oidc?code=test-code&state={Uri.EscapeDataString(state)}");
     }
 
     [Fact]
@@ -161,7 +386,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces"
-        }))) { }
+        }), TestContext.Current.CancellationToken)) { }
 
         // Refresh antiforgery token (the auth cookie change may invalidate the prior token tied to the unauthenticated identity).
         var logoutToken = await FetchAntiforgeryTokenAsync(client);
@@ -169,7 +394,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
         using var response = await client.PostAsync("/admin-auth/logout", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["__RequestVerificationToken"] = logoutToken
-        }));
+        }), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldBe("/login");
@@ -190,7 +415,7 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
     {
         var client = CreateClient();
 
-        using var response = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
+        using var response = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
@@ -209,9 +434,9 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
             ["email"] = "admin@example.com",
             ["password"] = "correct",
             ["returnUrl"] = "/workspaces"
-        }))) { }
+        }), TestContext.Current.CancellationToken)) { }
 
-        using var refresh = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
+        using var refresh = await client.PostAsync("/admin-auth/refresh-claims", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()), TestContext.Current.CancellationToken);
 
         refresh.StatusCode.ShouldBe(HttpStatusCode.OK);
         refresh.Headers.ShouldContain(h => h.Key == "Set-Cookie"

@@ -123,12 +123,12 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        packages = await PackageClient.ListOfficialAsync();
+        packages = await PackageClient.ListAllOfficialAsync();
         if (Workspace.Current is { } workspace)
         {
-            templates = (await Templates.ListAsync(workspace.Id)).Items;
-            components = await Components.ListAsync(workspace.Id);
-            picklists = await PickLists.ListAsync(workspace.Id);
+            templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(workspace.Id));
+            components = await Components.ListAllAsync(workspace.Id);
+            picklists = await PickLists.ListAllAsync(workspace.Id);
         }
     }
 
@@ -139,11 +139,11 @@ else
 
     private async Task ExportSelectedAsync()
     {
-        if (Workspace.Current is null) return;
+        if (Workspace.Current is not { } workspace) return;
         exporting = true; error = null; message = null;
         try
         {
-            var file = await PackageClient.ExportWithMetadataAsync(Workspace.Current.Id, selectedTemplates.ToArray(), selectedComponents.ToArray(), selectedPicklists.ToArray(), exportNamespace, exportId, exportVersion);
+            var file = await PackageClient.ExportWithMetadataAsync(workspace.Id, selectedTemplates.ToArray(), selectedComponents.ToArray(), selectedPicklists.ToArray(), exportNamespace, exportId, exportVersion);
             await Downloads.SaveAsync(file);
             message = $"Exported {selectedTemplates.Count} templates, {selectedComponents.Count} components, and {selectedPicklists.Count} picklists.";
         }
@@ -157,7 +157,7 @@ else
 
     private async Task StartCustomImportAsync()
     {
-        if (Workspace.Current is null || customPackageFile is null)
+        if (Workspace.Current is not { } workspace || customPackageFile is not { } packageFile)
         {
             return;
         }
@@ -168,17 +168,19 @@ else
 
         try
         {
-            await using var stream = customPackageFile.OpenReadStream(1_073_741_824);
-            var preview = await PackageClient.PreviewAsync(Workspace.Current.Id, stream, customPackageFile.Name);
+            await using var stream = packageFile.OpenReadStream(1_073_741_824);
+            var preview = ApiResponse.Required(
+                await PackageClient.PreviewAsync(workspace.Id, stream, packageFile.Name),
+                "previewing a package import");
             if (HasConflicts(preview))
             {
-                pendingCustomFile = customPackageFile;
+                pendingCustomFile = packageFile;
                 pendingOfficialPackageId = null;
                 pendingPreview = preview;
             }
             else
             {
-                await DoCustomImportAsync(customPackageFile, null);
+                await DoCustomImportAsync(workspace.Id, packageFile, null);
             }
         }
         catch (CmsifyApiException ex)
@@ -197,7 +199,7 @@ else
 
     private async Task StartOfficialImportAsync(string packageId)
     {
-        if (Workspace.Current is null)
+        if (Workspace.Current is not { } workspace)
         {
             return;
         }
@@ -208,7 +210,9 @@ else
 
         try
         {
-            var preview = await PackageClient.PreviewOfficialAsync(Workspace.Current.Id, packageId);
+            var preview = ApiResponse.Required(
+                await PackageClient.PreviewOfficialAsync(workspace.Id, packageId),
+                "previewing an official package import");
             if (HasConflicts(preview))
             {
                 pendingOfficialPackageId = packageId;
@@ -217,7 +221,7 @@ else
             }
             else
             {
-                await DoOfficialImportAsync(packageId, null);
+                await DoOfficialImportAsync(workspace.Id, packageId, null);
             }
         }
         catch (CmsifyApiException ex)
@@ -236,7 +240,7 @@ else
 
     private async Task ConfirmImportAsync(PackageImportResolutionsRequest resolutions)
     {
-        if (Workspace.Current is null)
+        if (Workspace.Current is not { } workspace)
         {
             return;
         }
@@ -245,11 +249,11 @@ else
         {
             if (pendingOfficialPackageId is not null)
             {
-                await DoOfficialImportAsync(pendingOfficialPackageId, resolutions);
+                await DoOfficialImportAsync(workspace.Id, pendingOfficialPackageId, resolutions);
             }
             else if (pendingCustomFile is not null)
             {
-                await DoCustomImportAsync(pendingCustomFile, resolutions);
+                await DoCustomImportAsync(workspace.Id, pendingCustomFile, resolutions);
             }
         }
         catch (CmsifyApiException ex)
@@ -275,18 +279,22 @@ else
         pendingCustomFile = null;
     }
 
-    private async Task DoCustomImportAsync(IBrowserFile file, PackageImportResolutionsRequest? resolutions)
+    private async Task DoCustomImportAsync(Guid workspaceId, IBrowserFile file, PackageImportResolutionsRequest? resolutions)
     {
         await using var stream = file.OpenReadStream(1_073_741_824);
-        var result = await PackageClient.ImportAsync(Workspace.Current!.Id, stream, file.Name, resolutions);
+        var result = ApiResponse.Required(
+            await PackageClient.ImportAsync(workspaceId, stream, file.Name, resolutions),
+            "importing a package");
         message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists?.Count ?? 0} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         customPackageFile = null;
         Toasts.Success("Package imported");
     }
 
-    private async Task DoOfficialImportAsync(string packageId, PackageImportResolutionsRequest? resolutions)
+    private async Task DoOfficialImportAsync(Guid workspaceId, string packageId, PackageImportResolutionsRequest? resolutions)
     {
-        var result = await PackageClient.ImportOfficialAsync(Workspace.Current!.Id, packageId, resolutions);
+        var result = ApiResponse.Required(
+            await PackageClient.ImportOfficialAsync(workspaceId, packageId, resolutions),
+            "importing an official package");
         message = $"Imported {result.Imported.Count} templates, {result.Components?.Count ?? 0} components, and {result.PickLists?.Count ?? 0} picklists from {result.PackageNamespace}/{result.Id}@{result.Version}.";
         Toasts.Success("Package imported");
     }

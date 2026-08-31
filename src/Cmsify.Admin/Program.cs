@@ -2,11 +2,16 @@ using Cmsify.Admin.Auth;
 using Cmsify.Admin.Components;
 using Cmsify.Admin.Services;
 using Cmsify.Admin.State;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Extensions;
 using SyntaxCircus.AspNetCore.Common;
+using SyntaxCircus.Blazor.Auth;
 using SyntaxCircus.DotEnv;
 using SyntaxCircus.Cmsify;
+using SyntaxCircus.Http.Resilience;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,8 +27,10 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
+var oidcEnabled = builder.Configuration.GetValue("Auth:Oidc:Enabled", false);
+
 var slidingMinutes = Math.Max(1, builder.Configuration.GetValue("Admin:Auth:Session:SlidingWindowMinutes", 60));
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+var authenticationBuilder = builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
         options.Cookie.Name = "cmsify.admin.auth";
@@ -37,6 +44,47 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.AccessDeniedPath = "/login";
         options.EventsType = typeof(AbsoluteLifetimeCookieEvents);
     });
+if (oidcEnabled)
+{
+    var roleClaimType = builder.Configuration["Auth:Oidc:ClaimsMapping:Role"] ?? "cmsify_role";
+    authenticationBuilder.AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
+    {
+        options.Authority = builder.Configuration["Auth:Oidc:Authority"];
+        options.ClientId = builder.Configuration["Auth:Oidc:ClientId"];
+        options.ClientSecret = builder.Configuration["Auth:Oidc:ClientSecret"];
+        options.ResponseType = "code";
+        options.SaveTokens = true;
+        options.GetClaimsFromUserInfoEndpoint = true;
+        options.SignedOutRedirectUri = "/login";
+        options.RequireHttpsMetadata = builder.Configuration.GetValue("Auth:Oidc:RequireHttpsMetadata", !builder.Environment.IsDevelopment());
+        options.Scope.Add("email");
+        options.Scope.Add("offline_access");
+        options.Events.OnTokenValidated = context =>
+        {
+            if (context.Principal?.Identity is not ClaimsIdentity identity)
+            {
+                return Task.CompletedTask;
+            }
+
+            AddMappedClaim(identity, ClaimTypes.NameIdentifier, "sub");
+            AddMappedClaim(identity, ClaimTypes.Name, "name");
+            AddMappedClaim(identity, ClaimTypes.Email, "email");
+            AddMappedClaim(identity, ClaimTypes.Role, roleClaimType);
+            identity.AddClaim(new Claim(CmsifyAuthClaims.OidcSession, "true"));
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToIdentityProviderForSignOut = context =>
+        {
+            context.ProtocolMessage.PostLogoutRedirectUri = UriHelper.BuildAbsolute(
+                context.Request.Scheme,
+                context.Request.Host,
+                context.Request.PathBase,
+                "/login");
+            return Task.CompletedTask;
+        };
+    });
+    builder.Services.AddBlazorTokenForwarding(builder.Configuration, "Auth:Oidc");
+}
 builder.Services.AddSingleton<AbsoluteLifetimeCookieEvents>();
 
 var keysPath = builder.Configuration["Admin:DataProtection:KeysPath"];
@@ -53,16 +101,25 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(keysPath))
     .SetApplicationName("Cmsify.Admin");
 
-builder.Services.AddHttpClient("CmsifyApi", client =>
+var cmsifyApiClientBuilder = builder.Services.AddHttpClient("CmsifyApi", client =>
 {
     var baseUrl = builder.Configuration["Admin:ApiBaseUrl"] ?? "https://localhost:61241";
     client.BaseAddress = new Uri(baseUrl);
 });
+if (oidcEnabled)
+{
+    cmsifyApiClientBuilder.AddHttpMessageHandler<ApiAuthHandler>();
+}
+builder.Services.AddSingleton(new HttpRequestResiliencePipeline("CmsifyApi", new HttpRequestResilienceOptions()));
 builder.Services.AddScoped<CmsifyClient>(services =>
 {
     var tokenAccessor = services.GetRequiredService<IApiTokenAccessor>();
     var httpContextAccessor = services.GetRequiredService<IHttpContextAccessor>();
-    return new CmsifyClient(services.GetRequiredService<IHttpClientFactory>().CreateClient("CmsifyApi"), new CmsifyClientOptions
+    var resiliencePipeline = services.GetRequiredService<HttpRequestResiliencePipeline>();
+    var httpClient = oidcEnabled
+        ? services.GetRequiredService<IBlazorCircuitHttpClientFactory>().CreateClient("CmsifyApi")
+        : services.GetRequiredService<IHttpClientFactory>().CreateClient("CmsifyApi");
+    return new CmsifyClient(httpClient, new CmsifyClientOptions
     {
         TokenProvider = ct =>
         {
@@ -82,7 +139,7 @@ builder.Services.AddScoped<CmsifyClient>(services =>
                 await tokenAccessor.NoteSessionExpiryAsync(expiresAt, ct);
             }
         }
-    });
+    }, resiliencePipeline);
 });
 builder.Services.AddScoped<BrowserStorage>();
 builder.Services.AddScoped<BrowserDownloads>();
@@ -104,6 +161,10 @@ app.UseHttpsRedirection();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+if (oidcEnabled)
+{
+    app.UseBlazorTokenCache();
+}
 app.UseAntiforgery();
 
 app.MapAdminAuthEndpoints();
@@ -111,6 +172,20 @@ app.MapRazorComponentsWithStaticAssets<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static void AddMappedClaim(ClaimsIdentity identity, string targetClaimType, string sourceClaimType)
+{
+    if (identity.HasClaim(claim => claim.Type == targetClaimType))
+    {
+        return;
+    }
+
+    var sourceValue = identity.FindFirst(sourceClaimType)?.Value;
+    if (!string.IsNullOrWhiteSpace(sourceValue))
+    {
+        identity.AddClaim(new Claim(targetClaimType, sourceValue));
+    }
+}
 
 public partial class Program;
 

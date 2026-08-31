@@ -33,7 +33,7 @@ else
     [Parameter] public Guid WorkspaceId { get; set; }
     private List<ComponentSummaryResponse> items = [];
     private string? error;
-    protected override async Task OnParametersSetAsync() { try { items = (await Components.ListAsync(WorkspaceId)).ToList(); } catch (CmsifyApiException ex) { error = ex.Message; } }
+    protected override async Task OnParametersSetAsync() { try { items = (await Components.ListAllAsync(WorkspaceId)).ToList(); } catch (CmsifyApiException ex) { error = ex.Message; } }
     private void NewComponent() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/components/new");
     private void Edit(Guid id) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/components/{id}");
 }

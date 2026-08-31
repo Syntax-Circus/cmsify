@@ -11,6 +11,11 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType;
+using TemplateVersionStatus = Cmsify.Core.Domain.Enums.TemplateVersionStatus;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -40,7 +45,7 @@ public sealed class PackagesController : ControllerBase
 
     [HttpGet("/api/v1/packages/official")]
     [RequireRole(UserRole.Reader)]
-    public async Task<ActionResult<IReadOnlyList<OfficialPackageResponse>>> Official(CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>>> Official([FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         var packages = new List<OfficialPackageResponse>();
         foreach (var manifest in await LoadOfficialPackagesAsync(ct))
@@ -60,7 +65,13 @@ public sealed class PackagesController : ControllerBase
                 manifest.Components?.Count ?? 0));
         }
 
-        return Ok(packages.OrderBy(package => package.Name).ToArray());
+        var ordered = packages.OrderBy(package => package.Name).ToArray();
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>([], ordered.Length, pagination.Page, pagination.PageSize));
+        }
+
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<OfficialPackageResponse>(ordered.Skip(offset).Take(pagination.PageSize).ToArray(), ordered.Length, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost("/api/v1/workspaces/{workspaceId:guid}/packages/import")]
@@ -111,7 +122,7 @@ public sealed class PackagesController : ControllerBase
 
     [HttpPost("/api/v1/workspaces/{workspaceId:guid}/packages/import/official/{packageId}")]
     [RequireRole(UserRole.TemplateAdmin)]
-    public async Task<ActionResult<PackageImportResponse>> ImportOfficial(Guid workspaceId, string packageId, [FromBody] PackageImportResolutions? resolutions, CancellationToken ct)
+    public async Task<ActionResult<PackageImportResponse>> ImportOfficial(Guid workspaceId, string packageId, [FromBody] PackageImportResolutionsRequest? resolutions, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
@@ -127,7 +138,7 @@ public sealed class PackagesController : ControllerBase
         return await ImportManifestAsync(workspaceId, manifest, resolutions, ct);
     }
 
-    private async Task<ActionResult<PackageImportResponse>> ImportManifestAsync(Guid workspaceId, CtpPackageManifest manifest, PackageImportResolutions? resolutions, CancellationToken ct)
+    private async Task<ActionResult<PackageImportResponse>> ImportManifestAsync(Guid workspaceId, CtpPackageManifest manifest, PackageImportResolutionsRequest? resolutions, CancellationToken ct)
     {
         var validationErrors = ValidateManifest(manifest);
         if (validationErrors.Count > 0)
@@ -528,7 +539,7 @@ public sealed class PackagesController : ControllerBase
         return File(Encoding.UTF8.GetBytes(json), "application/json", $"{packageNamespace}.{id}@{version}.ctp");
     }
 
-    private async Task<(CtpPackageManifest Manifest, PackageImportResolutions? Resolutions)> ReadManifestAndResolutionsAsync(CancellationToken ct)
+    private async Task<(CtpPackageManifest Manifest, PackageImportResolutionsRequest? Resolutions)> ReadManifestAndResolutionsAsync(CancellationToken ct)
     {
         if (Request.HasFormContentType)
         {
@@ -546,10 +557,10 @@ public sealed class PackagesController : ControllerBase
                     ?? throw new ArgumentException("Package manifest is empty.");
             }
 
-            PackageImportResolutions? resolutions = null;
+            PackageImportResolutionsRequest? resolutions = null;
             if (form.TryGetValue("resolutions", out var resolutionsValue) && !string.IsNullOrWhiteSpace(resolutionsValue))
             {
-                resolutions = JsonSerializer.Deserialize<PackageImportResolutions>(resolutionsValue.ToString(), JsonOptions);
+                resolutions = JsonSerializer.Deserialize<PackageImportResolutionsRequest>(resolutionsValue.ToString(), JsonOptions);
             }
 
             return (manifest, resolutions);
@@ -561,10 +572,10 @@ public sealed class PackagesController : ControllerBase
         {
             var manifest = manifestElement.Deserialize<CtpPackageManifest>(JsonOptions)
                 ?? throw new ArgumentException("Package manifest is empty.");
-            PackageImportResolutions? resolutions = null;
+            PackageImportResolutionsRequest? resolutions = null;
             if (root.TryGetProperty("resolutions", out var resolutionsElement) && resolutionsElement.ValueKind != JsonValueKind.Null)
             {
-                resolutions = resolutionsElement.Deserialize<PackageImportResolutions>(JsonOptions);
+                resolutions = resolutionsElement.Deserialize<PackageImportResolutionsRequest>(JsonOptions);
             }
 
             return (manifest, resolutions);
@@ -835,8 +846,8 @@ public sealed class PackagesController : ControllerBase
             MinOccurrences = packageField.MinOccurrences ?? (packageField.IsRequired ? 1 : 0),
             MaxOccurrences = packageField.MaxOccurrences,
             IsOpen = packageField.IsOpen,
-            CompositionMode = packageField.CompositionMode,
-            PrimitiveType = packageField.PrimitiveType,
+            CompositionMode = packageField.CompositionMode.ToCore(),
+            PrimitiveType = packageField.PrimitiveType.ToCore(),
             TemplateId = string.IsNullOrWhiteSpace(packageField.TemplateRef) ? null : templatesBySlug[packageField.TemplateRef].Id,
             ComponentId = string.IsNullOrWhiteSpace(packageField.ComponentRef) ? null : componentIdBySlug[packageField.ComponentRef],
             FieldConfig = RewriteFieldConfigForImport(packageField.FieldConfig, picklistIdBySlug, picklistRevisionIdBySlug)
@@ -871,7 +882,7 @@ public sealed class PackagesController : ControllerBase
                 IsRequired = field.IsRequired,
                 MinOccurrences = field.MinOccurrences,
                 MaxOccurrences = field.MaxOccurrences,
-                PrimitiveType = field.PrimitiveType,
+                PrimitiveType = field.PrimitiveType.ToCore(),
                 NestedComponentId = string.IsNullOrWhiteSpace(field.ComponentRef) ? null : componentIdBySlug[field.ComponentRef],
                 FieldConfig = RewriteFieldConfigForImport(field.FieldConfig, picklistIdBySlug, picklistRevisionIdBySlug)
             });
@@ -975,7 +986,7 @@ public sealed class PackagesController : ControllerBase
 
         var fieldConfig = RewriteFieldConfigForExport(field.FieldConfig, field.PrimitiveType, picklistSlugById);
         componentSlugById.TryGetValue(field.ComponentId ?? Guid.Empty, out var componentRef);
-        return new CtpField(field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, templateRef, fieldConfig, componentRef);
+        return new CtpField(field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode.ToContract(), field.PrimitiveType.ToContract(), templateRef, fieldConfig, componentRef);
     }
 
     private CtpComponent ToPackageComponent(ComponentVersion version, IReadOnlyDictionary<Guid, string> picklistSlugById, IReadOnlyDictionary<Guid, string> componentSlugById)
@@ -984,7 +995,7 @@ public sealed class PackagesController : ControllerBase
         return new CtpComponent(component.Slug, component.Name, component.Description, version.Fields.OrderBy(field => field.Order).Select(field =>
         {
             componentSlugById.TryGetValue(field.NestedComponentId ?? Guid.Empty, out var componentRef);
-            return new CtpComponentField(field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.PrimitiveType, componentRef, RewriteFieldConfigForExport(field.FieldConfig, field.PrimitiveType, picklistSlugById));
+            return new CtpComponentField(field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.PrimitiveType.ToContract(), componentRef, RewriteFieldConfigForExport(field.FieldConfig, field.PrimitiveType, picklistSlugById));
         }).ToArray());
     }
 
@@ -1140,7 +1151,7 @@ public sealed class PackagesController : ControllerBase
         {
             if (!string.Equals(existingFields[index].Key, incomingFields[index].Key, StringComparison.Ordinal)
                 || !string.Equals(existingFields[index].Label, incomingFields[index].Label, StringComparison.Ordinal)
-                || existingFields[index].PrimitiveType != incomingFields[index].PrimitiveType
+                || existingFields[index].PrimitiveType != incomingFields[index].PrimitiveType.ToCore()
                 || existingFields[index].IsRequired != incomingFields[index].IsRequired
                 || existingFields[index].MinOccurrences != incomingFields[index].MinOccurrences
                 || existingFields[index].MaxOccurrences != incomingFields[index].MaxOccurrences)
@@ -1332,143 +1343,4 @@ public sealed class PackagesController : ControllerBase
         using var document = JsonDocument.Parse(ms.ToArray());
         return document.RootElement.Clone();
     }
-}
-
-public sealed record CtpPackageManifest(
-    string CmsifyPackage,
-    [property: JsonPropertyName("namespace")] string PackageNamespace,
-    string Id,
-    string Version,
-    string Name,
-    string? Description,
-    string? Author,
-    string? License,
-    string? Homepage,
-    IReadOnlyList<CtpTemplate> Templates,
-    [property: JsonPropertyName("picklists")] IReadOnlyList<CtpPickList>? PickLists = null,
-    IReadOnlyList<CtpComponent>? Components = null);
-
-public sealed record CtpPickList(string Slug, string Name, string? Description, IReadOnlyList<CtpPickListOption> Options);
-
-public sealed record CtpPickListOption(string Label, string Value, int Order);
-
-public sealed record CtpTemplate(string Slug, string Name, string? Description, IReadOnlyList<CtpSection> Sections, IReadOnlyList<CtpField> Fields);
-
-public sealed record CtpSection(string Name, string? Description, int Order, bool IsCollapsible, IReadOnlyList<CtpField> Fields);
-
-public sealed record CtpField(
-    string Key,
-    string Label,
-    string? HelpText,
-    int Order,
-    bool IsRequired,
-    int? MinOccurrences,
-    int? MaxOccurrences,
-    bool IsOpen,
-    CompositionMode CompositionMode,
-    PrimitiveType? PrimitiveType,
-    string? TemplateRef,
-    JsonElement? FieldConfig,
-    string? ComponentRef = null);
-
-public sealed record CtpComponent(string Slug, string Name, string? Description, IReadOnlyList<CtpComponentField> Fields);
-
-public sealed record CtpComponentField(
-    string Key,
-    string Label,
-    string? HelpText,
-    int Order,
-    bool IsRequired,
-    int MinOccurrences,
-    int? MaxOccurrences,
-    PrimitiveType? PrimitiveType,
-    string? ComponentRef,
-    JsonElement? FieldConfig);
-public sealed record PackageImportResponse(
-    string PackageNamespace,
-    string Id,
-    string Version,
-    IReadOnlyList<PackageTemplateImportResult> Imported,
-    IReadOnlyList<string> Skipped,
-    IReadOnlyList<string> Errors,
-    IReadOnlyList<PackagePickListImportResult> PickLists,
-    IReadOnlyList<PackageComponentImportResult>? Components = null);
-
-public sealed record PackageTemplateImportResult(Guid TemplateId, string Slug, string Name, Guid TemplateVersionId, int VersionNumber);
-
-public sealed record PackagePickListImportResult(string Slug, string ResolvedSlug, Guid PickListId, string Action);
-
-public sealed record PackageComponentImportResult(string Slug, string ResolvedSlug, Guid ComponentId, string Action, Guid? ComponentVersionId, int? VersionNumber);
-
-public sealed record PackageImportResolutions(IReadOnlyDictionary<string, string>? PickLists, IReadOnlyDictionary<string, string>? Components = null);
-
-public sealed record PackageImportPreviewResponse(
-    string PackageNamespace,
-    string Id,
-    string Version,
-    IReadOnlyList<PackagePickListPreview> PickLists,
-    IReadOnlyList<PackageTemplatePreview> Templates,
-    IReadOnlyList<PackageComponentPreview>? Components = null);
-
-public sealed record PackagePickListPreview(
-    string Slug,
-    string Name,
-    string? Description,
-    IReadOnlyList<PackagePickListOptionPreview> Options,
-    string Status,
-    Guid? ExistingId,
-    string? ExistingName,
-    string? ExistingDescription,
-    IReadOnlyList<PackagePickListOptionPreview>? ExistingOptions,
-    string SuggestedAction);
-
-public sealed record PackagePickListOptionPreview(string Label, string Value, int Order);
-
-public sealed record PackageTemplatePreview(string Slug, string Name, string Status);
-
-public sealed record PackageComponentPreview(string Slug, string Name, string? Description, int FieldCount, string Status, Guid? ExistingId, string? ExistingName, int? ExistingFieldCount, string SuggestedAction);
-
-public static class PackagePickListResolution
-{
-    public const string UseExisting = "useExisting";
-    public const string Replace = "replace";
-    public const string ImportAsNew = "importAsNew";
-}
-
-public static class PackageComponentResolution
-{
-    public const string UseExisting = "useExisting";
-    public const string Replace = "replace";
-    public const string ImportAsNew = "importAsNew";
-}
-
-public sealed record OfficialPackageResponse(string PackageNamespace, string Id, string Version, string Name, string? Description, string? Author, string? License, string? Homepage, int TemplateCount, IReadOnlyList<OfficialPackageTemplateResponse> Templates, int PickListCount = 0, int ComponentCount = 0);
-
-public sealed record OfficialPackageTemplateResponse(string Slug, string Name, string? Description);
-
-internal static class CtpSchema
-{
-    public static object Build() => new
-    {
-        schema = "https://json-schema.org/draft/2020-12/schema",
-        id = "https://cmsify.dev/schema/ctp-1.1.json",
-        title = "Cmsify Reusable Model Package",
-        type = "object",
-        required = new[] { "cmsifyPackage", "namespace", "id", "version", "name", "templates" },
-        properties = new Dictionary<string, object>
-        {
-            ["cmsifyPackage"] = new { type = "string", @enum = new[] { "1.0", "1.1" } },
-            ["namespace"] = new { type = "string", minLength = 1, maxLength = 200 },
-            ["id"] = new { type = "string", minLength = 1, maxLength = 200 },
-            ["version"] = new { type = "string", minLength = 1, maxLength = 50 },
-            ["name"] = new { type = "string", minLength = 1, maxLength = 200 },
-            ["description"] = new { type = new[] { "string", "null" } },
-            ["author"] = new { type = new[] { "string", "null" } },
-            ["license"] = new { type = new[] { "string", "null" } },
-            ["homepage"] = new { type = new[] { "string", "null" } },
-            ["templates"] = new { type = "array" },
-            ["picklists"] = new { type = new[] { "array", "null" } },
-            ["components"] = new { type = new[] { "array", "null" } }
-        }
-    };
 }

@@ -17,6 +17,7 @@ docs-site/site/
 !.env.example
 !**/.env.example
 .local/
+.superpowers/
 
 # LibMan output (Bootstrap etc) — restored at build
 wwwroot/lib/
@@ -56,6 +57,8 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+!scripts/release/
+!scripts/release/*.mjs
 x64/
 x86/
 [Ww][Ii][Nn]32/
@@ -96,6 +99,8 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+/artifacts/upgrade-tests/
+/tests/upgrade/.runs/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

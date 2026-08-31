@@ -1,8 +1,17 @@
 {
   "name": "@cmsify/client",
-  "version": "1.0.0",
+  "version": "0.0.0-local",
+  "private": true,
   "description": "First-party TypeScript client for the Cmsify API.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Syntax-Circus/cmsify.git",
+    "directory": "sdk/typescript"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -21,8 +30,9 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap",
     "test": "vitest run",
-    "generate": "node scripts/generate.mjs",
-    "generate:check": "node scripts/generate.mjs --check",
+    "test:consumer": "node scripts/check-clean-consumer.mjs",
+    "generate": "node ../../scripts/openapi.mjs update",
+    "generate:check": "node ../../scripts/openapi.mjs check",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

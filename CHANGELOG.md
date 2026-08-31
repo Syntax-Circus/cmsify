@@ -8,7 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Successful `main` releases now publish the Cmsify API and Admin container images to Docker Hub with both versioned and `latest` tags.
+- Releases are certified from a reviewed immutable SemVer tag. Branch and pull-request builds validate only and never publish artifacts or create tags.
+
+## [1.0.0] - Unreleased
+
+### Changed
+
+- Public SDK packages (`SyntaxCircus.Cmsify.Contracts`, both .NET clients, and `@cmsify/client`) are MIT-licensed; the server repository and OCI images remain AGPL-3.0-or-later.
 
 ## [0.1.3] - Unreleased
 

@@ -25,6 +25,7 @@
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
     <PackageReference Include="SyntaxCircus.AspNetCore.Common" />
+    <PackageReference Include="SyntaxCircus.AspNetCore.Authentication" />
     <PackageReference Include="SyntaxCircus.AspNetCore.Serilog" />
     <PackageReference Include="SyntaxCircus.DotEnv" />
   </ItemGroup>

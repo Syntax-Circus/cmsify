@@ -11,6 +11,7 @@ using Cmsify.Infrastructure.Persistence.Repositories;
 using Cmsify.Infrastructure.Security;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Extensions;
@@ -42,6 +43,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IContentPublishingService, ContentPublishingService>();
         services.AddScoped<IContentSearchVectorBuilder, ContentSearchVectorBuilder>();
         services.AddScoped<IWorkspaceAuthorizationService, WorkspaceAuthorizationService>();
+        services.AddOptions<SecretProtectionOptions>()
+            .Bind(configuration.GetSection(SecretProtectionOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<SecretProtectionOptions>, SecretProtectionOptionsValidator>();
         services.AddSingleton<ISecretProtector, AesSecretProtector>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();
@@ -52,18 +57,65 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IApiClientRepository, ApiClientRepository>();
         services.AddScoped<IWebhookRepository, WebhookRepository>();
+        services.AddScoped<IScheduledPublishingRepository, ScheduledPublishingRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddStorageProvider(configuration);
-        services.AddSingleton<IWebhookDestinationValidator, WebhookDestinationValidator>();
-        services.AddHttpClient(nameof(WebhookDeliveryProcessor), client =>
-            client.Timeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Webhook:RequestTimeoutSeconds", 15), 1, 120)))
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddOptions<MediaOperationalOptions>()
+            .Bind(configuration.GetSection(MediaOperationalOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<MediaOperationalOptions>, MediaOperationalOptionsValidator>();
+        services.AddScoped<IMediaReconciliationRepository, MediaReconciliationRepository>();
+        services.AddOptions<WebhookOperationalOptions>()
+            .Bind(configuration.GetSection(WebhookOperationalOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<WebhookOperationalOptions>, WebhookOperationalOptionsValidator>();
+        services.AddOptions<SchedulerOperationalOptions>()
+            .Bind(configuration.GetSection(SchedulerOperationalOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<SchedulerOperationalOptions>, SchedulerOperationalOptionsValidator>();
+        services.AddSingleton<IWebhookDnsResolver, SystemWebhookDnsResolver>();
+        services.AddSingleton<IWebhookDestinationValidator>(provider =>
+            new WebhookDestinationValidator(
+                provider.GetRequiredService<IWebhookDnsResolver>(),
+                provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
+                provider.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().EnvironmentName));
+        services.AddSingleton<IWebhookSocketConnector, SocketWebhookConnector>();
+        services.AddHttpClient(nameof(WebhookDeliveryProcessor), (provider, client) =>
+            client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds))
+            .ConfigurePrimaryHttpMessageHandler(provider => PinnedWebhookTransport.CreateHandler(
+                provider.GetRequiredService<IWebhookSocketConnector>(),
+                TimeSpan.FromSeconds(provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>().Value.RequestTimeoutSeconds)));
         services.AddScoped<WebhookDeliveryProcessor>();
-        services.AddSingleton<IWebhookQueue, InProcessWebhookQueue>();
-        services.AddScoped<IScheduledPublishingDispatcher, InProcessScheduledPublishingDispatcher>();
-        services.AddHostedService<ScheduledPublishingService>();
-        services.AddHostedService<WebhookDispatchService>();
-        services.AddHostedService<WebhookRetryService>();
+        services.AddScoped<WebhookSecretRotationProcessor>();
+        services.AddScoped<IWebhookSecretRotationProcessor>(provider => provider.GetRequiredService<WebhookSecretRotationProcessor>());
+        services.AddScoped<IWebhookOutbox, EfWebhookOutbox>();
+        services.AddScoped<IScheduledPublishingDispatcher, ScheduledPublishingDispatcher>();
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new ScheduledPublishingService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SchedulerOperationalOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ScheduledPublishingService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new MediaReconciliationService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<MediaOperationalOptions>>(),
+            configuration,
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MediaReconciliationService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookDispatchService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookDispatchService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookRetryService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebhookOperationalOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookRetryService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookSecretRotationService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecretProtectionOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookSecretRotationService>>()));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(provider => new WebhookSecretRotationInventoryPreflightService(
+            provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(),
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecretProtectionOptions>>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookSecretRotationInventoryPreflightService>>()));
 
         return services;
     }

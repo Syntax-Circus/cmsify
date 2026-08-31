@@ -32,6 +32,10 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
 
+    public DbSet<MediaDeletionIntent> MediaDeletionIntents => Set<MediaDeletionIntent>();
+
+    public DbSet<MediaReconciliationCheckpoint> MediaReconciliationCheckpoints => Set<MediaReconciliationCheckpoint>();
+
     public DbSet<Tag> Tags => Set<Tag>();
 
     public DbSet<ContentItemTag> ContentItemTags => Set<ContentItemTag>();
@@ -53,6 +57,8 @@ public sealed class CmsifyDbContext : DbContext
     public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
 
     public DbSet<WebhookDeliveryLog> WebhookDeliveryLogs => Set<WebhookDeliveryLog>();
+
+    public DbSet<WebhookOutboxEvent> WebhookOutboxEvents => Set<WebhookOutboxEvent>();
 
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 

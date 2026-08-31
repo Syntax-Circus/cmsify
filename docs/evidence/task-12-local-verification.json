@@ -1,0 +1,108 @@
+{
+  "schema": "cmsify.task12-evidence.v1",
+  "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e",
+  "certification": {
+    "status": "preliminary-local-non-certifying",
+    "certifiesRelease": false,
+    "reason": "Local source, policy, and preserved-candidate evidence only; public, hosted, approval, signing, promotion, soak, tag, and final-release gates remain unperformed."
+  },
+  "sdkVersion": "10.0.400",
+  "nodeVersion": "v24.14.1",
+  "dockerClientVersion": "29.7.2",
+  "dockerServerVersion": null,
+  "commandInputs": {
+    "CMSIFY_RELEASE_RUN_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_CHECKSUMS_PATH": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_API_DIGEST": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_ADMIN_DIGEST": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_RELEASE_VERSION": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_RELEASE_TAG": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_COSIGN_CERTIFICATE_IDENTITY": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_ATTESTATION_SIGNER_WORKFLOW": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_ACCESSIBILITY_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_PROMOTE_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_SMOKE_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_UPGRADE_ROLLBACK_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_RELEASE_SOURCE_SHA": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_SOAK_EVIDENCE_PATH": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_SOAK_EVIDENCE_SHA256": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" }
+  },
+  "localFeedPackage": {
+    "id": "SyntaxCircus.Http.Resilience",
+    "version": "0.2.0-cmsify.1",
+    "localUnsignedSha256": "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
+    "contentHash": "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+    "expectedRepositorySignature": {
+      "type": "Repository",
+      "serviceIndex": "https://api.nuget.org/v3/index.json",
+      "owner": "syntaxcircus"
+    },
+    "publicRestoreValidated": false
+  },
+  "checks": [
+    { "name": "release-contract suite", "command": "node --test tests/release-contract/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 504, "passed": 504, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    { "name": "release-smoke source suite", "command": "node --test tests/release-smoke/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 91, "passed": 91, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    { "name": "upgrade unit suite", "command": "node --test tests/upgrade/unit/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 173, "passed": 173, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    { "name": "standalone release verifier", "command": "node scripts/release/verify-release-contract.mjs", "exitCode": 0, "status": "passed", "counts": null, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    {
+      "name": "pre-publication full product sweep",
+      "command": "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal",
+      "exitCode": 0,
+      "status": "passed",
+      "counts": { "total": 599, "passed": 599, "failed": 0 },
+      "sourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0",
+      "reason": "Accepted head only adds release-policy, smoke-evidence, workflow, and test changes after this successful ignored-feed product sweep; it is retained as preliminary local evidence, not final public-candidate certification."
+    },
+    {
+      "name": "pre-publication TypeScript SDK sweep",
+      "command": "npm run generate:check && npm run typecheck && npm test && npm run build",
+      "exitCode": 0,
+      "status": "passed",
+      "counts": { "total": 40, "passed": 40, "failed": 0 },
+      "sourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0",
+      "reason": "Accepted head only adds release-policy, smoke-evidence, workflow, and test changes after this successful ignored-feed product sweep; it is retained as preliminary local evidence, not final public-candidate certification."
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "preserved preliminary API OCI candidate",
+      "status": "local-offline-loader-certified-non-promotable",
+      "releaseCandidate": false,
+      "version": "1.0.0-task12.a8e2218",
+      "sourceSha": "a8e2218c530b4323e8e44ca0cf25b3d22e2aea4d",
+      "loaderSourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0",
+      "archiveSha256": "535CCD85AE5CED158D396534231F0D32E4ADA2ADD63EB089A499B07547236488",
+      "metadataSha256": "81BE3D015CC3E67C86221A858BCEF8550DC8ABDC5C8F4969D8A9D609FEFD35F3",
+      "manifestDigest": "sha256:f5ca59c7bab1dcb24ecf9ffadbc1daf819cfedbc7419c87bd5e07d5b80b8d79a",
+      "imageId": "sha256:69c7c6bb684f308e46b9385a3984b16fc2b6aa1600e542f7546c1cbb0d84b60b",
+      "platform": "linux/amd64",
+      "offlineLoaderLiveCertified": true,
+      "cleanupVerified": true,
+      "reason": "Reviewed live loader proof for the preserved API archive only; it predates the accepted implementation SHA and is not the definitive public package/API/Admin candidate tuple."
+    }
+  ],
+  "externalGates": {
+    "publicPackageRestore": { "passed": false, "reason": "The tested resilience package is branch-built local evidence and is absent from the official public NuGet flat-container listing; merge, default-branch repack/reconciliation, and trusted publication must occur before this gate can run.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate public-package-restore", "evidenceLink": null },
+    "hostedAccessibility": { "passed": false, "reason": "No hosted candidate accessibility workflow evidence exists for the definitive tuple.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-accessibility", "evidenceLink": null },
+    "protectedApprovals": { "passed": false, "reason": "No protected release approval has been verified.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate protected-approvals", "evidenceLink": null },
+    "artifactAttestation": { "passed": false, "reason": "No canonical definitive candidate set has hosted attestations.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate artifact-attestation", "evidenceLink": null },
+    "registrySigning": { "passed": false, "reason": "No definitive API/Admin registry digests have verified signatures.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate registry-signing", "evidenceLink": null },
+    "immutableOciPromotion": { "passed": false, "reason": "No definitive API/Admin OCI manifests have been promoted immutably.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate immutable-oci-promotion", "evidenceLink": null },
+    "hostedSmokeSoak": { "passed": false, "reason": "No definitive hosted smoke, upgrade/rollback, or authenticated soak evidence exists.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-smoke-soak", "evidenceLink": null },
+    "finalRelease": { "passed": false, "reason": "No stable tag or release is authorized or certified.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate final-release", "evidenceLink": null }
+  },
+  "pendingReleaseGates": {
+    "definitivePackageOciTuple": { "passed": false, "status": "unperformed", "reason": "The public resilience dependency is unavailable. After that gate passes and explicit authorization is given, an authorized maintainer must push an already-created, reviewed, v-prefixed SemVer tag to trigger the tag-push-only workflow; this recorded command has not been executed.", "owner": "authorized maintainer", "nextCommand": "git push origin \"refs/tags/$env:CMSIFY_RELEASE_TAG\"", "evidenceLink": null },
+    "finalConsumersAccessibilityUpgradeSmoke": { "passed": false, "status": "unperformed", "reason": "Clean NuGet/npm consumers, candidate accessibility, exact-image upgrade/rollback, and production-like smoke have not run against a definitive tuple.", "owner": "release operator", "nextCommand": "gh run watch $env:CMSIFY_RELEASE_RUN_ID --exit-status", "evidenceLink": null },
+    "soak": { "passed": false, "status": "unperformed", "reason": "The required authenticated hosted soak has not run for a certified tuple.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-smoke-soak", "evidenceLink": null },
+    "stableTag": { "passed": false, "status": "unperformed", "reason": "No stable tag may be created until the preceding gates pass and explicit approval is given.", "owner": "approver and release operator", "nextCommand": "git tag --sign $env:CMSIFY_RELEASE_TAG $env:CMSIFY_RELEASE_SOURCE_SHA", "evidenceLink": null }
+  },
+  "knownDiagnostics": [
+    "The ignored SyntaxCircus.Http.Resilience package was built from sibling feature-branch source and must not be published; follow the post-merge default-branch handoff and refresh this identity before the public gate.",
+    "The exact SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 version remains absent from the official public flat-container listing; the approved ignored local package is not public evidence.",
+    "CODEOWNERS remains intentionally inactive until a repository-verified GitHub user or team is supplied; hosted protection configuration is external evidence.",
+    "The preserved API archive passed reviewed offline-loader live certification, but it predates the accepted implementation and is neither an API/Admin pair nor a definitive promotable candidate tuple.",
+    "The historical media reconciliation races remain an adjudication caveat; the latest preliminary full solution sweep passed 599/599 with zero skips and did not reproduce them.",
+    "The retained Task 9 rollback diagnostic omission still requires final candidate adjudication; local source tests do not convert it into hosted evidence."
+  ]
+}

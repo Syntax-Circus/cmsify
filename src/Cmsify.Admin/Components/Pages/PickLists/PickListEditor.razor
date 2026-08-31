@@ -83,7 +83,9 @@
         {
             try
             {
-                var loaded = await PickLists.GetAsync(WorkspaceId, PickListId.Value);
+                var loaded = ApiResponse.Required(
+                    await PickLists.GetAsync(WorkspaceId, PickListId.Value),
+                    "loading a picklist");
                 name = loaded.Name;
                 slug = new AutoSlugState(loaded.Slug, isManual: true);
                 description = loaded.Description;
@@ -133,7 +135,9 @@
             }
             else
             {
-                var created = await PickLists.CreateAsync(WorkspaceId, request);
+                var created = ApiResponse.Required(
+                    await PickLists.CreateAsync(WorkspaceId, request),
+                    "creating a picklist");
                 Toasts.Success("Picklist created");
                 Navigation.NavigateTo($"/workspaces/{WorkspaceId}/picklists/{created.Id}");
                 return;

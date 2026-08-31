@@ -199,13 +199,34 @@ public sealed record WebhookDispatchTargetDto(Guid Id, Guid WorkspaceId, string 
 public sealed record PendingWebhookDeliveryDto(
     Guid Id,
     Guid WebhookEndpointId,
+    Guid WebhookEventId,
     Guid WorkspaceId,
     string EventType,
     string Url,
     string Secret,
     JsonElement Payload,
     int AttemptCount,
-    DateTimeOffset? NextRetryAt);
+    DateTimeOffset? NextRetryAt,
+    string LeaseOwner,
+    Guid LeaseToken,
+    bool WasReclaimed = false);
+
+public sealed record WebhookDeliveryCompletionDto(Guid Id, string LeaseOwner, Guid LeaseToken, DateTimeOffset AttemptedAt);
+
+public sealed record ClaimedWebhookOutboxEventDto(
+    Guid Id,
+    string EventType,
+    Guid? WorkspaceId,
+    Guid EntityId,
+    JsonElement Payload,
+    DateTimeOffset OccurredAt,
+    string LeaseOwner,
+    Guid LeaseToken,
+    bool WasReclaimed = false);
+
+public sealed record ScheduledContentClaimDto(Guid ContentItemId, string LeaseOwner, Guid LeaseToken, bool WasReclaimed = false);
+
+public sealed record WebhookRetentionCleanupResult(int ProcessedOutboxEventsDeleted, int DeliveredLogsDeleted);
 
 public sealed record AuditLogDto(
     Guid Id,

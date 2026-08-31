@@ -1,0 +1,622 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { relative, resolve } from "node:path";
+import test from "node:test";
+
+import { createDockerHarness } from "../../../eng/upgrade-tests/docker.mjs";
+import { createRunScope } from "../../../eng/upgrade-tests/paths.mjs";
+import { verifyMatchedBackup } from "../../../eng/upgrade-tests/rehearsal.mjs";
+
+const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-upgrade-paths-"));
+
+test.after(() => rmSync(repositoryRoot, { force: true, recursive: true }));
+
+function inspectedResource(args, labels, { createdAt = "2026-08-27T12:00:00Z" } = {}) {
+  const resourceId = args.at(-1);
+  return args[0] === "container"
+    ? { Id: resourceId, Config: { Labels: labels } }
+    : { Name: resourceId, Driver: "local", Mountpoint: `/docker/volumes/${resourceId}`, CreatedAt: createdAt, Labels: labels, Scope: "local", Options: null };
+}
+
+test("creates an isolated, repository-owned run scope", () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-001");
+
+  assert.equal(scope.runId, "safe-run-001");
+  assert.equal(scope.projectName, "safe-run-001");
+  assert.equal(scope.diagnosticsDirectory, resolve(repositoryRoot, "artifacts", "upgrade-tests", scope.runId));
+  assert.equal(relative(resolve(repositoryRoot, "artifacts", "upgrade-tests"), scope.diagnosticsDirectory).startsWith(".."), false);
+  assert.deepEqual(scope.labels, {
+    "io.syntaxcircus.cmsify.upgrade-test": "true",
+    "io.syntaxcircus.cmsify.upgrade-run": scope.runId,
+  });
+});
+
+test("generates a safe lower-case run id", () => {
+  const scope = createRunScope(repositoryRoot);
+
+  assert.match(scope.runId, /^cmsify-upgrade-[a-f0-9]{12}$/);
+});
+
+test("rejects diagnostics outside the repository-owned upgrade run root", () => {
+  assert.throws(() => createRunScope(repositoryRoot, "..\\outside"), /safe run id/i);
+});
+
+test("rejects forged run scopes before they can create or delete an unowned env file", () => {
+  const trusted = createRunScope(repositoryRoot, "safe-run-006");
+  const outsideEnvironmentFile = resolve(repositoryRoot, "..", "unowned-upgrade.env");
+  const forged = {
+    ...trusted,
+    runId: "..\\..\\unowned-upgrade",
+    diagnosticsDirectory: resolve(repositoryRoot, "..", "unowned-diagnostics"),
+    labels: {
+      "io.syntaxcircus.cmsify.upgrade-test": "true",
+      "io.syntaxcircus.cmsify.upgrade-run": "..\\..\\unowned-upgrade",
+    },
+  };
+
+  assert.throws(() => createDockerHarness(forged), /trusted safe run scope/i);
+  assert.equal(existsSync(outsideEnvironmentFile), false);
+});
+
+test("cleanup discovers resources using both exact ownership labels", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-002");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.cleanup();
+
+  const discoveryCalls = calls.filter(({ args }) => ["ps", "network", "volume"].includes(args[0]));
+  assert.equal(discoveryCalls.length, 3);
+  for (const { command, args } of discoveryCalls) {
+    assert.equal(command, "docker");
+    assert.deepEqual(args.filter((value) => value.startsWith("label=")), [
+      "label=io.syntaxcircus.cmsify.upgrade-test=true",
+      `label=io.syntaxcircus.cmsify.upgrade-run=${scope.runId}`,
+    ]);
+  }
+});
+
+test("compose commands carry the run scope without wildcard cleanup", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-003");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.up(["postgres"]);
+  await harness.stop("postgres");
+  await harness.start("postgres");
+  await harness.exec("postgres", ["pg_isready"]);
+  await harness.logs();
+
+  const composeCalls = calls.filter(({ args }) => args[0] === "compose");
+  assert.equal(composeCalls.length, 6);
+  for (const { command, args } of composeCalls) {
+    assert.equal(command, "docker");
+    assert.deepEqual(args.slice(0, 7), [
+      "compose",
+      "--project-name", scope.projectName,
+      "--file", "tests/upgrade/compose.yml",
+      "--env-file", resolve(repositoryRoot, "tests", "upgrade", ".runs", `${scope.runId}.env`),
+    ]);
+    assert.equal(args.includes("down"), false);
+    assert.equal(args.includes("--volumes"), false);
+  }
+});
+
+test("Docker exec forwards bounded cancellation and redaction options without changing its command boundary", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-010");
+  const calls = [];
+  const controller = new AbortController();
+  const executor = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { exitCode: 0, stdout: Buffer.from("ok"), stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  const result = await harness.exec("baseline-api", ["curl", "--version"], {
+    timeoutMs: 5_000,
+    signal: controller.signal,
+    redact: ["fixture-secret"],
+    stdoutEncoding: "buffer",
+  });
+
+  assert.deepEqual(result.stdout, Buffer.from("ok"));
+  assert.deepEqual(calls[0].args.slice(-4), ["--no-TTY", "baseline-api", "curl", "--version"]);
+  assert.equal(calls[0].options.timeoutMs, 5_000);
+  assert.equal(calls[0].options.signal, controller.signal);
+  assert.deepEqual(calls[0].options.redact, ["fixture-secret"]);
+  assert.equal(calls[0].options.stdoutEncoding, "buffer");
+});
+
+test("Docker lifecycle commands forward the rehearsal cancellation boundary", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-015");
+  const calls = [];
+  const controller = new AbortController();
+  const executor = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.up(["postgres", "minio"], { signal: controller.signal, redact: ["fixture-secret"] });
+  await harness.stop("postgres", { signal: controller.signal });
+  await harness.copyTo("postgres", "fixture.sql", "/tmp/fixture.sql", { signal: controller.signal });
+
+  assert.equal(calls.length, 3);
+  assert.equal(calls.every(({ options }) => options.signal === controller.signal), true);
+  assert.deepEqual(calls[0].options.redact, ["fixture-secret"]);
+});
+
+test("Docker exec opts into an interactive stdin pipe only when input is supplied", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-011");
+  const calls = [];
+  const executor = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { exitCode: 0, stdout: "1\n", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.exec("postgres", ["psql", "--file=-"], { stdin: "SELECT 1;" });
+
+  assert.deepEqual(calls[0].args.slice(-5), ["--interactive", "--no-TTY", "postgres", "psql", "--file=-"]);
+  assert.equal(calls[0].options.stdin, "SELECT 1;");
+});
+
+test("accepts Docker Hub's canonical repository spelling for an immutable digest", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-009");
+  const digest = "sha256:e28a7c884ed4cc4933fbb58608ba8d1dd97bf6a1e443ef234e0a0aa8b5c51931";
+  const executor = async () => ({
+    exitCode: 0,
+    stdout: JSON.stringify({ Os: "linux", Architecture: "amd64", RepoDigests: [`syntaxcircus/cmsify-api@${digest}`] }),
+    stderr: "",
+    durationMs: 0,
+  });
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.inspectImage({ repository: "docker.io/syntaxcircus/cmsify-api", digest, platform: "linux/amd64" });
+});
+
+test("inspects the candidate once and binds its stable ID, platform, and exact OCI identity", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-012");
+  const sourceSha = "0123456789abcdef0123456789abcdef01234567";
+  const imageId = `sha256:${"a".repeat(64)}`;
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({
+        Id: imageId,
+        Os: "linux",
+        Architecture: "amd64",
+        Config: {
+          Labels: {
+            "org.opencontainers.image.version": "1.0.0",
+            "org.opencontainers.image.revision": sourceSha,
+          },
+        },
+      }),
+      stderr: "",
+      durationMs: 0,
+    };
+  };
+
+  const identity = await createDockerHarness(scope, executor).inspectCandidateImage("cmsify-candidate:test", {
+    version: "1.0.0",
+    sourceSha,
+  });
+
+  assert.deepEqual(identity, {
+    reference: "cmsify-candidate:test",
+    imageId,
+    platform: "linux/amd64",
+    version: "1.0.0",
+    sourceSha,
+    informationalVersion: `1.0.0+${sourceSha}`,
+    labels: {
+      "org.opencontainers.image.version": "1.0.0",
+      "org.opencontainers.image.revision": sourceSha,
+    },
+  });
+  assert.deepEqual(calls, [{ command: "docker", args: ["image", "inspect", "--format", "{{json .}}", "cmsify-candidate:test"] }]);
+});
+
+test("writes both candidate reference and inspected ID into the run-owned environment", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-013");
+  const harness = createDockerHarness(scope, async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }));
+  const imageId = `sha256:${"b".repeat(64)}`;
+
+  await harness.writeEnvironment({
+    CANDIDATE_API_IMAGE: imageId,
+    CANDIDATE_API_IMAGE_REFERENCE: "cmsify-candidate:test",
+    CANDIDATE_API_IMAGE_ID: imageId,
+  });
+
+  assert.equal(readFileSync(harness.environmentFile, "utf8"), [
+    `CMSIFY_UPGRADE_RUN_ID=${scope.runId}`,
+    "CMSIFY_UPGRADE_TEST_LABEL=true",
+    `CANDIDATE_API_IMAGE=${imageId}`,
+    "CANDIDATE_API_IMAGE_REFERENCE=cmsify-candidate:test",
+    `CANDIDATE_API_IMAGE_ID=${imageId}`,
+    "",
+  ].join("\n"));
+});
+
+test("discarding upgraded state label-verifies exact data containers and volumes before removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-014");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    if (args[0] === "compose" && args.includes("ps")) {
+      return { exitCode: 0, stdout: "postgres-container\nminio-container\n", stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels)), stderr: "", durationMs: 0 };
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await createDockerHarness(scope, executor).discardDataVolumes();
+
+  const removedContainers = calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1));
+  const removedVolumes = calls.filter(({ args }) => args[0] === "volume" && args[1] === "rm").map(({ args }) => args.at(-1));
+  assert.deepEqual(removedContainers, ["postgres-container", "minio-container"]);
+  assert.deepEqual(removedVolumes, [`${scope.projectName}_postgres-data`, `${scope.projectName}_minio-data`]);
+  const firstVolumeRemoval = calls.findIndex(({ args }) => args[0] === "volume" && args[1] === "rm");
+  assert.ok(firstVolumeRemoval > calls.findLastIndex(({ args }) => args[0] === "rm"));
+  assert.equal(calls.some(({ args }) => args.includes("prune") || args.includes("--volumes") || args.includes("down")), false);
+});
+
+test("post-fence resource relabeling aborts the entire discard before any removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-020");
+  const removals = [];
+  let fenced = false;
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) {
+      return { exitCode: 0, stdout: "postgres-container\nminio-container\n", stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) {
+      const labels = fenced
+        ? { ...scope.labels, "io.syntaxcircus.cmsify.upgrade-run": "different-run" }
+        : scope.labels;
+      return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, labels)), stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(
+    () => createDockerHarness(scope, executor).discardDataVolumes({}, async () => { fenced = true; }),
+    /ownership|changed|fence/i,
+  );
+  assert.deepEqual(removals, []);
+});
+
+test("post-fence container replacement aborts the entire discard before any removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-021");
+  const removals = [];
+  let discoveries = 0;
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) {
+      discoveries += 1;
+      const containers = discoveries === 1
+        ? "postgres-container\nminio-container\n"
+        : "replacement-postgres\nminio-container\n";
+      return { exitCode: 0, stdout: containers, stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels)), stderr: "", durationMs: 0 };
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(
+    () => createDockerHarness(scope, executor).discardDataVolumes({}, async () => {}),
+    /changed|fence/i,
+  );
+  assert.deepEqual(removals, []);
+});
+
+test("post-fence volume replacement with the same name and labels aborts before any removal", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-023");
+  const removals = [];
+  let fenced = false;
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) return { exitCode: 0, stdout: "postgres-container\nminio-container\n", stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) {
+      const createdAt = fenced && args.at(-1).endsWith("_postgres-data") ? "2026-08-27T12:00:01Z" : "2026-08-27T12:00:00Z";
+      return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels, { createdAt })), stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(
+    () => createDockerHarness(scope, executor).discardDataVolumes({}, async () => { fenced = true; }),
+    /changed|fence/i,
+  );
+  assert.deepEqual(removals, []);
+});
+
+test("final discard fence catches local media mutation from the source-inventory hook before first removal", async () => {
+  const root = mkdtempSync(resolve(tmpdir(), "cmsify-final-fence-"));
+  const scope = createRunScope(root, "final-fence-001");
+  const backup = resolve(scope.diagnosticsDirectory, "backup");
+  const media = resolve(backup, "media");
+  const mediaPath = resolve(media, "object.txt");
+  const database = "database bytes";
+  const originalMedia = "media";
+  mkdirSync(media, { recursive: true });
+  writeFileSync(resolve(backup, "database.dump"), database);
+  writeFileSync(mediaPath, originalMedia);
+  const mediaObjects = [{
+    path: "object.txt",
+    size: Buffer.byteLength(originalMedia),
+    sha256: createHash("sha256").update(originalMedia).digest("hex"),
+  }];
+  const manifest = {
+    schemaVersion: 1,
+    runId: scope.runId,
+    baselineVersion: "0.1.3",
+    createdAt: "2026-08-27T12:00:00.000Z",
+    databaseSha256: createHash("sha256").update(database).digest("hex"),
+    sourceMediaObjectCount: 1,
+    sourceMediaInventorySha256: createHash("sha256").update(JSON.stringify(mediaObjects)).digest("hex"),
+    mediaObjects,
+  };
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+  writeFileSync(resolve(backup, "backup-manifest.json"), manifestText);
+  const removals = [];
+  const executor = async (_command, args) => {
+    if (args[0] === "compose" && args.includes("ps")) return { exitCode: 0, stdout: "postgres-id\nminio-id\n", stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: `${scope.projectName}_postgres-data\n${scope.projectName}_minio-data\n`, stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(inspectedResource(args, scope.labels)), stderr: "", durationMs: 0 };
+    if (args[0] === "compose" && args.includes("mc") && args.includes("ls")) {
+      writeFileSync(mediaPath, "mutat");
+      return { exitCode: 0, stdout: `${JSON.stringify({ key: "object.txt", size: 5, type: "file" })}\n`, stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "compose" && args.includes("sha256sum")) {
+      return { exitCode: 0, stdout: `${mediaObjects[0].sha256}  object\n`, stderr: "", durationMs: 0 };
+    }
+    if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) removals.push(args.join(" "));
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  try {
+    await assert.rejects(() => harness.discardDataVolumes({}, () => verifyMatchedBackup({
+      harness,
+      scope,
+      baselineVersion: "0.1.3",
+      manifestSha256: createHash("sha256").update(manifestText).digest("hex"),
+    })), /backup media checksum mismatch/i);
+    assert.deepEqual(removals, []);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("captures logs before explicitly removing label-verified resources", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-004");
+  const calls = [];
+  const labels = JSON.stringify(scope.labels);
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    if (args[0] === "ps") return { exitCode: 0, stdout: "container-id\n", stderr: "", durationMs: 0 };
+    if (args[0] === "network" && args[1] === "ls") return { exitCode: 0, stdout: "network-id\n", stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: "volume-id\n", stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: labels, stderr: "", durationMs: 0 };
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await createDockerHarness(scope, executor).cleanup();
+
+  const logsIndex = calls.findIndex(({ args }) => args.includes("logs"));
+  const removalIndex = calls.findIndex(({ args }) => args[0] === "rm" || (args[0] === "network" && args[1] === "rm") || (args[0] === "volume" && args[1] === "rm"));
+  assert.ok(logsIndex >= 0 && removalIndex > logsIndex);
+  assert.ok(calls.some(({ args }) => args[0] === "network" && args[1] === "inspect" && args.includes("{{json .Labels}}")));
+  assert.ok(calls.some(({ args }) => args[0] === "volume" && args[1] === "inspect" && args.includes("{{json .Labels}}")));
+});
+
+test("preserves a run environment file supplied by later orchestration", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-005");
+  const executor = async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 });
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.up(["postgres"]);
+  writeFileSync(harness.environmentFile, "CMSIFY_FIXTURE_TOKEN=fixture-only-value\n", "utf8");
+  await harness.start("postgres");
+
+  assert.equal(readFileSync(harness.environmentFile, "utf8"), "CMSIFY_FIXTURE_TOKEN=fixture-only-value\n");
+});
+
+test("continues owned cleanup when log collection fails", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-007");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    if (args[0] === "compose" && args.includes("logs")) throw new Error("log collection failed");
+    if (args[0] === "ps") return { exitCode: 0, stdout: "container-id\n", stderr: "", durationMs: 0 };
+    if (args[0] === "network" && args[1] === "ls") return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    if (args[0] === "volume" && args[1] === "ls") return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return { exitCode: 0, stdout: JSON.stringify(scope.labels), stderr: "", durationMs: 0 };
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(createDockerHarness(scope, executor).cleanup(), /log collection failed/);
+
+  assert.ok(calls.some(({ args }) => args[0] === "ps"));
+  assert.ok(calls.some(({ args }) => args[0] === "rm" && args.includes("container-id")));
+});
+
+test("refuses to remove a discovered resource without both ownership labels", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-008");
+  const calls = [];
+  const executor = async (command, args) => {
+    calls.push({ command, args });
+    if (args[0] === "ps") return { exitCode: 0, stdout: "container-id\n", stderr: "", durationMs: 0 };
+    if (args[0] === "network" || args[0] === "volume") return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    if (args.includes("inspect")) return {
+      exitCode: 0,
+      stdout: JSON.stringify({ "io.syntaxcircus.cmsify.upgrade-test": "true" }),
+      stderr: "",
+      durationMs: 0,
+    };
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+
+  await assert.rejects(createDockerHarness(scope, executor).cleanup(), /lacks the required ownership labels/i);
+
+  assert.equal(calls.some(({ args }) => args[0] === "rm" && args.includes("container-id")), false);
+});
+
+test("stores only a bounded structured Docker diagnostic summary", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-016");
+  const secret = "cmsify_sensitive-token-value";
+  const password = "fixture-password-value";
+  const raw = `SELECT * FROM users; row=(1, '${secret}'); password=${password}; C:\\outside\\data.sql; ${"z".repeat(100_000)}`;
+  const harness = createDockerHarness(scope, async (_command, args, options) => {
+    assert.deepEqual(options.redact, [secret, password]);
+    return { exitCode: 0, stdout: raw, stderr: raw, durationMs: 12 };
+  });
+
+  const summary = await harness.logs({ redact: [secret, password] });
+  const artifact = resolve(scope.diagnosticsDirectory, "docker-diagnostics.json");
+  const serialized = readFileSync(artifact, "utf8");
+
+  assert.deepEqual(summary, { status: "captured", stdoutBytes: Buffer.byteLength(raw), stderrBytes: Buffer.byteLength(raw) });
+  assert.ok(serialized.length <= 1_024);
+  for (const forbidden of ["SELECT", "row=(", secret, password, "outside", "z".repeat(1_000)]) assert.equal(serialized.includes(forbidden), false);
+  assert.equal(existsSync(resolve(scope.diagnosticsDirectory, "docker-compose.log")), false);
+});
+
+test("persists bounded allow-listed per-service logs and safe migration state", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-022");
+  const secret = "cmsify_fixture-secret-never-retain";
+  const migration = "20260827135736_AddMediaLifecycleReconciliation";
+  const markerLines = Array.from({ length: 80 }, () => "Application started. useful-marker").join("\n");
+  const harness = createDockerHarness(scope, async (_command, args, options) => {
+    assert.deepEqual(options.redact, [secret]);
+    if (args.includes("logs")) {
+      const prefixedMarkers = markerLines.split("\n").map((line) => `safe-run-baseline-api-1 | ${line}`).join("\n");
+      const stdout = [
+        `safe-run-postgres-1 | database system is ready to accept connections`,
+        `safe-run-postgres-1 | SELECT * FROM users; token=${secret}`,
+        `safe-run-minio-1 | API: http://minio:9000`,
+        `safe-run-minio-1 | raw-object=${secret}`,
+        `safe-run-baseline-api-1 | Now listening on: http://[::]:8080`,
+        prefixedMarkers,
+        `safe-run-baseline-api-1 | body=${secret}`,
+        `safe-run-candidate-api-1 | Applying migration '${migration}'.`,
+        `safe-run-candidate-api-1 | Unhandled exception: ${secret}`,
+      ].join("\n");
+      return { exitCode: 0, stdout, stderr: "non-allow-listed stderr", durationMs: 12 };
+    }
+    if (args.includes("psql")) {
+      return { exitCode: 0, stdout: `${migration}\nnot-a-migration=${secret}\n`, stderr: "", durationMs: 3 };
+    }
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  });
+
+  const summary = await harness.logs({ redact: [secret] });
+  const artifact = JSON.parse(readFileSync(resolve(scope.diagnosticsDirectory, "docker-diagnostics.json"), "utf8"));
+  const serialized = JSON.stringify(artifact);
+
+  assert.equal(summary.status, "captured");
+  assert.deepEqual(artifact.migrations, { status: "captured", count: 1, ids: [migration] });
+  assert.ok(artifact.services.postgres.lines.includes("database system is ready to accept connections"));
+  assert.ok(artifact.services["baseline-api"].lines.includes("Application started."));
+  assert.ok(artifact.services["candidate-api"].lines.includes(`Applying migration ${migration}.`));
+  for (const service of Object.values(artifact.services)) {
+    assert.ok(service.lines.length <= 32);
+    assert.ok(service.lines.every((line) => line.length <= 160));
+  }
+  for (const forbidden of [secret, "SELECT", "raw-object", "body=", "non-allow-listed"]) assert.equal(serialized.includes(forbidden), false);
+  assert.ok(serialized.length <= 12_000);
+});
+
+test("fails prerequisite probing before a Compose up when a required tool is missing", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-017");
+  const calls = [];
+  const harness = createDockerHarness(scope, async (command, args) => {
+    calls.push({ command, args });
+    if (args.includes("pg_restore")) throw new Error("missing tool");
+    return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 0 };
+  });
+  const image = (repository) => ({ repository, digest: `sha256:${"a".repeat(64)}`, platform: "linux/amd64" });
+
+  await assert.rejects(() => harness.verifyPrerequisites({
+    postgresImage: image("postgres"),
+    minioImage: image("minio"),
+    baselineApiImage: image("baseline-api"),
+    candidateImageId: `sha256:${"b".repeat(64)}`,
+  }), /prerequisite/i);
+
+  assert.equal(calls.some(({ args }) => args[0] === "compose" && args.includes("up")), false);
+  assert.equal(existsSync(harness.environmentFile), false);
+});
+
+test("preserves cancellation when an immutable-image prerequisite probe aborts", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-020");
+  const controller = new AbortController();
+  const executor = async (_command, args) => {
+    if (args.includes("pg_dump")) {
+      controller.abort();
+      throw new Error("raw prerequisite abort detail");
+    }
+    return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 0 };
+  };
+  const image = (repository) => ({ repository, digest: `sha256:${"a".repeat(64)}`, platform: "linux/amd64" });
+
+  await assert.rejects(() => createDockerHarness(scope, executor).verifyPrerequisites({
+    postgresImage: image("postgres"),
+    minioImage: image("minio"),
+    baselineApiImage: image("baseline-api"),
+    candidateImageId: `sha256:${"b".repeat(64)}`,
+  }, { signal: controller.signal }), /cancelled/i);
+});
+
+test("records unavailable diagnostics without Compose or an env write before resources start", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-019");
+  const calls = [];
+  const harness = createDockerHarness(scope, async (command, args) => {
+    calls.push({ command, args });
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  });
+
+  const summary = await harness.logs({ resourcesStarted: false, redact: ["fixture-secret"] });
+
+  assert.deepEqual(summary, { status: "unavailable", stdoutBytes: 0, stderrBytes: 0 });
+  assert.deepEqual(calls, []);
+  assert.equal(existsSync(harness.environmentFile), false);
+});
+
+test("rejects a junction parent for the run environment file", async (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "cmsify-env-link-"));
+  const outside = mkdtempSync(resolve(tmpdir(), "cmsify-env-outside-"));
+  mkdirSync(resolve(root, "tests", "upgrade"), { recursive: true });
+  try {
+    try {
+      symlinkSync(outside, resolve(root, "tests", "upgrade", ".runs"), process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) return t.skip("filesystem does not permit link creation");
+      throw error;
+    }
+    const harness = createDockerHarness(createRunScope(root, "safe-run-018"), async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }));
+    await assert.rejects(() => harness.writeEnvironment({ VALUE: "safe" }), /linked|reparse|safe.*path/i);
+    assert.equal(existsSync(resolve(outside, "safe-run-018.env")), false);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+    rmSync(outside, { force: true, recursive: true });
+  }
+});

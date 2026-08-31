@@ -4,7 +4,363 @@
  */
 
 export interface paths {
-    "/health/live": {
+    "/api/v1/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ApiClientDtoPagedResponse"];
+                        "application/json": components["schemas"]["ApiClientDtoPagedResponse"];
+                        "text/json": components["schemas"]["ApiClientDtoPagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CreateApiClientRequest"];
+                    "text/json": components["schemas"]["CreateApiClientRequest"];
+                    "application/*+json": components["schemas"]["CreateApiClientRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CreateApiClientResponse"];
+                        "application/json": components["schemas"]["CreateApiClientResponse"];
+                        "text/json": components["schemas"]["CreateApiClientResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ApiClientDto"];
+                        "application/json": components["schemas"]["ApiClientDto"];
+                        "text/json": components["schemas"]["ApiClientDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ApiClientDto"];
+                        "application/json": components["schemas"]["ApiClientDto"];
+                        "text/json": components["schemas"]["ApiClientDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CreateApiClientResponse"];
+                        "application/json": components["schemas"]["CreateApiClientResponse"];
+                        "text/json": components["schemas"]["CreateApiClientResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    EntityType?: string;
+                    EntityId?: string;
+                    Action?: components["schemas"]["AuditAction"];
+                    ActorUserId?: string;
+                    ActorApiClientId?: string;
+                    After?: string;
+                    Before?: string;
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["AuditLogResponsePagedResponse"];
+                        "application/json": components["schemas"]["AuditLogResponsePagedResponse"];
+                        "text/json": components["schemas"]["AuditLogResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    EntityType?: string;
+                    EntityId?: string;
+                    Action?: components["schemas"]["AuditAction"];
+                    ActorUserId?: string;
+                    ActorApiClientId?: string;
+                    After?: string;
+                    Before?: string;
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["AuditLogResponsePagedResponse"];
+                        "application/json": components["schemas"]["AuditLogResponsePagedResponse"];
+                        "text/json": components["schemas"]["AuditLogResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["LoginRequest"];
+                    "text/json": components["schemas"]["LoginRequest"];
+                    "application/*+json": components["schemas"]["LoginRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["LoginResponse"];
+                        "application/json": components["schemas"]["LoginResponse"];
+                        "text/json": components["schemas"]["LoginResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/me": {
         parameters: {
             query?: never;
             header?: never;
@@ -20,7 +376,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Live */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -37,7 +393,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/health/ready": {
+    "/api/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["LoginResponse"];
+                        "application/json": components["schemas"]["LoginResponse"];
+                        "text/json": components["schemas"]["LoginResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ChangePasswordRequest"];
+                    "text/json": components["schemas"]["ChangePasswordRequest"];
+                    "application/*+json": components["schemas"]["ChangePasswordRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/components": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ComponentSummaryResponsePagedResponse"];
+                        "application/json": components["schemas"]["ComponentSummaryResponsePagedResponse"];
+                        "text/json": components["schemas"]["ComponentSummaryResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ComponentRequest"];
+                    "text/json": components["schemas"]["ComponentRequest"];
+                    "application/*+json": components["schemas"]["ComponentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ComponentResponse"];
+                        "application/json": components["schemas"]["ComponentResponse"];
+                        "text/json": components["schemas"]["ComponentResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/components/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -48,24 +551,141 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Ready */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ComponentResponse"];
+                        "application/json": components["schemas"]["ComponentResponse"];
+                        "text/json": components["schemas"]["ComponentResponse"];
+                    };
                 };
-                /** @description Not ready */
-                503: {
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ComponentRequest"];
+                    "text/json": components["schemas"]["ComponentRequest"];
+                    "application/*+json": components["schemas"]["ComponentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ComponentResponse"];
+                        "application/json": components["schemas"]["ComponentResponse"];
+                        "text/json": components["schemas"]["ComponentResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/components/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ComponentVersionRequest"];
+                    "text/json": components["schemas"]["ComponentVersionRequest"];
+                    "application/*+json": components["schemas"]["ComponentVersionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ComponentVersionResponse"];
+                        "application/json": components["schemas"]["ComponentVersionResponse"];
+                        "text/json": components["schemas"]["ComponentVersionResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/components/{id}/versions/{versionNumber}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ComponentVersionResponse"];
+                        "application/json": components["schemas"]["ComponentVersionResponse"];
+                        "text/json": components["schemas"]["ComponentVersionResponse"];
+                    };
                 };
             };
         };
@@ -77,33 +697,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces": {
+    "/api/v1/workspaces/{workspaceId}/components/{id}/versions/{versionNumber}/fields": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: {
+        get?: never;
+        put: {
             parameters: {
                 query?: never;
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ComponentFieldRequest"][];
+                    "text/json": components["schemas"]["ComponentFieldRequest"][];
+                    "application/*+json": components["schemas"]["ComponentFieldRequest"][];
+                };
+            };
             responses: {
-                /** @description Workspaces */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ComponentVersionResponse"];
+                        "application/json": components["schemas"]["ComponentVersionResponse"];
+                        "text/json": components["schemas"]["ComponentVersionResponse"];
+                    };
                 };
             };
         };
-        put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/components/{id}/versions/{versionNumber}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ComponentResponse"];
+                        "application/json": components["schemas"]["ComponentResponse"];
+                        "text/json": components["schemas"]["ComponentResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -119,24 +794,78 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    Q?: string;
+                    TemplateVersionId?: string;
+                    TemplateId?: string;
+                    Status?: components["schemas"]["ContentStatus"];
+                    LocaleCode?: string;
+                    TranslationGroupId?: string;
+                    Slug?: string;
+                    Tags?: string;
+                    CreatedAfter?: string;
+                    CreatedBefore?: string;
+                    PublishedAfter?: string;
+                    PublishedBefore?: string;
+                    Resolve?: boolean;
+                    AsOf?: string;
+                    SortBy?: string;
+                    SortDesc?: boolean;
+                    Page?: number;
+                    PageSize?: number;
+                };
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Content list */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemSummaryResponsePagedResponse"];
+                        "application/json": components["schemas"]["ContentItemSummaryResponsePagedResponse"];
+                        "text/json": components["schemas"]["ContentItemSummaryResponsePagedResponse"];
+                    };
                 };
             };
         };
         put?: never;
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CreateContentItemRequest"];
+                    "text/json": components["schemas"]["CreateContentItemRequest"];
+                    "application/*+json": components["schemas"]["CreateContentItemRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -152,14 +881,77 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    resolve?: boolean;
+                    asOf?: string;
+                };
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Content detail */
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["UpdateContentItemRequest"];
+                    "text/json": components["schemas"]["UpdateContentItemRequest"];
+                    "application/*+json": components["schemas"]["UpdateContentItemRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -168,9 +960,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -185,19 +974,28 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    asOf?: string;
+                };
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                    slug: string;
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Content detail */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
                 };
             };
         };
@@ -209,7 +1007,431 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspaceId}/templates": {
+    "/api/v1/workspaces/{workspaceId}/content/{id}/upgrade-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["RejectContentRequest"];
+                    "text/json": components["schemas"]["RejectContentRequest"];
+                    "application/*+json": components["schemas"]["RejectContentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PublishContentRequest"];
+                    "text/json": components["schemas"]["PublishContentRequest"];
+                    "application/*+json": components["schemas"]["PublishContentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PublishContentResponse"];
+                        "application/json": components["schemas"]["PublishContentResponse"];
+                        "text/json": components["schemas"]["PublishContentResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/link-translation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["LinkTranslationRequest"];
+                    "text/json": components["schemas"]["LinkTranslationRequest"];
+                    "application/*+json": components["schemas"]["LinkTranslationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemSummaryResponse"][];
+                        "application/json": components["schemas"]["ContentItemSummaryResponse"][];
+                        "text/json": components["schemas"]["ContentItemSummaryResponse"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/translations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemSummaryResponsePagedResponse"];
+                        "application/json": components["schemas"]["ContentItemSummaryResponsePagedResponse"];
+                        "text/json": components["schemas"]["ContentItemSummaryResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentVersionSummaryResponsePagedResponse"];
+                        "application/json": components["schemas"]["ContentVersionSummaryResponsePagedResponse"];
+                        "text/json": components["schemas"]["ContentVersionSummaryResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/versions/{versionNumber}": {
         parameters: {
             query?: never;
             header?: never;
@@ -220,22 +1442,71 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Templates */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ContentVersionDetailResponse"];
+                        "application/json": components["schemas"]["ContentVersionDetailResponse"];
+                        "text/json": components["schemas"]["ContentVersionDetailResponse"];
+                    };
                 };
             };
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/content/{id}/versions/{versionNumber}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ContentItemDetailResponse"];
+                        "application/json": components["schemas"]["ContentItemDetailResponse"];
+                        "text/json": components["schemas"]["ContentItemDetailResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -251,14 +1522,182 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                    mimeType?: string;
+                    search?: string;
+                };
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Media */
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["MediaAssetResponsePagedResponse"];
+                        "application/json": components["schemas"]["MediaAssetResponsePagedResponse"];
+                        "text/json": components["schemas"]["MediaAssetResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file?: string;
+                        altText?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["MediaAssetResponse"];
+                        "application/json": components["schemas"]["MediaAssetResponse"];
+                        "text/json": components["schemas"]["MediaAssetResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/media/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["MediaAssetResponse"];
+                        "application/json": components["schemas"]["MediaAssetResponse"];
+                        "text/json": components["schemas"]["MediaAssetResponse"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["UpdateMediaAssetRequest"];
+                    "text/json": components["schemas"]["UpdateMediaAssetRequest"];
+                    "application/*+json": components["schemas"]["UpdateMediaAssetRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["MediaAssetResponse"];
+                        "application/json": components["schemas"]["MediaAssetResponse"];
+                        "text/json": components["schemas"]["MediaAssetResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/media/{id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -275,7 +1714,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspaceId}/picklists/{id}/revisions/{revisionId}": {
+    "/schema/ctp-1.0.json": {
         parameters: {
             query?: never;
             header?: never;
@@ -291,15 +1730,41 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description PickList revision */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
                 };
-                /** @description Not found */
-                404: {
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schema/ctp-1.1.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -324,24 +1789,195 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Official reusable-model packages */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["OfficialPackageResponsePagedResponse"];
+                        "application/json": components["schemas"]["OfficialPackageResponsePagedResponse"];
+                        "text/json": components["schemas"]["OfficialPackageResponsePagedResponse"];
+                    };
                 };
             };
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/packages/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PackageImportResponse"];
+                        "application/json": components["schemas"]["PackageImportResponse"];
+                        "text/json": components["schemas"]["PackageImportResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/packages/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PackageImportPreviewResponse"];
+                        "application/json": components["schemas"]["PackageImportPreviewResponse"];
+                        "text/json": components["schemas"]["PackageImportPreviewResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/packages/import/official/{packageId}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    packageId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PackageImportPreviewResponse"];
+                        "application/json": components["schemas"]["PackageImportPreviewResponse"];
+                        "text/json": components["schemas"]["PackageImportPreviewResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/packages/import/official/{packageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    packageId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PackageImportResolutionsRequest"];
+                    "text/json": components["schemas"]["PackageImportResolutionsRequest"];
+                    "application/*+json": components["schemas"]["PackageImportResolutionsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PackageImportResponse"];
+                        "application/json": components["schemas"]["PackageImportResponse"];
+                        "text/json": components["schemas"]["PackageImportResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -361,14 +1997,19 @@ export interface paths {
                     templateIds?: string;
                     componentIds?: string;
                     picklistIds?: string;
+                    packageNamespace?: string;
+                    id?: string;
+                    version?: string;
                 };
                 header?: never;
-                path?: never;
+                path: {
+                    workspaceId: string;
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description CTP package download */
+                /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -385,10 +2026,2639 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspaceId}/picklists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                    search?: string;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PickListSummaryResponsePagedResponse"];
+                        "application/json": components["schemas"]["PickListSummaryResponsePagedResponse"];
+                        "text/json": components["schemas"]["PickListSummaryResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PickListRequest"];
+                    "text/json": components["schemas"]["PickListRequest"];
+                    "application/*+json": components["schemas"]["PickListRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PickListResponse"];
+                        "application/json": components["schemas"]["PickListResponse"];
+                        "text/json": components["schemas"]["PickListResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/picklists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PickListResponse"];
+                        "application/json": components["schemas"]["PickListResponse"];
+                        "text/json": components["schemas"]["PickListResponse"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PickListRequest"];
+                    "text/json": components["schemas"]["PickListRequest"];
+                    "application/*+json": components["schemas"]["PickListRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PickListResponse"];
+                        "application/json": components["schemas"]["PickListResponse"];
+                        "text/json": components["schemas"]["PickListResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/picklists/{id}/revisions/{revisionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    revisionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PickListResponse"];
+                        "application/json": components["schemas"]["PickListResponse"];
+                        "text/json": components["schemas"]["PickListResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["AccountPreferencesResponse"];
+                        "application/json": components["schemas"]["AccountPreferencesResponse"];
+                        "text/json": components["schemas"]["AccountPreferencesResponse"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["UpdateAccountPreferencesRequest"];
+                    "text/json": components["schemas"]["UpdateAccountPreferencesRequest"];
+                    "application/*+json": components["schemas"]["UpdateAccountPreferencesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["AccountPreferencesResponse"];
+                        "application/json": components["schemas"]["AccountPreferencesResponse"];
+                        "text/json": components["schemas"]["AccountPreferencesResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["StorageConfigResponse"];
+                        "application/json": components["schemas"]["StorageConfigResponse"];
+                        "text/json": components["schemas"]["StorageConfigResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/storage/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["StorageTestResponse"];
+                        "application/json": components["schemas"]["StorageTestResponse"];
+                        "text/json": components["schemas"]["StorageTestResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TagResponsePagedResponse"];
+                        "application/json": components["schemas"]["TagResponsePagedResponse"];
+                        "text/json": components["schemas"]["TagResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/tags/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                    isSystem?: boolean;
+                    search?: string;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateSummaryResponsePagedResponse"];
+                        "application/json": components["schemas"]["TemplateSummaryResponsePagedResponse"];
+                        "text/json": components["schemas"]["TemplateSummaryResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CreateTemplateRequest"];
+                    "text/json": components["schemas"]["CreateTemplateRequest"];
+                    "application/*+json": components["schemas"]["CreateTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateResponse"];
+                        "application/json": components["schemas"]["TemplateResponse"];
+                        "text/json": components["schemas"]["TemplateResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateResponse"];
+                        "application/json": components["schemas"]["TemplateResponse"];
+                        "text/json": components["schemas"]["TemplateResponse"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["UpdateTemplateRequest"];
+                    "text/json": components["schemas"]["UpdateTemplateRequest"];
+                    "application/*+json": components["schemas"]["UpdateTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateResponse"];
+                        "application/json": components["schemas"]["TemplateResponse"];
+                        "text/json": components["schemas"]["TemplateResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateVersionSummaryResponsePagedResponse"];
+                        "application/json": components["schemas"]["TemplateVersionSummaryResponsePagedResponse"];
+                        "text/json": components["schemas"]["TemplateVersionSummaryResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CreateTemplateVersionRequest"];
+                    "text/json": components["schemas"]["CreateTemplateVersionRequest"];
+                    "application/*+json": components["schemas"]["CreateTemplateVersionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateVersionResponse"];
+                        "application/json": components["schemas"]["TemplateVersionResponse"];
+                        "text/json": components["schemas"]["TemplateVersionResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions/{versionNumber}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateVersionResponse"];
+                        "application/json": components["schemas"]["TemplateVersionResponse"];
+                        "text/json": components["schemas"]["TemplateVersionResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions/{versionNumber}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateVersionResponse"];
+                        "application/json": components["schemas"]["TemplateVersionResponse"];
+                        "text/json": components["schemas"]["TemplateVersionResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions/{versionNumber}/sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["TemplateSectionRequest"];
+                    "text/json": components["schemas"]["TemplateSectionRequest"];
+                    "application/*+json": components["schemas"]["TemplateSectionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateSectionResponse"];
+                        "application/json": components["schemas"]["TemplateSectionResponse"];
+                        "text/json": components["schemas"]["TemplateSectionResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions/{versionNumber}/sections/{sectionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                    sectionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["TemplateSectionRequest"];
+                    "text/json": components["schemas"]["TemplateSectionRequest"];
+                    "application/*+json": components["schemas"]["TemplateSectionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateSectionResponse"];
+                        "application/json": components["schemas"]["TemplateSectionResponse"];
+                        "text/json": components["schemas"]["TemplateSectionResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                    sectionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions/{versionNumber}/fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["TemplateFieldRequest"];
+                    "text/json": components["schemas"]["TemplateFieldRequest"];
+                    "application/*+json": components["schemas"]["TemplateFieldRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateFieldResponse"];
+                        "application/json": components["schemas"]["TemplateFieldResponse"];
+                        "text/json": components["schemas"]["TemplateFieldResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions/{versionNumber}/fields/{fieldId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                    fieldId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["TemplateFieldRequest"];
+                    "text/json": components["schemas"]["TemplateFieldRequest"];
+                    "application/*+json": components["schemas"]["TemplateFieldRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TemplateFieldResponse"];
+                        "application/json": components["schemas"]["TemplateFieldResponse"];
+                        "text/json": components["schemas"]["TemplateFieldResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                    fieldId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/templates/{id}/versions/{versionNumber}/fields/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    versionNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ReorderFieldRequest"][];
+                    "text/json": components["schemas"]["ReorderFieldRequest"][];
+                    "application/*+json": components["schemas"]["ReorderFieldRequest"][];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["UserDtoPagedResponse"];
+                        "application/json": components["schemas"]["UserDtoPagedResponse"];
+                        "text/json": components["schemas"]["UserDtoPagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CreateUserRequest"];
+                    "text/json": components["schemas"]["CreateUserRequest"];
+                    "application/*+json": components["schemas"]["CreateUserRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TempPasswordResponse"];
+                        "application/json": components["schemas"]["TempPasswordResponse"];
+                        "text/json": components["schemas"]["TempPasswordResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["UserDto"];
+                        "application/json": components["schemas"]["UserDto"];
+                        "text/json": components["schemas"]["UserDto"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["UpdateUserRequest"];
+                    "text/json": components["schemas"]["UpdateUserRequest"];
+                    "application/*+json": components["schemas"]["UpdateUserRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["UserDto"];
+                        "application/json": components["schemas"]["UserDto"];
+                        "text/json": components["schemas"]["UserDto"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ResetPasswordRequest"];
+                    "text/json": components["schemas"]["ResetPasswordRequest"];
+                    "application/*+json": components["schemas"]["ResetPasswordRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["TempPasswordResponse"];
+                        "application/json": components["schemas"]["TempPasswordResponse"];
+                        "text/json": components["schemas"]["TempPasswordResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WebhookEndpointResponsePagedResponse"];
+                        "application/json": components["schemas"]["WebhookEndpointResponsePagedResponse"];
+                        "text/json": components["schemas"]["WebhookEndpointResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CreateWebhookEndpointRequest"];
+                    "text/json": components["schemas"]["CreateWebhookEndpointRequest"];
+                    "application/*+json": components["schemas"]["CreateWebhookEndpointRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CreateWebhookEndpointResponse"];
+                        "application/json": components["schemas"]["CreateWebhookEndpointResponse"];
+                        "text/json": components["schemas"]["CreateWebhookEndpointResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WebhookEndpointResponse"];
+                        "application/json": components["schemas"]["WebhookEndpointResponse"];
+                        "text/json": components["schemas"]["WebhookEndpointResponse"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["UpdateWebhookEndpointRequest"];
+                    "text/json": components["schemas"]["UpdateWebhookEndpointRequest"];
+                    "application/*+json": components["schemas"]["UpdateWebhookEndpointRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WebhookEndpointResponse"];
+                        "application/json": components["schemas"]["WebhookEndpointResponse"];
+                        "text/json": components["schemas"]["WebhookEndpointResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/webhooks/{id}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["RotateWebhookSecretResponse"];
+                        "application/json": components["schemas"]["RotateWebhookSecretResponse"];
+                        "text/json": components["schemas"]["RotateWebhookSecretResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/webhooks/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                    isDelivered?: boolean;
+                    isFailed?: boolean;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WebhookDeliveryResponsePagedResponse"];
+                        "application/json": components["schemas"]["WebhookDeliveryResponsePagedResponse"];
+                        "text/json": components["schemas"]["WebhookDeliveryResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspaceId}/webhooks/{id}/deliveries/{deliveryId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workspaceId: string;
+                    id: string;
+                    deliveryId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WorkspaceDtoPagedResponse"];
+                        "application/json": components["schemas"]["WorkspaceDtoPagedResponse"];
+                        "text/json": components["schemas"]["WorkspaceDtoPagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["WorkspaceRequest"];
+                    "text/json": components["schemas"]["WorkspaceRequest"];
+                    "application/*+json": components["schemas"]["WorkspaceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WorkspaceDto"];
+                        "application/json": components["schemas"]["WorkspaceDto"];
+                        "text/json": components["schemas"]["WorkspaceDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WorkspaceDto"];
+                        "application/json": components["schemas"]["WorkspaceDto"];
+                        "text/json": components["schemas"]["WorkspaceDto"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["WorkspaceRequest"];
+                    "text/json": components["schemas"]["WorkspaceRequest"];
+                    "application/*+json": components["schemas"]["WorkspaceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WorkspaceDto"];
+                        "application/json": components["schemas"]["WorkspaceDto"];
+                        "text/json": components["schemas"]["WorkspaceDto"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: never;
+    schemas: {
+        AccountPreferencesResponse: {
+            /** Format: uuid */
+            userId: string;
+            displayName: string;
+            email: string;
+            timeZoneId?: string | null;
+            theme: string;
+        };
+        ApiClientDto: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description?: string | null;
+            role: components["schemas"]["UserRole"];
+            /** Format: uuid */
+            workspaceId?: string | null;
+            isActive: boolean;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            lastUsedAt?: string | null;
+        };
+        ApiClientDtoPagedResponse: {
+            items: components["schemas"]["ApiClientDto"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        /** @enum {string} */
+        AuditAction: "Created" | "Updated" | "Deleted" | "StatusChanged";
+        AuditActorResponse: {
+            type: string;
+            /** Format: uuid */
+            id: string;
+            displayName?: string | null;
+        };
+        AuditLogResponse: {
+            /** Format: uuid */
+            id: string;
+            entityType: string;
+            /** Format: uuid */
+            entityId: string;
+            action: components["schemas"]["AuditAction"];
+            actor?: components["schemas"]["AuditActorResponse"];
+            /** Format: date-time */
+            timestamp: string;
+            /** Format: uuid */
+            workspaceId?: string | null;
+            changeDelta?: unknown;
+        };
+        AuditLogResponsePagedResponse: {
+            items: components["schemas"]["AuditLogResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        ChangePasswordRequest: {
+            currentPassword: string;
+            newPassword: string;
+        };
+        ComponentFieldRequest: {
+            key: string;
+            label: string;
+            helpText?: string | null;
+            /** Format: int32 */
+            order: number;
+            isRequired: boolean;
+            /** Format: int32 */
+            minOccurrences: number;
+            /** Format: int32 */
+            maxOccurrences?: number | null;
+            primitiveType?: components["schemas"]["PrimitiveType"];
+            /** Format: uuid */
+            nestedComponentId?: string | null;
+            fieldConfig?: unknown;
+        };
+        ComponentFieldResponse: {
+            /** Format: uuid */
+            id: string;
+            key: string;
+            label: string;
+            helpText?: string | null;
+            /** Format: int32 */
+            order: number;
+            isRequired: boolean;
+            /** Format: int32 */
+            minOccurrences: number;
+            /** Format: int32 */
+            maxOccurrences?: number | null;
+            primitiveType?: components["schemas"]["PrimitiveType"];
+            /** Format: uuid */
+            nestedComponentId?: string | null;
+            fieldConfig?: unknown;
+        };
+        ComponentRequest: {
+            name: string;
+            slug: string;
+            description?: string | null;
+        };
+        ComponentResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            name: string;
+            slug: string;
+            description?: string | null;
+            currentVersion?: components["schemas"]["ComponentVersionResponse"];
+        };
+        ComponentSummaryResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            description?: string | null;
+            /** Format: uuid */
+            currentVersionId?: string | null;
+        };
+        ComponentSummaryResponsePagedResponse: {
+            items: components["schemas"]["ComponentSummaryResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        ComponentVersionRequest: {
+            notes?: string | null;
+        };
+        ComponentVersionResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            componentId: string;
+            /** Format: int32 */
+            versionNumber: number;
+            status: components["schemas"]["TemplateVersionStatus"];
+            /** Format: date-time */
+            publishedAt?: string | null;
+            notes?: string | null;
+            fields: components["schemas"]["ComponentFieldResponse"][];
+        };
+        /** @enum {string} */
+        CompositionMode: "Inline" | "Reference";
+        ContentFieldValueRequest: {
+            /** Format: uuid */
+            fieldId: string;
+            /** Format: int32 */
+            order: number;
+            valueKind: components["schemas"]["ValueKind"];
+            textValue?: string | null;
+            boolValue?: boolean | null;
+            /** Format: uuid */
+            mediaAssetId?: string | null;
+            /** Format: uuid */
+            fileAssetId?: string | null;
+            /** Format: uuid */
+            childContentItemId?: string | null;
+            jsonValue?: unknown;
+        };
+        ContentFieldValueResponse: {
+            /** Format: uuid */
+            fieldId: string;
+            key?: string | null;
+            label?: string | null;
+            /** Format: int32 */
+            order: number;
+            valueKind: components["schemas"]["ValueKind"];
+            textValue?: string | null;
+            boolValue?: boolean | null;
+            /** Format: uuid */
+            mediaAssetId?: string | null;
+            /** Format: uuid */
+            fileAssetId?: string | null;
+            /** Format: uuid */
+            childContentItemId?: string | null;
+            child?: components["schemas"]["ContentItemDetailResponse"];
+            jsonValue?: unknown;
+            displayLabel?: string | null;
+        };
+        ContentItemDetailResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            templateVersionId: string;
+            templateName: string;
+            status: components["schemas"]["ContentStatus"];
+            slug?: string | null;
+            localeCode?: string | null;
+            /** Format: uuid */
+            translationGroupId?: string | null;
+            tags: string[];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            publishedAt?: string | null;
+            fields: components["schemas"]["ContentFieldValueResponse"][];
+        };
+        ContentItemSummaryResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            templateVersionId: string;
+            templateName: string;
+            status: components["schemas"]["ContentStatus"];
+            slug?: string | null;
+            localeCode?: string | null;
+            /** Format: uuid */
+            translationGroupId?: string | null;
+            tags: string[];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            publishedAt?: string | null;
+        };
+        ContentItemSummaryResponsePagedResponse: {
+            items: components["schemas"]["ContentItemSummaryResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        /** @enum {string} */
+        ContentStatus: "Draft" | "Review" | "Approved" | "Published" | "Archived";
+        ContentVersionDetailResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            contentItemId: string;
+            /** Format: int32 */
+            versionNumber: number;
+            status: components["schemas"]["ContentVersionStatus"];
+            /** Format: uuid */
+            templateVersionId: string;
+            templateName: string;
+            slug?: string | null;
+            localeCode?: string | null;
+            /** Format: uuid */
+            translationGroupId?: string | null;
+            /** Format: date-time */
+            effectiveStartAt?: string | null;
+            /** Format: date-time */
+            effectiveEndAt?: string | null;
+            /** Format: date-time */
+            publishedAt: string;
+            /** Format: date-time */
+            retiredAt?: string | null;
+            /** Format: uuid */
+            publishedByUserId?: string | null;
+            /** Format: int32 */
+            rolledBackFromVersionNumber?: number | null;
+            tags: string[];
+            fields: components["schemas"]["ContentVersionFieldValueResponse"][];
+        };
+        ContentVersionFieldValueResponse: {
+            /** Format: uuid */
+            fieldId: string;
+            key?: string | null;
+            label?: string | null;
+            /** Format: int32 */
+            order: number;
+            valueKind: components["schemas"]["ValueKind"];
+            textValue?: string | null;
+            boolValue?: boolean | null;
+            /** Format: uuid */
+            mediaAssetId?: string | null;
+            /** Format: uuid */
+            fileAssetId?: string | null;
+            /** Format: uuid */
+            childContentItemId?: string | null;
+            jsonValue?: unknown;
+            displayLabel?: string | null;
+        };
+        /** @enum {string} */
+        ContentVersionStatus: "Published" | "Retired";
+        ContentVersionSummaryResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            contentItemId: string;
+            /** Format: int32 */
+            versionNumber: number;
+            status: components["schemas"]["ContentVersionStatus"];
+            /** Format: uuid */
+            templateVersionId: string;
+            slug?: string | null;
+            localeCode?: string | null;
+            /** Format: date-time */
+            effectiveStartAt?: string | null;
+            /** Format: date-time */
+            effectiveEndAt?: string | null;
+            /** Format: date-time */
+            publishedAt: string;
+            /** Format: date-time */
+            retiredAt?: string | null;
+            /** Format: uuid */
+            publishedByUserId?: string | null;
+            /** Format: int32 */
+            rolledBackFromVersionNumber?: number | null;
+            tags: string[];
+        };
+        ContentVersionSummaryResponsePagedResponse: {
+            items: components["schemas"]["ContentVersionSummaryResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        CreateApiClientRequest: {
+            name: string;
+            description?: string | null;
+            role: components["schemas"]["UserRole"];
+            /** Format: uuid */
+            workspaceId?: string | null;
+            /** Format: date-time */
+            expiresAt?: string | null;
+        };
+        CreateApiClientResponse: {
+            client: components["schemas"]["ApiClientDto"];
+            token: string;
+            warning: string;
+        };
+        CreateContentItemRequest: {
+            /** Format: uuid */
+            templateVersionId: string;
+            slug?: string | null;
+            localeCode?: string | null;
+            /** Format: uuid */
+            translationGroupId?: string | null;
+            tags: string[];
+            fields: components["schemas"]["ContentFieldValueRequest"][];
+        };
+        CreateTemplateRequest: {
+            name: string;
+            slug: string;
+            description?: string | null;
+        };
+        CreateTemplateVersionRequest: {
+            notes?: string | null;
+        };
+        CreateUserRequest: {
+            email: string;
+            displayName: string;
+            role: components["schemas"]["UserRole"];
+            temporaryPassword: string;
+            isSuperAdmin: boolean;
+            timeZoneId?: string | null;
+            workspaceAccesses?: components["schemas"]["UserWorkspaceAccessRequest"][] | null;
+        };
+        CreateWebhookEndpointRequest: {
+            name: string;
+            url: string;
+            secret?: string | null;
+            events: string[];
+        };
+        CreateWebhookEndpointResponse: {
+            endpoint: components["schemas"]["WebhookEndpointResponse"];
+            secret: string;
+        };
+        LinkTranslationRequest: {
+            /** Format: uuid */
+            targetContentItemId: string;
+        };
+        LoginRequest: {
+            email: string;
+            password: string;
+        };
+        LoginResponse: {
+            token: string;
+            /** Format: date-time */
+            expiresAt: string;
+            mustChangePassword: boolean;
+            user: components["schemas"]["UserSummary"];
+        };
+        MediaAssetResponse: {
+            /** Format: uuid */
+            id: string;
+            fileName: string;
+            mimeType: string;
+            /** Format: int64 */
+            sizeBytes: number;
+            altText?: string | null;
+            url: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        MediaAssetResponsePagedResponse: {
+            items: components["schemas"]["MediaAssetResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        OfficialPackageResponse: {
+            packageNamespace: string;
+            id: string;
+            version: string;
+            name: string;
+            description?: string | null;
+            author?: string | null;
+            license?: string | null;
+            homepage?: string | null;
+            /** Format: int32 */
+            templateCount: number;
+            templates: components["schemas"]["OfficialPackageTemplateResponse"][];
+            /** Format: int32 */
+            pickListCount: number;
+            /** Format: int32 */
+            componentCount: number;
+        };
+        OfficialPackageResponsePagedResponse: {
+            items: components["schemas"]["OfficialPackageResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        OfficialPackageTemplateResponse: {
+            slug: string;
+            name: string;
+            description?: string | null;
+        };
+        PackageComponentImportResult: {
+            slug: string;
+            resolvedSlug: string;
+            /** Format: uuid */
+            componentId: string;
+            action: string;
+            /** Format: uuid */
+            componentVersionId?: string | null;
+            /** Format: int32 */
+            versionNumber?: number | null;
+        };
+        PackageComponentPreview: {
+            slug: string;
+            name: string;
+            description?: string | null;
+            /** Format: int32 */
+            fieldCount: number;
+            status: string;
+            /** Format: uuid */
+            existingId?: string | null;
+            existingName?: string | null;
+            /** Format: int32 */
+            existingFieldCount?: number | null;
+            suggestedAction: string;
+        };
+        PackageImportPreviewResponse: {
+            packageNamespace: string;
+            id: string;
+            version: string;
+            pickLists: components["schemas"]["PackagePickListPreview"][];
+            templates: components["schemas"]["PackageTemplatePreview"][];
+            components?: components["schemas"]["PackageComponentPreview"][] | null;
+        };
+        PackageImportResolutionsRequest: {
+            pickLists?: {
+                [key: string]: string;
+            } | null;
+            components?: {
+                [key: string]: string;
+            } | null;
+        };
+        PackageImportResponse: {
+            packageNamespace: string;
+            id: string;
+            version: string;
+            imported: components["schemas"]["PackageTemplateImportResult"][];
+            skipped: string[];
+            errors: string[];
+            pickLists: components["schemas"]["PackagePickListImportResult"][];
+            components?: components["schemas"]["PackageComponentImportResult"][] | null;
+        };
+        PackagePickListImportResult: {
+            slug: string;
+            resolvedSlug: string;
+            /** Format: uuid */
+            pickListId: string;
+            action: string;
+        };
+        PackagePickListOptionPreview: {
+            label: string;
+            value: string;
+            /** Format: int32 */
+            order: number;
+        };
+        PackagePickListPreview: {
+            slug: string;
+            name: string;
+            description?: string | null;
+            options: components["schemas"]["PackagePickListOptionPreview"][];
+            status: string;
+            /** Format: uuid */
+            existingId?: string | null;
+            existingName?: string | null;
+            existingDescription?: string | null;
+            existingOptions?: components["schemas"]["PackagePickListOptionPreview"][] | null;
+            suggestedAction: string;
+        };
+        PackageTemplateImportResult: {
+            /** Format: uuid */
+            templateId: string;
+            slug: string;
+            name: string;
+            /** Format: uuid */
+            templateVersionId: string;
+            /** Format: int32 */
+            versionNumber: number;
+        };
+        PackageTemplatePreview: {
+            slug: string;
+            name: string;
+            status: string;
+        };
+        PickListOptionRequest: {
+            label: string;
+            value: string;
+            /** Format: int32 */
+            order?: number | null;
+        };
+        PickListOptionResponse: {
+            /** Format: uuid */
+            id: string;
+            label: string;
+            value: string;
+            /** Format: int32 */
+            order: number;
+        };
+        PickListRequest: {
+            name: string;
+            slug: string;
+            description?: string | null;
+            options: components["schemas"]["PickListOptionRequest"][];
+        };
+        PickListResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            description?: string | null;
+            options: components["schemas"]["PickListOptionResponse"][];
+            /** Format: uuid */
+            currentRevisionId?: string | null;
+            /** Format: int32 */
+            currentVersionNumber: number;
+        };
+        PickListSummaryResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            description?: string | null;
+            /** Format: int32 */
+            optionCount: number;
+            /** Format: uuid */
+            currentRevisionId?: string | null;
+            /** Format: int32 */
+            currentVersionNumber: number;
+        };
+        PickListSummaryResponsePagedResponse: {
+            items: components["schemas"]["PickListSummaryResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        /** @enum {string} */
+        PrimitiveType: "Text" | "RichText" | "Markdown" | "Boolean" | "PickList" | "Media" | "File" | "Link" | "Quote" | "Separator";
+        PublishContentRequest: {
+            /** Format: date-time */
+            publishAt?: string | null;
+            /** Format: date-time */
+            effectiveStartAt?: string | null;
+            /** Format: date-time */
+            effectiveEndAt?: string | null;
+        };
+        PublishContentResponse: {
+            content: components["schemas"]["ContentItemDetailResponse"];
+            warnings: string[];
+        };
+        RejectContentRequest: {
+            reason: string;
+        };
+        ReorderFieldRequest: {
+            /** Format: uuid */
+            fieldId: string;
+            /** Format: int32 */
+            order: number;
+        };
+        ResetPasswordRequest: {
+            temporaryPassword: string;
+        };
+        RotateWebhookSecretResponse: {
+            /** Format: uuid */
+            id: string;
+            secret: string;
+            warning: string;
+        };
+        StorageConfigResponse: {
+            provider: string;
+            isConfigured: boolean;
+        };
+        StorageTestResponse: {
+            provider: string;
+            success: boolean;
+            message: string;
+        };
+        TagResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: int32 */
+            usageCount: number;
+        };
+        TagResponsePagedResponse: {
+            items: components["schemas"]["TagResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        TempPasswordResponse: {
+            /** Format: uuid */
+            userId: string;
+            temporaryPassword: string;
+            warning: string;
+        };
+        TemplateFieldAllowedTypeRequest: {
+            primitiveType?: components["schemas"]["PrimitiveType"];
+            /** Format: uuid */
+            allowedTemplateId?: string | null;
+        };
+        TemplateFieldAllowedTypeResponse: {
+            /** Format: uuid */
+            id: string;
+            primitiveType?: components["schemas"]["PrimitiveType"];
+            /** Format: uuid */
+            allowedTemplateId?: string | null;
+        };
+        TemplateFieldRequest: {
+            /** Format: uuid */
+            sectionId?: string | null;
+            key: string;
+            label: string;
+            helpText?: string | null;
+            /** Format: int32 */
+            order: number;
+            isRequired: boolean;
+            /** Format: int32 */
+            minOccurrences: number;
+            /** Format: int32 */
+            maxOccurrences?: number | null;
+            isOpen: boolean;
+            compositionMode: components["schemas"]["CompositionMode"];
+            primitiveType?: components["schemas"]["PrimitiveType"];
+            /** Format: uuid */
+            templateId?: string | null;
+            allowedTypes: components["schemas"]["TemplateFieldAllowedTypeRequest"][];
+            fieldConfig?: unknown;
+            /** Format: uuid */
+            componentId?: string | null;
+        };
+        TemplateFieldResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sectionId?: string | null;
+            key: string;
+            label: string;
+            helpText?: string | null;
+            /** Format: int32 */
+            order: number;
+            isRequired: boolean;
+            /** Format: int32 */
+            minOccurrences: number;
+            /** Format: int32 */
+            maxOccurrences?: number | null;
+            isOpen: boolean;
+            compositionMode: components["schemas"]["CompositionMode"];
+            primitiveType?: components["schemas"]["PrimitiveType"];
+            /** Format: uuid */
+            templateId?: string | null;
+            allowedTypes: components["schemas"]["TemplateFieldAllowedTypeResponse"][];
+            fieldConfig?: unknown;
+            /** Format: uuid */
+            componentId?: string | null;
+        };
+        TemplateResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            name: string;
+            slug: string;
+            description?: string | null;
+            isSystem: boolean;
+            currentVersion?: components["schemas"]["TemplateVersionResponse"];
+        };
+        TemplateSectionRequest: {
+            name: string;
+            description?: string | null;
+            /** Format: int32 */
+            order: number;
+            isCollapsible: boolean;
+        };
+        TemplateSectionResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description?: string | null;
+            /** Format: int32 */
+            order: number;
+            isCollapsible: boolean;
+        };
+        TemplateSummaryResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            name: string;
+            slug: string;
+            description?: string | null;
+            /** Format: uuid */
+            currentVersionId?: string | null;
+        };
+        TemplateSummaryResponsePagedResponse: {
+            items: components["schemas"]["TemplateSummaryResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        TemplateVersionResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            templateId: string;
+            /** Format: int32 */
+            versionNumber: number;
+            status: components["schemas"]["TemplateVersionStatus"];
+            /** Format: date-time */
+            publishedAt?: string | null;
+            notes?: string | null;
+            sections: components["schemas"]["TemplateSectionResponse"][];
+            fields: components["schemas"]["TemplateFieldResponse"][];
+        };
+        /** @enum {string} */
+        TemplateVersionStatus: "Draft" | "Published" | "Archived";
+        TemplateVersionSummaryResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: int32 */
+            versionNumber: number;
+            status: components["schemas"]["TemplateVersionStatus"];
+            /** Format: date-time */
+            publishedAt?: string | null;
+            notes?: string | null;
+            /** Format: int32 */
+            fieldCount: number;
+        };
+        TemplateVersionSummaryResponsePagedResponse: {
+            items: components["schemas"]["TemplateVersionSummaryResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        UpdateAccountPreferencesRequest: {
+            timeZoneId?: string | null;
+            theme: string;
+        };
+        UpdateContentItemRequest: {
+            slug?: string | null;
+            localeCode?: string | null;
+            /** Format: uuid */
+            translationGroupId?: string | null;
+            /** Format: date-time */
+            publishAt?: string | null;
+            tags: string[];
+            fields: components["schemas"]["ContentFieldValueRequest"][];
+        };
+        UpdateMediaAssetRequest: {
+            altText?: string | null;
+        };
+        UpdateTemplateRequest: {
+            name: string;
+            description?: string | null;
+        };
+        UpdateUserRequest: {
+            email: string;
+            displayName: string;
+            role: components["schemas"]["UserRole"];
+            isSuperAdmin: boolean;
+            timeZoneId?: string | null;
+            isActive: boolean;
+            workspaceAccesses?: components["schemas"]["UserWorkspaceAccessRequest"][] | null;
+        };
+        UpdateWebhookEndpointRequest: {
+            name: string;
+            url: string;
+            isActive: boolean;
+            events: string[];
+        };
+        UserDto: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            displayName: string;
+            role: components["schemas"]["UserRole"];
+            isSuperAdmin: boolean;
+            mustChangePassword: boolean;
+            timeZoneId?: string | null;
+            isActive: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            lastLoginAt?: string | null;
+            workspaceAccesses: components["schemas"]["UserWorkspaceAccessDto"][];
+        };
+        UserDtoPagedResponse: {
+            items: components["schemas"]["UserDto"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        /** @enum {string} */
+        UserRole: "Reader" | "Editor" | "TemplateAdmin" | "Admin";
+        UserSummary: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            displayName: string;
+            role: string;
+            isSuperAdmin: boolean;
+        };
+        UserWorkspaceAccessDto: {
+            /** Format: uuid */
+            workspaceId: string;
+            accessLevel: components["schemas"]["WorkspaceAccessLevel"];
+        };
+        UserWorkspaceAccessRequest: {
+            /** Format: uuid */
+            workspaceId: string;
+            accessLevel: components["schemas"]["WorkspaceAccessLevel"];
+        };
+        /** @enum {string} */
+        ValueKind: "Text" | "RichText" | "Markdown" | "Boolean" | "PickList" | "Media" | "File" | "Link" | "Quote" | "Separator" | "ChildContent" | "Component";
+        WebhookDeliveryResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            webhookEndpointId: string;
+            /** Format: uuid */
+            eventId?: string | null;
+            eventType: string;
+            payload: unknown;
+            /** Format: int32 */
+            attemptCount: number;
+            /** Format: date-time */
+            lastAttemptAt?: string | null;
+            /** Format: date-time */
+            nextRetryAt?: string | null;
+            /** Format: int32 */
+            statusCode?: number | null;
+            isDelivered: boolean;
+            isFailed: boolean;
+            lastError?: string | null;
+            isDeadLetter: boolean;
+            /** Format: date-time */
+            deadLetteredAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        WebhookDeliveryResponsePagedResponse: {
+            items: components["schemas"]["WebhookDeliveryResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        WebhookEndpointResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            name: string;
+            url: string;
+            isActive: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            events: string[];
+        };
+        WebhookEndpointResponsePagedResponse: {
+            items: components["schemas"]["WebhookEndpointResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        /** @enum {string} */
+        WorkspaceAccessLevel: "Read" | "Write";
+        WorkspaceDto: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            description?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            canWrite: boolean;
+        };
+        WorkspaceDtoPagedResponse: {
+            items: components["schemas"]["WorkspaceDto"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
+        };
+        WorkspaceRequest: {
+            name: string;
+            slug: string;
+            description?: string | null;
+        };
+    };
     responses: never;
     parameters: never;
     requestBodies: never;

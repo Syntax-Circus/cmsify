@@ -7,6 +7,8 @@ Use the guide that matches the job you are doing. The current API behavior is de
 - [Getting started](getting-started.md) — run a local stack, sign in, and create the first integration token.
 - [Configuration](../README.md#configuration) — every supported API and Admin setting, defaults, and production guidance.
 - [Operations](operations.md) — deployment, persistence, backup, restore, upgrades, health checks, and incident response.
+- [Release runbook](release-runbook.md) and [rollback runbook](rollback-runbook.md) — release evidence, abort criteria, and recovery.
+- [API compatibility](api-compatibility.md) — `/api/v1` compatibility and deprecation policy.
 
 ## Build with Cmsify
 
@@ -24,4 +26,5 @@ Use the guide that matches the job you are doing. The current API behavior is de
 - [Agent and contributor guidance](../AGENTS.md) — architecture boundaries, change-scoped validation, generated-file rules, and hygiene.
 - [Changelog](../CHANGELOG.md) — released and upcoming changes.
 - [Roadmap](roadmap.md) — committed future work, when available.
+- [v1 release-readiness audit](v1-release-readiness.md) — maintainer release gates, prioritized remediation backlog, and shared-package decisions.
 - [Project-plan archive](project%20plan/00_index.md) — design decisions and historical implementation plans, not a current API reference.

@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 
@@ -12,80 +11,84 @@ public sealed class WebhookDeliveryProcessor
     private readonly IHttpClientFactory httpClientFactory;
     private readonly IWebhookRepository webhookRepository;
     private readonly IWebhookDestinationValidator destinationValidator;
+    private readonly TimeProvider timeProvider;
 
-    public WebhookDeliveryProcessor(IHttpClientFactory httpClientFactory, IWebhookRepository webhookRepository, IWebhookDestinationValidator destinationValidator)
+    public WebhookDeliveryProcessor(IHttpClientFactory httpClientFactory, IWebhookRepository webhookRepository, IWebhookDestinationValidator destinationValidator, TimeProvider? timeProvider = null)
     {
         this.httpClientFactory = httpClientFactory;
         this.webhookRepository = webhookRepository;
         this.destinationValidator = destinationValidator;
-    }
-
-    public async Task DeliverInitialAsync(WebhookEvent evt, WebhookDispatchTargetDto target, CancellationToken ct)
-    {
-        var payload = evt.Payload;
-        var result = await PostAsync(target.Url, target.Secret, payload, ct);
-        var now = DateTimeOffset.UtcNow;
-
-        await webhookRepository.AddDeliveryLogAsync(new WebhookDeliveryLogDto(
-            Guid.CreateVersion7(),
-            target.Id,
-            evt.EventType,
-            payload,
-            1,
-            now,
-            result.IsSuccess ? null : now.Add(WebhookBackoffCalculator.CalculateDelay(1)),
-            result.StatusCode,
-            result.IsSuccess,
-            false,
-            now),
-            ct);
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task DeliverRetryAsync(PendingWebhookDeliveryDto delivery, int maxAttempts, CancellationToken ct)
     {
-        var result = await PostAsync(delivery.Url, delivery.Secret, delivery.Payload, ct);
+        var result = await PostAsync(delivery, ct);
+        var completedAt = timeProvider.GetUtcNow();
+        var completion = new WebhookDeliveryCompletionDto(delivery.Id, delivery.LeaseOwner, delivery.LeaseToken, completedAt);
         if (result.IsSuccess)
         {
-            await webhookRepository.MarkDeliverySucceededAsync(delivery.Id, result.StatusCode ?? 0, ct);
+            await webhookRepository.CompleteDeliverySucceededAsync(completion, result.StatusCode ?? 0, ct);
             return;
         }
 
         var nextAttempt = delivery.AttemptCount + 1;
-        var isFailed = nextAttempt >= maxAttempts;
-        var nextRetryAt = DateTimeOffset.UtcNow.Add(WebhookBackoffCalculator.CalculateDelay(nextAttempt));
-        await webhookRepository.MarkDeliveryFailedAsync(delivery.Id, result.StatusCode, nextRetryAt, isFailed, ct);
+        var isDeadLetter = nextAttempt >= maxAttempts;
+        DateTimeOffset? nextRetryAt = isDeadLetter ? null : completedAt.Add(WebhookBackoffCalculator.CalculateDelay(nextAttempt));
+        await webhookRepository.CompleteDeliveryFailedAsync(completion, result.StatusCode, result.Error, nextRetryAt, isDeadLetter, ct);
     }
 
-    private async Task<(bool IsSuccess, int? StatusCode)> PostAsync(string url, string secret, JsonElement payload, CancellationToken ct)
+    private async Task<(bool IsSuccess, int? StatusCode, string? Error)> PostAsync(PendingWebhookDeliveryDto delivery, CancellationToken ct)
     {
-        var destination = await destinationValidator.ValidateAsync(url, ct);
-        if (!destination.IsValid)
-        {
-            return (false, null);
-        }
-
-        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
-        using var content = new ByteArrayContent(payloadBytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, destination.NormalizedUrl)
-        {
-            Content = content
-        };
-        request.Headers.Add("X-Cmsify-Signature", WebhookSigner.Sign(secret, payloadBytes));
-
         try
         {
+            var destination = await destinationValidator.ValidateAsync(delivery.Url, ct);
+            var destinationUri = destination.DestinationUri;
+            if (!destination.IsValid || destinationUri is null)
+            {
+                CmsifyOperationalMetrics.RecordDestinationRejection(GetDestinationRejectionReason(destination.Error));
+                return (false, null, destination.Error ?? "Webhook destination validation failed.");
+            }
+
+            var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(delivery.Payload);
+            using var content = new ByteArrayContent(payloadBytes);
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, destinationUri)
+            {
+                Content = content
+            };
+            request.Options.Set(PinnedWebhookTransport.DestinationKey, destination);
+            request.Headers.Add("X-Cmsify-Signature", WebhookSigner.Sign(delivery.Secret, payloadBytes));
+            request.Headers.Add("X-Cmsify-Event-Id", delivery.WebhookEventId.ToString("D"));
+
             using var response = await httpClientFactory.CreateClient(nameof(WebhookDeliveryProcessor)).SendAsync(request, ct);
-            return (response.IsSuccessStatusCode, (int)response.StatusCode);
+            return response.IsSuccessStatusCode
+                ? (true, (int)response.StatusCode, null)
+                : (false, (int)response.StatusCode, $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "no reason phrase"}).");
         }
-        catch (HttpRequestException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return (false, null);
+            throw;
         }
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        catch (Exception ex)
         {
-            return (false, null);
+            CmsifyOperationalMetrics.RecordPinnedConnectionFailure(GetPinnedConnectionFailureReason(ex));
+            return (false, null, ex.Message);
         }
     }
+
+    private static string GetDestinationRejectionReason(string? error) => error switch
+    {
+        "Webhook URLs must use HTTPS and target a public host." => "url_policy",
+        "Webhook host could not be resolved." => "resolution",
+        "Webhook URLs must not resolve to private, loopback, or reserved addresses." => "address_policy",
+        _ => "unknown"
+    };
+
+    private static string GetPinnedConnectionFailureReason(Exception exception) => exception switch
+    {
+        HttpRequestException => "connection",
+        _ => "unknown"
+    };
 }

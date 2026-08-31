@@ -5,6 +5,10 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using ContractUserDto = SyntaxCircus.Cmsify.Contracts.UserDto;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -27,16 +31,21 @@ public sealed class UsersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<UserDto>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractUserDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
         if (!currentActor.IsSuperAdmin)
         {
             return StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var limit = Math.Clamp(pageSize, 1, 200);
-        var result = await userRepository.ListAsync(new PageRequest((Math.Max(1, page) - 1) * limit, limit), ct);
-        return Ok(new PagedResponse<UserDto>(result.Items, result.TotalCount, Math.Max(1, page), limit));
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            var countResult = await userRepository.ListAsync(new PageRequest(0, 1), ct);
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractUserDto>([], countResult.TotalCount, pagination.Page, pagination.PageSize));
+        }
+
+        var result = await userRepository.ListAsync(new PageRequest(offset, pagination.PageSize), ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractUserDto>(result.Items.Select(ContractMappings.ToContract).ToArray(), result.TotalCount, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]
@@ -55,12 +64,12 @@ public sealed class UsersController : ControllerBase
         }
 
         var hash = BCrypt.Net.BCrypt.HashPassword(request.TemporaryPassword, configuration.GetValue("Auth:BcryptCost", 12));
-        var user = await userRepository.CreateAsync(new CreateUserCommand(request.Email, request.DisplayName, request.TemporaryPassword, request.Role, request.IsSuperAdmin, request.TimeZoneId, workspaceAccesses), hash, ct);
+        var user = await userRepository.CreateAsync(new CreateUserCommand(request.Email, request.DisplayName, request.TemporaryPassword, request.Role.ToCore(), request.IsSuperAdmin, request.TimeZoneId, workspaceAccesses), hash, ct);
         return CreatedAtAction(nameof(Get), new { id = user.Id }, new TempPasswordResponse(user.Id, request.TemporaryPassword, "Copy this temporary password now. It will not be shown again."));
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<UserDto>> Get(Guid id, CancellationToken ct)
+    public async Task<ActionResult<ContractUserDto>> Get(Guid id, CancellationToken ct)
     {
         if (!currentActor.IsSuperAdmin)
         {
@@ -68,11 +77,11 @@ public sealed class UsersController : ControllerBase
         }
 
         var user = await userRepository.GetAsync(id, ct);
-        return user is null ? NotFound() : Ok(user);
+        return user is null ? NotFound() : Ok(user.ToContract());
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult<UserDto>> Update(Guid id, UpdateUserRequest request, CancellationToken ct)
+    public async Task<ActionResult<ContractUserDto>> Update(Guid id, UpdateUserRequest request, CancellationToken ct)
     {
         if (!currentActor.IsSuperAdmin)
         {
@@ -90,7 +99,7 @@ public sealed class UsersController : ControllerBase
             return NotFound();
         }
 
-        if (existing.IsSuperAdmin && (!request.IsSuperAdmin || !request.IsActive || request.Role != UserRole.Admin) && await IsLastSuperAdminAsync(id, ct))
+        if (existing.IsSuperAdmin && (!request.IsSuperAdmin || !request.IsActive || request.Role.ToCore() != UserRole.Admin) && await IsLastSuperAdminAsync(id, ct))
         {
             return this.Error(StatusCodes.Status409Conflict, "conflict", "The last superadmin cannot be disabled, demoted, or converted to a regular user.");
         }
@@ -102,7 +111,7 @@ public sealed class UsersController : ControllerBase
             return validation;
         }
 
-        return Ok(await userRepository.UpdateAsync(new UpdateUserCommand(id, request.Email, request.DisplayName, request.Role, request.IsSuperAdmin, request.TimeZoneId, request.IsActive, workspaceAccesses), ct));
+        return Ok((await userRepository.UpdateAsync(new UpdateUserCommand(id, request.Email, request.DisplayName, request.Role.ToCore(), request.IsSuperAdmin, request.TimeZoneId, request.IsActive, workspaceAccesses), ct)).ToContract());
     }
 
     [HttpPost("{id:guid}/reset-password")]
@@ -130,7 +139,7 @@ public sealed class UsersController : ControllerBase
     private async Task<bool> IsLastSuperAdminAsync(Guid userId, CancellationToken ct) =>
         !await dbContext.Users.AsNoTracking().AnyAsync(user => user.Id != userId && user.IsSuperAdmin && user.IsActive, ct);
 
-    private async Task<ActionResult?> ValidateWorkspaceAccessesAsync(IReadOnlyList<UserWorkspaceAccessDto> workspaceAccesses, CancellationToken ct)
+    private async Task<ActionResult?> ValidateWorkspaceAccessesAsync(IReadOnlyList<Cmsify.Core.Interfaces.Repositories.UserWorkspaceAccessDto> workspaceAccesses, CancellationToken ct)
     {
         if (workspaceAccesses.Count == 0)
         {
@@ -144,18 +153,12 @@ public sealed class UsersController : ControllerBase
             : this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "One or more workspace grants reference a workspace that does not exist.");
     }
 
-    private static IReadOnlyList<UserWorkspaceAccessDto> NormalizeWorkspaceAccesses(IReadOnlyList<UserWorkspaceAccessRequest>? workspaceAccesses) =>
+    private static IReadOnlyList<Cmsify.Core.Interfaces.Repositories.UserWorkspaceAccessDto> NormalizeWorkspaceAccesses(IReadOnlyList<UserWorkspaceAccessRequest>? workspaceAccesses) =>
         (workspaceAccesses ?? [])
         .Where(access => access.WorkspaceId != Guid.Empty)
         .GroupBy(access => access.WorkspaceId)
-        .Select(group => new UserWorkspaceAccessDto(
+        .Select(group => new Cmsify.Core.Interfaces.Repositories.UserWorkspaceAccessDto(
             group.Key,
-            group.Any(access => access.AccessLevel == WorkspaceAccessLevel.Write) ? WorkspaceAccessLevel.Write : WorkspaceAccessLevel.Read))
+            group.Any(access => access.AccessLevel == SyntaxCircus.Cmsify.Contracts.WorkspaceAccessLevel.Write) ? Cmsify.Core.Domain.Enums.WorkspaceAccessLevel.Write : Cmsify.Core.Domain.Enums.WorkspaceAccessLevel.Read))
         .ToArray();
 }
-
-public sealed record UserWorkspaceAccessRequest(Guid WorkspaceId, WorkspaceAccessLevel AccessLevel);
-public sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role, string TemporaryPassword, bool IsSuperAdmin, string? TimeZoneId, IReadOnlyList<UserWorkspaceAccessRequest>? WorkspaceAccesses);
-public sealed record UpdateUserRequest(string Email, string DisplayName, UserRole Role, bool IsSuperAdmin, string? TimeZoneId, bool IsActive, IReadOnlyList<UserWorkspaceAccessRequest>? WorkspaceAccesses);
-public sealed record ResetPasswordRequest(string TemporaryPassword);
-public sealed record TempPasswordResponse(Guid UserId, string TemporaryPassword, string Warning);

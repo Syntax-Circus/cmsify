@@ -1,5 +1,5 @@
-export { CmsifyClient, type CmsifyClientOptions, type ContentListOptions, type RequestOptions } from "./client";
-export { CmsifyApiError } from "./errors";
+export { CmsifyClient, type CmsifyClientOptions, type ContentListOptions, type Delay, type PageOptions, type RequestOptions } from "./client";
+export { CmsifyApiError, CmsifyTimeoutError } from "./errors";
 export { ETagStore } from "./etag";
 export { listAll, type PageResult } from "./pagination";
 export {
@@ -12,3 +12,5 @@ export {
 } from "./formatting";
 export type * from "./types";
 export * as generated from "./generated/schema";
+export { createCmsifyFetchClient } from "./generated/client";
+export type { paths, components } from "./generated/schema";

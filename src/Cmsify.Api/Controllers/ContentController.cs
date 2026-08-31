@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Cmsify.Api.Auth;
+using Cmsify.Api.Queries;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Domain.ValueObjects;
@@ -8,6 +9,16 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using CompositionMode = Cmsify.Core.Domain.Enums.CompositionMode;
+using ContentStatus = Cmsify.Core.Domain.Enums.ContentStatus;
+using ContentVersionStatus = Cmsify.Core.Domain.Enums.ContentVersionStatus;
+using PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType;
+using TemplateVersionStatus = Cmsify.Core.Domain.Enums.TemplateVersionStatus;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
+using ValueKind = Cmsify.Core.Domain.Enums.ValueKind;
+using ContentListQuery = SyntaxCircus.Cmsify.Contracts.ContentListQuery;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -22,10 +33,11 @@ public sealed class ContentController : ControllerBase
     private readonly IContentLifecycleService lifecycleService;
     private readonly IContentPublishingService publishingService;
     private readonly ICurrentActor currentActor;
+    private readonly IResolvedContentListQuery resolvedContentListQuery;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
-    private readonly IWebhookQueue webhookQueue;
+    private readonly IWebhookOutbox webhookOutbox;
 
-    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookQueue webhookQueue)
+    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IServiceProvider serviceProvider, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox)
     {
         this.dbContext = dbContext;
         this.contentValidator = contentValidator;
@@ -33,12 +45,13 @@ public sealed class ContentController : ControllerBase
         this.lifecycleService = lifecycleService;
         this.publishingService = publishingService;
         this.currentActor = currentActor;
+        resolvedContentListQuery = serviceProvider.GetRequiredService<IResolvedContentListQuery>();
         this.workspaceAuthorization = workspaceAuthorization;
-        this.webhookQueue = webhookQueue;
+        this.webhookOutbox = webhookOutbox;
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -63,7 +76,8 @@ public sealed class ContentController : ControllerBase
 
         if (query.Status.HasValue)
         {
-            items = items.Where(content => content.Status == query.Status.Value);
+            var status = query.Status.Value.ToCore();
+            items = items.Where(content => content.Status == status);
         }
 
         if (!string.IsNullOrWhiteSpace(query.LocaleCode))
@@ -124,14 +138,19 @@ public sealed class ContentController : ControllerBase
         };
 
         var total = await items.CountAsync(ct);
-        var pageItems = await items.Skip(ControllerHelpers.Offset(query.Page, query.PageSize)).Take(ControllerHelpers.Limit(query.PageSize)).ToListAsync(ct);
+        if (!ControllerHelpers.TryOffset(query.Page, query.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], total, query.Page, query.PageSize));
+        }
+
+        var pageItems = await items.Skip(offset).Take(ControllerHelpers.Limit(query.PageSize)).ToListAsync(ct);
         var responses = new List<ContentItemSummaryResponse>();
         foreach (var item in pageItems)
         {
             responses.Add(await ToSummaryResponseAsync(item, ct));
         }
 
-        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, total, query.Page, query.PageSize));
     }
 
     [HttpPost]
@@ -178,8 +197,8 @@ public sealed class ContentController : ControllerBase
         content.SearchVector = searchVectorBuilder.Build(content, version);
         await ApplyTagsAsync(content, workspaceId, request.Tags, ct);
         dbContext.ContentItems.Add(content);
+        EnqueueContentEvent("content.created", content);
         await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.created", content, ct);
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
         return CreatedAtAction(nameof(Get), new { workspaceId, id = content.Id }, await ToDetailResponseAsync(content.Id, ct: ct));
     }
@@ -262,14 +281,10 @@ public sealed class ContentController : ControllerBase
         content.LocaleCode = request.LocaleCode;
         content.TranslationGroupId = request.TranslationGroupId;
         content.PublishAt = request.PublishAt;
+        ClearScheduledPublishLease(content);
         content.UpdatedAt = DateTimeOffset.UtcNow;
         content.UpdatedByUserId = currentActor.UserId;
-        if (!FieldValuesMatch(content.FieldValues, request.Fields))
-        {
-            dbContext.ContentFieldValues.RemoveRange(content.FieldValues);
-            content.FieldValues.Clear();
-            ApplyFieldValues(content, request.Fields);
-        }
+        ReconcileFieldValues(content, request.Fields);
 
         var existingTags = await GetTagNamesAsync(content.Id, ct);
         if (!TagsMatch(existingTags, request.Tags))
@@ -293,6 +308,7 @@ public sealed class ContentController : ControllerBase
         content.SearchVector = searchVectorBuilder.Build(content, version!);
         try
         {
+            EnqueueContentEvent("content.updated", content);
             await dbContext.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
@@ -300,7 +316,6 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
         }
 
-        await EnqueueContentEventAsync("content.updated", content, ct);
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
     }
@@ -332,8 +347,8 @@ public sealed class ContentController : ControllerBase
         }
 
         SoftDelete(content);
+        EnqueueContentEvent("content.deleted", content);
         await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.deleted", content, ct);
         return NoContent();
     }
 
@@ -372,6 +387,7 @@ public sealed class ContentController : ControllerBase
         }
 
         content.SearchVector = searchVectorBuilder.Build(content, target);
+        ClearScheduledPublishLease(content);
         content.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
@@ -426,6 +442,7 @@ public sealed class ContentController : ControllerBase
             content.PublishAt = request.PublishAt;
             content.PendingEffectiveStartAt = effectiveRange.StartAt;
             content.PendingEffectiveEndAt = effectiveRange.EndAt;
+            ClearScheduledPublishLease(content);
             content.UpdatedAt = DateTimeOffset.UtcNow;
             await dbContext.SaveChangesAsync(ct);
             return Ok(new PublishContentResponse(await ToDetailResponseAsync(content.Id, ct: ct), []));
@@ -440,10 +457,11 @@ public sealed class ContentController : ControllerBase
         content.PublishAt = null;
         content.PendingEffectiveStartAt = null;
         content.PendingEffectiveEndAt = null;
+        ClearScheduledPublishLease(content);
         var publishResult = await publishingService.PublishSnapshotAsync(content, effectiveRange, actorUserId: currentActor.UserId, ct: ct);
+        EnqueueContentEvent("content.status_changed", content);
+        EnqueueContentEvent("content.published", content);
         await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.status_changed", content, ct);
-        await EnqueueContentEventAsync("content.published", content, ct);
 
         return Ok(new PublishContentResponse(await ToDetailResponseAsync(content.Id, ct: ct), publishResult.Warnings));
     }
@@ -475,12 +493,24 @@ public sealed class ContentController : ControllerBase
         var groupId = source.TranslationGroupId ?? target.TranslationGroupId ?? Guid.CreateVersion7();
         source.TranslationGroupId = groupId;
         target.TranslationGroupId = groupId;
+        ClearScheduledPublishLease(source);
+        ClearScheduledPublishLease(target);
         await dbContext.SaveChangesAsync(ct);
-        return await GetTranslations(workspaceId, id, ct);
+        var translations = await BaseContentQuery(workspaceId).AsNoTracking()
+            .Where(content => content.TranslationGroupId == groupId)
+            .OrderBy(content => content.LocaleCode)
+            .ToListAsync(ct);
+        var responses = new List<ContentItemSummaryResponse>();
+        foreach (var translation in translations)
+        {
+            responses.Add(await ToSummaryResponseAsync(translation, ct));
+        }
+
+        return Ok(responses);
     }
 
     [HttpGet("{id:guid}/translations")]
-    public async Task<ActionResult<IReadOnlyList<ContentItemSummaryResponse>>> GetTranslations(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> GetTranslations(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -495,17 +525,24 @@ public sealed class ContentController : ControllerBase
 
         if (!source.TranslationGroupId.HasValue)
         {
-            return Ok(Array.Empty<ContentItemSummaryResponse>());
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], 0, pagination.Page, pagination.PageSize));
         }
 
-        var translations = await BaseContentQuery(workspaceId).AsNoTracking().Where(content => content.TranslationGroupId == source.TranslationGroupId).OrderBy(content => content.LocaleCode).ToListAsync(ct);
+        var query = BaseContentQuery(workspaceId).AsNoTracking().Where(content => content.TranslationGroupId == source.TranslationGroupId).OrderBy(content => content.LocaleCode);
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var translations = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
         var responses = new List<ContentItemSummaryResponse>();
         foreach (var translation in translations)
         {
             responses.Add(await ToSummaryResponseAsync(translation, ct));
         }
 
-        return Ok(responses);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, total, pagination.Page, pagination.PageSize));
     }
 
     private async Task<ActionResult<ContentItemDetailResponse>> Transition(Guid workspaceId, Guid id, ContentStatus targetStatus, string? reason, CancellationToken ct)
@@ -540,22 +577,27 @@ public sealed class ContentController : ControllerBase
             content.PublishAt = null;
             content.PendingEffectiveStartAt = null;
             content.PendingEffectiveEndAt = null;
+            ClearScheduledPublishLease(content);
             await publishingService.PublishSnapshotAsync(content, new ContentEffectiveRange(null, null), actorUserId: currentActor.UserId, ct: ct);
         }
+        else if (targetStatus == ContentStatus.Archived)
+        {
+            ClearScheduledPublishLease(content);
+        }
 
-        await dbContext.SaveChangesAsync(ct);
-        await EnqueueContentEventAsync("content.status_changed", content, ct);
+        EnqueueContentEvent("content.status_changed", content);
         if (targetStatus is ContentStatus.Published or ContentStatus.Archived)
         {
-            await EnqueueContentEventAsync(targetStatus == ContentStatus.Published ? "content.published" : "content.archived", content, ct);
+            EnqueueContentEvent(targetStatus == ContentStatus.Published ? "content.published" : "content.archived", content);
         }
+        await dbContext.SaveChangesAsync(ct);
 
         _ = reason;
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
     }
 
     [HttpGet("{id:guid}/versions")]
-    public async Task<ActionResult<IReadOnlyList<ContentVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -568,11 +610,17 @@ public sealed class ContentController : ControllerBase
             return NotFound();
         }
 
-        var versions = await dbContext.ContentVersions.AsNoTracking()
+        var query = dbContext.ContentVersions.AsNoTracking()
             .Where(version => version.ContentItemId == id)
-            .OrderByDescending(version => version.VersionNumber)
-            .ToListAsync(ct);
-        return Ok(versions.Select(ToVersionSummary).ToList());
+            .OrderByDescending(version => version.VersionNumber);
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentVersionSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var versions = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentVersionSummaryResponse>(versions.Select(ToVersionSummary).ToList(), total, pagination.Page, pagination.PageSize));
     }
 
     [HttpGet("{id:guid}/versions/{versionNumber:int}")]
@@ -679,6 +727,7 @@ public sealed class ContentController : ControllerBase
         content.PublishAt = null;
         content.PendingEffectiveStartAt = null;
         content.PendingEffectiveEndAt = null;
+        ClearScheduledPublishLease(content);
         content.ArchivedAt = null;
 
         var snapshot = await publishingService.PublishSnapshotAsync(
@@ -687,7 +736,6 @@ public sealed class ContentController : ControllerBase
             target.VersionNumber,
             currentActor.UserId,
             ct);
-        await dbContext.SaveChangesAsync(ct);
 
         var payload = JsonSerializer.SerializeToElement(new
         {
@@ -697,13 +745,14 @@ public sealed class ContentController : ControllerBase
             toVersionNumber = target.VersionNumber,
             newVersionNumber = snapshot.Version.VersionNumber
         });
-        await webhookQueue.EnqueueAsync(new WebhookEvent("content.rolled_back", content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow), ct);
-        await EnqueueContentEventAsync("content.published", content, ct);
+        webhookOutbox.Enqueue("content.rolled_back", content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow);
+        EnqueueContentEvent("content.published", content);
+        await dbContext.SaveChangesAsync(ct);
         return Ok(await ToDetailResponseAsync(content.Id, ct: ct));
     }
 
     private static ContentVersionSummaryResponse ToVersionSummary(ContentVersion version) =>
-        new(version.Id, version.ContentItemId, version.VersionNumber, version.Status, version.TemplateVersionId,
+        new(version.Id, version.ContentItemId, version.VersionNumber, version.Status.ToContract(), version.TemplateVersionId,
             version.Slug, version.LocaleCode, version.EffectiveStartAt, version.EffectiveEndAt, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
             version.RolledBackFromVersionNumber, version.Tags.ToList());
 
@@ -723,12 +772,12 @@ public sealed class ContentController : ControllerBase
             {
                 templateFields.TryGetValue(value.FieldId, out var field);
                 return new ContentVersionFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order,
-                    value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId,
+                    value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId,
                     value.ChildContentItemId, value.JsonValue?.Clone(), value.DisplayLabel);
             })
             .ToList();
         return new ContentVersionDetailResponse(version.Id, version.ContentItemId, version.VersionNumber,
-            version.Status, version.TemplateVersionId, templateName, version.Slug, version.LocaleCode,
+            version.Status.ToContract(), version.TemplateVersionId, templateName, version.Slug, version.LocaleCode,
             version.TranslationGroupId, version.EffectiveStartAt, version.EffectiveEndAt, version.PublishedAt, version.RetiredAt, version.PublishedByUserId,
             version.RolledBackFromVersionNumber, version.Tags.ToList(), fields);
     }
@@ -776,19 +825,9 @@ public sealed class ContentController : ControllerBase
     {
         foreach (var value in values)
         {
-            content.FieldValues.Add(new ContentFieldValue
-            {
-                ContentItemId = content.Id,
-                FieldId = value.FieldId,
-                Order = value.Order,
-                ValueKind = value.ValueKind,
-                TextValue = value.TextValue,
-                BoolValue = value.BoolValue,
-                MediaAssetId = value.MediaAssetId,
-                FileAssetId = value.FileAssetId,
-                ChildContentItemId = value.ChildContentItemId,
-                JsonValue = value.JsonValue.Clone()
-            });
+            var fieldValue = new ContentFieldValue { ContentItemId = content.Id };
+            ApplyFieldValue(fieldValue, value);
+            content.FieldValues.Add(fieldValue);
         }
     }
 
@@ -807,138 +846,69 @@ public sealed class ContentController : ControllerBase
         }
     }
 
-    private static bool FieldValuesMatch(IEnumerable<ContentFieldValue> existing, IEnumerable<ContentFieldValueRequest> requested)
+    private void ReconcileFieldValues(ContentItem content, IEnumerable<ContentFieldValueRequest> values)
     {
-        var existingValues = existing
-            .OrderBy(value => value.FieldId)
-            .ThenBy(value => value.Order)
-            .ToList();
-        var requestedValues = requested
-            .OrderBy(value => value.FieldId)
-            .ThenBy(value => value.Order)
-            .ToList();
-
-        if (existingValues.Count != requestedValues.Count)
+        var retained = new HashSet<Guid>();
+        foreach (var value in values)
         {
-            return false;
-        }
-
-        for (var index = 0; index < existingValues.Count; index++)
-        {
-            var current = existingValues[index];
-            var next = requestedValues[index];
-            if (current.FieldId != next.FieldId
-                || current.Order != next.Order
-                || current.ValueKind != next.ValueKind
-                || current.TextValue != next.TextValue
-                || current.BoolValue != next.BoolValue
-                || current.MediaAssetId != next.MediaAssetId
-                || current.FileAssetId != next.FileAssetId
-                || current.ChildContentItemId != next.ChildContentItemId
-                || !JsonValuesMatch(current.JsonValue, next.JsonValue))
+            var fieldValue = content.FieldValues.FirstOrDefault(candidate =>
+                candidate.FieldId == value.FieldId
+                && candidate.Order == value.Order
+                && !retained.Contains(candidate.Id));
+            if (fieldValue is null)
             {
-                return false;
+                fieldValue = new ContentFieldValue { ContentItemId = content.Id };
+                content.FieldValues.Add(fieldValue);
             }
+
+            ApplyFieldValue(fieldValue, value);
+            retained.Add(fieldValue.Id);
         }
 
-        return true;
+        var removed = content.FieldValues.Where(value => !retained.Contains(value.Id)).ToList();
+        dbContext.ContentFieldValues.RemoveRange(removed);
+        foreach (var value in removed)
+        {
+            content.FieldValues.Remove(value);
+        }
+    }
+
+    private static void ApplyFieldValue(ContentFieldValue fieldValue, ContentFieldValueRequest value)
+    {
+        fieldValue.FieldId = value.FieldId;
+        fieldValue.Order = value.Order;
+        fieldValue.ValueKind = value.ValueKind.ToCore();
+        fieldValue.TextValue = value.TextValue;
+        fieldValue.BoolValue = value.BoolValue;
+        fieldValue.MediaAssetId = value.MediaAssetId;
+        fieldValue.FileAssetId = value.FileAssetId;
+        fieldValue.ChildContentItemId = value.ChildContentItemId;
+        fieldValue.JsonValue = value.JsonValue.Clone();
     }
 
     private static bool TagsMatch(IEnumerable<string> existing, IEnumerable<string> requested) =>
         existing.Select(NormalizeTag).Where(tag => tag.Length > 0).Distinct().Order()
             .SequenceEqual(requested.Select(NormalizeTag).Where(tag => tag.Length > 0).Distinct().Order());
 
-    private static bool JsonValuesMatch(JsonElement? left, JsonElement? right) =>
-        left.HasValue == right.HasValue
-        && (!left.HasValue || left.Value.GetRawText() == right!.Value.GetRawText());
-
-    private async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
+    private async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
     {
-        if (query.Status.HasValue && query.Status.Value != ContentStatus.Published)
-        {
-            return Ok(new PagedResponse<ContentItemSummaryResponse>([], 0, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
-        }
-
         var asOf = query.AsOf ?? DateTimeOffset.UtcNow;
-        var versions = await dbContext.ContentVersions.AsNoTracking()
-            .Where(version => version.WorkspaceId == workspaceId && version.Status == ContentVersionStatus.Published)
-            .Where(version =>
-                (version.EffectiveStartAt == null && version.EffectiveEndAt == null)
-                || (version.EffectiveStartAt <= asOf && asOf < version.EffectiveEndAt))
-            .Where(version => !dbContext.ContentItems.Any(content => content.Id == version.ContentItemId && content.IsDeleted))
-            .ToListAsync(ct);
-
-        if (query.TemplateVersionId.HasValue)
-        {
-            versions = versions.Where(version => version.TemplateVersionId == query.TemplateVersionId.Value).ToList();
-        }
-
-        if (query.TemplateId.HasValue)
-        {
-            var templateVersionIds = await dbContext.TemplateVersions.AsNoTracking()
-                .Where(version => version.TemplateId == query.TemplateId.Value)
-                .Select(version => version.Id)
-                .ToListAsync(ct);
-            versions = versions.Where(version => templateVersionIds.Contains(version.TemplateVersionId)).ToList();
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.LocaleCode))
-        {
-            versions = versions.Where(version => version.LocaleCode == query.LocaleCode).ToList();
-        }
-
-        if (query.TranslationGroupId.HasValue)
-        {
-            versions = versions.Where(version => version.TranslationGroupId == query.TranslationGroupId.Value).ToList();
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Slug))
-        {
-            versions = versions.Where(version => version.Slug == query.Slug).ToList();
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Tags))
-        {
-            var tags = query.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(NormalizeTag).ToArray();
-            versions = versions.Where(version => tags.All(tag => version.Tags.Contains(tag))).ToList();
-        }
-
-        if (query.PublishedAfter.HasValue)
-        {
-            versions = versions.Where(version => version.PublishedAt >= query.PublishedAfter.Value).ToList();
-        }
-
-        if (query.PublishedBefore.HasValue)
-        {
-            versions = versions.Where(version => version.PublishedAt <= query.PublishedBefore.Value).ToList();
-        }
-
-        var resolved = versions
-            .GroupBy(version => version.ContentItemId)
-            .Select(group => SelectMostSpecific(group, asOf))
+        var page = await resolvedContentListQuery.ExecuteAsync(workspaceId, query, asOf, ct);
+        var responses = page.Items
+            .Select(row => new ContentItemSummaryResponse(
+                row.ContentItemId,
+                row.TemplateVersionId,
+                row.TemplateName,
+                ContentStatus.Published.ToContract(),
+                row.Slug,
+                row.LocaleCode,
+                row.TranslationGroupId,
+                row.Tags,
+                row.PublishedAt,
+                row.PublishedAt,
+                row.PublishedAt))
             .ToList();
-
-        if (!string.IsNullOrWhiteSpace(query.Q))
-        {
-            resolved = resolved.Where(version => (version.Slug ?? string.Empty).Contains(query.Q, StringComparison.OrdinalIgnoreCase)).ToList();
-        }
-
-        resolved = query.SortBy switch
-        {
-            "publishedAt" => query.SortDesc ? resolved.OrderByDescending(version => version.PublishedAt).ToList() : resolved.OrderBy(version => version.PublishedAt).ToList(),
-            "slug" => query.SortDesc ? resolved.OrderByDescending(version => version.Slug).ToList() : resolved.OrderBy(version => version.Slug).ToList(),
-            _ => query.SortDesc ? resolved.OrderByDescending(version => version.PublishedAt).ToList() : resolved.OrderBy(version => version.PublishedAt).ToList()
-        };
-
-        var total = resolved.Count;
-        var pageItems = resolved.Skip(ControllerHelpers.Offset(query.Page, query.PageSize)).Take(ControllerHelpers.Limit(query.PageSize)).ToList();
-        var responses = new List<ContentItemSummaryResponse>();
-        foreach (var version in pageItems)
-        {
-            responses.Add(await ToResolvedSummaryResponseAsync(version, ct));
-        }
-
-        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, Math.Max(1, query.Page), ControllerHelpers.Limit(query.PageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContentItemSummaryResponse>(responses, page.TotalCount, query.Page, query.PageSize));
     }
 
     private async Task<ContentVersion?> ResolvePublishedVersionAsync(Guid workspaceId, Guid? contentItemId, string? slug, DateTimeOffset asOf, CancellationToken ct)
@@ -979,7 +949,7 @@ public sealed class ContentController : ControllerBase
             .Where(templateVersion => templateVersion.Id == version.TemplateVersionId)
             .Select(templateVersion => dbContext.Templates.Where(template => template.Id == templateVersion.TemplateId).Select(template => template.Name).First())
             .FirstAsync(ct);
-        return new ContentItemSummaryResponse(version.ContentItemId, version.TemplateVersionId, template, ContentStatus.Published, version.Slug, version.LocaleCode, version.TranslationGroupId, version.Tags.ToList(), version.PublishedAt, version.PublishedAt, version.PublishedAt);
+        return new ContentItemSummaryResponse(version.ContentItemId, version.TemplateVersionId, template, ContentStatus.Published.ToContract(), version.Slug, version.LocaleCode, version.TranslationGroupId, version.Tags.ToList(), version.PublishedAt, version.PublishedAt, version.PublishedAt);
     }
 
     private async Task<ContentItemDetailResponse> ToResolvedDetailResponseAsync(ContentVersion version, DateTimeOffset asOf, int depth = 0, CancellationToken ct = default)
@@ -1000,7 +970,7 @@ public sealed class ContentController : ControllerBase
                 }
             }
 
-            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone(), value.DisplayLabel));
+            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone(), value.DisplayLabel));
         }
 
         return new ContentItemDetailResponse(summary.Id, summary.TemplateVersionId, summary.TemplateName, summary.Status, summary.Slug, summary.LocaleCode, summary.TranslationGroupId, summary.Tags, summary.CreatedAt, summary.UpdatedAt, summary.PublishedAt, fields);
@@ -1013,7 +983,7 @@ public sealed class ContentController : ControllerBase
             .Select(version => dbContext.Templates.Where(template => template.Id == version.TemplateId).Select(template => template.Name).First())
             .FirstAsync(ct);
         var tags = await GetTagNamesAsync(content.Id, ct);
-        return new ContentItemSummaryResponse(content.Id, content.TemplateVersionId, template, content.Status, content.Slug, content.LocaleCode, content.TranslationGroupId, tags, content.CreatedAt, content.UpdatedAt, content.PublishedAt);
+        return new ContentItemSummaryResponse(content.Id, content.TemplateVersionId, template, content.Status.ToContract(), content.Slug, content.LocaleCode, content.TranslationGroupId, tags, content.CreatedAt, content.UpdatedAt, content.PublishedAt);
     }
 
     private async Task<ContentItemDetailResponse> ToDetailResponseAsync(Guid id, int depth = 0, CancellationToken ct = default)
@@ -1031,7 +1001,7 @@ public sealed class ContentController : ControllerBase
                 child = await ToDetailResponseAsync(value.ChildContentItemId.Value, depth + 1, ct);
             }
 
-            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind, value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone()));
+            fields.Add(new ContentFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue.Clone()));
         }
 
         return new ContentItemDetailResponse(summary.Id, summary.TemplateVersionId, summary.TemplateName, summary.Status, summary.Slug, summary.LocaleCode, summary.TranslationGroupId, summary.Tags, summary.CreatedAt, summary.UpdatedAt, summary.PublishedAt, fields);
@@ -1216,31 +1186,21 @@ public sealed class ContentController : ControllerBase
         content.DeletedAt = DateTimeOffset.UtcNow;
         content.DeletedByUserId = currentActor.UserId;
         content.UpdatedAt = DateTimeOffset.UtcNow;
+        ClearScheduledPublishLease(content);
     }
 
-    private async Task EnqueueContentEventAsync(string eventType, ContentItem content, CancellationToken ct)
+    private static void ClearScheduledPublishLease(ContentItem content)
+    {
+        content.PublishLeaseOwner = null;
+        content.PublishLeaseToken = null;
+        content.PublishLeaseExpiresAt = null;
+    }
+
+    private void EnqueueContentEvent(string eventType, ContentItem content)
     {
         var payload = JsonSerializer.SerializeToElement(new { contentItemId = content.Id, workspaceId = content.WorkspaceId, templateVersionId = content.TemplateVersionId, status = content.Status.ToString() });
-        await webhookQueue.EnqueueAsync(new WebhookEvent(eventType, content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow), ct);
+        webhookOutbox.Enqueue(eventType, content.WorkspaceId, content.Id, payload, DateTimeOffset.UtcNow);
     }
 
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
 }
-
-public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20);
-public sealed record CreateContentItemRequest(Guid TemplateVersionId, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
-public sealed record UpdateContentItemRequest(string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? PublishAt, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
-public sealed record ContentFieldValueRequest(Guid FieldId, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
-public sealed record RejectContentRequest(string Reason);
-public sealed record PublishContentRequest(DateTimeOffset? PublishAt, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt);
-public sealed record PublishContentResponse(ContentItemDetailResponse Content, IReadOnlyList<string> Warnings);
-public sealed record LinkTranslationRequest(Guid TargetContentItemId);
-public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt);
-public sealed record ContentItemDetailResponse(Guid Id, Guid TemplateVersionId, string TemplateName, ContentStatus Status, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? PublishedAt, IReadOnlyList<ContentFieldValueResponse> Fields);
-public sealed record ContentFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentItemDetailResponse? Child, JsonElement? JsonValue, string? DisplayLabel = null);
-
-public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string? Slug, string? LocaleCode, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags);
-
-public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue, string? DisplayLabel = null);
-
-public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentVersionStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset PublishedAt, DateTimeOffset? RetiredAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, IReadOnlyList<ContentVersionFieldValueResponse> Fields);

@@ -1,5 +1,5 @@
 {
   "Source": "wwwroot/scss/app.scss",
   "Target": "wwwroot/css/app.css",
-  "Arguments": "--style=compressed"
+  "Arguments": "--style=compressed --load-path=wwwroot/lib/bootstrap/scss --quiet-deps"
 }

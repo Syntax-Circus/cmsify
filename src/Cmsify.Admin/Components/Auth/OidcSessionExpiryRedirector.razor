@@ -1,0 +1,55 @@
+@implements IDisposable
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IUserTokenCacheKeyProvider TokenCacheKeyProvider
+@inject SessionStateService SessionState
+@inject IJSRuntime JS
+
+@code {
+    private bool isObserving;
+    private int signOutRequested;
+
+    protected override async Task OnInitializedAsync()
+    {
+        SessionState.OnSessionChanged += OnSessionChanged;
+
+        var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authenticationState.User;
+        if (user.FindFirst(CmsifyAuthClaims.OidcSession)?.Value != "true")
+        {
+            return;
+        }
+
+        var cacheKey = TokenCacheKeyProvider.GetCacheKey(user);
+        if (string.IsNullOrWhiteSpace(cacheKey))
+        {
+            return;
+        }
+
+        SessionState.Observe(cacheKey);
+        isObserving = true;
+        if (SessionState.IsSessionExpired)
+        {
+            await SignOutOnceAsync();
+        }
+    }
+
+    private void OnSessionChanged()
+    {
+        if (isObserving && SessionState.IsSessionExpired)
+        {
+            _ = InvokeAsync(SignOutOnceAsync);
+        }
+    }
+
+    private async Task SignOutOnceAsync()
+    {
+        if (Interlocked.Exchange(ref signOutRequested, 1) != 0)
+        {
+            return;
+        }
+
+        await JS.InvokeVoidAsync("cmsifyAuth.submitLogout");
+    }
+
+    public void Dispose() => SessionState.OnSessionChanged -= OnSessionChanged;
+}

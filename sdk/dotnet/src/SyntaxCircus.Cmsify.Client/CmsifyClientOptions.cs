@@ -1,3 +1,5 @@
+using SyntaxCircus.Http.Resilience;
+
 namespace SyntaxCircus.Cmsify;
 
 public sealed class CmsifyClientOptions
@@ -19,4 +21,18 @@ public sealed class CmsifyClientOptions
     public int MaxRetryAttempts { get; set; } = 3;
 
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(100);
+
+    public double CircuitFailureRatio { get; set; } = 0.5;
+
+    public int CircuitMinimumThroughput { get; set; } = 5;
+
+    public TimeSpan CircuitSamplingDuration { get; set; } = TimeSpan.FromSeconds(30);
+
+    public TimeSpan CircuitBreakDuration { get; set; } = TimeSpan.FromSeconds(30);
+
+    public Func<HttpRetryTelemetry, CancellationToken, ValueTask>? OnRetry { get; set; }
+
+    public Func<HttpTimeoutTelemetry, CancellationToken, ValueTask>? OnTimeout { get; set; }
+
+    public Func<HttpCircuitTelemetry, CancellationToken, ValueTask>? OnCircuitStateChanged { get; set; }
 }

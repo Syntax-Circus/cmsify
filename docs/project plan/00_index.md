@@ -49,7 +49,7 @@ All decisions made during planning. Reference before making implementation choic
 - **Delivery mode for MVP:** Standalone only (separate API + Blazor admin). Embedded mode deferred post-MVP.
 - **Repo structure:** Single monorepo, one .NET solution. TypeScript SDK lives at `sdk/typescript/`.
 - **Project name:** Cmsify
-- **Scaling target for MVP:** Single API instance. Webhook dispatch and scheduled publishing run in-process but are abstracted behind interfaces (`IWebhookQueue`, `IScheduledPublishingDispatcher`) so they can be swapped for an outbox/leader-election implementation without API or schema changes.
+- **Scaling target:** Webhook dispatch and scheduled publishing use durable PostgreSQL outbox/lease claims and are safe across API replicas and recoverable worker crashes.
 - **API versioning:** URL prefix `/api/v1/...` from day one. Endpoint paths throughout this plan should be read with the `v1` segment.
 - **Error contract:** RFC 7807 ProblemDetails for every non-2xx response. See `25_cross_cutting.md`.
 - **Optimistic concurrency:** PostgreSQL `xmin` mapped as RowVersion / ETag with `If-Match` enforcement on Content, Template, TemplateVersion, MediaAsset, WebhookEndpoint, Workspace updates.

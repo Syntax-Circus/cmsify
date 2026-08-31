@@ -1,3 +1,5 @@
+import type { components } from "./generated/schema";
+
 export interface ProblemDetails {
   type?: string;
   title?: string;
@@ -13,44 +15,14 @@ export interface ProblemDetails {
 export interface PagedResult<T> {
   items: T[];
   totalCount: number;
-  page?: number;
-  pageSize?: number;
-  offset?: number;
-  limit?: number;
-  totalPages?: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }
 
-export interface Workspace {
-  id: string;
-  name: string;
-  slug: string;
-  description?: string | null;
-}
-
-export interface ContentItem {
-  id: string;
-  workspaceId: string;
-  templateVersionId: string;
-  status: string;
-  slug?: string | null;
-  fields?: Record<string, unknown>;
-  [key: string]: unknown;
-}
-
-export interface Template {
-  id: string;
-  workspaceId: string;
-  name: string;
-  slug: string;
-  description?: string | null;
-  currentVersion?: unknown;
-}
-
-export interface MediaAsset {
-  id: string;
-  workspaceId: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-  altText?: string | null;
-}
+export type Workspace = components["schemas"]["WorkspaceDto"];
+export type ContentItem = components["schemas"]["ContentItemDetailResponse"];
+export type ContentListItem = components["schemas"]["ContentItemSummaryResponse"];
+export type Template = components["schemas"]["TemplateResponse"];
+export type TemplateListItem = components["schemas"]["TemplateSummaryResponse"];
+export type MediaAsset = components["schemas"]["MediaAssetResponse"];

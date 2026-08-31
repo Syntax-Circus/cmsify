@@ -82,6 +82,10 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Auth__Oidc__Enabled` | `false` | Enables API JWT bearer authentication and the Admin OIDC sign-in option. |
 | `Auth__Oidc__Authority` | empty | OIDC issuer/authority used to validate JWT bearer tokens. Required when OIDC is enabled. |
 | `Auth__Oidc__Audience` | `cmsify` | Expected JWT audience. |
+| `Auth__Oidc__Audiences__0` | `cmsify` | First accepted JWT audience for the reusable API bearer registration; set this for every accepted audience. |
+| `Auth__Oidc__ClientId` | empty | Admin OIDC client ID. Required for the interactive Admin sign-in option. |
+| `Auth__Oidc__ClientSecret` | empty | Admin OIDC client secret. Store only in a secret manager or environment configuration. |
+| `Auth__Oidc__RequireHttpsMetadata` | production default | Require HTTPS OIDC discovery metadata; keep enabled outside controlled development. |
 | `Auth__Oidc__ClaimsMapping__Role` | `cmsify_role` | Claim name mapped to the Cmsify role. |
 | `Auth__Oidc__ClaimsMapping__WorkspaceId` | `cmsify_workspace` | Claim name mapped to the optional workspace ID. |
 | `Seed__DefaultWorkspace__Name` | `Default` | Name used only when creating the first workspace. |
@@ -90,7 +94,12 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Seed__Admin__DisplayName` | `Cmsify Admin` | Display name for the first admin user. |
 | `Seed__Admin__Password` | replace before use | Plaintext password for the first admin; use this or `PasswordHash`, never commit either. |
 | `Seed__Admin__PasswordHash` | empty | Precomputed BCrypt hash alternative to `Password` for the first admin. |
-| `Secrets__EncryptionKey` | replace before production | Secret used to encrypt webhook signing secrets. Use at least 32 random bytes and keep it in a secret manager. |
+| `Secrets__ActiveKeyId` | `development` locally | ID of the sole key used for new signing-secret writes. Production requires it to name a configured key. |
+| `Secrets__EncryptionKeys__<keyId>` | development fixture locally | Canonical Base64 for exactly 32 bytes. Retain entries for every `v2` ciphertext that may still exist; use a secret manager in production. |
+| `Secrets__EncryptionKey` | migration input only | Legacy `v1` read key. Configure only while existing `v1` ciphertext remains; it is never used for new writes. |
+| `Secrets__Rotation__Enabled` | `false` | Enables the opt-in, bounded PostgreSQL signing-secret re-encryption worker. Start disabled and enable only for an observed window. |
+| `Secrets__Rotation__BatchSize` | `100` | Maximum endpoint rows claimed per key-rotation cycle (1–500). |
+| `Secrets__Rotation__DelaySeconds` | `5` | Delay between key-rotation cycles (1–3600 seconds). |
 
 ### API: media and background processing
 
@@ -104,14 +113,33 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Storage__S3__AccessKey` | empty | S3 access key; treat as a secret. |
 | `Storage__S3__SecretKey` | empty | S3 secret key; treat as a secret. |
 | `Storage__S3__ServiceUrl` | empty | Optional S3-compatible endpoint URL. |
+| `Storage__S3__ForcePathStyle` | automatic | Uses path-style addressing when `ServiceUrl` is set unless explicitly `false`; otherwise uses the provider default. |
 | `Media__MaxFileSizeMb` | `50` | Maximum uploaded media-file size in MiB. |
 | `Media__AllowedMimeTypes` | documented default list | Comma-separated MIME types or prefixes allowed for uploads. |
-| `Webhook__QueueCapacity` | `1024` | Capacity of the in-process webhook event queue. |
+| `Media__Operations__ReconciliationIntervalSeconds` | `300` | Delay between bounded reconciliation cycles. |
+| `Media__Operations__LeaseDurationSeconds` | `300` | Fenced deletion/checkpoint claim lease. Expired claims can be recovered by another replica. |
+| `Media__Operations__BatchSize` | `100` | Maximum deletion, stale-upload, verification, or listing work per operation (1–1,000). |
+| `Media__Operations__RetryBaseSeconds` | `30` | First failed-deletion retry delay. |
+| `Media__Operations__RetryCapSeconds` | `3600` | Maximum exponential retry delay. |
+| `Media__Operations__RetentionDays` | `30` | Recovery window before a user-deleted blob becomes eligible for purge. |
+| `Media__Operations__OrphanGraceHours` | `24` | Minimum object age before an unowned managed-prefix object can be queued for deletion. |
+| `Media__Operations__AbandonedUploadMinutes` | `30` | Age at which an incomplete database-first upload becomes failed cleanup work. |
+| `Media__Operations__ManagedPrefixes__0/1` | `cmsify/media/`, `default/` | Fixed prefixes eligible for orphan scans; foreign prefixes are rejected by validation. |
+| `Webhook__OutboxPollIntervalSeconds` | `30` | Durable outbox polling interval (1–3600 seconds). |
+| `Webhook__OutboxLeaseDurationSeconds` | `300` | Outbox claim lease (1–1800 seconds). |
+| `Webhook__OutboxBatchSize` | `100` | Maximum outbox rows claimed per cycle (1–500). |
 | `Webhook__RetryIntervalSeconds` | `30` | Interval for polling webhook deliveries due for retry. |
+| `Webhook__DeliveryLeaseDurationSeconds` | `300` | Delivery claim lease (1–1800 seconds). |
+| `Webhook__DeliveryBatchSize` | `100` | Maximum due delivery rows claimed per cycle (1–500). |
 | `Webhook__MaxAttempts` | `10` | Maximum webhook delivery attempts before failure. |
-| `Webhook__RequestTimeoutSeconds` | `15` | Outbound webhook HTTP timeout, clamped to 1–120 seconds. |
-| `Webhook__AllowHttp` | `false` | Allows non-TLS webhook endpoints. Keep `false` outside controlled development. |
+| `Webhook__RequestTimeoutSeconds` | `15` | Outbound webhook HTTP timeout (1–120 seconds). |
+| `Webhook__AllowHttp` | `false` | Allows non-TLS webhook endpoints. Keep `false`; opt in only for controlled development. Webhook egress remains direct-only and does not provide a proxy mode. |
+| `Webhook__RetentionDays` | `30` | Retention for processed outbox rows and successful delivery logs; retry and dead-letter diagnostics are retained. |
+| `Webhook__CleanupBatchSize` | `100` | Per-table retention deletion limit per cleanup cycle (1–500). |
+| `Webhook__CleanupIntervalSeconds` | `3600` | Durable-worker cleanup cadence (1–86400 seconds). |
 | `Scheduler__PublishingIntervalSeconds` | `60` | Interval for processing scheduled content publication. |
+| `Scheduler__PublishingLeaseDurationSeconds` | `300` | Durable scheduled-publication lease (1–1800 seconds). |
+| `Scheduler__PublishingBatchSize` | `100` | Maximum due scheduled rows claimed per cycle (1–500). |
 
 ### Admin
 
@@ -122,26 +150,32 @@ Environment-variable names replace `:` with `__`. Comma-separated values are acc
 | `Admin__Auth__Session__SlidingWindowMinutes` | `60` | Sliding Admin cookie lifetime. Keep it no longer than the API session lifetime. |
 | `Admin__Auth__Session__MaxLifetimeHours` | `24` | Absolute Admin cookie lifetime. |
 | `Admin__DataProtection__KeysPath` | `.local/keys/admin` | Directory used to persist Admin Data Protection keys. Persist this path across production restarts. |
+| `Auth__Oidc__TokenCache__Redis__Enabled` | `false` | Use the distributed OIDC token cache for multi-instance Admin deployments. |
+| `Auth__Oidc__TokenCache__Redis__ConnectionString` | empty | Redis connection string required when the distributed token cache is enabled. |
 
 ## Run in production with Docker
 
-The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. Every successful `main` release publishes versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images to Docker Hub, alongside the moving `latest` tag. The template uses a pinned version instead of `latest`, so upgrades are deliberate and reversible; `CMSIFY_IMAGE_PREFIX` can point it at a private registry instead.
+The included [`docker-compose.prod.yml`](docker-compose.prod.yml) is a complete single-host deployment template with PostgreSQL and persistent database, media, and Admin session-key volumes. A reviewed SemVer tag publishes matching versioned `syntaxcircus/cmsify-api` and `syntaxcircus/cmsify-admin` images from one immutable commit; branch builds never publish. The template keeps literal API/Admin manifest digests beside the selected version, so upgrades are deliberate and reversible; `CMSIFY_IMAGE_PREFIX` can point it at a private registry instead.
 
 On the production host, copy the environment template and replace every placeholder with a real value. Keep the resulting file outside source control.
 
 ```bash
 cp docker-compose.prod.env.example .env.prod
-# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, encryption key, and CORS origin.
+cp docker-compose.prod.keyring.env.example .env.prod.keyring
+# Edit .env.prod: set CMSIFY_VERSION, CMSIFY_IMAGE_PREFIX, database/admin passwords, keyring-file path (`./.env.prod.keyring` after copying), and CORS origin. Update the literal API/Admin manifest digests in docker-compose.prod.yml together with a version change.
+# Edit the untracked keyring file: set its active key and retain every referenced older v2 key.
 # Pull the exact published CMSIFY_VERSION from Docker Hub (or the configured registry).
 docker compose --env-file .env.prod -f docker-compose.prod.yml pull
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
 
-When using locally built images, run `./Build-CmsifyDocker.ps1 -ImageTag local`, set `CMSIFY_VERSION=local`, and run only `up -d`; see [Operating Cmsify](docs/operations.md#container-deployment) for private-registry publishing commands.
+When using locally built images, run `./Build-CmsifyDocker.ps1 -ImageTag local`, update the literal API/Admin image references and digests in `docker-compose.prod.yml` from `docker image inspect`, set `CMSIFY_VERSION=local`, and run only `up -d`; see [Operating Cmsify](docs/operations.md#container-deployment) for private-registry publishing commands.
 
 The Compose sample binds the Admin and API ports to `127.0.0.1` (`5001` and `5000` by default). Put a TLS-terminating reverse proxy such as Caddy or Nginx on the host in front of those ports; configure its public Admin origin as `CORS_ALLOWED_ORIGIN`. To expose the containers directly instead, remove `127.0.0.1:` from the two `ports` mappings and provide TLS outside this sample. Do not expose the PostgreSQL service publicly.
 
-The template defaults to the named local-media volume. Set `Storage__Provider=s3` and its `Storage__S3__*` values to use S3-compatible object storage instead. To upgrade, set `CMSIFY_VERSION` to the next published version, back up PostgreSQL and the media volume, then rerun `pull` and `up -d`. The API applies database migrations at startup. Check `/health/live` for process health and `/health/ready` for database and storage readiness.
+The template defaults to the named local-media volume. Set `Storage__Provider=s3` and its `Storage__S3__*` values to use S3-compatible object storage instead. To upgrade, update `CMSIFY_VERSION` and the literal matching image digests in `docker-compose.prod.yml` to the next published release, back up PostgreSQL and the media volume, then rerun `pull` and `up -d`. The API applies database migrations at startup. Check `/health/live` for process health and `/health/ready` for database and storage readiness.
+
+The production Compose template reads signing-secret configuration only into the API container from `CMSIFY_API_KEYRING_ENV_FILE`; it does not pass the main Compose interpolation file through to the container. Copy [`docker-compose.prod.keyring.env.example`](docker-compose.prod.keyring.env.example) to an untracked deployment-only file, set `CMSIFY_API_KEYRING_ENV_FILE` to that path, and replace its active-key placeholder with a stable ID and canonical Base64 32-byte CSPRNG key. Add and retain every older `Secrets__EncryptionKeys__<keyId>` entry that may still be referenced by `v2` ciphertext. Missing, malformed, or placeholder keyring configuration fails API startup; never commit the deployment keyring file.
 
 ## Documentation
 
@@ -152,6 +186,9 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 - [Getting started](docs/getting-started.md) — local setup, first login, workspace, and API client token.
 - [Authentication and authorization](docs/authentication-and-authorization.md) — Admin user sessions, API-client tokens, SDK bearer handling, roles, scopes, and token lifecycle.
 - [Operating Cmsify](docs/operations.md) — configuration, production essentials, persistence, health checks, and security.
+- [API compatibility](docs/api-compatibility.md) — `/api/v1` compatibility and deprecation policy.
+- [Release runbook](docs/release-runbook.md) and [rollback runbook](docs/rollback-runbook.md) — authorized-release evidence and recovery boundaries.
+- [Security policy](SECURITY.md) and [support policy](SUPPORT.md) — private vulnerability reporting and public support channels.
 
 **Build integrations and content models:**
 
@@ -182,12 +219,16 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 
 ## Development commands
 
-From the repository root:
+Cmsify pins .NET SDK `10.0.400` and checks in a NuGet lock beside every solution project. Verify the SDK and use locked restore before building:
 
 ```powershell
-dotnet build Cmsify.slnx
-dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal
+dotnet --version
+dotnet restore Cmsify.slnx --locked-mode
+dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
+dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```
+
+The ordinary public restore is currently gated by the unpublished `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package. Maintainers with the approved ignored local feed must use the local restore command in [Quality and capacity operations](docs/performance.md); hosted/public restore is not certified until the user publishes those exact bytes or approves and pins a stable replacement.
 
 For the TypeScript client:
 
@@ -199,7 +240,7 @@ npm test
 npm run build
 ```
 
-See [`AGENTS.md`](AGENTS.md) for focused test commands, generated-file rules, and architecture conventions.
+See [Quality and capacity operations](docs/performance.md) for lock regeneration, warning enforcement, deterministic capacity filters, coverage summaries, scheduled timing reports, and the single-MSBuild-node final command. See [`AGENTS.md`](AGENTS.md) for generated-file rules and architecture conventions.
 
 ## Contributing
 

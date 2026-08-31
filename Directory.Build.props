@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
+    <!-- Local source builds are deliberately non-publishable. The release workflow supplies a validated tag version. -->
+    <Version Condition="'$(Version)' == ''">0.0.0-local</Version>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">$(Version)</PackageVersion>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
+    <!-- Only the reviewed tag workflow may make public .NET projects packable. -->
+    <IsPackable Condition="'$(CmsifyReleaseBuild)' != 'true'">false</IsPackable>
+  </PropertyGroup>
+  <Target Name="RequireCmsifyReleaseInputs" BeforeTargets="Pack" Condition="'$(CmsifyReleaseBuild)' == 'true'">
+    <Error Condition="'$(PackageVersion)' == '' Or '$(PackageVersion)' == '0.0.0-local'" Text="Cmsify release packing requires a validated tag-derived PackageVersion." />
+  </Target>
+</Project>

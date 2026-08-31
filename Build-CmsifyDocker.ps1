@@ -4,7 +4,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string[]]$Targets = @('api', 'admin'),
 
-    [string]$ImageTag = '',
+    [string]$ImageTag = '0.0.0-local',
 
     [string]$Registry = '',
 
@@ -13,9 +13,7 @@ param(
     [switch]$NoCache,
 
     [ValidateNotNullOrEmpty()]
-    [string[]]$Platforms = @('linux/amd64', 'linux/arm64'),
-
-    [string]$VersionProjectPath = '.\src\Cmsify.Contracts\Cmsify.Contracts.csproj'
+    [string[]]$Platforms = @('linux/amd64', 'linux/arm64')
 )
 
 Set-StrictMode -Version Latest
@@ -83,45 +81,6 @@ function Get-ImageReference {
     return "$prefix/$ImageName`:$Tag"
 }
 
-function Get-GitVersionValues {
-    param([Parameter(Mandatory)][string]$ProjectFile)
-    $resolvedProjectFile = Resolve-RepoPath $ProjectFile
-    if (-not (Test-Path $resolvedProjectFile)) { Fail-Build "Version project file not found: $resolvedProjectFile" }
-
-    $output = & dotnet msbuild $resolvedProjectFile -nologo -verbosity:quiet -target:GetVersion -getProperty:GitVersion_SemVer -getProperty:GitVersion_InformationalVersion 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) {
-        try {
-            $properties = ($output.Trim() | ConvertFrom-Json).Properties
-            if (-not [string]::IsNullOrWhiteSpace($properties.GitVersion_SemVer)) { return $properties }
-        }
-        catch {
-            # Fall through to the GitVersion CLI when MSBuild does not return JSON.
-        }
-    }
-
-    foreach ($command in @('dotnet-gitversion', 'gitversion')) {
-        if ($null -eq (Get-Command $command -ErrorAction SilentlyContinue)) { continue }
-
-        $cliOutput = & $command /output json /config (Resolve-RepoPath '.\GitVersion.yml') 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) { continue }
-
-        try {
-            $result = $cliOutput.Trim() | ConvertFrom-Json
-            if (-not [string]::IsNullOrWhiteSpace($result.SemVer)) {
-                return [pscustomobject]@{
-                    GitVersion_SemVer = $result.SemVer
-                    GitVersion_InformationalVersion = $result.InformationalVersion
-                }
-            }
-        }
-        catch {
-            # Try the next available CLI command.
-        }
-    }
-
-    Fail-Build 'Unable to resolve a Docker tag with GitVersion. Install GitVersion CLI or pass -ImageTag explicitly.'
-}
-
 $targetDefinitions = [ordered]@{
     api = @{ DisplayName = 'API'; ImageName = 'cmsify-api'; DockerfilePath = Resolve-RepoPath '.\src\Cmsify.Api\Dockerfile'; ProjectPath = Resolve-RepoPath '.\src\Cmsify.Api\Cmsify.Api.csproj' }
     admin = @{ DisplayName = 'Admin'; ImageName = 'cmsify-admin'; DockerfilePath = Resolve-RepoPath '.\src\Cmsify.Admin\Dockerfile'; ProjectPath = Resolve-RepoPath '.\src\Cmsify.Admin\Cmsify.Admin.csproj' }
@@ -147,11 +106,9 @@ foreach ($target in $Targets) {
     if (-not (Test-Path $definition.ProjectPath)) { Fail-Build "Project file not found for '$target': $($definition.ProjectPath)" }
 }
 
-$version = if ([string]::IsNullOrWhiteSpace($ImageTag)) { Get-GitVersionValues -ProjectFile $VersionProjectPath } else { $null }
-if ($null -ne $version) { $ImageTag = $version.GitVersion_SemVer }
-$buildVersion = if ($null -ne $version) { $version.GitVersion_SemVer } else { $ImageTag }
-$informationalVersion = if ($null -ne $version -and -not [string]::IsNullOrWhiteSpace($version.GitVersion_InformationalVersion)) { $version.GitVersion_InformationalVersion } else { $buildVersion }
-$publishedTags = @($ImageTag, 'latest' | Select-Object -Unique)
+$buildVersion = $ImageTag
+$informationalVersion = $buildVersion
+$publishedTags = @($ImageTag)
 
 Write-Header 'Build configuration'
 Write-Host "Targets: $($Targets -join ', ')"
@@ -170,7 +127,7 @@ try {
         if ($Push) {
             $arguments = @('buildx', 'build', '--platform', ($Platforms -join ','))
             foreach ($image in $imageReferences) { $arguments += @('-t', $image) }
-            $arguments += @('--build-arg', "BUILD_VERSION=$buildVersion", '--build-arg', "BUILD_INFORMATIONAL_VERSION=$informationalVersion", '--build-arg', 'DISABLE_GITVERSION_TASK=true', '-f', $definition.DockerfilePath)
+            $arguments += @('--build-arg', "BUILD_VERSION=$buildVersion", '--build-arg', "BUILD_INFORMATIONAL_VERSION=$informationalVersion", '-f', $definition.DockerfilePath)
             if ($NoCache) { $arguments += '--no-cache' }
             $arguments += @('--push', '.')
             & docker @arguments
@@ -185,7 +142,7 @@ try {
             $arguments = @('buildx', 'build', '--platform', $platform)
             foreach ($image in $platformImages) { $arguments += @('-t', $image) }
             if ($platform -eq 'linux/amd64') { foreach ($image in $imageReferences) { $arguments += @('-t', $image) } }
-            $arguments += @('--build-arg', "BUILD_VERSION=$buildVersion", '--build-arg', "BUILD_INFORMATIONAL_VERSION=$informationalVersion", '--build-arg', 'DISABLE_GITVERSION_TASK=true', '-f', $definition.DockerfilePath)
+            $arguments += @('--build-arg', "BUILD_VERSION=$buildVersion", '--build-arg', "BUILD_INFORMATIONAL_VERSION=$informationalVersion", '-f', $definition.DockerfilePath)
             if ($NoCache) { $arguments += '--no-cache' }
             $arguments += @('--load', '.')
             & docker @arguments

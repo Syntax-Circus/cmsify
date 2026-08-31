@@ -4,9 +4,9 @@ public sealed class ReconnectModalRenderingTests : IAsyncLifetime
 {
     private readonly AdminAuthTestFactory factory = new();
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         await factory.DisposeAsync();
     }
@@ -16,7 +16,7 @@ public sealed class ReconnectModalRenderingTests : IAsyncLifetime
     {
         var client = factory.CreateClient();
 
-        var markup = await client.GetStringAsync("/");
+        var markup = await client.GetStringAsync("/", TestContext.Current.CancellationToken);
 
         markup.ShouldContain("id=\"components-reconnect-modal\"");
         markup.ShouldContain("class=\"cms-reconnect-modal\"");

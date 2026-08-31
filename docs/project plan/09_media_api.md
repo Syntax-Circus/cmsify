@@ -9,13 +9,15 @@ All endpoints in this document follow the API conventions in `25_cross_cutting.m
 
 ---
 
-## MediaAsset Lifecycle
-1. Client uploads file via multipart form POST
-2. API validates MIME type and file size against config limits
-3. File is streamed to `IStorageProvider`; a `StoredFile` record is returned
-4. `MediaAsset` row is created in DB with metadata + storage key
-5. Client receives the `MediaAsset` ID and a retrieval URL
-6. Content field values reference `MediaAsset` by ID (`MediaAssetId` on `ContentFieldValue`)
+## MediaAsset lifecycle
+
+1. The API validates the multipart upload and allocates the final asset ID and deterministic key: `cmsify/media/{workspaceId}/{yyyy}/{MM}/{assetId}_{safeFileName}`.
+2. It commits a `PendingUpload` row before sending bytes to storage. Only `Available` rows are visible through list, metadata, and file endpoints.
+3. Storage receives that exact key. A successful write transitions the row to `Available`; a failed or canceled write best-effort transitions it to `UploadFailed` and queues immediate idempotent cleanup.
+4. Reconciliation marks a `PendingUpload` older than 30 minutes failed, verifies bounded batches of `Available`/`Missing` objects through metadata, and scans only `cmsify/media/` and legacy `default/` for orphans older than 24 hours.
+5. Delete performs reference and `If-Match` checks, then atomically soft-deletes the row, transitions it to `DeletePending`, and creates a durable deletion intent due after 30 days. Until purge, an operator can recover the matched database/blob state using the operations runbook.
+6. Replicas claim deletion and scan work with fenced PostgreSQL leases. Failed deletes use capped exponential retry; stale owners cannot complete reclaimed work.
+7. Content field values reference `MediaAsset` by ID (`MediaAssetId` on `ContentFieldValue`).
 
 ---
 
@@ -54,7 +56,7 @@ Stream the file bytes from the storage provider. Sets `Content-Type` and `Conten
 Update `altText` only.
 
 ### `DELETE /api/v1/workspaces/{workspaceId}/media/{id}`
-Soft-deletes the asset (`IsDeleted = true`); the file remains in storage until a future retention sweep. Returns `409` (ProblemDetails type `referenced-by-other-entity`) if the asset is referenced by any non-soft-deleted content item, with `extensions.referencedBy` listing the referencing content item IDs.
+Atomically soft-deletes the asset (`IsDeleted = true`), marks it `DeletePending`, and creates a durable deletion intent due after the configured 30-day recovery window. Returns `409` (ProblemDetails type `referenced-by-other-entity`) if the asset is referenced by any non-soft-deleted content item, with `extensions.referencedBy` listing the referencing content item IDs.
 
 Requires `Editor` and `If-Match`.
 
@@ -70,6 +72,9 @@ Requires `Editor` and `If-Match`.
 - [x] Add `Media:MaxFileSizeMb` and `Media:AllowedMimeTypes` to `.env.example`
 - [x] Integration test: upload → retrieve → delete flow
 - [x] Integration test: delete blocked by published content reference
+- [x] Persist database-first upload state and deterministic storage keys
+- [x] Add durable retention tombstones, leased deletion retries, missing-blob verification, and managed-prefix orphan reconciliation
+- [x] Cover database/storage failures, visibility states, disposal, authorization, concurrency, restart recovery, and replica-safe claims
 
 ---
 
@@ -77,3 +82,5 @@ Requires `Editor` and `If-Match`.
 - [x] File upload and retrieval working with local storage provider
 - [x] S3 provider swap verified via config change
 - [x] Reference-guarded delete
+- [x] Local and S3-compatible metadata/list/disposal support through `SyntaxCircus.Storage`
+- [x] Operator recovery window and reconciliation runbook

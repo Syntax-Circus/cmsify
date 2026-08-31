@@ -22,7 +22,7 @@ public sealed class HealthClient(CmsifyClient client)
 
 public sealed class WorkspaceClient(CmsifyClient client)
 {
-    public Task<PagedResult<WorkspaceDto>?> ListAsync(int offset = 0, int limit = 50, CancellationToken ct = default) => client.GetAsync<PagedResult<WorkspaceDto>>($"/api/v1/workspaces?offset={offset}&limit={limit}", ct);
+    public Task<PagedResponse<WorkspaceDto>?> ListAsync(int page = 1, int pageSize = 50, CancellationToken ct = default) => client.GetAsync<PagedResponse<WorkspaceDto>>($"/api/v1/workspaces?page={page}&pageSize={pageSize}", ct);
     public Task<WorkspaceDto?> GetAsync(Guid id, CancellationToken ct = default) => client.GetAsync<WorkspaceDto>($"/api/v1/workspaces/{id}", ct);
     public Task<WorkspaceDto?> CreateAsync(WorkspaceRequest request, CancellationToken ct = default) => client.PostAsync<WorkspaceDto>("/api/v1/workspaces", request, ct);
     public Task<WorkspaceDto?> UpdateAsync(Guid id, WorkspaceRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<WorkspaceDto>($"/api/v1/workspaces/{id}", request, ct) : client.PutAsync<WorkspaceDto>($"/api/v1/workspaces/{id}", request, ifMatch, ct);
@@ -31,15 +31,16 @@ public sealed class WorkspaceClient(CmsifyClient client)
 
 public sealed class TemplateClient(CmsifyClient client)
 {
-    public Task<PagedResult<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, string? search, CancellationToken ct = default) => ListAsync(workspaceId, null, search, ct: ct);
-    public Task<PagedResult<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, bool? isSystem = null, string? search = null, int page = 1, int pageSize = 20, CancellationToken ct = default) =>
-        client.GetAsync<PagedResult<TemplateSummaryResponse>>($"{CmsifyClient.WorkspacePath(workspaceId, "/templates")}?page={page}&pageSize={pageSize}{Query.Optional("isSystem", isSystem)}{Query.Optional("search", search)}", ct);
+    public Task<PagedResponse<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, string? search, CancellationToken ct = default) => ListAsync(workspaceId, null, search, ct: ct);
+    public Task<PagedResponse<TemplateSummaryResponse>?> ListAsync(Guid workspaceId, bool? isSystem = null, string? search = null, int page = 1, int pageSize = 20, CancellationToken ct = default) =>
+        client.GetAsync<PagedResponse<TemplateSummaryResponse>>($"{CmsifyClient.WorkspacePath(workspaceId, "/templates")}?page={page}&pageSize={pageSize}{Query.Optional("isSystem", isSystem)}{Query.Optional("search", search)}", ct);
     public Task<TemplateResponse?> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), ct);
     public Task<TemplateResponse?> CreateAsync(Guid workspaceId, CreateTemplateRequest request, CancellationToken ct = default) => client.PostAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, "/templates"), request, ct);
     public Task<TemplateResponse?> UpdateAsync(Guid workspaceId, Guid id, UpdateTemplateRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), request, ct) : client.PutAsync<TemplateResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), request, ifMatch, ct);
     public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), ct) : client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}"), ifMatch, ct);
-    public Task<IReadOnlyList<TemplateVersionSummaryResponse>?> VersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<TemplateVersionSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions"), ct);
-    public Task<IReadOnlyList<TemplateVersionSummaryResponse>?> ListVersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => VersionsAsync(workspaceId, id, ct);
+    public Task<PagedResponse<TemplateVersionSummaryResponse>?> VersionsAsync(Guid workspaceId, Guid id, int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<TemplateVersionSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions?page={page}&pageSize={pageSize}"), ct);
+    public Task<PagedResponse<TemplateVersionSummaryResponse>?> ListVersionsAsync(Guid workspaceId, Guid id, int page = 1, int pageSize = 20, CancellationToken ct = default) => VersionsAsync(workspaceId, id, page, pageSize, ct);
+    public Task<IReadOnlyList<TemplateVersionSummaryResponse>> ListAllVersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => CmsifyClient.ListAllToListAsync((page, cancellationToken) => ListVersionsAsync(workspaceId, id, page, 100, cancellationToken), ct);
     public Task<TemplateVersionResponse?> CreateVersionAsync(Guid workspaceId, Guid id, CreateTemplateVersionRequest request, CancellationToken ct = default) => client.PostAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions"), request, ct);
     public Task<TemplateVersionResponse?> CreateDraftAsync(Guid workspaceId, Guid id, string? notes, CancellationToken ct = default) => CreateVersionAsync(workspaceId, id, new CreateTemplateVersionRequest(notes), ct);
     public Task<TemplateVersionResponse?> GetVersionAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => client.GetAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}"), ct);
@@ -72,12 +73,14 @@ public sealed class ContentClient(CmsifyClient client)
     public Task<PublishContentResponse?> PublishAsync(Guid workspaceId, Guid id, PublishContentRequest? request = null, CancellationToken ct = default) => client.PostAsync<PublishContentResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/publish"), request, ct);
     public Task<ContentItemDetailResponse?> ArchiveAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.PostAsync<ContentItemDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/archive"), null, ct);
     public Task<ContentItemDetailResponse?> RestoreAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.PostAsync<ContentItemDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/restore"), null, ct);
-    public Task<IReadOnlyList<ContentItemSummaryResponse>?> TranslationsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<ContentItemSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/translations"), ct);
+    public Task<PagedResponse<ContentItemSummaryResponse>?> TranslationsAsync(Guid workspaceId, Guid id, int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<ContentItemSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/translations?page={page}&pageSize={pageSize}"), ct);
+    public Task<IReadOnlyList<ContentItemSummaryResponse>> ListAllTranslationsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => CmsifyClient.ListAllToListAsync((page, cancellationToken) => TranslationsAsync(workspaceId, id, page, 100, cancellationToken), ct);
     public Task<IReadOnlyList<ContentItemSummaryResponse>?> LinkTranslationAsync(Guid workspaceId, Guid id, LinkTranslationRequest request, CancellationToken ct = default) => client.PostAsync<IReadOnlyList<ContentItemSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/link-translation"), request, ct);
-    public Task<IReadOnlyList<ContentVersionSummaryResponse>?> VersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<ContentVersionSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions"), ct);
+    public Task<PagedResponse<ContentVersionSummaryResponse>?> VersionsAsync(Guid workspaceId, Guid id, int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<ContentVersionSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions?page={page}&pageSize={pageSize}"), ct);
     public Task<ContentVersionDetailResponse?> GetVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => client.GetAsync<ContentVersionDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}"), ct);
     public Task<ContentItemDetailResponse?> RollbackVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => client.PostAsync<ContentItemDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}/rollback"), null, ct);
-    public Task<IReadOnlyList<ContentVersionSummaryResponse>?> ListVersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => VersionsAsync(workspaceId, id, ct);
+    public Task<PagedResponse<ContentVersionSummaryResponse>?> ListVersionsAsync(Guid workspaceId, Guid id, int page = 1, int pageSize = 20, CancellationToken ct = default) => VersionsAsync(workspaceId, id, page, pageSize, ct);
+    public Task<IReadOnlyList<ContentVersionSummaryResponse>> ListAllVersionsAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => CmsifyClient.ListAllToListAsync((page, cancellationToken) => ListVersionsAsync(workspaceId, id, page, 100, cancellationToken), ct);
     public Task<ContentItemDetailResponse?> RollbackAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => RollbackVersionAsync(workspaceId, id, versionNumber, ct);
     public Task<ContentItemDetailResponse?> TransitionAsync(Guid workspaceId, Guid id, string action, object? request = null, CancellationToken ct = default) => client.PostAsync<ContentItemDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/{action}"), request, ct);
 }
@@ -87,7 +90,8 @@ public sealed class MediaClient(CmsifyClient client)
     public Task<MediaAssetResponse?> UploadAsync(Guid workspaceId, Stream content, string fileName, string contentType, string? altText = null, IProgress<long>? progress = null, CancellationToken ct = default)
     {
         var form = new MultipartFormDataContent();
-        var file = new StreamContent(progress is null ? content : new ProgressStream(content, progress));
+        var uploadContent = progress is null ? content : new ProgressStream(content, progress);
+        var file = new StreamContent(new CallerOwnedStream(uploadContent));
         file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         form.Add(file, "file", fileName);
         if (altText is not null)
@@ -125,11 +129,37 @@ public sealed class MediaClient(CmsifyClient client)
             return read;
         }
     }
+
+    private sealed class CallerOwnedStream(Stream inner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            inner.ReadAsync(buffer, offset, count, cancellationToken);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.ReadAsync(buffer, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override void Write(ReadOnlySpan<byte> buffer) => inner.Write(buffer);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            inner.WriteAsync(buffer, offset, count, cancellationToken);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.WriteAsync(buffer, cancellationToken);
+    }
 }
 
 public sealed class PickListClient(CmsifyClient client)
 {
-    public Task<IReadOnlyList<PickListSummaryResponse>?> ListAsync(Guid workspaceId, string? search = null, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<PickListSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists{Query.OptionalQuery("search", search)}"), ct);
+    public Task<PagedResponse<PickListSummaryResponse>?> ListAsync(Guid workspaceId, string? search = null, int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<PickListSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists?page={page}&pageSize={pageSize}{Query.Optional("search", search)}"), ct);
+    public Task<IReadOnlyList<PickListSummaryResponse>> ListAllAsync(Guid workspaceId, string? search = null, CancellationToken ct = default) => CmsifyClient.ListAllToListAsync((page, cancellationToken) => ListAsync(workspaceId, search, page, 100, cancellationToken), ct);
     public Task<PickListResponse?> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}"), ct);
     public Task<PickListResponse?> GetRevisionAsync(Guid workspaceId, Guid id, Guid revisionId, CancellationToken ct = default) => client.GetAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/picklists/{id}/revisions/{revisionId}"), ct);
     public Task<PickListResponse?> CreateAsync(Guid workspaceId, PickListRequest request, CancellationToken ct = default) => client.PostAsync<PickListResponse>(CmsifyClient.WorkspacePath(workspaceId, "/picklists"), request, ct);
@@ -139,7 +169,8 @@ public sealed class PickListClient(CmsifyClient client)
 
 public sealed class ComponentClient(CmsifyClient client)
 {
-    public Task<IReadOnlyList<ComponentSummaryResponse>?> ListAsync(Guid workspaceId, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<ComponentSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, "/components"), ct);
+    public Task<PagedResponse<ComponentSummaryResponse>?> ListAsync(Guid workspaceId, int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<ComponentSummaryResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/components?page={page}&pageSize={pageSize}"), ct);
+    public Task<IReadOnlyList<ComponentSummaryResponse>> ListAllAsync(Guid workspaceId, CancellationToken ct = default) => CmsifyClient.ListAllToListAsync((page, cancellationToken) => ListAsync(workspaceId, page, 100, cancellationToken), ct);
     public Task<ComponentResponse?> GetAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.GetAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}"), ct);
     public Task<ComponentResponse?> CreateAsync(Guid workspaceId, ComponentRequest request, CancellationToken ct = default) => client.PostAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, "/components"), request, ct);
     public Task<ComponentResponse?> UpdateAsync(Guid workspaceId, Guid id, ComponentRequest request, CancellationToken ct = default, string? ifMatch = null) => ifMatch is null ? client.PutAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}"), request, ct) : client.PutAsync<ComponentResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/components/{id}"), request, ifMatch, ct);
@@ -151,7 +182,8 @@ public sealed class ComponentClient(CmsifyClient client)
 
 public sealed class TagClient(CmsifyClient client)
 {
-    public Task<IReadOnlyList<TagResponse>?> ListAsync(Guid workspaceId, CancellationToken ct = default) => client.GetAsync<IReadOnlyList<TagResponse>>(CmsifyClient.WorkspacePath(workspaceId, "/tags"), ct);
+    public Task<PagedResponse<TagResponse>?> ListAsync(Guid workspaceId, int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<TagResponse>>(CmsifyClient.WorkspacePath(workspaceId, $"/tags?page={page}&pageSize={pageSize}"), ct);
+    public Task<IReadOnlyList<TagResponse>> ListAllAsync(Guid workspaceId, CancellationToken ct = default) => CmsifyClient.ListAllToListAsync((page, cancellationToken) => ListAsync(workspaceId, page, 100, cancellationToken), ct);
     public Task DeleteAsync(Guid workspaceId, Guid id, CancellationToken ct = default) => client.DeleteAsync<object>(CmsifyClient.WorkspacePath(workspaceId, $"/tags/{id}"), ct);
 }
 
@@ -225,8 +257,9 @@ public sealed class SettingsClient(CmsifyClient client)
 
 public sealed class PackageClient(CmsifyClient client)
 {
-    public Task<IReadOnlyList<OfficialPackageResponse>?> OfficialAsync(CancellationToken ct = default) => client.GetAsync<IReadOnlyList<OfficialPackageResponse>>("/api/v1/packages/official", ct);
-    public Task<IReadOnlyList<OfficialPackageResponse>?> ListOfficialAsync(CancellationToken ct = default) => OfficialAsync(ct);
+    public Task<PagedResponse<OfficialPackageResponse>?> OfficialAsync(int page = 1, int pageSize = 20, CancellationToken ct = default) => client.GetAsync<PagedResponse<OfficialPackageResponse>>($"/api/v1/packages/official?page={page}&pageSize={pageSize}", ct);
+    public Task<PagedResponse<OfficialPackageResponse>?> ListOfficialAsync(int page = 1, int pageSize = 20, CancellationToken ct = default) => OfficialAsync(page, pageSize, ct);
+    public Task<IReadOnlyList<OfficialPackageResponse>> ListAllOfficialAsync(CancellationToken ct = default) => CmsifyClient.ListAllToListAsync((page, cancellationToken) => ListOfficialAsync(page, 100, cancellationToken), ct);
     public Task<PackageImportPreviewResponse?> PreviewOfficialAsync(Guid workspaceId, string packageId, CancellationToken ct = default) => client.PostAsync<PackageImportPreviewResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/packages/import/official/{Uri.EscapeDataString(packageId)}/preview"), null, ct);
     public Task<PackageImportResponse?> ImportOfficialAsync(Guid workspaceId, string packageId, PackageImportResolutionsRequest? request = null, CancellationToken ct = default) => client.PostAsync<PackageImportResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/packages/import/official/{Uri.EscapeDataString(packageId)}"), request, ct);
     public Task<PackageImportResponse?> ImportAsync(Guid workspaceId, object manifestOrRequest, CancellationToken ct = default) => client.PostAsync<PackageImportResponse>(CmsifyClient.WorkspacePath(workspaceId, "/packages/import"), manifestOrRequest, ct);

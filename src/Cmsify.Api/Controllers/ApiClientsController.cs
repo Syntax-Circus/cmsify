@@ -5,6 +5,10 @@ using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
+using SyntaxCircus.Cmsify.Contracts;
+using ContractApiClientDto = SyntaxCircus.Cmsify.Contracts.ApiClientDto;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -27,10 +31,16 @@ public sealed class ApiClientsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<ApiClientDto>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractApiClientDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
-        var result = await apiClientRepository.ListAsync(new PageRequest((Math.Max(1, page) - 1) * Math.Clamp(pageSize, 1, 200), Math.Clamp(pageSize, 1, 200)), ct);
-        return Ok(new PagedResponse<ApiClientDto>(result.Items, result.TotalCount, Math.Max(1, page), result.Limit));
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            var countResult = await apiClientRepository.ListAsync(new PageRequest(0, 1), ct);
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractApiClientDto>([], countResult.TotalCount, pagination.Page, pagination.PageSize));
+        }
+
+        var result = await apiClientRepository.ListAsync(new PageRequest(offset, pagination.PageSize), ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractApiClientDto>(result.Items.Select(ContractMappings.ToContract).ToArray(), result.TotalCount, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]
@@ -44,20 +54,20 @@ public sealed class ApiClientsController : ControllerBase
         var tokenIdentifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(12));
         var rawToken = TokenUtility.GenerateApiToken(tokenIdentifier);
         var tokenHash = BCrypt.Net.BCrypt.HashPassword(rawToken, configuration.GetValue("Auth:BcryptCost", 12));
-        var command = new CreateApiClientCommand(request.Name, request.Description, request.Role, request.WorkspaceId, request.ExpiresAt, currentActor.UserId!.Value);
+        var command = new CreateApiClientCommand(request.Name, request.Description, request.Role.ToCore(), request.WorkspaceId, request.ExpiresAt, currentActor.UserId!.Value);
         var client = await apiClientRepository.CreateAsync(command, tokenHash, tokenIdentifier, ct);
-        return CreatedAtAction(nameof(Get), new { id = client.Id }, new CreateApiClientResponse(client, rawToken, "Store this token securely - it cannot be retrieved again."));
+        return CreatedAtAction(nameof(Get), new { id = client.Id }, new CreateApiClientResponse(client.ToContract(), rawToken, "Store this token securely - it cannot be retrieved again."));
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<ApiClientDto>> Get(Guid id, CancellationToken ct)
+    public async Task<ActionResult<ContractApiClientDto>> Get(Guid id, CancellationToken ct)
     {
         var client = await apiClientRepository.GetAsync(id, ct);
-        return client is null ? NotFound() : Ok(client);
+        return client is null ? NotFound() : Ok(client.ToContract());
     }
 
     [HttpPost("{id:guid}/revoke")]
-    public async Task<ActionResult<ApiClientDto>> Revoke(Guid id, CancellationToken ct)
+    public async Task<ActionResult<ContractApiClientDto>> Revoke(Guid id, CancellationToken ct)
     {
         var client = await apiClientRepository.GetAsync(id, ct);
         if (client is null)
@@ -65,7 +75,7 @@ public sealed class ApiClientsController : ControllerBase
             return NotFound();
         }
 
-        return Ok(await apiClientRepository.UpdateAsync(new UpdateApiClientCommand(id, client.Name, client.Description, client.Role, client.WorkspaceId, false, client.ExpiresAt), ct));
+        return Ok((await apiClientRepository.UpdateAsync(new UpdateApiClientCommand(id, client.Name, client.Description, client.Role, client.WorkspaceId, false, client.ExpiresAt), ct)).ToContract());
     }
 
     [HttpPost("{id:guid}/rotate")]
@@ -82,7 +92,7 @@ public sealed class ApiClientsController : ControllerBase
         var tokenHash = BCrypt.Net.BCrypt.HashPassword(rawToken, configuration.GetValue("Auth:BcryptCost", 12));
         await apiClientRepository.SoftDeleteAsync(id, currentActor.UserId!.Value, ct);
         var created = await apiClientRepository.CreateAsync(new CreateApiClientCommand(client.Name, client.Description, client.Role, client.WorkspaceId, client.ExpiresAt, currentActor.UserId!.Value), tokenHash, tokenIdentifier, ct);
-        return Ok(new CreateApiClientResponse(created, rawToken, "Store this token securely - it cannot be retrieved again."));
+        return Ok(new CreateApiClientResponse(created.ToContract(), rawToken, "Store this token securely - it cannot be retrieved again."));
     }
 
     private Task<bool> CanManageClientScopeAsync(Guid? workspaceId, CancellationToken ct) =>
@@ -90,7 +100,3 @@ public sealed class ApiClientsController : ControllerBase
             ? workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId.Value, ct)
             : Task.FromResult(currentActor.IsSuperAdmin);
 }
-
-public sealed record CreateApiClientRequest(string Name, string? Description, UserRole Role, Guid? WorkspaceId, DateTimeOffset? ExpiresAt);
-
-public sealed record CreateApiClientResponse(ApiClientDto Client, string Token, string Warning);

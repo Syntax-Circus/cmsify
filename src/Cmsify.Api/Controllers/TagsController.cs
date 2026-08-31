@@ -4,7 +4,10 @@ using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using SyntaxCircus.Cmsify.Contracts;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using Microsoft.EntityFrameworkCore;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -25,19 +28,25 @@ public sealed class TagsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<TagResponse>>> List(Guid workspaceId, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<TagResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
             return NotFound();
         }
 
-        var tags = await dbContext.Tags.AsNoTracking()
+        var query = dbContext.Tags.AsNoTracking()
             .Where(tag => tag.WorkspaceId == workspaceId && !tag.IsDeleted)
             .OrderBy(tag => tag.Name)
-            .Select(tag => new TagResponse(tag.Id, tag.Name, dbContext.ContentItemTags.Count(join => join.TagId == tag.Id)))
-            .ToListAsync(ct);
-        return Ok(tags);
+            .Select(tag => new TagResponse(tag.Id, tag.Name, dbContext.ContentItemTags.Count(join => join.TagId == tag.Id)));
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TagResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var tags = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TagResponse>(tags, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpDelete("{id:guid}")]
@@ -64,5 +73,3 @@ public sealed class TagsController : ControllerBase
     }
 
 }
-
-public sealed record TagResponse(Guid Id, string Name, int UsageCount);

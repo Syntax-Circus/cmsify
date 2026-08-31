@@ -124,11 +124,17 @@ public interface IWebhookRepository
 
     Task<IReadOnlyList<WebhookDispatchTargetDto>> GetActiveEndpointsForEventAsync(string eventType, Guid? workspaceId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<PendingWebhookDeliveryDto>> ClaimPendingDeliveryLogsAsync(DateTimeOffset now, int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<PendingWebhookDeliveryDto>> ClaimPendingDeliveryLogsAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default);
 
-    Task MarkDeliverySucceededAsync(Guid deliveryLogId, int statusCode, CancellationToken ct = default);
+    Task<IReadOnlyList<ClaimedWebhookOutboxEventDto>> ClaimOutboxEventsAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default);
 
-    Task MarkDeliveryFailedAsync(Guid deliveryLogId, int? statusCode, DateTimeOffset nextRetryAt, bool isFailed, CancellationToken ct = default);
+    Task<bool> MaterializeOutboxEventAsync(ClaimedWebhookOutboxEventDto claim, DateTimeOffset now, CancellationToken ct = default);
+
+    Task<WebhookRetentionCleanupResult> CleanupRetentionAsync(DateTimeOffset olderThan, int batchSize, CancellationToken ct = default);
+
+    Task<bool> CompleteDeliverySucceededAsync(WebhookDeliveryCompletionDto completion, int statusCode, CancellationToken ct = default);
+
+    Task<bool> CompleteDeliveryFailedAsync(WebhookDeliveryCompletionDto completion, int? statusCode, string? error, DateTimeOffset? nextRetryAt, bool isDeadLetter, CancellationToken ct = default);
 }
 
 public interface IAuditLogRepository
@@ -136,4 +142,11 @@ public interface IAuditLogRepository
     Task<PagedResult<AuditLogDto>> QueryAsync(AuditLogQuery query, CancellationToken ct = default);
 
     Task AppendAsync(AuditLogDto log, CancellationToken ct = default);
+}
+
+public interface IScheduledPublishingRepository
+{
+    Task<IReadOnlyList<ScheduledContentClaimDto>> ClaimDueContentAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default);
+
+    Task<bool> CompleteClaimAsync(ScheduledContentClaimDto claim, DateTimeOffset now, CancellationToken ct = default);
 }

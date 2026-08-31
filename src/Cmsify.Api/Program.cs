@@ -1,20 +1,20 @@
 using Cmsify.Api;
 using Cmsify.Api.Auth;
 using Cmsify.Api.HealthChecks;
+using Cmsify.Api.Queries;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.Extensions;
 using Cmsify.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi;
 using Serilog;
 using Serilog.Events;
 using SyntaxCircus.AspNetCore.Common;
+using SyntaxCircus.AspNetCore.Authentication;
 using SyntaxCircus.AspNetCore.Serilog;
 using SyntaxCircus.Cmsify.Contracts;
 using SyntaxCircus.DotEnv;
@@ -57,14 +57,21 @@ builder.Services.AddProblemDetails(options =>
     options.CustomizeProblemDetails = context =>
     {
         context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
-        if (context.ProblemDetails.Type == "about:blank" && context.ProblemDetails.Status is int status)
+        var correlationId = context.HttpContext.Request.Headers[CorrelationHeaderName].FirstOrDefault()
+            ?? context.HttpContext.TraceIdentifier;
+        context.HttpContext.Response.Headers[CorrelationHeaderName] = correlationId;
+        context.ProblemDetails.Extensions["correlationId"] = correlationId;
+        if (context.ProblemDetails.Status is int status && !(context.ProblemDetails.Type?.StartsWith(CmsifyError.BaseUri, StringComparison.Ordinal) ?? false))
         {
             context.ProblemDetails.Type = CmsifyError.TypeUri(StatusCodeToErrorCode(status));
         }
+        context.ProblemDetails.Title ??= ReasonPhrases.GetReasonPhrase(context.ProblemDetails.Status ?? StatusCodes.Status500InternalServerError);
+        context.ProblemDetails.Instance ??= context.HttpContext.Request.Path;
     };
 });
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentActor, HttpContextCurrentActor>();
+builder.Services.AddScoped<IResolvedContentListQuery, ResolvedContentListQuery>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddCors(options =>
 {
@@ -100,46 +107,20 @@ builder.Services.AddRateLimiter(options =>
             isExempt: context => IsRateLimitExempt(context.Request.Path)));
     options.UseProblemDetailsRejection(CmsifyError.RateLimitExceeded);
 });
-builder.Services.AddSwaggerGen(options =>
-{
-    options.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "Cmsify API",
-        Version = "v1",
-        Description = "Headless CMS API"
-    });
-    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = ParameterLocation.Header,
-        Description = "Enter a Cmsify user session token, API client token, or JWT bearer token."
-    });
-    options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecuritySchemeReference("Bearer", null, null),
-            []
-        }
-    });
-
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
-    if (File.Exists(xmlPath))
-    {
-        options.IncludeXmlComments(xmlPath);
-    }
-});
+builder.Services.AddCmsifySwagger();
+builder.Services.AddAuthentication(CmsifyOpaqueBearerAuthenticationHandler.SchemeName)
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, CmsifyOpaqueBearerAuthenticationHandler>(CmsifyOpaqueBearerAuthenticationHandler.SchemeName, _ => { });
 if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
 {
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
-        {
-            options.Authority = builder.Configuration["Auth:Oidc:Authority"];
-            options.Audience = builder.Configuration["Auth:Oidc:Audience"];
-            options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
-        });
+    builder.Services.AddSyntaxCircusJwtBearer(builder.Configuration, "Auth:Oidc");
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = CmsifyCompositeBearer.SchemeName;
+        options.DefaultChallengeScheme = CmsifyCompositeBearer.SchemeName;
+    }).AddSyntaxCircusCompositeBearer(
+        CmsifyOpaqueBearerAuthenticationHandler.SchemeName,
+        Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
+        CmsifyCompositeBearer.SchemeName);
 }
 builder.Services.AddCmsifyInfrastructure(builder.Configuration);
 builder.Services.AddHealthChecks()
@@ -148,7 +129,10 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
-await app.MigrateCmsifyDatabaseAsync();
+if (!builder.Configuration.GetValue("Api:OpenApiExport", false))
+{
+    await app.MigrateCmsifyDatabaseAsync();
+}
 
 app.UseCorrelationId();
 app.UseSecurityHeaders();
@@ -175,6 +159,10 @@ app.UseStatusCodePages(async context =>
         Instance = httpContext.Request.Path
     };
     problem.Extensions["traceId"] = httpContext.TraceIdentifier;
+    var correlationId = httpContext.Request.Headers[CorrelationHeaderName].FirstOrDefault()
+        ?? httpContext.TraceIdentifier;
+    httpContext.Response.Headers[CorrelationHeaderName] = correlationId;
+    problem.Extensions["correlationId"] = correlationId;
     httpContext.Response.ContentType = "application/problem+json";
     await httpContext.Response.WriteAsJsonAsync(problem);
 });
@@ -201,10 +189,7 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue("Api:Swagg
 app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 app.UseCors();
-if (builder.Configuration.GetValue("Auth:Oidc:Enabled", false))
-{
-    app.UseAuthentication();
-}
+app.UseAuthentication();
 app.UseMiddleware<CmsifyAuthMiddleware>();
 app.UseRateLimiter();
 app.MapControllers();

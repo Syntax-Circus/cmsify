@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Collections.Concurrent;
+using Cmsify.Admin.Auth;
 using Cmsify.Admin.Services;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
@@ -7,9 +9,21 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.AspNetCore.Components.Authorization;
+using SyntaxCircus.Blazor.Auth;
+using SyntaxCircus.Http.Resilience;
 
 namespace Cmsify.Admin.Integration.Tests;
 
@@ -19,14 +33,34 @@ namespace Cmsify.Admin.Integration.Tests;
 /// </summary>
 internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
 {
+    public string EnvironmentName { get; set; } = "Testing";
+    public string? ReleaseSmokeRunId { get; set; }
+    public bool OidcEnabled { get; set; }
+    public bool OidcAccessTokenExpiresImmediately { get; set; }
+    public bool OidcRefreshSucceeds { get; set; } = true;
+    public bool OidcRedisEnabled { get; set; }
+    public string? OidcRedisConnectionString { get; set; }
+    public string? OidcRedisInstanceName { get; set; }
+    public bool UseCircuitAuthenticationStateProvider { get; set; }
+    public bool UseRecordingApiTokenAccessor { get; set; }
+    public HttpRequestResilienceOptions? ResiliencePipelineOptions { get; set; }
+
     public Func<HttpRequestMessage, HttpResponseMessage> Responder { get; set; } =
         _ => new HttpResponseMessage(HttpStatusCode.NotImplemented);
 
+    public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? AsyncResponder { get; set; }
+
     public List<HttpRequestMessage> ObservedRequests { get; } = new();
+
+    public ConcurrentQueue<ObservedApiRequest> ObservedApiRequests { get; } = new();
+
+    public List<OidcTokenRequest> OidcTokenRequests { get; } = new();
+
+    private readonly object observedRequestsGate = new();
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(EnvironmentName);
         builder.ConfigureHostConfiguration(c =>
         {
             c.AddInMemoryCollection(new Dictionary<string, string?>
@@ -34,6 +68,16 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 ["Admin:ApiBaseUrl"] = "http://api.test",
                 ["Admin:Auth:Session:SlidingWindowMinutes"] = "60",
                 ["Admin:Auth:Session:MaxLifetimeHours"] = "24",
+                ["Admin:ReleaseSmokeRunId"] = ReleaseSmokeRunId,
+                ["Auth:Oidc:Enabled"] = OidcEnabled.ToString(),
+                ["Auth:Oidc:Authority"] = "http://identity.test",
+                ["Auth:Oidc:ClientId"] = "cmsify-admin",
+                ["Auth:Oidc:ClientSecret"] = "test-secret",
+                ["Auth:Oidc:RequireHttpsMetadata"] = "false",
+                ["Auth:Oidc:TokenCache:Redis:Enabled"] = OidcRedisEnabled.ToString(),
+                ["Auth:Oidc:TokenCache:Redis:ConnectionString"] = OidcRedisConnectionString ?? string.Empty,
+                ["Auth:Oidc:TokenCache:Redis:InstanceName"] = OidcRedisInstanceName ?? string.Empty,
+                ["Auth:Oidc:TokenCache:Redis:Protection:Enabled"] = "false",
                 ["Admin:DataProtection:KeysPath"] = Path.Combine(Path.GetTempPath(), "cmsify-admin-test-keys", Guid.NewGuid().ToString("N"))
             });
         });
@@ -44,8 +88,31 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureTestServices(services =>
         {
+            services.AddLogging(logging => logging.ClearProviders());
+            if (ResiliencePipelineOptions is { } resiliencePipelineOptions)
+            {
+                services.RemoveAll<HttpRequestResiliencePipeline>();
+                services.AddSingleton(new HttpRequestResiliencePipeline("CmsifyApi", resiliencePipelineOptions));
+            }
+            if (UseCircuitAuthenticationStateProvider)
+            {
+                services.RemoveAll<AuthenticationStateProvider>();
+                services.AddScoped<CircuitIdentitySlot>();
+                services.AddScoped<AuthenticationStateProvider>(sp => new CircuitAuthenticationStateProvider(
+                    sp.GetRequiredService<CircuitIdentitySlot>()));
+            }
+            if (UseRecordingApiTokenAccessor)
+            {
+                services.RemoveAll<IApiTokenAccessor>();
+                services.AddScoped<RecordingApiTokenAccessor>();
+                services.AddScoped<IApiTokenAccessor>(sp => sp.GetRequiredService<RecordingApiTokenAccessor>());
+            }
             services.AddHttpClient("CmsifyApi")
                 .ConfigurePrimaryHttpMessageHandler(() => new DelegatingFakeHandler(this));
+            services.AddHttpClient<OidcTokenRefreshService>()
+                .ConfigurePrimaryHttpMessageHandler(() => new OidcBackchannelHandler(
+                    this,
+                    new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-oidc-signing-key-for-cmsify-admin"))));
             services.AddSingleton<IStartupFilter, TestEndpointsStartupFilter>();
             services.PostConfigure<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>(
                 Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme,
@@ -53,6 +120,37 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                 {
                     // The TestServer talks plain HTTP; relax the secure policy so the auth cookie round-trips.
                     options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                });
+            services.PostConfigure<OpenIdConnectOptions>(
+                OpenIdConnectDefaults.AuthenticationScheme,
+                options =>
+                {
+                    var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-oidc-signing-key-for-cmsify-admin"));
+                    var configuration = new OpenIdConnectConfiguration
+                    {
+                        Issuer = "http://identity.test",
+                        AuthorizationEndpoint = "http://identity.test/connect/authorize",
+                        TokenEndpoint = "http://identity.test/connect/token",
+                        UserInfoEndpoint = "http://identity.test/connect/userinfo",
+                        EndSessionEndpoint = "http://identity.test/connect/logout"
+                    };
+                    configuration.SigningKeys.Add(signingKey);
+                    options.Configuration = configuration;
+                    options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuerSigningKey = true,
+                        IssuerSigningKey = signingKey,
+                        ValidateIssuer = true,
+                        ValidIssuer = configuration.Issuer,
+                        ValidateAudience = true,
+                        ValidAudience = "cmsify-admin"
+                    };
+                    // TestServer uses plain HTTP, while production retains the framework's secure defaults.
+                    options.CorrelationCookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                    options.NonceCookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                    options.ProtocolValidator.RequireNonce = false;
+                    options.Backchannel = new HttpClient(new OidcBackchannelHandler(this, signingKey));
                 });
         });
     }
@@ -69,8 +167,17 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
             {
                 await request.Content.LoadIntoBufferAsync();
             }
-            factory.ObservedRequests.Add(request);
-            return factory.Responder(request);
+            lock (factory.observedRequestsGate)
+            {
+                factory.ObservedRequests.Add(request);
+            }
+            factory.ObservedApiRequests.Enqueue(new ObservedApiRequest(
+                request.RequestUri?.AbsolutePath ?? string.Empty,
+                request.Headers.Authorization?.ToString(),
+                request.Headers.TryGetValues("X-Correlation-Id", out var values) ? values.Single() : null));
+            return factory.AsyncResponder is { } asyncResponder
+                ? await asyncResponder(request, cancellationToken)
+                : factory.Responder(request);
         }
     }
 
@@ -89,14 +196,116 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
                     return;
                 }
                 await n();
+                if (HttpMethods.IsGet(ctx.Request.Method) && ctx.Request.Path == "/test/api-call" && !ctx.Response.HasStarted)
+                {
+                    using var response = await ctx.RequestServices.GetRequiredService<IHttpClientFactory>()
+                        .CreateClient("CmsifyApi")
+                        .GetAsync("/test/forwarded-api-call", ctx.RequestAborted);
+                    ctx.Response.StatusCode = (int)response.StatusCode;
+                }
             });
             next(app);
         };
+    }
+
+    public sealed record OidcTokenRequest(string GrantType, string? RefreshToken);
+
+    public sealed record ObservedApiRequest(string Path, string? Authorization, string? CorrelationId);
+
+    private sealed class OidcBackchannelHandler(AdminAuthTestFactory factory, SecurityKey signingKey) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath == "/connect/userinfo")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { sub = "oidc-admin", name = "OIDC Admin", email = "oidc@example.test", cmsify_role = "Admin" })
+                };
+            }
+
+            if (request.RequestUri?.AbsolutePath == "/connect/token")
+            {
+                var values = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(await request.Content!.ReadAsStringAsync(cancellationToken));
+                var grantType = values["grant_type"].ToString();
+                var refreshToken = values.TryGetValue("refresh_token", out var refreshTokenValue)
+                    ? refreshTokenValue.ToString()
+                    : null;
+                factory.OidcTokenRequests.Add(new OidcTokenRequest(grantType, refreshToken));
+                if (grantType == "refresh_token" && !factory.OidcRefreshSucceeds)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = JsonContent.Create(new { error = "invalid_grant" })
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new
+                    {
+                        access_token = grantType == "refresh_token" ? "refreshed-access-token" : "initial-access-token",
+                        refresh_token = "refresh-token",
+                        expires_in = factory.OidcAccessTokenExpiresImmediately && grantType != "refresh_token" ? 0 : 3600,
+                        id_token = CreateIdToken(signingKey)
+                    })
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }
+
+        private static string CreateIdToken(SecurityKey signingKey) => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+            issuer: "http://identity.test",
+            audience: "cmsify-admin",
+            claims:
+            [
+                new Claim("sub", "oidc-admin"),
+                new Claim("name", "OIDC Admin"),
+                new Claim("email", "oidc@example.test"),
+                new Claim("cmsify_role", "Admin"),
+                new Claim(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+            ],
+            notBefore: DateTime.UtcNow.AddMinutes(-1),
+            expires: DateTime.UtcNow.AddMinutes(10),
+            signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)));
     }
 
     public static HttpResponseMessage JsonOk(LoginResponse payload) => new(HttpStatusCode.OK)
     {
         Content = JsonContent.Create(payload)
     };
+}
+
+internal sealed class RecordingApiTokenAccessor(AuthenticationStateProvider authenticationStateProvider) : IApiTokenAccessor
+{
+    private readonly object expiriesGate = new();
+    private readonly List<DateTimeOffset> expiries = new();
+
+    public IReadOnlyList<DateTimeOffset> Expiries
+    {
+        get
+        {
+            lock (expiriesGate)
+            {
+                return expiries.ToArray();
+            }
+        }
+    }
+
+    public async Task<string?> GetTokenAsync(CancellationToken ct = default)
+    {
+        var state = await authenticationStateProvider.GetAuthenticationStateAsync();
+        return state.User.FindFirst(CmsifyAuthClaims.ApiToken)?.Value;
+    }
+
+    public Task NoteSessionExpiryAsync(DateTimeOffset expiresAt, CancellationToken ct = default)
+    {
+        lock (expiriesGate)
+        {
+            expiries.Add(expiresAt);
+        }
+
+        return Task.CompletedTask;
+    }
 }
 

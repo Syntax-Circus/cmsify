@@ -137,8 +137,7 @@ else
 
     private async Task LoadAsync()
     {
-        var page = await Templates.ListAsync(WorkspaceId, search);
-        templates = page.Items.ToList();
+        templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(WorkspaceId, search)).ToList();
     }
 
     private void BeginCreate()
@@ -169,7 +168,9 @@ else
 
         try
         {
-            var created = await Templates.CreateAsync(WorkspaceId, new CreateTemplateRequest(newName, newSlug.Value, newDescription));
+            var created = ApiResponse.Required(
+                await Templates.CreateAsync(WorkspaceId, new CreateTemplateRequest(newName, newSlug.Value, newDescription)),
+                "creating a template");
             Toasts.Success("Template created");
             Navigation.NavigateTo($"/workspaces/{WorkspaceId}/templates/{created.Id}");
         }

@@ -1,6 +1,13 @@
-@import "variables";
-@import "../lib/bootstrap/scss/bootstrap";
-@import "custom";
+@use "variables";
+@use "bootstrap" with (
+  $primary: variables.$primary,
+  $success: variables.$success,
+  $warning: variables.$warning,
+  $danger: variables.$danger,
+  $info: variables.$info,
+  $font-family-base: variables.$font-family-base
+);
+@use "custom";
 
 h1 {
     //user-select: none;

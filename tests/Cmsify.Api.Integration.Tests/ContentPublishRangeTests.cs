@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Cmsify.Api.Controllers;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.Persistence;
@@ -9,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
+using ContentItemDetailResponse = SyntaxCircus.Cmsify.Contracts.ContentItemDetailResponse;
 
 namespace Cmsify.Api.Integration.Tests;
 
@@ -22,7 +22,7 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
@@ -32,9 +32,9 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        await postgres.DisposeAsync().AsTask();
+        await postgres.DisposeAsync();
         foreach (var key in new[]
         {
             "ConnectionStrings__Cmsify",
@@ -58,10 +58,10 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
 
         var (workspaceId, contentId) = await SeedContentWithRangesAsync(factory);
 
-        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/seasonal?asOf=2026-12-24T12:00:00Z");
+        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/seasonal?asOf=2026-12-24T12:00:00Z", TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ContentItemDetailResponse>(ApiJsonOptions);
+        var body = await response.Content.ReadFromJsonAsync<ContentItemDetailResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(body);
         Assert.Equal(contentId, body.Id);
         Assert.Equal("seasonal", body.Slug);

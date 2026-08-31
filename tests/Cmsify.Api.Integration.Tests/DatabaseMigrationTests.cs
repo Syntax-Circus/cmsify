@@ -15,9 +15,9 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync() => await postgres.StartAsync();
+    public ValueTask InitializeAsync() => new(postgres.StartAsync());
 
-    public async Task DisposeAsync() => await postgres.DisposeAsync().AsTask();
+    public async ValueTask DisposeAsync() => await postgres.DisposeAsync();
 
     [Fact]
     public async Task Migrations_ApplyCleanlyAndCreateExpectedIndexes()
@@ -39,10 +39,10 @@ public sealed class DatabaseMigrationTests : IAsyncLifetime
         await using var context = new CmsifyDbContext(options);
         var migrator = new CmsifyDatabaseMigrator(context, new DbSeeder(context, configuration));
 
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync(TestContext.Current.CancellationToken);
 
         await using var connection = new NpgsqlConnection(postgres.GetConnectionString());
-        await connection.OpenAsync();
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         var migrations = await QueryStringsAsync(connection, "SELECT \"MigrationId\" FROM \"__EFMigrationsHistory\" ORDER BY \"MigrationId\";");
         Assert.Contains(migrations, migration => migration.EndsWith("_InitialSchema", StringComparison.Ordinal));

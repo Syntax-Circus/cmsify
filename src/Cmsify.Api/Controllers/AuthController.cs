@@ -2,6 +2,7 @@ using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SyntaxCircus.Cmsify.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
+    [AllowAnonymous]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken ct)
     {
         var user = await dbContext.Users.FirstOrDefaultAsync(candidate => candidate.Email == request.Email && candidate.IsActive, ct);
@@ -77,7 +79,7 @@ public sealed class AuthController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only user sessions can be refreshed.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only user sessions can be refreshed.");
         }
 
         var rawToken = GetBearerToken();
@@ -115,7 +117,7 @@ public sealed class AuthController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only local users can change passwords.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only local users can change passwords.");
         }
 
         var user = await dbContext.Users.FirstAsync(candidate => candidate.Id == currentActor.UserId.Value, ct);

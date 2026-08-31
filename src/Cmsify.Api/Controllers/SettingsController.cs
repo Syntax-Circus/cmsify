@@ -4,7 +4,10 @@ using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using SyntaxCircus.Cmsify.Contracts;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Storage;
 
 namespace Cmsify.Api.Controllers;
 
@@ -30,7 +33,7 @@ public sealed class SettingsController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only user sessions have account preferences.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only user sessions have account preferences.");
         }
 
         var user = await dbContext.Users.AsNoTracking().FirstAsync(candidate => candidate.Id == currentActor.UserId.Value, ct);
@@ -43,7 +46,7 @@ public sealed class SettingsController : ControllerBase
     {
         if (!currentActor.UserId.HasValue)
         {
-            return BadRequest("Only user sessions have account preferences.");
+            return this.Error(StatusCodes.Status400BadRequest, CmsifyError.BadRequest, "Only user sessions have account preferences.");
         }
 
         var user = await dbContext.Users.FirstAsync(candidate => candidate.Id == currentActor.UserId.Value, ct);
@@ -66,14 +69,10 @@ public sealed class SettingsController : ControllerBase
         var provider = configuration["Storage:Provider"] ?? "local";
         var bytes = Encoding.UTF8.GetBytes("cmsify storage test");
         await using var stream = new MemoryStream(bytes);
-        var stored = await storageProvider.StoreAsync(stream, "storage-test.txt", "text/plain", ct);
-        var exists = await storageProvider.ExistsAsync(stored.StorageKey, ct);
-        await storageProvider.DeleteAsync(stored.StorageKey, ct);
+        var key = $"cmsify/media/storage-test/{Guid.CreateVersion7()}_storage-test.txt";
+        var stored = await storageProvider.StoreAsync(new StoreObjectRequest(key, stream, "text/plain"), ct);
+        var exists = await storageProvider.GetMetadataAsync(stored.Key, ct) is not null;
+        await storageProvider.DeleteAsync(stored.Key, ct);
         return Ok(new StorageTestResponse(provider, exists, exists ? "Storage connection test succeeded." : "Storage connection test failed."));
     }
 }
-
-public sealed record AccountPreferencesResponse(Guid UserId, string DisplayName, string Email, string? TimeZoneId, string Theme);
-public sealed record UpdateAccountPreferencesRequest(string? TimeZoneId, string Theme);
-public sealed record StorageConfigResponse(string Provider, bool IsConfigured);
-public sealed record StorageTestResponse(string Provider, bool Success, string Message);

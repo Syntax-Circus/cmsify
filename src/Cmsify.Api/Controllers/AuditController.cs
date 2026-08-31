@@ -5,6 +5,9 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using AuditActorResponse = SyntaxCircus.Cmsify.Contracts.AuditActorResponse;
+using AuditLogResponse = SyntaxCircus.Cmsify.Contracts.AuditLogResponse;
+using AuditQueryRequest = SyntaxCircus.Cmsify.Contracts.AuditQueryRequest;
 
 namespace Cmsify.Api.Controllers;
 
@@ -24,11 +27,11 @@ public sealed class AuditController : ControllerBase
     }
 
     [HttpGet("api/v1/audit")]
-    public Task<ActionResult<PagedResponse<AuditLogResponse>>> QueryGlobal([FromQuery] AuditQueryRequest request, CancellationToken ct) =>
+    public Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<AuditLogResponse>>> QueryGlobal([FromQuery] AuditQueryRequest request, CancellationToken ct) =>
         Query(workspaceId: null, request, ct);
 
     [HttpGet("api/v1/workspaces/{workspaceId:guid}/audit")]
-    public async Task<ActionResult<PagedResponse<AuditLogResponse>>> QueryWorkspace(Guid workspaceId, [FromQuery] AuditQueryRequest request, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<AuditLogResponse>>> QueryWorkspace(Guid workspaceId, [FromQuery] AuditQueryRequest request, CancellationToken ct)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -38,7 +41,7 @@ public sealed class AuditController : ControllerBase
         return await Query(workspaceId, request, ct);
     }
 
-    private async Task<ActionResult<PagedResponse<AuditLogResponse>>> Query(Guid? workspaceId, AuditQueryRequest request, CancellationToken ct)
+    private async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<AuditLogResponse>>> Query(Guid? workspaceId, AuditQueryRequest request, CancellationToken ct)
     {
         var query = dbContext.AuditLogs.AsNoTracking().AsQueryable();
         if (workspaceId.HasValue)
@@ -74,7 +77,8 @@ public sealed class AuditController : ControllerBase
 
         if (request.Action.HasValue)
         {
-            query = query.Where(log => log.Action == request.Action.Value);
+            var action = request.Action.Value.ToCore();
+            query = query.Where(log => log.Action == action);
         }
 
         if (request.ActorUserId.HasValue)
@@ -97,10 +101,15 @@ public sealed class AuditController : ControllerBase
             query = query.Where(log => log.Timestamp <= request.Before.Value);
         }
 
-        var pageSize = Math.Clamp(request.PageSize, 1, 200);
+        var pageSize = request.PageSize;
         var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(request.Page, pageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<AuditLogResponse>([], total, request.Page, pageSize));
+        }
+
         var logs = await query.OrderByDescending(log => log.Timestamp)
-            .Skip((Math.Max(1, request.Page) - 1) * pageSize)
+            .Skip(offset)
             .Take(pageSize)
             .ToListAsync(ct);
 
@@ -112,13 +121,13 @@ public sealed class AuditController : ControllerBase
             log.Id,
             log.EntityType,
             log.EntityId,
-            log.Action,
+            log.Action.ToContract(),
             ResolveActor(log.ActorUserId, log.ActorApiClientId, users, apiClients),
             log.Timestamp,
             log.WorkspaceId,
             log.ChangeDelta)).ToArray();
 
-        return Ok(new PagedResponse<AuditLogResponse>(responses, total, Math.Max(1, request.Page), pageSize));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<AuditLogResponse>(responses, total, request.Page, pageSize));
     }
 
     private static AuditActorResponse? ResolveActor(Guid? userId, Guid? apiClientId, IReadOnlyDictionary<Guid, string> users, IReadOnlyDictionary<Guid, string> apiClients)
@@ -136,7 +145,3 @@ public sealed class AuditController : ControllerBase
         return null;
     }
 }
-
-public sealed record AuditQueryRequest(string? EntityType, Guid? EntityId, AuditAction? Action, Guid? ActorUserId, Guid? ActorApiClientId, DateTimeOffset? After, DateTimeOffset? Before, int Page = 1, int PageSize = 50);
-public sealed record AuditActorResponse(string Type, Guid Id, string? DisplayName);
-public sealed record AuditLogResponse(Guid Id, string EntityType, Guid EntityId, AuditAction Action, AuditActorResponse? Actor, DateTimeOffset Timestamp, Guid? WorkspaceId, JsonElement? ChangeDelta);

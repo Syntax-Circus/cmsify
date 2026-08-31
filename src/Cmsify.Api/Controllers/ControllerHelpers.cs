@@ -5,16 +5,35 @@ namespace Cmsify.Api.Controllers;
 
 internal static class ControllerHelpers
 {
-    public static int Offset(int page, int pageSize) => (Math.Max(1, page) - 1) * Math.Clamp(pageSize, 1, 100);
+    public static bool TryOffset(int page, int pageSize, out int offset)
+    {
+        var calculatedOffset = ((long)page - 1) * pageSize;
+        if (calculatedOffset > int.MaxValue)
+        {
+            offset = 0;
+            return false;
+        }
 
-    public static int Limit(int pageSize) => Math.Clamp(pageSize, 1, 100);
+        offset = (int)calculatedOffset;
+        return true;
+    }
 
-    public static string ETag(DateTimeOffset updatedAt) => $"\"{updatedAt.UtcTicks}\"";
+    public static int Limit(int pageSize) => pageSize;
+
+    public static string ETag(DateTimeOffset updatedAt) => $"\"{updatedAt.UtcTicks / TimeSpan.TicksPerMicrosecond}\"";
 
     public static bool IfMatchMatches(this ControllerBase controller, DateTimeOffset updatedAt)
     {
         var ifMatch = controller.Request.Headers.IfMatch.ToString();
-        return !string.IsNullOrWhiteSpace(ifMatch) && string.Equals(ifMatch, ETag(updatedAt), StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            return false;
+        }
+
+        var normalized = ETag(updatedAt);
+        var legacy = $"\"{updatedAt.UtcTicks}\"";
+        return string.Equals(ifMatch, normalized, StringComparison.Ordinal)
+            || string.Equals(ifMatch, legacy, StringComparison.Ordinal);
     }
 
     public static ObjectResult Error(this ControllerBase controller, int status, string code, string title, string? detail = null, IDictionary<string, object?>? extensions = null)
@@ -28,6 +47,10 @@ internal static class ControllerHelpers
             Instance = controller.HttpContext.Request.Path
         };
         problem.Extensions["traceId"] = controller.HttpContext.TraceIdentifier;
+        var correlationId = controller.HttpContext.Request.Headers["X-Correlation-Id"].FirstOrDefault()
+            ?? controller.HttpContext.TraceIdentifier;
+        controller.HttpContext.Response.Headers["X-Correlation-Id"] = correlationId;
+        problem.Extensions["correlationId"] = correlationId;
         if (extensions is not null)
         {
             foreach (var extension in extensions)
@@ -36,7 +59,10 @@ internal static class ControllerHelpers
             }
         }
 
-        return controller.StatusCode(status, problem);
+        var result = controller.StatusCode(status, problem);
+        result.ContentTypes.Clear();
+        result.ContentTypes.Add("application/problem+json");
+        return result;
     }
 
     public static JsonElement? Clone(this JsonElement? element) => element?.Clone();

@@ -97,8 +97,8 @@
 
     private async Task LoadAsync()
     {
-        users = (await UsersClient.ListAsync()).Items.ToList();
-        workspaces = (await WorkspacesClient.ListAsync()).Items.ToList();
+        users = ApiResponse.ItemsOrEmpty(await UsersClient.ListAsync()).ToList();
+        workspaces = ApiResponse.ItemsOrEmpty(await WorkspacesClient.ListAsync()).ToList();
         if (form.WorkspaceAccesses.Count == 0)
         {
             ResetWorkspaceGrantForm([]);
@@ -135,7 +135,9 @@
         {
             if (editing is null)
             {
-                var response = await UsersClient.CreateAsync(new CreateUserRequest(form.Email, form.DisplayName, form.Role, form.TemporaryPassword, form.IsSuperAdmin, form.TimeZoneId, SelectedWorkspaceAccesses()));
+                var response = ApiResponse.Required(
+                    await UsersClient.CreateAsync(new CreateUserRequest(form.Email, form.DisplayName, form.Role, form.TemporaryPassword, form.IsSuperAdmin, form.TimeZoneId, SelectedWorkspaceAccesses())),
+                    "creating a user");
                 oneTimeSecret = response.TemporaryPassword;
                 Toasts.Success("User created");
             }
@@ -163,18 +165,20 @@
     private async Task ResetAsync(UserDto user)
     {
         var password = $"Temp-{Guid.NewGuid():N}"[..18];
-        var response = await UsersClient.ResetPasswordAsync(user.Id, password);
+        var response = ApiResponse.Required(
+            await UsersClient.ResetPasswordAsync(user.Id, password),
+            "resetting a user password");
         oneTimeSecret = response.TemporaryPassword;
         Toasts.Success("Password reset");
         await LoadAsync();
     }
 
-    private IReadOnlyList<UserWorkspaceAccessDto> SelectedWorkspaceAccesses() =>
+    private IReadOnlyList<UserWorkspaceAccessRequest> SelectedWorkspaceAccesses() =>
         form.IsSuperAdmin
             ? []
             : form.WorkspaceAccesses
                 .Where(access => access.Access != WorkspaceGrantOption.None)
-                .Select(access => new UserWorkspaceAccessDto(access.WorkspaceId, access.Access == WorkspaceGrantOption.Write ? WorkspaceAccessLevel.Write : WorkspaceAccessLevel.Read))
+                .Select(access => new UserWorkspaceAccessRequest(access.WorkspaceId, access.Access == WorkspaceGrantOption.Write ? WorkspaceAccessLevel.Write : WorkspaceAccessLevel.Read))
                 .ToArray();
 
     private void ResetWorkspaceGrantForm(IReadOnlyList<UserWorkspaceAccessDto> existing)

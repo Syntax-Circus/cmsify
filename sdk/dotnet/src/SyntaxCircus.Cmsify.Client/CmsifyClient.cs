@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SyntaxCircus.Cmsify.Contracts;
+using SyntaxCircus.Http.Resilience;
 
 namespace SyntaxCircus.Cmsify;
 
@@ -16,8 +17,11 @@ public sealed record CmsifyDownload(byte[] Content, string FileName, string Cont
 public sealed class CmsifyClient
 {
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
+    private static readonly object ResiliencePipelineServiceKey = new();
     private readonly HttpClient httpClient;
     private readonly CmsifyClientOptions options;
+    private readonly HttpRequestResiliencePipeline resiliencePipeline;
+    private readonly bool enableRetries;
     private readonly ConcurrentDictionary<string, string> etags = new(StringComparer.OrdinalIgnoreCase);
 
     public CmsifyClient(CmsifyClientOptions options)
@@ -27,15 +31,20 @@ public sealed class CmsifyClient
         : this(httpClient, options?.Value ?? throw new ArgumentNullException(nameof(options))) { }
 
     public CmsifyClient(HttpClient httpClient, CmsifyClientOptions options)
+        : this(httpClient, options, CreateResiliencePipeline(options)) { }
+
+    public CmsifyClient(HttpClient httpClient, CmsifyClientOptions options, HttpRequestResiliencePipeline resiliencePipeline)
     {
         this.httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
+        this.resiliencePipeline = resiliencePipeline ?? throw new ArgumentNullException(nameof(resiliencePipeline));
+        enableRetries = options.EnableRetries;
         if (options.BaseUrl is not null)
         {
             httpClient.BaseAddress = options.BaseUrl;
         }
 
-        httpClient.Timeout = options.RequestTimeout;
+        httpClient.Timeout = Timeout.InfiniteTimeSpan;
         Auth = new AuthClient(this);
         Health = new HealthClient(this);
         Workspaces = new WorkspaceClient(this);
@@ -104,40 +113,49 @@ public sealed class CmsifyClient
     {
         ArgumentNullException.ThrowIfNull(destination);
         var uri = CreateUri(path);
-        for (var attempt = 1; ; attempt++)
+        var correlationId = string.Empty;
+        using var response = await resiliencePipeline.SendAsync(
+            async (_, attemptToken) =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, uri);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+                correlationId = await AddAuthenticationAndCorrelationAsync(request, attemptToken).ConfigureAwait(false);
+                return request;
+            },
+            SendHttpRequestAsync,
+            HttpCompletionOption.ResponseHeadersRead,
+            GetReplaySafety(HttpMethod.Get),
+            ObserveResponseAsync,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
-            var correlationId = await AddAuthenticationAndCorrelationAsync(request, cancellationToken).ConfigureAwait(false);
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            await ObserveResponseAsync(response, cancellationToken).ConfigureAwait(false);
-            if (ShouldRetry(HttpMethod.Get, response.StatusCode, attempt))
-            {
-                await Task.Delay(GetRetryDelay(response, attempt), cancellationToken).ConfigureAwait(false);
-                continue;
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new CmsifyApiException(response.StatusCode, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false), GetCorrelationId(response, correlationId));
-            }
-
-            await response.Content.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
-            var disposition = response.Content.Headers.ContentDisposition;
-            var fileName = disposition?.FileNameStar ?? disposition?.FileName?.Trim('"') ?? "download";
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-            return (fileName, contentType);
+            throw new CmsifyApiException(response.StatusCode, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false), GetCorrelationId(response, correlationId));
         }
+
+        await response.Content.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+        var disposition = response.Content.Headers.ContentDisposition;
+        var fileName = disposition?.FileNameStar ?? disposition?.FileName?.Trim('"') ?? "download";
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+        return (fileName, contentType);
     }
 
     internal async Task<T?> SendMultipartAsync<T>(string path, MultipartFormDataContent content, CancellationToken cancellationToken)
     {
         var uri = CreateUri(path);
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = content };
-        var correlationId = await AddAuthenticationAndCorrelationAsync(request, cancellationToken).ConfigureAwait(false);
-
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        await ObserveResponseAsync(response, cancellationToken).ConfigureAwait(false);
+        var correlationId = string.Empty;
+        using var response = await resiliencePipeline.SendAsync(
+            async (_, attemptToken) =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = content };
+                correlationId = await AddAuthenticationAndCorrelationAsync(request, attemptToken).ConfigureAwait(false);
+                return request;
+            },
+            SendHttpRequestAsync,
+            HttpCompletionOption.ResponseContentRead,
+            HttpRequestReplaySafety.NotReplayable,
+            ObserveResponseAsync,
+            cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new CmsifyApiException(response.StatusCode, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false), GetCorrelationId(response, correlationId));
@@ -149,77 +167,54 @@ public sealed class CmsifyClient
     internal async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellationToken, string? ifMatch = null)
     {
         var uri = CreateUri(path);
-        for (var attempt = 1; ; attempt++)
+        var serializedBody = body is null ? null : JsonSerializer.Serialize(body, JsonOptions);
+        var correlationId = string.Empty;
+        using var response = await resiliencePipeline.SendAsync(
+            async (_, attemptToken) =>
+            {
+                var request = new HttpRequestMessage(method, uri);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                correlationId = await AddAuthenticationAndCorrelationAsync(request, attemptToken).ConfigureAwait(false);
+
+                if (serializedBody is not null)
+                {
+                    request.Content = new StringContent(serializedBody, Encoding.UTF8, "application/json");
+                }
+
+                if (ifMatch is not null)
+                {
+                    request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+                }
+                else if (etags.TryGetValue(uri.ToString(), out var trackedEtag) && method != HttpMethod.Get)
+                {
+                    request.Headers.TryAddWithoutValidation("If-Match", trackedEtag);
+                }
+
+                return request;
+            },
+            SendHttpRequestAsync,
+            HttpCompletionOption.ResponseHeadersRead,
+            GetReplaySafety(method),
+            ObserveResponseAsync,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
         {
-            using var request = new HttpRequestMessage(method, uri);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            var correlationId = await AddAuthenticationAndCorrelationAsync(request, cancellationToken).ConfigureAwait(false);
-
-            if (body is not null)
-            {
-                request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
-            }
-
-            if (ifMatch is not null)
-            {
-                request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
-            }
-            else if (etags.TryGetValue(uri.ToString(), out var trackedEtag) && method != HttpMethod.Get)
-            {
-                request.Headers.TryAddWithoutValidation("If-Match", trackedEtag);
-            }
-
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            await ObserveResponseAsync(response, cancellationToken).ConfigureAwait(false);
-            if (ShouldRetry(method, response.StatusCode, attempt))
-            {
-                var delay = GetRetryDelay(response, attempt);
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                continue;
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
-                throw new CmsifyApiException(response.StatusCode, problem, GetCorrelationId(response, correlationId));
-            }
-
-            if (response.Headers.ETag?.Tag is { } etag)
-            {
-                etags[uri.ToString()] = etag;
-            }
-
-            if (response.StatusCode == HttpStatusCode.NoContent || response.Content.Headers.ContentLength == 0 || typeof(T) == typeof(object))
-            {
-                return default;
-            }
-
-            return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private bool ShouldRetry(HttpMethod method, HttpStatusCode statusCode, int attempt) => options.EnableRetries
-        && attempt < Math.Max(1, options.MaxRetryAttempts)
-        && (method == HttpMethod.Get || method == HttpMethod.Head || method == HttpMethod.Options)
-        && (statusCode == HttpStatusCode.TooManyRequests || (int)statusCode >= 500);
-
-    private static TimeSpan GetRetryDelay(HttpResponseMessage response, int attempt)
-    {
-        if (response.Headers.RetryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
-        {
-            return delta;
+            var problem = await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false);
+            throw new CmsifyApiException(response.StatusCode, problem, GetCorrelationId(response, correlationId));
         }
 
-        if (response.Headers.RetryAfter?.Date is { } date)
+        if (response.Headers.ETag?.Tag is { } etag)
         {
-            var delay = date - DateTimeOffset.UtcNow;
-            if (delay > TimeSpan.Zero)
-            {
-                return delay;
-            }
+            etags[uri.ToString()] = etag;
         }
 
-        return TimeSpan.FromMilliseconds(100 * Math.Pow(2, attempt - 1) + Random.Shared.Next(0, 100));
+        if (response.StatusCode == HttpStatusCode.NoContent || response.Content.Headers.ContentLength == 0 || typeof(T) == typeof(object))
+        {
+            return default;
+        }
+
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<ProblemDetailsModel> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -269,12 +264,34 @@ public sealed class CmsifyClient
         }
     }
 
+    internal static async Task<IReadOnlyList<T>> ListAllToListAsync<T>(Func<int, CancellationToken, Task<PagedResponse<T>?>> loader, CancellationToken cancellationToken = default)
+    {
+        var items = new List<T>();
+        await foreach (var item in ListAll(loader, cancellationToken))
+        {
+            items.Add(item);
+        }
+
+        return items;
+    }
+
     private static JsonSerializerOptions CreateJsonOptions() => new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() }
     };
 
     private Uri CreateUri(string path) => new(httpClient.BaseAddress ?? throw new InvalidOperationException("Cmsify BaseUrl is not configured."), path.TrimStart('/'));
+
+    private HttpRequestReplaySafety GetReplaySafety(HttpMethod method) =>
+        enableRetries && (method == HttpMethod.Get || method == HttpMethod.Head || method == HttpMethod.Options)
+            ? HttpRequestReplaySafety.Replayable
+            : HttpRequestReplaySafety.NotReplayable;
+
+    private Task<HttpResponseMessage> SendHttpRequestAsync(
+        HttpRequestMessage request,
+        HttpCompletionOption completionOption,
+        CancellationToken cancellationToken) =>
+        httpClient.SendAsync(request, completionOption, cancellationToken);
 
     private async ValueTask<string> AddAuthenticationAndCorrelationAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -291,11 +308,34 @@ public sealed class CmsifyClient
         return correlationId;
     }
 
-    private Task ObserveResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
-        options.ResponseObserver?.Invoke(response, cancellationToken) ?? Task.CompletedTask;
+    private ValueTask ObserveResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
+        options.ResponseObserver is { } observer
+            ? new ValueTask(observer(response, cancellationToken))
+            : ValueTask.CompletedTask;
 
     private static string GetCorrelationId(HttpResponseMessage response, string fallback) =>
         response.Headers.TryGetValues("X-Correlation-Id", out var values) ? values.FirstOrDefault() ?? fallback : fallback;
+
+    internal static HttpRequestResiliencePipeline CreateResiliencePipeline(CmsifyClientOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new HttpRequestResiliencePipeline("CmsifyClient", new HttpRequestResilienceOptions
+        {
+            MaxAttempts = options.EnableRetries ? Math.Max(1, options.MaxRetryAttempts) : 1,
+            TotalRequestTimeout = options.RequestTimeout == Timeout.InfiniteTimeSpan
+                ? TimeSpan.MaxValue
+                : options.RequestTimeout,
+            CircuitFailureRatio = options.CircuitFailureRatio,
+            CircuitMinimumThroughput = options.CircuitMinimumThroughput,
+            CircuitSamplingDuration = options.CircuitSamplingDuration,
+            CircuitBreakDuration = options.CircuitBreakDuration,
+            OnRetry = options.OnRetry,
+            OnTimeout = options.OnTimeout,
+            OnCircuitStateChanged = options.OnCircuitStateChanged,
+        });
+    }
+
+    internal static object PipelineServiceKey => ResiliencePipelineServiceKey;
 }
 
 public static class CmsifyClientServiceCollectionExtensions
@@ -303,6 +343,15 @@ public static class CmsifyClientServiceCollectionExtensions
     public static IHttpClientBuilder AddCmsifyClient(this IServiceCollection services, Action<CmsifyClientOptions> configure)
     {
         services.Configure(configure);
-        return services.AddHttpClient<CmsifyClient>();
+        services.AddKeyedSingleton<HttpRequestResiliencePipeline>(
+            CmsifyClient.PipelineServiceKey,
+            (provider, _) => CmsifyClient.CreateResiliencePipeline(provider.GetRequiredService<IOptions<CmsifyClientOptions>>().Value));
+
+        var builder = services.AddHttpClient(nameof(CmsifyClient));
+        builder.AddTypedClient((httpClient, provider) => new CmsifyClient(
+            httpClient,
+            provider.GetRequiredService<IOptions<CmsifyClientOptions>>().Value,
+            provider.GetRequiredKeyedService<HttpRequestResiliencePipeline>(CmsifyClient.PipelineServiceKey)));
+        return builder;
     }
 }

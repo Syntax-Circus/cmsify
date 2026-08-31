@@ -7,6 +7,9 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -43,7 +46,7 @@ public sealed class WebhooksController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<WebhookEndpointResponse>>> List(Guid workspaceId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookEndpointResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -55,8 +58,13 @@ public sealed class WebhooksController : ControllerBase
             .Where(endpoint => endpoint.WorkspaceId == workspaceId && !endpoint.IsDeleted)
             .OrderBy(endpoint => endpoint.Name);
         var total = await query.CountAsync(ct);
-        var items = await query.Skip(ControllerHelpers.Offset(page, pageSize)).Take(ControllerHelpers.Limit(pageSize)).Select(endpoint => ToResponse(endpoint)).ToListAsync(ct);
-        return Ok(new PagedResponse<WebhookEndpointResponse>(items, total, Math.Max(1, page), ControllerHelpers.Limit(pageSize)));
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookEndpointResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var items = await query.Skip(offset).Take(pagination.PageSize).Select(endpoint => ToResponse(endpoint)).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookEndpointResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]
@@ -202,7 +210,7 @@ public sealed class WebhooksController : ControllerBase
     }
 
     [HttpGet("{id:guid}/deliveries")]
-    public async Task<ActionResult<PagedResponse<WebhookDeliveryResponse>>> ListDeliveries(Guid workspaceId, Guid id, [FromQuery] bool? isDelivered = null, [FromQuery] bool? isFailed = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookDeliveryResponse>>> ListDeliveries(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, [FromQuery] bool? isDelivered = null, [FromQuery] bool? isFailed = null, CancellationToken ct = default)
     {
         if (!await EndpointExistsAsync(workspaceId, id, requireWrite: false, ct))
         {
@@ -221,12 +229,17 @@ public sealed class WebhooksController : ControllerBase
         }
 
         var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookDeliveryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
         var items = await query.OrderByDescending(log => log.CreatedAt)
-            .Skip(ControllerHelpers.Offset(page, pageSize))
-            .Take(ControllerHelpers.Limit(pageSize))
-            .Select(log => new WebhookDeliveryResponse(log.Id, log.WebhookEndpointId, log.EventType, log.Payload, log.AttemptCount, log.LastAttemptAt, log.NextRetryAt, log.StatusCode, log.IsDelivered, log.IsFailed, log.CreatedAt))
+            .Skip(offset)
+            .Take(pagination.PageSize)
+            .Select(log => new WebhookDeliveryResponse(log.Id, log.WebhookEndpointId, log.WebhookEventId, log.EventType, log.Payload, log.AttemptCount, log.LastAttemptAt, log.NextRetryAt, log.StatusCode, log.IsDelivered, log.IsFailed, log.LastError, log.IsDeadLetter, log.DeadLetteredAt, log.CreatedAt))
             .ToListAsync(ct);
-        return Ok(new PagedResponse<WebhookDeliveryResponse>(items, total, Math.Max(1, page), ControllerHelpers.Limit(pageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<WebhookDeliveryResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost("{id:guid}/deliveries/{deliveryId:guid}/retry")]
@@ -249,7 +262,17 @@ public sealed class WebhooksController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Delivered webhook deliveries cannot be retried");
         }
 
+        if (!delivery.IsFailed)
+        {
+            return this.Error(StatusCodes.Status409Conflict, "conflict", "Only terminal failed webhook deliveries can be retried");
+        }
+
         delivery.IsFailed = false;
+        delivery.IsDeadLetter = false;
+        delivery.DeadLetteredAt = null;
+        delivery.LeaseOwner = null;
+        delivery.LeaseToken = null;
+        delivery.LeaseExpiresAt = null;
         delivery.NextRetryAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
         return Accepted();
@@ -299,10 +322,3 @@ public sealed class WebhooksController : ControllerBase
     private static WebhookEndpointResponse ToResponse(WebhookEndpoint endpoint) =>
         new(endpoint.Id, endpoint.WorkspaceId, endpoint.Name, endpoint.Url, endpoint.IsActive, endpoint.CreatedAt, endpoint.UpdatedAt, endpoint.Subscriptions.Select(subscription => subscription.EventType).OrderBy(evt => evt).ToArray());
 }
-
-public sealed record CreateWebhookEndpointRequest(string Name, string Url, string? Secret, IReadOnlyList<string> Events);
-public sealed record UpdateWebhookEndpointRequest(string Name, string Url, bool IsActive, IReadOnlyList<string> Events);
-public sealed record WebhookEndpointResponse(Guid Id, Guid WorkspaceId, string Name, string Url, bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, IReadOnlyList<string> Events);
-public sealed record CreateWebhookEndpointResponse(WebhookEndpointResponse Endpoint, string Secret);
-public sealed record RotateWebhookSecretResponse(Guid Id, string Secret, string Warning);
-public sealed record WebhookDeliveryResponse(Guid Id, Guid WebhookEndpointId, string EventType, JsonElement Payload, int AttemptCount, DateTimeOffset? LastAttemptAt, DateTimeOffset? NextRetryAt, int? StatusCode, bool IsDelivered, bool IsFailed, DateTimeOffset CreatedAt);

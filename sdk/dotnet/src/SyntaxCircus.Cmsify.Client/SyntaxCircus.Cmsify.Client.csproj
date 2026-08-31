@@ -12,7 +12,7 @@
     <Copyright>Copyright © Syntax Circus LLC</Copyright>
     <PackageTags>cms;headless-cms;cmsify;content-management;api-client</PackageTags>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/Syntax-Circus/cmsify</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Syntax-Circus/cmsify</RepositoryUrl>
@@ -24,11 +24,12 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\src\Cmsify.Contracts\Cmsify.Contracts.csproj" />
-    <PackageReference Include="GitVersion.MsBuild" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="SyntaxCircus.Http.Resilience" />
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\..\..\LICENSE-MIT.txt" Pack="true" PackagePath="\" Link="LICENSE-MIT.txt" />
   </ItemGroup>
 </Project>

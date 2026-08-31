@@ -1,15 +1,4 @@
 <Project>
-	<PropertyGroup Condition="'$(NCrunch)' == '1' Or '$(NCrunch)' == 'true'">
-		<!-- NCrunch builds isolated snapshots without the repository metadata GitVersion requires. -->
-		<DisableGitVersionTask>true</DisableGitVersionTask>
-		<GetVersion>false</GetVersion>
-		<WriteVersionInfoToBuildLog>false</WriteVersionInfoToBuildLog>
-		<UpdateAssemblyInfo>false</UpdateAssemblyInfo>
-		<GenerateGitVersionInformation>false</GenerateGitVersionInformation>
-		<GenerateGitVersionWixDefines>false</GenerateGitVersionWixDefines>
-		<UpdateVersionProperties>false</UpdateVersionProperties>
-	</PropertyGroup>
-
 	<Target Name="RejectFluentAssertions" BeforeTargets="CollectPackageReferences">
     <ItemGroup>
       <_ForbiddenFluentAssertionsReference Include="@(PackageReference)" Condition="'%(PackageReference.Identity)' == 'FluentAssertions'" />

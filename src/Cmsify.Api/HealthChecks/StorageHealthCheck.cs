@@ -1,5 +1,5 @@
-using Cmsify.Core.Interfaces.Services;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using SyntaxCircus.Storage;
 
 namespace Cmsify.Api.HealthChecks;
 
@@ -13,7 +13,7 @@ public sealed class StorageHealthCheck : IHealthCheck
     {
         try
         {
-            await storageProvider.ExistsAsync(".cmsify-healthcheck", cancellationToken);
+            await storageProvider.GetMetadataAsync(".cmsify-healthcheck", cancellationToken);
             return HealthCheckResult.Healthy("Storage provider is reachable.");
         }
         catch (Exception ex)

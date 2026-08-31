@@ -16,5 +16,12 @@ export class CmsifyApiError extends Error {
   }
 }
 
+export class CmsifyTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Cmsify API request exceeded its ${timeoutMs}ms timeout budget.`);
+    this.name = "CmsifyTimeoutError";
+  }
+}
+
 export const isProblemDetails = (value: unknown): value is ProblemDetails =>
   typeof value === "object" && value !== null && ("status" in value || "title" in value || "type" in value);

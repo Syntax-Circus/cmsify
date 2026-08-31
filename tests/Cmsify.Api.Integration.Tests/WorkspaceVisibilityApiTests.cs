@@ -22,7 +22,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         .WithPassword("cmsify")
         .Build();
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         await postgres.StartAsync();
         Environment.SetEnvironmentVariable("ConnectionStrings__Cmsify", postgres.GetConnectionString());
@@ -32,9 +32,9 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("Seed__DefaultWorkspace__Slug", "default");
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        await postgres.DisposeAsync().AsTask();
+        await postgres.DisposeAsync();
         ClearEnvironment();
     }
 
@@ -47,7 +47,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "reader@example.test", "reader-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var response = await client.GetFromJsonAsync<PagedResult<WorkspaceDto>>("/api/v1/workspaces");
+        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(response);
         Assert.Collection(
@@ -69,9 +69,12 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "writer@example.test", "writer-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        var response = await client.GetFromJsonAsync<PagedResult<WorkspaceDto>>("/api/v1/workspaces");
+        var response = await client.GetFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PagedResponse<WorkspaceDto>>("/api/v1/workspaces?page=1&pageSize=10", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(response);
+        Assert.Equal(1, response.Page);
+        Assert.Equal(10, response.PageSize);
+        Assert.Equal(1, response.TotalPages);
         Assert.Collection(
             response.Items,
             workspace =>
@@ -80,7 +83,7 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
                 Assert.True(workspace.CanWrite);
             });
 
-        var workspace = await client.GetFromJsonAsync<WorkspaceDto>($"/api/v1/workspaces/{workspaceId}");
+        var workspace = await client.GetFromJsonAsync<WorkspaceDto>($"/api/v1/workspaces/{workspaceId}", cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(workspace);
         Assert.True(workspace.CanWrite);
     }
@@ -94,8 +97,8 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         var login = await LoginAsync(client, "reader@example.test", "reader-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-        using var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}");
-        using var templatesResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}/templates");
+        using var workspaceResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}", TestContext.Current.CancellationToken);
+        using var templatesResponse = await client.GetAsync($"/api/v1/workspaces/{hiddenWorkspaceId}/templates", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, workspaceResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, templatesResponse.StatusCode);
@@ -113,7 +116,24 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
             """{"email":"editor@example.test","displayName":"Editor","role":"Editor","temporaryPassword":"temporary-password","isSuperAdmin":false,"workspaceAccesses":[]}""",
             Encoding.UTF8,
             "application/json");
-        using var response = await client.PostAsync("/api/v1/users", request);
+        using var response = await client.PostAsync("/api/v1/users", request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateUser_AcceptsAnOmittedWorkspaceAccessList()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var request = new StringContent(
+            """{"email":"reader-without-grants@example.test","displayName":"Reader without grants","role":"Reader","temporaryPassword":"temporary-password","isSuperAdmin":false}""",
+            Encoding.UTF8,
+            "application/json");
+        using var response = await client.PostAsync("/api/v1/users", request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }

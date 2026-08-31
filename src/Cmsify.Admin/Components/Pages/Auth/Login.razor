@@ -31,7 +31,7 @@
         @if (OidcEnabled)
         {
             <div class="text-center text-muted small my-3">or</div>
-            <a class="btn btn-outline-secondary w-100" href="/signin-oidc">Sign in with @OidcProviderName</a>
+            <a class="btn btn-outline-secondary w-100" href="@OidcLoginUrl">Sign in with @OidcProviderName</a>
         }
     </form>
     <div class="text-center text-muted small mt-3">Cmsify Admin</div>
@@ -40,6 +40,7 @@
 @code {
     private bool OidcEnabled => Configuration.GetValue("Auth:Oidc:Enabled", false);
     private string OidcProviderName => Configuration["Admin:OidcProviderName"] ?? "OIDC";
+    private string OidcLoginUrl => $"/admin-auth/oidc-login?returnUrl={Uri.EscapeDataString(ReturnUrl)}";
 
     private string ReturnUrl { get; set; } = "/workspaces";
     private string? ErrorMessage { get; set; }

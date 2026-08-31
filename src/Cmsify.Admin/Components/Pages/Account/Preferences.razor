@@ -41,9 +41,12 @@
 
     protected override async Task OnInitializedAsync()
     {
-        account = await Settings.GetPreferencesAsync();
-        timeZoneId = account.TimeZoneId ?? PrefState.TimeZoneId;
-        theme = account.Theme;
+        var loaded = ApiResponse.Required(
+            await Settings.GetPreferencesAsync(),
+            "loading account preferences");
+        account = loaded;
+        timeZoneId = loaded.TimeZoneId ?? PrefState.TimeZoneId;
+        theme = loaded.Theme;
     }
 
     private async Task SaveAsync()

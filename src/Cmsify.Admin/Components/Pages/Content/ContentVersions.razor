@@ -158,7 +158,7 @@ else
     {
         try
         {
-            versions = await Content.ListVersionsAsync(WorkspaceId, ContentId);
+            versions = await Content.ListAllVersionsAsync(WorkspaceId, ContentId);
         }
         catch (CmsifyApiException ex)
         {

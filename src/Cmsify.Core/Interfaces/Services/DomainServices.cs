@@ -1,6 +1,8 @@
+using System.Net;
 using System.Text.Json;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Interfaces.Repositories;
 using FluentValidation.Results;
 
 namespace Cmsify.Core.Interfaces.Services;
@@ -81,11 +83,12 @@ public static class CurrentActorHttpContextKeys
     public const string ItemName = "Cmsify.CurrentActor";
 }
 
-public interface IWebhookQueue
+/// <summary>
+/// Adds a webhook event to the current persistence unit of work. Implementations must not save or deliver it.
+/// </summary>
+public interface IWebhookOutbox
 {
-    ValueTask EnqueueAsync(WebhookEvent evt, CancellationToken ct = default);
-
-    IAsyncEnumerable<WebhookEvent> DequeueAllAsync(CancellationToken ct = default);
+    void Enqueue(string eventType, Guid? workspaceId, Guid entityId, JsonElement payload, DateTimeOffset occurredAt);
 }
 
 public interface IWebhookDestinationValidator
@@ -93,30 +96,23 @@ public interface IWebhookDestinationValidator
     Task<WebhookDestinationValidationResult> ValidateAsync(string url, CancellationToken ct = default);
 }
 
-public sealed record WebhookDestinationValidationResult(bool IsValid, string? NormalizedUrl, string? Error)
+public sealed record WebhookDestinationValidationResult(
+    bool IsValid, Uri? DestinationUri, IReadOnlyList<IPAddress> Addresses, string? Error)
 {
-    public static WebhookDestinationValidationResult Valid(string normalizedUrl) => new(true, normalizedUrl, null);
+    public string? NormalizedUrl => DestinationUri?.AbsoluteUri;
 
-    public static WebhookDestinationValidationResult Invalid(string error) => new(false, null, error);
+    public static WebhookDestinationValidationResult Valid(Uri uri, IReadOnlyList<IPAddress> addresses) =>
+        new(true, uri, addresses.ToArray(), null);
+
+    public static WebhookDestinationValidationResult Invalid(string error) => new(false, null, [], error);
 }
 
 public interface IScheduledPublishingDispatcher
 {
-    Task RunOnceAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<ScheduledContentClaimDto>> ClaimDueAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default);
+
+    Task<bool> CompleteClaimAsync(ScheduledContentClaimDto claim, DateTimeOffset now, CancellationToken ct = default);
 }
-
-public interface IStorageProvider
-{
-    Task<StoredFile> StoreAsync(Stream content, string fileName, string mimeType, CancellationToken ct = default);
-
-    Task<Stream> RetrieveAsync(string storageKey, CancellationToken ct = default);
-
-    Task DeleteAsync(string storageKey, CancellationToken ct = default);
-
-    Task<bool> ExistsAsync(string storageKey, CancellationToken ct = default);
-}
-
-public sealed record StoredFile(string StorageKey, string Provider, long SizeBytes);
 
 public interface ISecretProtector
 {

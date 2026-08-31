@@ -8,6 +8,12 @@ using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.Cmsify.Contracts;
+using CompositionMode = Cmsify.Core.Domain.Enums.CompositionMode;
+using PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType;
+using TemplateVersionStatus = Cmsify.Core.Domain.Enums.TemplateVersionStatus;
+using UserRole = Cmsify.Core.Domain.Enums.UserRole;
+using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
 
 namespace Cmsify.Api.Controllers;
 
@@ -20,19 +26,19 @@ public sealed class TemplatesController : ControllerBase
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IFieldConfigValidator fieldConfigValidator;
-    private readonly IWebhookQueue webhookQueue;
+    private readonly IWebhookOutbox webhookOutbox;
 
-    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IFieldConfigValidator fieldConfigValidator, IWebhookQueue webhookQueue)
+    public TemplatesController(CmsifyDbContext dbContext, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IFieldConfigValidator fieldConfigValidator, IWebhookOutbox webhookOutbox)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
         this.fieldConfigValidator = fieldConfigValidator;
-        this.webhookQueue = webhookQueue;
+        this.webhookOutbox = webhookOutbox;
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResult<TemplateSummaryResponse>>> List(Guid workspaceId, [FromQuery] bool? isSystem = null, [FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateSummaryResponse>>> List(Guid workspaceId, [FromQuery] PaginationQuery pagination, [FromQuery] bool? isSystem = null, [FromQuery] string? search = null, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -46,13 +52,18 @@ public sealed class TemplatesController : ControllerBase
         }
 
         var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
         var items = await query.OrderBy(template => template.Name)
-            .Skip(ControllerHelpers.Offset(page, pageSize))
-            .Take(ControllerHelpers.Limit(pageSize))
+            .Skip(offset)
+            .Take(pagination.PageSize)
             .Select(template => new TemplateSummaryResponse(template.Id, template.WorkspaceId, template.Name, template.Slug, template.Description, template.CurrentVersionId))
             .ToListAsync(ct);
 
-        return Ok(new PagedResult<TemplateSummaryResponse>(items, total, ControllerHelpers.Offset(page, pageSize), ControllerHelpers.Limit(pageSize)));
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateSummaryResponse>(items, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost]
@@ -177,19 +188,25 @@ public sealed class TemplatesController : ControllerBase
     }
 
     [HttpGet("{id:guid}/versions")]
-    public async Task<ActionResult<IReadOnlyList<TemplateVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateVersionSummaryResponse>>> ListVersions(Guid workspaceId, Guid id, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         if (!await TemplateExistsAsync(workspaceId, id, requireWrite: false, ct))
         {
             return NotFound();
         }
 
-        var versions = await dbContext.TemplateVersions.AsNoTracking()
+        var query = dbContext.TemplateVersions.AsNoTracking()
             .Where(version => version.TemplateId == id && !version.IsDeleted)
             .OrderByDescending(version => version.VersionNumber)
-            .Select(version => new TemplateVersionSummaryResponse(version.Id, version.VersionNumber, version.Status, version.PublishedAt, version.Notes, version.Fields.Count))
-            .ToListAsync(ct);
-        return Ok(versions);
+            .Select(version => new TemplateVersionSummaryResponse(version.Id, version.VersionNumber, version.Status.ToContract(), version.PublishedAt, version.Notes, version.Fields.Count));
+        var total = await query.CountAsync(ct);
+        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
+        {
+            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateVersionSummaryResponse>([], total, pagination.Page, pagination.PageSize));
+        }
+
+        var versions = await query.Skip(offset).Take(pagination.PageSize).ToListAsync(ct);
+        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<TemplateVersionSummaryResponse>(versions, total, pagination.Page, pagination.PageSize));
     }
 
     [HttpPost("{id:guid}/versions")]
@@ -264,6 +281,7 @@ public sealed class TemplatesController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Only draft versions can be published");
         }
 
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
         await dbContext.TemplateVersions
             .Where(candidate => candidate.TemplateId == id && candidate.Status == TemplateVersionStatus.Published)
             .ExecuteUpdateAsync(updates => updates.SetProperty(candidate => candidate.Status, TemplateVersionStatus.Archived), ct);
@@ -274,14 +292,14 @@ public sealed class TemplatesController : ControllerBase
         var template = await dbContext.Templates.FirstAsync(template => template.Id == id, ct);
         template.CurrentVersionId = version.Id;
         template.UpdatedAt = DateTimeOffset.UtcNow;
-        await dbContext.SaveChangesAsync(ct);
-        await webhookQueue.EnqueueAsync(new WebhookEvent(
+        webhookOutbox.Enqueue(
             "template.version_published",
             workspaceId,
             version.Id,
             JsonSerializer.SerializeToElement(new { templateId = id, templateVersionId = version.Id, versionNumber = version.VersionNumber, workspaceId }),
-            DateTimeOffset.UtcNow),
-            ct);
+            DateTimeOffset.UtcNow);
+        await dbContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return Ok(ToVersionResponse(version));
     }
 
@@ -412,7 +430,7 @@ public sealed class TemplatesController : ControllerBase
         field.AllowedTypes.Clear();
         foreach (var allowedType in request.AllowedTypes)
         {
-            var entry = new TemplateFieldAllowedType { FieldId = field.Id, PrimitiveType = allowedType.PrimitiveType, AllowedTemplateId = allowedType.AllowedTemplateId };
+            var entry = new TemplateFieldAllowedType { FieldId = field.Id, PrimitiveType = allowedType.PrimitiveType.ToCore(), AllowedTemplateId = allowedType.AllowedTemplateId };
             field.AllowedTypes.Add(entry);
             dbContext.TemplateFieldAllowedTypes.Add(entry);
         }
@@ -544,13 +562,13 @@ public sealed class TemplatesController : ControllerBase
     }
 
     private static TemplateVersionResponse ToVersionResponse(TemplateVersion version) =>
-        new(version.Id, version.TemplateId, version.VersionNumber, version.Status, version.PublishedAt, version.Notes, version.Sections.OrderBy(section => section.Order).Select(ToSectionResponse).ToArray(), version.Fields.OrderBy(field => field.Order).Select(ToFieldResponse).ToArray());
+        new(version.Id, version.TemplateId, version.VersionNumber, version.Status.ToContract(), version.PublishedAt, version.Notes, version.Sections.OrderBy(section => section.Order).Select(ToSectionResponse).ToArray(), version.Fields.OrderBy(field => field.Order).Select(ToFieldResponse).ToArray());
 
     private static TemplateSectionResponse ToSectionResponse(TemplateSection section) =>
         new(section.Id, section.Name, section.Description, section.Order, section.IsCollapsible);
 
     private static TemplateFieldResponse ToFieldResponse(TemplateField field) =>
-        new(field.Id, field.SectionId, field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode, field.PrimitiveType, field.TemplateId, field.AllowedTypes.Select(type => new TemplateFieldAllowedTypeResponse(type.Id, type.PrimitiveType, type.AllowedTemplateId)).ToArray(), field.FieldConfig.Clone(), field.ComponentId);
+        new(field.Id, field.SectionId, field.Key, field.Label, field.HelpText, field.Order, field.IsRequired, field.MinOccurrences, field.MaxOccurrences, field.IsOpen, field.CompositionMode.ToContract(), field.PrimitiveType.ToContract(), field.TemplateId, field.AllowedTypes.Select(type => new TemplateFieldAllowedTypeResponse(type.Id, type.PrimitiveType.ToContract(), type.AllowedTemplateId)).ToArray(), field.FieldConfig.Clone(), field.ComponentId);
 
     private async Task<ObjectResult?> ValidateFieldRequestAsync(Guid workspaceId, TemplateVersion version, TemplateFieldRequest request, CancellationToken ct, Guid? currentFieldId = null)
     {
@@ -585,13 +603,13 @@ public sealed class TemplatesController : ControllerBase
 
         if (request.PrimitiveType.HasValue)
         {
-            var result = fieldConfigValidator.Validate(request.PrimitiveType.Value, request.FieldConfig);
+            var result = fieldConfigValidator.Validate(request.PrimitiveType.Value.ToCore(), request.FieldConfig);
             if (!result.IsValid)
             {
                 return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Field configuration is invalid", string.Join(" ", result.Errors.Select(error => error.ErrorMessage)));
             }
 
-            if (request.PrimitiveType == PrimitiveType.PickList && !await HasValidPickListBindingAsync(workspaceId, request.FieldConfig, ct))
+            if (request.PrimitiveType == SyntaxCircus.Cmsify.Contracts.PrimitiveType.PickList && !await HasValidPickListBindingAsync(workspaceId, request.FieldConfig, ct))
             {
                 return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid PickList binding", "The PickList and its pinned revision must belong to this workspace.");
             }
@@ -633,7 +651,7 @@ public sealed class TemplatesController : ControllerBase
         ApplyField(field, request);
         foreach (var allowedType in request.AllowedTypes)
         {
-            field.AllowedTypes.Add(new TemplateFieldAllowedType { FieldId = field.Id, PrimitiveType = allowedType.PrimitiveType, AllowedTemplateId = allowedType.AllowedTemplateId });
+            field.AllowedTypes.Add(new TemplateFieldAllowedType { FieldId = field.Id, PrimitiveType = allowedType.PrimitiveType.ToCore(), AllowedTemplateId = allowedType.AllowedTemplateId });
         }
 
         return field;
@@ -650,8 +668,8 @@ public sealed class TemplatesController : ControllerBase
         field.MinOccurrences = request.MinOccurrences;
         field.MaxOccurrences = request.MaxOccurrences;
         field.IsOpen = request.IsOpen;
-        field.CompositionMode = request.CompositionMode;
-        field.PrimitiveType = request.PrimitiveType;
+        field.CompositionMode = request.CompositionMode.ToCore();
+        field.PrimitiveType = request.PrimitiveType.ToCore();
         field.TemplateId = request.TemplateId;
         field.ComponentId = request.ComponentId;
         field.FieldConfig = request.FieldConfig.Clone();
@@ -735,18 +753,3 @@ public sealed class TemplatesController : ControllerBase
         }
     }
 }
-
-public sealed record CreateTemplateRequest(string Name, string Slug, string? Description);
-public sealed record UpdateTemplateRequest(string Name, string? Description);
-public sealed record CreateTemplateVersionRequest(string? Notes);
-public sealed record TemplateSectionRequest(string Name, string? Description, int Order, bool IsCollapsible);
-public sealed record TemplateFieldAllowedTypeRequest(PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
-public sealed record TemplateFieldRequest(Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeRequest> AllowedTypes, JsonElement? FieldConfig, Guid? ComponentId = null);
-public sealed record ReorderFieldRequest(Guid FieldId, int Order);
-public sealed record TemplateSummaryResponse(Guid Id, Guid WorkspaceId, string Name, string Slug, string? Description, Guid? CurrentVersionId);
-public sealed record TemplateResponse(Guid Id, Guid WorkspaceId, string Name, string Slug, string? Description, bool IsSystem, TemplateVersionResponse? CurrentVersion);
-public sealed record TemplateVersionSummaryResponse(Guid Id, int VersionNumber, TemplateVersionStatus Status, DateTimeOffset? PublishedAt, string? Notes, int FieldCount);
-public sealed record TemplateVersionResponse(Guid Id, Guid TemplateId, int VersionNumber, TemplateVersionStatus Status, DateTimeOffset? PublishedAt, string? Notes, IReadOnlyList<TemplateSectionResponse> Sections, IReadOnlyList<TemplateFieldResponse> Fields);
-public sealed record TemplateSectionResponse(Guid Id, string Name, string? Description, int Order, bool IsCollapsible);
-public sealed record TemplateFieldAllowedTypeResponse(Guid Id, PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
-public sealed record TemplateFieldResponse(Guid Id, Guid? SectionId, string Key, string Label, string? HelpText, int Order, bool IsRequired, int MinOccurrences, int? MaxOccurrences, bool IsOpen, CompositionMode CompositionMode, PrimitiveType? PrimitiveType, Guid? TemplateId, IReadOnlyList<TemplateFieldAllowedTypeResponse> AllowedTypes, JsonElement? FieldConfig, Guid? ComponentId = null);

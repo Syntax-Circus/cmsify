@@ -91,7 +91,7 @@ else
 
     private async Task LoadAsync()
     {
-        assets = (await Media.ListAsync(WorkspaceId, mimeType, search)).Items.ToList();
+        assets = ApiResponse.ItemsOrEmpty(await Media.ListAsync(WorkspaceId, mimeType, search)).ToList();
         if (selected is not null)
         {
             selected = assets.FirstOrDefault(asset => asset.Id == selected.Id);
@@ -110,9 +110,11 @@ else
 
     private async Task SaveAltTextAsync()
     {
-        if (selected is not null)
+        if (selected is { } asset)
         {
-            selected = await Media.UpdateAsync(WorkspaceId, selected.Id, new UpdateMediaAssetRequest(altText));
+            selected = ApiResponse.Required(
+                await Media.UpdateAsync(WorkspaceId, asset.Id, new UpdateMediaAssetRequest(altText)),
+                "updating media alt text");
             await LoadAsync();
             Toasts.Success("Alt text saved");
         }
