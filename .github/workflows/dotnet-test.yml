@@ -13,20 +13,54 @@ jobs:
       - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
         with:
           global-json-file: global.json
+      - name: Restore public-independent PR dependencies
+        if: github.event_name == 'pull_request'
+        run: |
+          dotnet restore tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj --locked-mode
+          dotnet restore tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --locked-mode
+          dotnet restore tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --locked-mode
+      - name: Build public-independent PR binaries
+        if: github.event_name == 'pull_request'
+        run: |
+          dotnet build tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj --configuration Release --no-restore --no-incremental
+          dotnet build tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-restore --no-incremental
+          dotnet build tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-restore --no-incremental
+      - name: Run public-independent PR tests
+        if: github.event_name == 'pull_request'
+        run: |
+          dotnet test tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
+          dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
+          dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
+      - name: Report deferred package-dependent PR coverage
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            echo "## Package-dependent PR coverage"
+            echo
+            echo "Admin and .NET client checks are deferred until SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 passes the public-package gate."
+            echo "Core, Infrastructure, and API tests ran above; the full locked solution remains required on main and release workflows."
+          } >> "$GITHUB_STEP_SUMMARY"
       # Public restore remains gated on publication/replacement of SyntaxCircus.Http.Resilience 0.2.0-cmsify.1.
       - name: Restore locked dependencies
+        if: github.event_name != 'pull_request'
         run: dotnet restore Cmsify.slnx --locked-mode
       - name: Build Release binaries
+        if: github.event_name != 'pull_request'
         run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
       - name: Run full test suite
+        if: github.event_name != 'pull_request'
         run: dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
       - name: Collect raw coverage
+        if: github.event_name != 'pull_request'
         run: dotnet test Cmsify.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage --verbosity minimal
       - name: Summarize coverage
+        if: github.event_name != 'pull_request'
         run: node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md
       - name: Publish coverage summary
+        if: github.event_name != 'pull_request'
         run: cat artifacts/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload raw coverage reports
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dotnet-coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}
@@ -34,6 +68,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Upload coverage summary
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dotnet-coverage-summary-${{ github.run_id }}-${{ github.run_attempt }}
@@ -43,10 +78,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Run API capacity invariants
+        if: github.event_name != 'pull_request'
         run: dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --filter Category=Capacity
       - name: Run Infrastructure capacity invariants
+        if: github.event_name != 'pull_request'
         run: dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --filter Category=Capacity
       - name: Run .NET client capacity invariants
+        if: github.event_name != 'pull_request'
         run: dotnet test sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj --configuration Release --no-build --filter Category=Capacity
 
   release-contract:

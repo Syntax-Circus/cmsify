@@ -42,8 +42,8 @@ jobs:
       - name: Install TypeScript generator
         working-directory: sdk/typescript
         run: npm ci
-      - name: Restore locked solution dependencies
-        run: dotnet restore Cmsify.slnx --locked-mode
+      - name: Restore locked API dependencies
+        run: dotnet restore src/Cmsify.Api/Cmsify.Api.csproj --locked-mode
       - name: Restore pinned OpenAPI exporter
         run: dotnet tool restore
       - name: Resolve exact comparison revisions

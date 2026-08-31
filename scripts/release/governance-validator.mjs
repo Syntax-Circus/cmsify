@@ -69,7 +69,7 @@ const canonicalContractStepSequence = [
   "      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d",
   "      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444",
   "      - name: Install TypeScript generator",
-  "      - name: Restore locked solution dependencies",
+  "      - name: Restore locked API dependencies",
   "      - name: Restore pinned OpenAPI exporter",
   "      - name: Resolve exact comparison revisions",
   "      - name: Verify live OpenAPI and tracked generated output",

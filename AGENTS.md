@@ -31,6 +31,8 @@ dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --locked-mode
 ```
 
+While that public package gate is open, hosted pull-request validation restores and tests the public-independent Core, Infrastructure, and API projects and runs the complete OpenAPI and TypeScript checks from the API project graph. Package-dependent Admin/.NET-client and Admin accessibility checks are reported as deferred on pull requests. Pushes to `main` and release workflows retain the full public locked-solution restore and must not treat the partial pull-request result as public-package evidence.
+
 Never track that feed configuration, package bytes, or package cache. Use [`docs/performance.md`](docs/performance.md) for safe `--force-evaluate` lock regeneration, focused capacity filters, XPlat coverage aggregation, the scheduled timing runner, and the single-MSBuild-node final command. Latency and coverage are trends; query counts, database paging, batch/lease bounds, upload rejection, and streaming/ownership assertions are blocking.
 
 Useful focused commands:

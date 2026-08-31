@@ -38,9 +38,9 @@ jobs:
           global-json-file: global.json
       - name: Install
         run: npm ci
-      - name: Restore locked solution dependencies
+      - name: Restore locked API dependencies
         working-directory: .
-        run: dotnet restore Cmsify.slnx --locked-mode
+        run: dotnet restore src/Cmsify.Api/Cmsify.Api.csproj --locked-mode
       - name: Restore pinned OpenAPI exporter
         run: dotnet tool restore
       - name: Check generated output

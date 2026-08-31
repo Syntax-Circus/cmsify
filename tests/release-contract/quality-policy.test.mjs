@@ -26,6 +26,13 @@ const testProjectPaths = [
 const pinnedUploadArtifact = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
 const pinnedCheckout = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
 const pinnedSetupDotnet = "actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d";
+const pullRequestCondition = "github.event_name == 'pull_request'";
+const nonPullRequestCondition = "github.event_name != 'pull_request'";
+const publicIndependentTestProjects = [
+  "tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj",
+  "tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj",
+  "tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj",
+];
 
 function solutionProjectPaths() {
   return [...readRepositoryFile("Cmsify.slnx").matchAll(/<Project Path="([^"]+)"/g)]
@@ -70,6 +77,10 @@ function validatePullRequestWorkflow(workflow) {
   assert.deepEqual(steps.map(stepLabel), [
     pinnedCheckout,
     pinnedSetupDotnet,
+    "Restore public-independent PR dependencies",
+    "Build public-independent PR binaries",
+    "Run public-independent PR tests",
+    "Report deferred package-dependent PR coverage",
     "Restore locked dependencies",
     "Build Release binaries",
     "Run full test suite",
@@ -86,14 +97,33 @@ function validatePullRequestWorkflow(workflow) {
     uses: pinnedSetupDotnet,
     with: { "global-json-file": "global.json" },
   });
-  assert.equal(steps[2].run, "dotnet restore Cmsify.slnx --locked-mode");
-  assert.equal(steps[3].run, "dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental");
-  assert.equal(steps[4].run, "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true");
-  assert.equal(steps[5].run, 'dotnet test Cmsify.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage --verbosity minimal');
-  assert.equal(steps[6].run, "node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md");
-  assert.equal(steps[7].run, 'cat artifacts/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"');
-  assert.deepEqual(steps[8], {
+  const expectedPrRestore = publicIndependentTestProjects
+    .map((project) => `dotnet restore ${project} --locked-mode`)
+    .join("\n");
+  const expectedPrBuild = publicIndependentTestProjects
+    .map((project) => `dotnet build ${project} --configuration Release --no-restore --no-incremental`)
+    .join("\n");
+  const expectedPrTest = publicIndependentTestProjects
+    .map((project) => `dotnet test ${project} --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true`)
+    .join("\n");
+  assert.equal(steps[2].if, pullRequestCondition);
+  assert.equal(steps[2].run.trim(), expectedPrRestore);
+  assert.equal(steps[3].if, pullRequestCondition);
+  assert.equal(steps[3].run.trim(), expectedPrBuild);
+  assert.equal(steps[4].if, pullRequestCondition);
+  assert.equal(steps[4].run.trim(), expectedPrTest);
+  assert.equal(steps[5].if, pullRequestCondition);
+  assert.match(steps[5].run, /Admin and \.NET client checks are deferred/i);
+  for (const step of steps.slice(6)) assert.equal(step.if, nonPullRequestCondition, stepLabel(step));
+  assert.equal(steps[6].run, "dotnet restore Cmsify.slnx --locked-mode");
+  assert.equal(steps[7].run, "dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental");
+  assert.equal(steps[8].run, "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true");
+  assert.equal(steps[9].run, 'dotnet test Cmsify.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage --verbosity minimal');
+  assert.equal(steps[10].run, "node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md");
+  assert.equal(steps[11].run, 'cat artifacts/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"');
+  assert.deepEqual(steps[12], {
     name: "Upload raw coverage reports",
+    if: nonPullRequestCondition,
     uses: pinnedUploadArtifact,
     with: {
       name: "dotnet-coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}",
@@ -102,8 +132,9 @@ function validatePullRequestWorkflow(workflow) {
       "retention-days": 14,
     },
   });
-  assert.deepEqual(steps[9], {
+  assert.deepEqual(steps[13], {
     name: "Upload coverage summary",
+    if: nonPullRequestCondition,
     uses: pinnedUploadArtifact,
     with: {
       name: "dotnet-coverage-summary-${{ github.run_id }}-${{ github.run_attempt }}",
@@ -117,9 +148,9 @@ function validatePullRequestWorkflow(workflow) {
     "dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
     "dotnet test sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj --configuration Release --no-build --filter Category=Capacity",
   ];
-  assert.deepEqual(steps.slice(10).map((step) => step.run), capacityCommands);
+  assert.deepEqual(steps.slice(14).map((step) => step.run), capacityCommands);
   assert.equal(workflow.jobs.test.env, undefined);
-  for (const step of steps.slice(10)) {
+  for (const step of steps.slice(14)) {
     assert.equal(step.env, undefined, `${step.name}: timing/report environment is forbidden`);
     assert.doesNotMatch(step.run, /CMSIFY_CAPACITY_|run-capacity\.mjs/);
   }
@@ -176,9 +207,7 @@ function validateDotnetSetupAndRestorePolicy(documents) {
     ".github/workflows/admin-accessibility.yml:axe:dotnet restore Cmsify.slnx --locked-mode",
     ".github/workflows/capacity-trends.yml:capacity-trends:dotnet restore Cmsify.slnx --locked-mode",
     ".github/workflows/dotnet-test.yml:test:dotnet restore Cmsify.slnx --locked-mode",
-    ".github/workflows/openapi-contract.yml:contract:dotnet restore Cmsify.slnx --locked-mode",
     ".github/workflows/publish-cmsify.yml:build:dotnet restore Cmsify.slnx --locked-mode",
-    ".github/workflows/typescript-sdk.yml:sdk:dotnet restore Cmsify.slnx --locked-mode",
   ]);
 }
 
@@ -388,20 +417,20 @@ function invokesOpenApiBuildWrapper(words, workingDirectory) {
     && ["generate", "generate:check"].includes(script);
 }
 
-function isRootLockedSolutionRestore(words, workingDirectory) {
+function isRootLockedOpenApiRestore(words, workingDirectory) {
   const commandIndex = commandStart(words);
   return normalizedWorkflowDirectory(workingDirectory) === "."
     && words.length === commandIndex + 4
     && words[commandIndex] === "dotnet"
     && words[commandIndex + 1] === "restore"
-    && words[commandIndex + 2] === "Cmsify.slnx"
+    && ["Cmsify.slnx", "src/Cmsify.Api/Cmsify.Api.csproj"].includes(words[commandIndex + 2])
     && words[commandIndex + 3] === "--locked-mode";
 }
 
 function validateOpenApiWrapperRestorePolicy(documents) {
   for (const [workflowPath, workflow] of Object.entries(documents)) {
     for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
-      let lockedSolutionRestoreSeen = false;
+      let lockedOpenApiRestoreSeen = false;
       for (const step of job.steps ?? []) {
         if (typeof step.run !== "string") continue;
         const workingDirectory = normalizedWorkflowDirectory(
@@ -412,12 +441,12 @@ function validateOpenApiWrapperRestorePolicy(documents) {
         );
         const commandSegments = step.run.split("\n").flatMap(shellCommandSegments);
         for (const words of commandSegments) {
-          if (isRootLockedSolutionRestore(words, workingDirectory)) lockedSolutionRestoreSeen = true;
+          if (isRootLockedOpenApiRestore(words, workingDirectory)) lockedOpenApiRestoreSeen = true;
           if (!invokesOpenApiBuildWrapper(words, workingDirectory)) continue;
           assert.equal(
-            lockedSolutionRestoreSeen,
+            lockedOpenApiRestoreSeen,
             true,
-            `${workflowPath}:${jobName}: OpenAPI wrapper requires a prior same-job root locked solution restore`,
+            `${workflowPath}:${jobName}: OpenAPI wrapper requires a prior same-job root locked API restore`,
           );
         }
       }
@@ -859,6 +888,20 @@ test("restores the locked repository graph before wrapper-induced OpenAPI builds
   validateOpenApiWrapperBuild(readRepositoryFile("scripts/openapi.mjs"));
   validateOpenApiWrapperRestorePolicy(documents);
 
+  for (const [workflowPath, jobName] of [
+    [".github/workflows/openapi-contract.yml", "contract"],
+    [".github/workflows/typescript-sdk.yml", "sdk"],
+  ]) {
+    const commands = documents[workflowPath].jobs[jobName].steps
+      .flatMap((step) => typeof step.run === "string" ? step.run.split("\n").map((line) => line.trim()) : []);
+    assert.equal(
+      commands.includes("dotnet restore src/Cmsify.Api/Cmsify.Api.csproj --locked-mode"),
+      true,
+      `${workflowPath}:${jobName}: PR-safe API restore`,
+    );
+    assert.equal(commands.includes("dotnet restore Cmsify.slnx --locked-mode"), false);
+  }
+
   const withoutNoRestore = readRepositoryFile("scripts/openapi.mjs").replace(', "--no-restore"', "");
   assert.throws(() => validateOpenApiWrapperBuild(withoutNoRestore), /must consume a prior restore/);
 
@@ -870,13 +913,39 @@ test("restores the locked repository graph before wrapper-induced OpenAPI builds
     const mutation = structuredClone(documents);
     for (const step of mutation[workflowPath].jobs[jobName].steps) {
       if (typeof step.run === "string") {
-        step.run = step.run.replace(/^\s*dotnet restore Cmsify\.slnx --locked-mode\s*\n?/m, "");
+        step.run = step.run.replace(
+          /^\s*dotnet restore (?:Cmsify\.slnx|src\/Cmsify\.Api\/Cmsify\.Api\.csproj) --locked-mode\s*\n?/m,
+          "",
+        );
       }
     }
     assert.throws(
       () => validateOpenApiWrapperRestorePolicy(mutation),
       new RegExp(`${workflowPath.replaceAll(".", "\\.")}:${jobName}: OpenAPI wrapper`),
     );
+  }
+});
+
+test("defers package-dependent Admin accessibility on pull requests without hiding the main-branch gate", () => {
+  const workflow = parseYamlSubset(
+    readRepositoryFile(".github/workflows/admin-accessibility.yml"),
+    ".github/workflows/admin-accessibility.yml",
+  );
+  const steps = workflow.jobs.axe.steps;
+  const deferred = steps.find((step) => step.name === "Report deferred PR accessibility");
+  assert.notEqual(deferred, undefined);
+  assert.equal(deferred.if, pullRequestCondition);
+  assert.match(deferred.run, /SyntaxCircus\.Http\.Resilience.*public/i);
+
+  for (const stepName of [
+    "Restore and build Admin source",
+    "Install locked accessibility harness",
+    "Run Admin source",
+    "Certify login accessibility",
+  ]) {
+    const step = steps.find((candidate) => candidate.name === stepName);
+    assert.notEqual(step, undefined, stepName);
+    assert.equal(step.if, nonPullRequestCondition, stepName);
   }
 });
 
