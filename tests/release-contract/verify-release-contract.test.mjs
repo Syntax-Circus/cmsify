@@ -269,8 +269,8 @@ test("accepts fake execute calls in nested interpolation literals and comments",
   '    const harmlessNested = `fixture ${(() => { const text = "execute([\\"image\\", \\"pull\\", input.canonicalRef])"; /* execute(["network", "create", "relay"]) */ return `nested execute(["build", "."]) ${text}`; })()}`;\n    assert(harmlessNested.length > 0, "Fixture text must remain non-empty.");\n    validateScratchArchive(dockerArchive, scratchRoot, MAX_DOCKER_ARCHIVE_BYTES);',
 ))));
 test("rejects workflow upload of disposable OCI transport scratch", () => expectInvalid((root) => mutateFile(root, workflowPath, (workflow) => workflow.replace(
-  "path: artifacts, if-no-files-found: error",
-  "path: ${{ runner.temp }}/cmsify-oci-loader-scratch/candidate.docker.tar, if-no-files-found: error",
+  "          path: artifacts\n          if-no-files-found: error",
+  "          path: ${{ runner.temp }}/cmsify-oci-loader-scratch/candidate.docker.tar\n          if-no-files-found: error",
 )), /transport scratch.*(?:upload|certif)/i));
 test("rejects renamed runner-temp transport upload from certification", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace(
   "    steps:\n",
@@ -544,7 +544,7 @@ test("rejects package SBOM generation that scans candidate archive directories",
     .replace('dir:"$NPM_CONSUMER"', "dir:artifacts/npm")),
   /package SBOM.*populated.*trees/i,
 ));
-test("rejects package SBOM staging inside the uploaded artifact root", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
+test("rejects package SBOM staging inside the uploaded artifact root", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replaceAll(
   'SBOM_STAGING_ROOT: ${{ runner.temp }}/cmsify-sbom-inputs',
   "SBOM_STAGING_ROOT: artifacts/sbom-inputs",
 )), /SBOM staging.*run-owned temporary root.*outside artifacts/i));

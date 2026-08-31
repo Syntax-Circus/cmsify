@@ -18,8 +18,15 @@
     protected override async Task OnParametersSetAsync()
     {
         ready = false;
-        await Preferences.InitializeAsync();
         await Auth.InitializeAsync();
+        if (Auth.IsAuthenticated)
+        {
+            await Preferences.InitializeAsync();
+        }
+        else
+        {
+            await Preferences.InitializeThemeAsync();
+        }
         var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
         var isLogin = path.Equals("/login", StringComparison.OrdinalIgnoreCase);
         var isChangePassword = path.Equals("/account/change-password", StringComparison.OrdinalIgnoreCase);
