@@ -163,7 +163,9 @@ public sealed class PinnedWebhookTransportTests
         await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request, TestContext.Current.CancellationToken));
 
         Assert.Equal("hooks.example.test", await observedServerName.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
-        await Assert.ThrowsAnyAsync<Exception>(() => server);
+        // Depending on platform and socket timing, the rejected client handshake reaches the server as either
+        // a TLS exception or a clean EOF. Both are valid after the client rejection and SNI are verified above.
+        _ = await Record.ExceptionAsync(() => server);
     }
 
     [Fact]
