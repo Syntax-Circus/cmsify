@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using Cmsify.Infrastructure.BackgroundServices;
 
@@ -25,7 +26,7 @@ public sealed class CmsifyOperationalMetricsTests
     public void DeliveryAndClaimMetrics_AreLowCardinalityAndObservable()
     {
         using var listener = new MeterListener();
-        var measurements = new List<(string Name, int TagCount)>();
+        var measurements = new ConcurrentQueue<(string Name, int TagCount)>();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
             if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
@@ -33,7 +34,7 @@ public sealed class CmsifyOperationalMetricsTests
                 meterListener.EnableMeasurementEvents(instrument);
             }
         };
-        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) => measurements.Add((instrument.Name, tags.Length)));
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) => measurements.Enqueue((instrument.Name, tags.Length)));
         listener.Start();
 
         CmsifyOperationalMetrics.RecordOutboxClaim(reclaimed: true);
@@ -65,7 +66,7 @@ public sealed class CmsifyOperationalMetricsTests
     public void WebhookSecurityFailureMetrics_NormalizeUnknownReasonsToOneFixedTag()
     {
         using var listener = new MeterListener();
-        var measurements = new List<(string Name, List<KeyValuePair<string, object?>> Tags)>();
+        var measurements = new ConcurrentQueue<(string Name, List<KeyValuePair<string, object?>> Tags)>();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
             if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
@@ -81,7 +82,7 @@ public sealed class CmsifyOperationalMetricsTests
                 capturedTags.Add(tag);
             }
 
-            measurements.Add((instrument.Name, capturedTags));
+            measurements.Enqueue((instrument.Name, capturedTags));
         });
         listener.Start();
 
@@ -102,8 +103,8 @@ public sealed class CmsifyOperationalMetricsTests
     public void SecretRotationMetrics_UseOnlyBoundedConfiguredKeyAndOutcomeLabels()
     {
         using var listener = new MeterListener();
-        var measurements = new List<(string Name, List<KeyValuePair<string, object?>> Tags)>();
-        var doubleMeasurements = new List<(string Name, int TagCount)>();
+        var measurements = new ConcurrentQueue<(string Name, List<KeyValuePair<string, object?>> Tags)>();
+        var doubleMeasurements = new ConcurrentQueue<(string Name, int TagCount)>();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
             if (instrument.Meter.Name == CmsifyOperationalMetrics.MeterName)
@@ -119,9 +120,9 @@ public sealed class CmsifyOperationalMetricsTests
                 capturedTags.Add(tag);
             }
 
-            measurements.Add((instrument.Name, capturedTags));
+            measurements.Enqueue((instrument.Name, capturedTags));
         });
-        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, _) => doubleMeasurements.Add((instrument.Name, tags.Length)));
+        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, _) => doubleMeasurements.Enqueue((instrument.Name, tags.Length)));
         listener.Start();
 
         CmsifyOperationalMetrics.RecordSecretDecryptFailure("v2", "attacker-controlled-key", "arbitrary failure", ["key_current"]);
@@ -170,9 +171,9 @@ public sealed class CmsifyOperationalMetricsTests
             && measurement.Tags.Select(tag => tag.Key).SequenceEqual(expectedKeys)
             && measurement.Tags.Select(tag => tag.Value).SequenceEqual(expectedValues.Cast<object?>()));
 
-    private static (MeterListener Listener, List<(string Name, List<KeyValuePair<string, object?>> Tags)> Measurements) CreateListener()
+    private static (MeterListener Listener, ConcurrentQueue<(string Name, List<KeyValuePair<string, object?>> Tags)> Measurements) CreateListener()
     {
-        var measurements = new List<(string Name, List<KeyValuePair<string, object?>> Tags)>();
+        var measurements = new ConcurrentQueue<(string Name, List<KeyValuePair<string, object?>> Tags)>();
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
@@ -188,7 +189,7 @@ public sealed class CmsifyOperationalMetricsTests
             {
                 capturedTags.Add(tag);
             }
-            measurements.Add((instrument.Name, capturedTags));
+            measurements.Enqueue((instrument.Name, capturedTags));
         });
         listener.Start();
         return (listener, measurements);
