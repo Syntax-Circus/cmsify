@@ -1,33 +1,35 @@
 # V1 release remediation handoff after Task 12 repository remediation
 
-This is a point-in-time resume document for moving the remediation work to another computer. Resume from the commit containing this file; do not redo Tasks 1–11 or the completed Task 12 repository implementation and pre-publication review fixes.
+This is the point-in-time handoff for merging the remediation work and returning later for release certification. Do not publish from either feature branch. Merge this PR and the sibling resilience PR first, then resume from updated default branches by following the [post-merge release handoff plan](superpowers/plans/2026-08-30-post-merge-release-handoff.md). Do not redo Tasks 1–11 or the completed Task 12 repository implementation and pre-publication review fixes.
 
 ## Resume point
 
-- Branch: `feature/readiness-audit`
+- PR source branch: `feature/readiness-audit`. After this PR merges, resume from updated `main`; do not resume release work or publish artifacts from this feature branch.
 - Accepted Task 12 repository implementation source: `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e` (`Authenticate repository-signed public package`). This is the source SHA bound by the preliminary evidence ledger; the evidence-only commit containing this handoff follows it.
 - Exact Task 11 reproducible-quality implementation source tested: `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4` (`Close dependency policy mutation gaps`); implementation range `a482873..bdaa0ff`.
 - Exact Task 10 Cmsify implementation source tested: `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` (`Snapshot Cmsify retry configuration`); full implementation range `29ba5a8^..b68172d`.
 - Exact sibling source tested: `e5a7c57bbd3f24eb15c66e5d740e05fffd4f1bc3` (`Clarify cancellation ownership control`) on `feature/cmsify-resilience`; full change range `5216a18..e5a7c57`.
 - State: Tasks 1–11 are implemented and validated locally. Task 12 repository implementation and its preliminary whole-branch review fixes are implemented and source/policy-tested through the accepted SHA. F-01 through F-19 are remediated at the local source/policy level. The outer remediation Task 12 remains open only for the exact public dependency, definitive same-source candidate tuple, final clean consumers/accessibility/upgrade/smoke, hosted evidence, approvals, signing/attestation, immutable promotion, soak, stable tag, and final release.
-- Publication prerequisite: exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` bytes remain available only through the approved ignored local feed; the package owner must publish the exact prerelease publicly before ordinary public restore evidence can be collected. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries.
+- Publication prerequisite: the tested `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package remains available only through the approved ignored local feed and was built from sibling feature-branch source. It is local evidence, not a publication candidate. Merge the sibling PR, pack the version from its default branch, reconcile any changed source/raw SHA/content hash/locks into Cmsify through a follow-up PR, and publish the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` candidate only through the trusted default-branch publishing workflow. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries.
 - The evidence-only commit containing this refreshed handoff follows the accepted Task 12 implementation commit and changes documentation/release-contract evidence coverage only, not runtime, generated output, package bytes, or dependency locks.
 - No push, merge, tag, package publication, image publication, or release was performed in Task 10 or Task 11.
 
-On the new computer, first make sure this branch and the commit containing this document have been transferred or pushed by the user. Then run:
+After this PR and the sibling resilience PR are merged, begin the return workflow from updated default branches. In Cmsify run:
 
 ```powershell
-git switch feature/readiness-audit
+git switch main
+git pull --ff-only origin main
 git status --short
 git log -5 --oneline
 ```
 
-Expected: a clean worktree with this evidence refresh at `HEAD` and accepted Task 12 implementation source `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e` in its direct history. Read `AGENTS.md` before changing anything.
+Expected: a clean worktree with this handoff in `main` history and accepted Task 12 implementation source `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e` in its ancestry. Read `AGENTS.md` and the post-merge handoff plan before changing anything. Do not publish the ignored branch-built package.
 
 ## Authoritative plans and audit
 
 - Master remediation plan: [`docs/superpowers/plans/2026-08-24-v1-remediation.md`](superpowers/plans/2026-08-24-v1-remediation.md)
 - Pre-publication review remediation plan: [`docs/superpowers/plans/2026-08-30-prepublication-review-remediation.md`](superpowers/plans/2026-08-30-prepublication-review-remediation.md)
+- Post-merge/default-branch publication handoff: [`docs/superpowers/plans/2026-08-30-post-merge-release-handoff.md`](superpowers/plans/2026-08-30-post-merge-release-handoff.md)
 - Release-readiness audit: [`docs/v1-release-readiness.md`](v1-release-readiness.md)
 - Task 11 quality/capacity design: [`docs/superpowers/specs/2026-08-28-reproducible-quality-capacity-design.md`](superpowers/specs/2026-08-28-reproducible-quality-capacity-design.md)
 - Task 11 quality/capacity implementation plan: [`docs/superpowers/plans/2026-08-28-reproducible-quality-capacity.md`](superpowers/plans/2026-08-28-reproducible-quality-capacity.md)
@@ -104,7 +106,7 @@ These are explicitly non-blocking and must remain visible for final release adju
 - Task 4's Syft relationship-only `DESCRIBES` handling and smoke cleanup trap requirement.
 - Task 5 package publication and all external release evidence remain explicit-approval gates.
 - Task 10's exact `SyntaxCircus.Http.Resilience` prerelease publication and clean public restore remain explicit user-owned gates; a replacement requires separate explicit approval and identity/pin review.
-- Public/CI restore remains blocked until the package owner publishes the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` prerelease publicly. A separately approved replacement is an alternative only after its package identity, version, content hash, central pin, and lock entries are reviewed; the ordinary locked restore and all downstream evidence must then be rerun.
+- Public/CI restore remains blocked until the sibling work is merged, `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` is packed and approved from its default branch, any changed identity/locks are reconciled into Cmsify, and those approved bytes are published through the trusted workflow. The current branch-built local artifact must not be published. A separately approved replacement is an alternative only after its package identity, version, content hash, central pin, and lock entries are reviewed; the ordinary locked restore and all downstream evidence must then be rerun.
 - exact candidate package certification and clean consumers for every NuGet/npm artifact, plus exact candidate container certification from the promoted OCI bytes and immutable digest, are implemented as fail-closed workflow/verifier contracts; definitive candidate execution remains unperformed.
 - Production-like PostgreSQL/API/Admin artifact smoke covering health/login plus CRUD, media, OIDC, webhook, and scheduled-publication scenario certification, including backup and restart certification, is implemented and source-tested; definitive hosted execution remains unperformed.
 - accessibility certification with the required trigger expansion and bounded evidence is implemented; definitive candidate and hosted accessibility remain unperformed.
@@ -326,7 +328,7 @@ Earlier Task 10 full-solution attempts exposed the existing Media API fixture/in
 
 ### User-owned public-package gate
 
-Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1` has not been published and exists only in ignored local artifacts. Public CI restore therefore remains blocked. The package owner must publish the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` prerelease publicly; Cmsify retains that exact central pin, removes reliance on the local feed, runs a clean public locked restore, verifies the repository signature, content hash, every asset graph, and signed package-cache bytes, and reruns the sibling/consumer/client/Admin/full Release gates. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries. Do not claim this gate is complete until that evidence exists. No command in Task 10 pushed, merged, tagged, published, or released anything.
+Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1` has not been published and exists only in ignored local artifacts built from sibling feature-branch source. Those bytes must not be published. Merge the sibling work, pack and approve the prerelease from its default branch, reconcile any changed package identity and locks into Cmsify through a post-merge PR, and publish only the approved default-branch bytes through the trusted workflow. Cmsify retains the exact version pin, removes reliance on the local feed, runs a clean public locked restore, verifies the repository signature, content hash, every asset graph, and signed package-cache bytes, and reruns the sibling/consumer/client/Admin/full Release gates. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries. Do not claim this gate is complete until that evidence exists. No command in Task 10 pushed, merged, tagged, published, or released anything.
 
 ### Environment facts and limitations
 
@@ -335,11 +337,11 @@ Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1`
 - The documented and CI prerequisite remains Node 22. The local nvm installation exposed only Node 18.16.0, so the complete Node and TypeScript checks used the available newer Codex runtime Node 24.19.0 with npm 11.11.0. No Node check was skipped.
 - `npm ci` reported 8 dependency advisories (1 low, 1 moderate, 5 high, 1 critical); dependency remediation is outside Task 9.8 and remains visible for final release adjudication.
 - Stable `SyntaxCircus.Storage` `0.2.0` is pinned and resolved in Infrastructure/API assets. Its publication was user-confirmed; Task 9 did not publish it.
-- `SyntaxCircus.Http.Resilience` remains pinned to local-only `0.2.0-cmsify.1`; unlike the storage package, its exact prerelease publication has not been confirmed. Public/CI restore is blocked until the package owner publishes it and the release operator completes the public-package gate above.
+- `SyntaxCircus.Http.Resilience` remains pinned to local-only `0.2.0-cmsify.1`; unlike the storage package, its default-branch publication has not occurred. Public/CI restore is blocked until the post-merge handoff reconciles and publishes the approved default-branch package and the release operator completes the public-package gate above.
 - The candidate is a local content-addressed image, not a published release artifact. No external GitHub Actions run ID exists for this local evidence, and no release is certified solely by this handoff.
 
 ## Next task: public dependency and definitive release tuple
 
-Task 12 repository implementation and pre-publication review fixes are complete locally through accepted implementation `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e`; the preliminary evidence-only commit containing this handoff follows it. Do not redo that work. Resume when the package owner publishes the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` prerelease publicly, then run the isolated ordinary public-restore gate. A replacement requires separate explicit approval and identity/pin review. Publication itself is not authorized by this handoff.
+Task 12 repository implementation and pre-publication review fixes are complete locally through accepted implementation `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e`; the preliminary evidence-only commit containing this handoff follows it. Do not redo that work. Resume only after this PR and the sibling resilience PR are merged. Follow the post-merge handoff to pack `0.2.0-cmsify.1` from the sibling default branch, reconcile any changed identity/locks into Cmsify, and publish only through the trusted default-branch/release workflow. Then return to updated Cmsify `main` and run the isolated ordinary public-restore gate. A replacement requires separate explicit approval and identity/pin review. Publication itself is not authorized by this handoff.
 
 After the public gate passes, build one definitive same-source package/API/Admin tuple and run its clean consumers, candidate accessibility, exact-image upgrade/rollback, production-like smoke, backup/restart, hosted accessibility, protected approvals, complete artifact attestations, registry signatures, immutable promotion, authenticated soak, stable tag verification, and final release gate in the order documented by the release runbook. Preserve the Task 9 rollback diagnostic omission and both historical media races for final adjudication. Do not push, merge, tag, publish, sign, attest, promote, or release without explicit approval.

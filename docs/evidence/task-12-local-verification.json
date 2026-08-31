@@ -82,7 +82,7 @@
     }
   ],
   "externalGates": {
-    "publicPackageRestore": { "passed": false, "reason": "The exact resilience bytes are absent from the official public NuGet flat-container listing; local feed and cache evidence cannot satisfy this gate.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate public-package-restore", "evidenceLink": null },
+    "publicPackageRestore": { "passed": false, "reason": "The tested resilience package is branch-built local evidence and is absent from the official public NuGet flat-container listing; merge, default-branch repack/reconciliation, and trusted publication must occur before this gate can run.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate public-package-restore", "evidenceLink": null },
     "hostedAccessibility": { "passed": false, "reason": "No hosted candidate accessibility workflow evidence exists for the definitive tuple.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-accessibility", "evidenceLink": null },
     "protectedApprovals": { "passed": false, "reason": "No protected release approval has been verified.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate protected-approvals", "evidenceLink": null },
     "artifactAttestation": { "passed": false, "reason": "No canonical definitive candidate set has hosted attestations.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate artifact-attestation", "evidenceLink": null },
@@ -98,6 +98,7 @@
     "stableTag": { "passed": false, "status": "unperformed", "reason": "No stable tag may be created until the preceding gates pass and explicit approval is given.", "owner": "approver and release operator", "nextCommand": "git tag --sign $env:CMSIFY_RELEASE_TAG $env:CMSIFY_RELEASE_SOURCE_SHA", "evidenceLink": null }
   },
   "knownDiagnostics": [
+    "The ignored SyntaxCircus.Http.Resilience package was built from sibling feature-branch source and must not be published; follow the post-merge default-branch handoff and refresh this identity before the public gate.",
     "The exact SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 version remains absent from the official public flat-container listing; the approved ignored local package is not public evidence.",
     "CODEOWNERS remains intentionally inactive until a repository-verified GitHub user or team is supplied; hosted protection configuration is external evidence.",
     "The preserved API archive passed reviewed offline-loader live certification, but it predates the accepted implementation and is neither an API/Admin pair nor a definitive promotable candidate tuple.",
