@@ -59,7 +59,7 @@ jobs:
           dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
           mkdir -p artifacts/nuget
           dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
-          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
+          dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
           dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
       - name: Pack npm candidate once
         working-directory: sdk/typescript

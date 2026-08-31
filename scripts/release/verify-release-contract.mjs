@@ -733,6 +733,9 @@ expect(/npm pkg delete private[\s\S]*npm pkg set version=/s.test(workflow), "Rel
 expect(/npm pkg set version="\$VERSION" gitHead="\$SOURCE_SHA"[\s\S]*npm pack --pack-destination/s.test(workflow), "Release npm candidate gitHead must equal resolved SOURCE_SHA before its sole npm pack.");
 const nugetPackCommands = [...workflow.matchAll(/dotnet pack[^\n]+/g)].map((match) => match[0]);
 expect(nugetPackCommands.length === 3 && nugetPackCommands.every((command) => command.includes('-p:RepositoryCommit="$SOURCE_SHA"') && command.includes("-p:IncludeSymbols=false")), "All three NuGet candidates must bind RepositoryCommit to SOURCE_SHA and suppress symbol packages explicitly.");
+const prereleaseDependencyPackExceptions = nugetPackCommands.filter((command) => command.includes("-p:WarningsNotAsErrors=NU5104"));
+expect(prereleaseDependencyPackExceptions.length === 1
+  && prereleaseDependencyPackExceptions[0].includes("sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj"), "Only the .NET client candidate may retain NU5104 as a non-fatal warning for its exact reviewed SyntaxCircus.Http.Resilience prerelease dependency.");
 
 for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Release action must be pinned by immutable SHA: ${match[1]}`);
