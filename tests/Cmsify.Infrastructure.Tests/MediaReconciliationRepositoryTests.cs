@@ -141,7 +141,9 @@ public sealed class MediaReconciliationRepositoryTests(MediaPostgresFixture fixt
         var intentId = await SeedIntentAsync(now);
         await using var context = await CreateContextAsync();
         var repository = new MediaReconciliationRepository(context);
-        var claim = Assert.Single(await repository.ClaimDeletionIntentsAsync("worker", now, TimeSpan.FromMinutes(5), 1, TestContext.Current.CancellationToken));
+        var claim = Assert.Single(
+            await repository.ClaimDeletionIntentsAsync("worker", now, TimeSpan.FromMinutes(5), 1_000, TestContext.Current.CancellationToken),
+            item => item.Id == intentId);
 
         (await repository.RetryDeletionAsync(claim, now, now.AddSeconds(30), new string('x', 3_000), TestContext.Current.CancellationToken)).ShouldBeTrue();
 

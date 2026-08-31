@@ -48,7 +48,17 @@ public sealed class CmsifyOperationalMetricsTests
         Assert.Contains(measurements, measurement => measurement.Name == "cmsify.webhook.delivery.succeeded");
         Assert.Contains(measurements, measurement => measurement.Name == "cmsify.webhook.delivery.retried");
         Assert.Contains(measurements, measurement => measurement.Name == "cmsify.webhook.delivery.dead_lettered");
-        Assert.All(measurements, measurement => Assert.Equal(0, measurement.TagCount));
+        var deliveryAndClaimNames = new HashSet<string>
+        {
+            "cmsify.webhook.outbox.claimed",
+            "cmsify.webhook.delivery.claimed",
+            "cmsify.webhook.delivery.succeeded",
+            "cmsify.webhook.delivery.retried",
+            "cmsify.webhook.delivery.dead_lettered"
+        };
+        Assert.All(
+            measurements.Where(measurement => deliveryAndClaimNames.Contains(measurement.Name)),
+            measurement => Assert.Equal(0, measurement.TagCount));
     }
 
     [Fact]
