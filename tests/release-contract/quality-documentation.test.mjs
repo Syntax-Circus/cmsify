@@ -108,8 +108,8 @@ function assertNoPrematureCertification(section, documentName) {
   assert.doesNotMatch(section, /\bfully certified\b/i, `${documentName} must not claim full certification`);
   assert.doesNotMatch(
     section,
-    /\b(?:hosted|public(?:\/CI)?)(?: validation| restore| checks?| workflows?)? (?:passed|succeeded|validated|green|certified)\b/i,
-    `${documentName} must not claim hosted/public validation succeeded`,
+    /\bhosted(?: validation| checks?| workflows?)? (?:passed|succeeded|validated|green|certified)\b/i,
+    `${documentName} must not claim hosted validation succeeded`,
   );
 }
 
@@ -167,7 +167,7 @@ function validateDocumentationContract(documents) {
   assertIncludesAll(readinessUpdate, [
     "F-11, F-16, and F-17 are remediated at the local source/test level",
     "bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4",
-    "overall v1 decision remains **not ready**",
+    "overall release decision remains **not ready**",
   ]);
   assertIncludesAll(readinessF11, ["F-11", "bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4"]);
   assertIncludesAll(readinessMedium, ["F-16", "F-17", "bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4"]);
@@ -201,7 +201,7 @@ function validateDocumentationContract(documents) {
     "AvailableAssetWithMissingBlob_ReturnsSanitizedProblemDetails",
     "Delete_WithStaleEtag_ReturnsPreconditionFailedWithoutTombstone",
   ]);
-  assert.match(handoffCarry, /public(?:\/CI)? restore[^\n]+(?:blocked|gated)/i);
+  assert.match(handoffCarry, /public(?:\/CI)? restore[^\n]+(?:complete|validated|passed)/i);
   assertBoundAggregate(readinessEvidence, "readiness evidence");
   assertBoundAggregate(handoffEvidence, "handoff evidence");
   assertNoPrematureCertification(readinessUpdate, "readiness update");
@@ -242,11 +242,11 @@ const mutations = [
     documents["docs/v1-release-readiness.md"] = documents["docs/v1-release-readiness.md"].replace("587/587", "552/552");
   }, /aggregate test total/],
   ["rejects a fully certified readiness status", (documents) => {
-    documents["docs/v1-release-readiness.md"] = documents["docs/v1-release-readiness.md"].replace("overall v1 decision remains **not ready**", "overall v1 decision is fully certified");
+    documents["docs/v1-release-readiness.md"] = documents["docs/v1-release-readiness.md"].replace("overall release decision remains **not ready**", "overall release decision is fully certified");
   }, /full certification|not ready/],
   ["rejects hosted validation success language", (documents) => {
     documents["docs/v1-release-remediation-handoff.md"] = documents["docs/v1-release-remediation-handoff.md"].replace("## Authoritative plans and audit", "Hosted validation succeeded.\n\n## Authoritative plans and audit");
-  }, /hosted\/public validation succeeded/],
+  }, /hosted validation succeeded/],
   ["rejects removal of a required handoff carry", (documents) => {
     documents["docs/v1-release-remediation-handoff.md"] = documents["docs/v1-release-remediation-handoff.md"].replace("CRUD, media, OIDC, webhook, and scheduled-publication scenario certification", "scenario certification");
   }, /CRUD, media, OIDC/],

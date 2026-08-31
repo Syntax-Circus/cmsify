@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const evidencePath = path.join(root, "docs/evidence/task-12-local-verification.json");
-const sha = "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e";
+const sha = "fb983502c619bca7debb76eb7c01f436a9a6c913";
 const readiness = readFileSync(path.join(root, "docs/v1-release-readiness.md"), "utf8");
 const handoff = readFileSync(path.join(root, "docs/v1-release-remediation-handoff.md"), "utf8");
 const releaseRunbook = readFileSync(path.join(root, "docs/release-runbook.md"), "utf8");
@@ -55,7 +55,7 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   assert.deepEqual(evidence.certification, {
     status: "preliminary-local-non-certifying",
     certifiesRelease: false,
-    reason: "Local source, policy, and preserved-candidate evidence only; public, hosted, approval, signing, promotion, soak, tag, and final-release gates remain unperformed.",
+    reason: "Local source, policy, public-package restore, and preserved-candidate evidence only; hosted candidate, approval, signing, promotion, soak, tag, and final-release gates remain unperformed.",
   });
   for (const key of ["sourceSha", "sdkVersion", "nodeVersion", "dockerClientVersion", "dockerServerVersion", "localFeedPackage", "checks", "artifacts", "externalGates", "pendingReleaseGates", "knownDiagnostics"]) assert.ok(key in evidence, `missing ${key}`);
   assert.equal(evidence.sourceSha, sha, "evidence must not transplant a stale source SHA");
@@ -64,13 +64,15 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   assert.deepEqual(evidence.localFeedPackage, {
     id: "SyntaxCircus.Http.Resilience",
     version: "0.2.0-cmsify.1",
-    localUnsignedSha256: "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
-    contentHash: "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+    defaultBranchSourceSha: "827aafb7f9eaa8e35c67c3a73aa5bd761384899a",
+    localUnsignedSha256: "44912C98E653C2414D42BDD5174478DF184D02AFDA6E95C1DD1996F4C81C40B8",
+    publicSignedSha256: "3C2D87EF5B1C5D3FD49A4EB57B89EF3A251841B03FDC1F762256ED26B8BE0E65",
+    contentHash: "NMTysZp25vAOrFJ67PkFUbWleijS54StWjT5GAXbRLWoxv+H69VBFgP6f+wR0YRTNvF/yMvlIallZu3ID7ue6w==",
     expectedRepositorySignature: { type: "Repository", serviceIndex: "https://api.nuget.org/v3/index.json", owner: "syntaxcircus" },
-    publicRestoreValidated: false,
+    publicRestoreValidated: true,
   });
   assert.deepEqual(evidence.checks, [
-    { name: "release-contract suite", command: "node --test tests/release-contract/*.test.mjs", exitCode: 0, status: "passed", counts: { total: 504, passed: 504, failed: 0 }, sourceSha: sha },
+    { name: "release-contract suite", command: "node --test tests/release-contract/*.test.mjs", exitCode: 0, status: "passed", counts: { total: 505, passed: 505, failed: 0 }, sourceSha: sha },
     { name: "release-smoke source suite", command: "node --test tests/release-smoke/*.test.mjs", exitCode: 0, status: "passed", counts: { total: 91, passed: 91, failed: 0 }, sourceSha: sha },
     { name: "upgrade unit suite", command: "node --test tests/upgrade/unit/*.test.mjs", exitCode: 0, status: "passed", counts: { total: 173, passed: 173, failed: 0 }, sourceSha: sha },
     { name: "standalone release verifier", command: "node scripts/release/verify-release-contract.mjs", exitCode: 0, status: "passed", counts: null, sourceSha: sha },
@@ -97,7 +99,15 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   for (const input of commandInputs) assert.deepEqual(evidence.commandInputs[input], { value: null, reason: "Unperformed external gate; release operator must supply the immutable value.", owner: "release operator" });
   assert.deepEqual(Object.keys(evidence.externalGates).sort(), [...gateKeys].sort(), "external gate set must be exact");
   const owners = { publicPackageRestore: "release operator", hostedAccessibility: "release operator", protectedApprovals: "approver", artifactAttestation: "release operator", registrySigning: "release operator", immutableOciPromotion: "release operator", hostedSmokeSoak: "release operator", finalRelease: "approver" };
-  for (const name of gateKeys) { const gate = evidence.externalGates[name]; assert.equal(gate.passed, false, `${name} must remain false`); assert.ok(gate.reason?.trim()); assert.equal(gate.owner, owners[name]); assert.equal(digest(gate.nextCommand), commandHashes[name]); assert.equal(gate.evidenceLink, null); assert.match(gate.nextCommand, /^pwsh -NoProfile -NonInteractive -File scripts\/release\/verify-task-12-external-gate\.ps1 -Gate [a-z-]+$/); }
+  for (const name of gateKeys) {
+    const gate = evidence.externalGates[name];
+    assert.equal(gate.passed, name === "publicPackageRestore", `${name} completion must match the performed gates`);
+    assert.ok(gate.reason?.trim());
+    assert.equal(gate.owner, owners[name]);
+    assert.equal(digest(gate.nextCommand), commandHashes[name]);
+    assert.equal(gate.evidenceLink, name === "publicPackageRestore" ? "https://github.com/Syntax-Circus/SyntaxCircus.Http.Resilience/actions/runs/33404390063" : null);
+    assert.match(gate.nextCommand, /^pwsh -NoProfile -NonInteractive -File scripts\/release\/verify-task-12-external-gate\.ps1 -Gate [a-z-]+$/);
+  }
   assert.deepEqual(Object.keys(evidence.pendingReleaseGates).sort(), [...pendingGateKeys].sort(), "pending release gate set must be exact");
   const pendingOwners = { definitivePackageOciTuple: "authorized maintainer", finalConsumersAccessibilityUpgradeSmoke: "release operator", soak: "release operator", stableTag: "approver and release operator" };
   for (const name of pendingGateKeys) { const gate = evidence.pendingReleaseGates[name]; assert.equal(gate.passed, false, `${name} must remain false`); assert.equal(gate.status, "unperformed"); assert.ok(gate.reason?.trim()); assert.equal(gate.owner, pendingOwners[name]); assert.ok(gate.nextCommand?.trim()); assert.equal(gate.evidenceLink, null); }
@@ -108,7 +118,7 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   assert.match(releaseRunbook, /authorized maintainer pushes a validated SemVer tag to trigger the tracked `publish-cmsify\.yml` workflow/i);
   assert.match(publishWorkflow, /^on:\s*\n\s+push:\s*\n\s+tags: \["v\*"\]/m);
   assert.doesNotMatch(publishWorkflow, /^\s+workflow_dispatch:/m);
-  assert.ok(evidence.knownDiagnostics.some((item) => /exact SyntaxCircus\.Http\.Resilience 0\.2\.0-cmsify\.1/i.test(item) && /absent/i.test(item)));
+  assert.ok(evidence.knownDiagnostics.some((item) => /exact SyntaxCircus\.Http\.Resilience 0\.2\.0-cmsify\.1/i.test(item) && /public restore/i.test(item)));
   assert.ok(evidence.knownDiagnostics.some((item) => /CODEOWNERS/i.test(item) && /verified/i.test(item)));
   assert.ok(evidence.knownDiagnostics.some((item) => /historical media/i.test(item) && /599\/599/i.test(item)));
   assert.match(documentText, /task-12-local-verification\.json/);
@@ -123,7 +133,7 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   assert.match(readinessText, /^## Completed repository remediation and current release remainder$/m);
   for (const claim of staleReadinessClaims) assert.doesNotMatch(readinessText, claim);
   for (const publicationDocument of [readinessText, handoff]) {
-    assert.match(publicationDocument, /publish(?:es)? the exact `?SyntaxCircus\.Http\.Resilience`? `?0\.2\.0-cmsify\.1`?/i);
+    assert.match(publicationDocument, /(?:0\.2\.0-cmsify\.1[\s\S]{0,300}published|published[\s\S]{0,300}0\.2\.0-cmsify\.1)/i);
     assert.match(publicationDocument, /replacement[^.\n]*(?:separate|explicit)[^.\n]*approv[^.\n]*(?:identity|pin)[^.\n]*review|(?:separate|explicit)[^.\n]*approv[^.\n]*replacement[^.\n]*(?:identity|pin)[^.\n]*review/i);
     assert.doesNotMatch(publicationDocument, /must[^.\n]*(?:publish|provide)[^.\n]*(?:exact )?stable `?SyntaxCircus\.Http\.Resilience|must[^.\n]*replace[^.\n]*0\.2\.0-cmsify\.1[^.\n]*stable/i);
   }
@@ -134,7 +144,7 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
       : readinessText.split(/\r?\n/).find((line) => line.startsWith(`| ${finding} |`)) ?? "";
     assert.match(section, /remediated (?:locally|at the (?:local )?source(?:\/policy)? level)/i, `${finding} must state its current source remediation status`);
   }
-  for (const claim of [/public(?:\/CI)? restore (?:passed|succeeded|validated|green|certified)/i, /hosted (?:validation|checks|workflow) (?:passed|succeeded|validated|green|certified)/i, /v1 certified/i, /release[- ]ready/i]) assert.ok(!documentText.split(/\r?\n/).some((line) => claim.test(line)));
+  for (const claim of [/hosted (?:validation|checks|workflow) (?:passed|succeeded|validated|green|certified)/i, /v1 certified/i, /release[- ]ready/i]) assert.ok(!documentText.split(/\r?\n/).some((line) => claim.test(line)));
   const section = task12Section(planText); assert.ok(section); assert.ok(/^\s*- \[ \]/m.test(section)); assert.doesNotMatch(section, /^\s*- \[x\]/im);
 }
 test("Task 12 evidence is complete, SHA-bound, and honest", () => validate(load()));
@@ -147,27 +157,29 @@ test("Task 12 evidence mutations are rejected", () => {
     (copy) => { copy.sdkVersion = "0"; }, (copy) => { copy.nodeVersion = "v0"; }, (copy) => { copy.dockerClientVersion = "0"; }, (copy) => { copy.dockerServerVersion = "0"; },
     (copy) => { copy.checks[0].command = "stale"; }, (copy) => { copy.checks[0].counts.total = 0; }, (copy) => { copy.checks[4].reason = " "; },
     (copy) => { copy.localFeedPackage.localUnsignedSha256 = "bad"; },
+    (copy) => { copy.localFeedPackage.defaultBranchSourceSha = "bad"; },
+    (copy) => { copy.localFeedPackage.publicSignedSha256 = "bad"; },
     (copy) => { delete copy.localFeedPackage.contentHash; },
     (copy) => { copy.localFeedPackage.contentHash = "bad"; },
     (copy) => { copy.localFeedPackage.expectedRepositorySignature.type = "Author"; },
     (copy) => { copy.localFeedPackage.expectedRepositorySignature.serviceIndex = "https://example.invalid/v3/index.json"; },
     (copy) => { copy.localFeedPackage.expectedRepositorySignature.owner = "attacker"; },
-    (copy) => { copy.localFeedPackage.publicRestoreValidated = true; },
+    (copy) => { copy.localFeedPackage.publicRestoreValidated = false; },
     (copy) => { copy.artifacts[0].status = "local-published"; }, (copy) => { copy.artifacts[0].status = "promotion-complete"; }, (copy) => { copy.artifacts[0].releaseCandidate = true; }, (copy) => { copy.artifacts[0].manifestDigest = copy.artifacts[0].imageId; },
     (copy) => { copy.sourceSha = "0".repeat(40); },
     (copy) => { copy.certification.certifiesRelease = true; },
     (copy) => { copy.certification.status = "certified"; },
-    (copy) => { copy.externalGates.publicPackageRestore.passed = true; },
+    (copy) => { copy.externalGates.publicPackageRestore.passed = false; },
     (copy) => { delete copy.externalGates.hostedAccessibility; },
     (copy) => { delete copy.externalGates.registrySigning.reason; },
     (copy) => { delete copy.commandInputs.CMSIFY_API_DIGEST; },
     (copy) => { delete copy.pendingReleaseGates.stableTag; },
     ...pendingGateKeys.flatMap((key) => [(copy) => { copy.pendingReleaseGates[key].passed = true; }, (copy) => { copy.pendingReleaseGates[key].status = "passed"; }, (copy) => { copy.pendingReleaseGates[key].nextCommand = ""; }, (copy) => { copy.pendingReleaseGates[key].evidenceLink = "x"; }]),
-    ...gateKeys.flatMap((key) => [(copy) => { copy.externalGates[key].owner = "repository administrator"; }, (copy) => { copy.externalGates[key].nextCommand = "echo changed"; }, (copy) => { delete copy.externalGates[key].owner; }, (copy) => { copy.externalGates[key].reason = ""; }, (copy) => { copy.externalGates[key].nextCommand = ""; }, (copy) => { copy.externalGates[key].evidenceLink = "x"; }, (copy) => { copy.externalGates[key].passed = true; }]),
+    ...gateKeys.flatMap((key) => [(copy) => { copy.externalGates[key].owner = "repository administrator"; }, (copy) => { copy.externalGates[key].nextCommand = "echo changed"; }, (copy) => { delete copy.externalGates[key].owner; }, (copy) => { copy.externalGates[key].reason = ""; }, (copy) => { copy.externalGates[key].nextCommand = ""; }, (copy) => { copy.externalGates[key].evidenceLink = "x"; }, (copy) => { copy.externalGates[key].passed = !copy.externalGates[key].passed; }]),
     (copy) => { delete copy.externalGates.finalRelease.evidenceLink; },
     (copy) => { delete copy.checks[1].status; },
   ]) { const copy = structuredClone(evidence); const before = JSON.stringify(copy); mutate(copy); assert.notEqual(JSON.stringify(copy), before); assert.throws(() => validate(copy)); }
-  for (const claim of ["Public restore passed, but not yet.", "Hosted validation succeeded although not final.", "v1 certified.", "Release-ready."]) { const changed = `${docs}\n${claim}`; assert.notEqual(changed, docs); assert.throws(() => validate(evidence, changed)); }
+  for (const claim of ["Hosted validation succeeded although not final.", "v1 certified.", "Release-ready."]) { const changed = `${docs}\n${claim}`; assert.notEqual(changed, docs); assert.throws(() => validate(evidence, changed)); }
   for (const claim of ["Several required gates do not exist yet.", "**Enhance, then adopt**", "## Phased remediation backlog", "Complete Admin OIDC with shared authentication/token-forwarding packages."]) {
     const changed = `${readiness}\n${claim}`;
     assert.notEqual(changed, readiness);
