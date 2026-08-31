@@ -734,8 +734,9 @@ expect(/npm pkg set version="\$VERSION" gitHead="\$SOURCE_SHA"[\s\S]*npm pack --
 const nugetPackCommands = [...workflow.matchAll(/dotnet pack[^\n]+/g)].map((match) => match[0]);
 expect(nugetPackCommands.length === 3 && nugetPackCommands.every((command) => command.includes('-p:RepositoryCommit="$SOURCE_SHA"') && command.includes("-p:IncludeSymbols=false")), "All three NuGet candidates must bind RepositoryCommit to SOURCE_SHA and suppress symbol packages explicitly.");
 const prereleaseDependencyPackExceptions = nugetPackCommands.filter((command) => command.includes("-p:WarningsNotAsErrors=NU5104"));
-expect(prereleaseDependencyPackExceptions.length === 1
-  && prereleaseDependencyPackExceptions[0].includes("sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj"), "Only the .NET client candidate may retain NU5104 as a non-fatal warning for its exact reviewed SyntaxCircus.Http.Resilience prerelease dependency.");
+expect(prereleaseDependencyPackExceptions.length === 2
+  && prereleaseDependencyPackExceptions.some((command) => command.includes("sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj"))
+  && prereleaseDependencyPackExceptions.some((command) => command.includes("sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj")), "Only the .NET client candidates may retain NU5104 as a non-fatal warning for their exact reviewed SyntaxCircus.Http.Resilience prerelease dependency.");
 
 for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Release action must be pinned by immutable SHA: ${match[1]}`);
