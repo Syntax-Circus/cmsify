@@ -5,7 +5,7 @@ This is a point-in-time resume document for moving the remediation work to anoth
 ## Resume point
 
 - Branch: `feature/readiness-audit`
-- Accepted Task 12 repository implementation source: `da3a428be6f12b9cdfbdde5a17daefab025615e0` (`Bind smoke evidence to certified manifests`). This is the source SHA bound by the preliminary evidence ledger; the evidence-only commit containing this handoff follows it.
+- Accepted Task 12 repository implementation source: `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e` (`Authenticate repository-signed public package`). This is the source SHA bound by the preliminary evidence ledger; the evidence-only commit containing this handoff follows it.
 - Exact Task 11 reproducible-quality implementation source tested: `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4` (`Close dependency policy mutation gaps`); implementation range `a482873..bdaa0ff`.
 - Exact Task 10 Cmsify implementation source tested: `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` (`Snapshot Cmsify retry configuration`); full implementation range `29ba5a8^..b68172d`.
 - Exact sibling source tested: `e5a7c57bbd3f24eb15c66e5d740e05fffd4f1bc3` (`Clarify cancellation ownership control`) on `feature/cmsify-resilience`; full change range `5216a18..e5a7c57`.
@@ -22,7 +22,7 @@ git status --short
 git log -5 --oneline
 ```
 
-Expected: a clean worktree with this evidence refresh at `HEAD` and accepted Task 12 implementation source `da3a428be6f12b9cdfbdde5a17daefab025615e0` in its direct history. Read `AGENTS.md` before changing anything.
+Expected: a clean worktree with this evidence refresh at `HEAD` and accepted Task 12 implementation source `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e` in its direct history. Read `AGENTS.md` before changing anything.
 
 ## Authoritative plans and audit
 
@@ -44,7 +44,7 @@ The master plan checkboxes are not the execution ledger. Use this handoff, Git h
 
 ## Task 12 evidence status
 
-The machine-readable [Task 12 local evidence ledger](evidence/task-12-local-verification.json) is bound to accepted implementation `da3a428be6f12b9cdfbdde5a17daefab025615e0`. This **preliminary local source/policy tuple** records release contracts 504/504, release-smoke source tests 91/91, upgrade unit tests 173/173, and a passing standalone semantic verifier. It also retains the earlier ignored-feed product sweep—Release build zero warnings/errors, .NET 599/599 with zero skips, and TypeScript generation/typecheck/40 tests/build—and the successful reviewed offline-loader live certification of the preserved API archive.
+The machine-readable [Task 12 local evidence ledger](evidence/task-12-local-verification.json) is bound to accepted implementation `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e`. This **preliminary local source/policy tuple** records release contracts 504/504, release-smoke source tests 91/91, upgrade unit tests 173/173, and a passing standalone semantic verifier. It also retains the earlier ignored-feed product sweep—Release build zero warnings/errors, .NET 599/599 with zero skips, and TypeScript generation/typecheck/40 tests/build—and the successful reviewed offline-loader live certification of the preserved API archive.
 
 The preserved archive proof is non-promotable: it covers only the API candidate built from `a8e2218c530b4323e8e44ca0cf25b3d22e2aea4d`, while the accepted repository source is newer and a definitive API/Admin/package tuple does not exist. The ledger leaves public restore, definitive tuple, final consumers/accessibility/upgrade/smoke, hosted accessibility, approvals, attestation, signing, immutable promotion, soak, stable tag, and final release explicitly false/unperformed. This handoff remains non-certifying.
 
@@ -68,7 +68,7 @@ Tasks 1–11 are complete through local implementation and validation. Key Cmsif
 | Task 9 | through `26bd204` plus the evidence-only documentation commit | Moving-baseline fixture, final-review compatibility/safety fixes, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
 | Task 10 | `29ba5a8^..b68172d` plus its earlier evidence-only documentation commit; sibling `5216a18..e5a7c57` | Shared request-factory resilience, direct/DI/Admin parity, construction-time configuration, atomic logical breaker completion, hard synchronous/asynchronous deadline, stable scheduled request/response snapshots, post-sender observer scheduling isolation, retry ownership, cancellation/observer exclusion, and final local package validation complete; exact prerelease publication or a separately approved identity/pin-reviewed replacement remains gated. |
 | Task 11 | `a482873..bdaa0ff` plus the documentation commit containing this handoff | Exact SDK and twelve locks, unified xUnit v3, warning-free Release enforcement, Sass modules, bounded PostgreSQL resolved listing, deterministic media/webhook capacity invariants, open coverage/capacity trends, locked workflows/containers, and dependency automation complete locally; public restore remains gated. |
-| Task 12 repository implementation | through `da3a428` plus the evidence-only documentation commit containing this handoff | Exact candidate verification/build/promotion policy, clean consumers, production-like smoke, accessibility, compatibility/governance, supply-chain controls, offline OCI loading, isolated public-package proof, complete attestation subjects, certified-manifest smoke identity, and bounded diagnostics are implemented and source/policy-tested. Definitive public and hosted execution remains gated. |
+| Task 12 repository implementation | through `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e` plus the evidence-only documentation commit containing this handoff | Exact candidate verification/build/promotion policy, clean consumers, production-like smoke, accessibility, compatibility/governance, supply-chain controls, offline OCI loading, isolated public-package proof, complete attestation subjects, certified-manifest smoke identity, and bounded diagnostics are implemented and source/policy-tested. Definitive public and hosted execution remains gated. |
 
 Task 5 also changed sibling packages outside this repository:
 

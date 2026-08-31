@@ -34,6 +34,22 @@ const digest = (value) => createHash("sha256").update(value).digest("hex");
 
 function load() { assert.ok(existsSync(evidencePath), "Task 12 evidence manifest must exist"); return JSON.parse(readFileSync(evidencePath, "utf8")); }
 function task12Section(plan) { return plan.match(/### Task 12:[\s\S]*?(?=\n## Completion Gate)/)?.[0] ?? ""; }
+function acceptedTask12Sources(documentText, readinessText) {
+  const capture = (text, pattern, context) => {
+    const match = text.match(pattern);
+    assert.ok(match, `missing ${context} source reference`);
+    return match[1];
+  };
+  return [
+    capture(readinessText, /\*\*Accepted implementation revision:\*\* `([0-9a-f]{40})`/, "readiness accepted implementation"),
+    capture(readinessText, /Task 12 local evidence manifest[^\n]*accepted implementation SHA `([0-9a-f]{40})`/, "readiness evidence binding"),
+    capture(readinessText, /Task 12 repository implementation[^\n]*present through `([0-9a-f]{40})`/, "readiness remediation update"),
+    capture(documentText, /Accepted Task 12 repository implementation source: `([0-9a-f]{40})`/, "handoff accepted implementation"),
+    capture(documentText, /Expected:[^\n]*accepted Task 12 implementation source `([0-9a-f]{40})`/, "handoff expected history"),
+    capture(documentText, /Task 12 local evidence ledger[^\n]*accepted implementation `([0-9a-f]{40})`/, "handoff evidence binding"),
+    capture(documentText, /Task 12 repository implementation \| through `([0-9a-f]{7,40})`/, "handoff completion table"),
+  ];
+}
 function validate(evidence, documentText = docs, planText = outerPlan, readinessText = readiness) {
   assert.equal(evidence.schema, "cmsify.task12-evidence.v1");
   assert.deepEqual(evidence.certification, {
@@ -43,6 +59,7 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   });
   for (const key of ["sourceSha", "sdkVersion", "nodeVersion", "dockerClientVersion", "dockerServerVersion", "localFeedPackage", "checks", "artifacts", "externalGates", "pendingReleaseGates", "knownDiagnostics"]) assert.ok(key in evidence, `missing ${key}`);
   assert.equal(evidence.sourceSha, sha, "evidence must not transplant a stale source SHA");
+  for (const acceptedSource of acceptedTask12Sources(documentText, readinessText)) assert.equal(acceptedSource, evidence.sourceSha, "current Task 12 documentation must agree with the evidence source SHA");
   assert.equal(evidence.sdkVersion, "10.0.400"); assert.equal(evidence.nodeVersion, "v24.14.1"); assert.equal(evidence.dockerClientVersion, "29.7.2"); assert.equal(evidence.dockerServerVersion, null);
   assert.deepEqual(evidence.localFeedPackage, {
     id: "SyntaxCircus.Http.Resilience",
