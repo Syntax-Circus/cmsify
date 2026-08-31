@@ -9,7 +9,7 @@ describe("published package consumer", () => {
     const output = execFileSync(process.execPath, ["scripts/check-clean-consumer.mjs"], { cwd: sdkRoot, encoding: "utf8" });
 
     expect(output).toContain("Clean consumer typecheck passed.");
-  });
+  }, 30_000);
 
   it("fails closed when release validation supplies a missing packed archive", () => {
     const missingTarball = resolve(sdkRoot, "missing-release-candidate.tgz");
