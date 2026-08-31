@@ -237,6 +237,7 @@ function Test-PublicPackageRestore {
     $packageId = [string] $identity.id
     $packageVersion = [string] $identity.version
     $localUnsignedSha = [string] $identity.localUnsignedSha256
+    $publicSignedSha = [string] $identity.publicSignedSha256
     $contentHash = [string] $identity.contentHash
     $expectedSignatureType = [string] $identity.expectedRepositorySignature.type
     $expectedServiceIndex = [string] $identity.expectedRepositorySignature.serviceIndex
@@ -244,6 +245,7 @@ function Test-PublicPackageRestore {
     if ($packageId -cnotmatch "^[A-Za-z0-9][A-Za-z0-9._-]+$" -or
         $packageVersion -cnotmatch "^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" -or
         $localUnsignedSha -cnotmatch "^[A-F0-9]{64}$" -or
+        $publicSignedSha -cnotmatch "^[A-F0-9]{64}$" -or
         $contentHash -cnotmatch "^[A-Za-z0-9+/]{86}==$" -or
         $expectedSignatureType -cne "Repository" -or
         $expectedServiceIndex -cne "https://api.nuget.org/v3/index.json" -or
@@ -281,6 +283,7 @@ function Test-PublicPackageRestore {
         [void] (Invoke-CheckedNative -FilePath "curl" -Arguments @("--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--tlsv1.2", "--output", $nupkgPath, $downloadUrl) -FailureMessage "Exact public package download failed")
         if (-not (Test-Path -LiteralPath $nupkgPath -PathType Leaf)) { throw "Exact public package download produced no nupkg." }
         $downloadedSignedSha = (Get-FileHash -LiteralPath $nupkgPath -Algorithm SHA256).Hash
+        if ($downloadedSignedSha -cne $publicSignedSha) { throw "Public package SHA-256 does not match the tracked repository-signed package identity." }
         $verificationOutput = Invoke-CheckedNative -FilePath "dotnet" -Arguments @("nuget", "verify", $nupkgPath, "--all", "--configfile", $configPath, "--verbosity", "normal", "--force-english-output") -FailureMessage "Public package signature verification failed"
         $verificationText = $verificationOutput -join [Environment]::NewLine
         $contentHashMatches = [Regex]::Matches($verificationText, "(?m)^[ `t]*Content hash:[ `t]*(?<value>\S+)[ `t`r]*$")

@@ -1,10 +1,10 @@
 {
   "schema": "cmsify.task12-evidence.v1",
-  "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e",
+  "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913",
   "certification": {
     "status": "preliminary-local-non-certifying",
     "certifiesRelease": false,
-    "reason": "Local source, policy, and preserved-candidate evidence only; public, hosted, approval, signing, promotion, soak, tag, and final-release gates remain unperformed."
+    "reason": "Local source, policy, public-package restore, and preserved-candidate evidence only; hosted candidate, approval, signing, promotion, soak, tag, and final-release gates remain unperformed."
   },
   "sdkVersion": "10.0.400",
   "nodeVersion": "v24.14.1",
@@ -30,20 +30,22 @@
   "localFeedPackage": {
     "id": "SyntaxCircus.Http.Resilience",
     "version": "0.2.0-cmsify.1",
-    "localUnsignedSha256": "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
-    "contentHash": "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+    "defaultBranchSourceSha": "827aafb7f9eaa8e35c67c3a73aa5bd761384899a",
+    "localUnsignedSha256": "44912C98E653C2414D42BDD5174478DF184D02AFDA6E95C1DD1996F4C81C40B8",
+    "publicSignedSha256": "3C2D87EF5B1C5D3FD49A4EB57B89EF3A251841B03FDC1F762256ED26B8BE0E65",
+    "contentHash": "NMTysZp25vAOrFJ67PkFUbWleijS54StWjT5GAXbRLWoxv+H69VBFgP6f+wR0YRTNvF/yMvlIallZu3ID7ue6w==",
     "expectedRepositorySignature": {
       "type": "Repository",
       "serviceIndex": "https://api.nuget.org/v3/index.json",
       "owner": "syntaxcircus"
     },
-    "publicRestoreValidated": false
+    "publicRestoreValidated": true
   },
   "checks": [
-    { "name": "release-contract suite", "command": "node --test tests/release-contract/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 504, "passed": 504, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
-    { "name": "release-smoke source suite", "command": "node --test tests/release-smoke/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 91, "passed": 91, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
-    { "name": "upgrade unit suite", "command": "node --test tests/upgrade/unit/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 173, "passed": 173, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
-    { "name": "standalone release verifier", "command": "node scripts/release/verify-release-contract.mjs", "exitCode": 0, "status": "passed", "counts": null, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    { "name": "release-contract suite", "command": "node --test tests/release-contract/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 505, "passed": 505, "failed": 0 }, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
+    { "name": "release-smoke source suite", "command": "node --test tests/release-smoke/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 91, "passed": 91, "failed": 0 }, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
+    { "name": "upgrade unit suite", "command": "node --test tests/upgrade/unit/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 173, "passed": 173, "failed": 0 }, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
+    { "name": "standalone release verifier", "command": "node scripts/release/verify-release-contract.mjs", "exitCode": 0, "status": "passed", "counts": null, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
     {
       "name": "pre-publication full product sweep",
       "command": "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal",
@@ -82,7 +84,7 @@
     }
   ],
   "externalGates": {
-    "publicPackageRestore": { "passed": false, "reason": "The tested resilience package is branch-built local evidence and is absent from the official public NuGet flat-container listing; merge, default-branch repack/reconciliation, and trusted publication must occur before this gate can run.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate public-package-restore", "evidenceLink": null },
+    "publicPackageRestore": { "passed": true, "reason": "The exact default-branch-built package is repository-signed on NuGet.org; its content hash, signature owner/service index, all five lock and asset graphs, fresh public-only locked restore, and restored signed package bytes were validated on 2026-08-31.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate public-package-restore", "evidenceLink": "https://github.com/Syntax-Circus/SyntaxCircus.Http.Resilience/actions/runs/33404390063" },
     "hostedAccessibility": { "passed": false, "reason": "No hosted candidate accessibility workflow evidence exists for the definitive tuple.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-accessibility", "evidenceLink": null },
     "protectedApprovals": { "passed": false, "reason": "No protected release approval has been verified.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate protected-approvals", "evidenceLink": null },
     "artifactAttestation": { "passed": false, "reason": "No canonical definitive candidate set has hosted attestations.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate artifact-attestation", "evidenceLink": null },
@@ -92,14 +94,14 @@
     "finalRelease": { "passed": false, "reason": "No stable tag or release is authorized or certified.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate final-release", "evidenceLink": null }
   },
   "pendingReleaseGates": {
-    "definitivePackageOciTuple": { "passed": false, "status": "unperformed", "reason": "The public resilience dependency is unavailable. After that gate passes and explicit authorization is given, an authorized maintainer must push an already-created, reviewed, v-prefixed SemVer tag to trigger the tag-push-only workflow; this recorded command has not been executed.", "owner": "authorized maintainer", "nextCommand": "git push origin \"refs/tags/$env:CMSIFY_RELEASE_TAG\"", "evidenceLink": null },
+    "definitivePackageOciTuple": { "passed": false, "status": "unperformed", "reason": "The public resilience dependency gate passed. After the dated changelog and this evidence reconciliation merge and explicit authorization is given, an authorized maintainer must push an already-created, reviewed, v-prefixed SemVer tag to trigger the tag-push-only workflow; this recorded command has not been executed.", "owner": "authorized maintainer", "nextCommand": "git push origin \"refs/tags/$env:CMSIFY_RELEASE_TAG\"", "evidenceLink": null },
     "finalConsumersAccessibilityUpgradeSmoke": { "passed": false, "status": "unperformed", "reason": "Clean NuGet/npm consumers, candidate accessibility, exact-image upgrade/rollback, and production-like smoke have not run against a definitive tuple.", "owner": "release operator", "nextCommand": "gh run watch $env:CMSIFY_RELEASE_RUN_ID --exit-status", "evidenceLink": null },
     "soak": { "passed": false, "status": "unperformed", "reason": "The required authenticated hosted soak has not run for a certified tuple.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-smoke-soak", "evidenceLink": null },
     "stableTag": { "passed": false, "status": "unperformed", "reason": "No stable tag may be created until the preceding gates pass and explicit approval is given.", "owner": "approver and release operator", "nextCommand": "git tag --sign $env:CMSIFY_RELEASE_TAG $env:CMSIFY_RELEASE_SOURCE_SHA", "evidenceLink": null }
   },
   "knownDiagnostics": [
-    "The ignored SyntaxCircus.Http.Resilience package was built from sibling feature-branch source and must not be published; follow the post-merge default-branch handoff and refresh this identity before the public gate.",
-    "The exact SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 version remains absent from the official public flat-container listing; the approved ignored local package is not public evidence.",
+    "The exact SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 default-branch candidate was published by the protected workflow and passed the public restore gate; the earlier ignored feature-branch artifact remains non-public historical evidence only.",
+    "Public restore validated the repository signature, NuGet content hash, all five lock and asset graphs, and exact signed package-cache bytes; hosted Cmsify candidate certification remains unperformed.",
     "CODEOWNERS remains intentionally inactive until a repository-verified GitHub user or team is supplied; hosted protection configuration is external evidence.",
     "The preserved API archive passed reviewed offline-loader live certification, but it predates the accepted implementation and is neither an API/Admin pair nor a definitive promotable candidate tuple.",
     "The historical media reconciliation races remain an adjudication caveat; the latest preliminary full solution sweep passed 599/599 with zero skips and did not reproduce them.",

@@ -10,22 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Releases are certified from a reviewed immutable SemVer tag. Branch and pull-request builds validate only and never publish artifacts or create tags.
 
-## [1.0.0] - Unreleased
+## [0.2.0] - 2026-08-31
+
+### Added
+
+- First-party .NET and TypeScript SDK packages, Admin accessibility certification, production-like release smoke tests, and deterministic upgrade/rollback rehearsal.
+- OIDC administration support, durable media reconciliation, package import/export, and release provenance/SBOM attestations.
 
 ### Changed
 
 - Public SDK packages (`SyntaxCircus.Cmsify.Contracts`, both .NET clients, and `@cmsify/client`) are MIT-licensed; the server repository and OCI images remain AGPL-3.0-or-later.
-
-## [0.1.3] - Unreleased
-
-### Added
-
 - Workspace responses now include the actor-specific `canWrite` capability for permission-aware clients.
 - The Admin app now generates slugs from a new workspace, template, picklist, or component name until the slug is manually edited.
 - User-management forms show API validation details inline.
-
-### Changed
-
 - Workspace management and selection now honor user role and per-workspace grants. The workspace picker is selectable only when multiple workspaces are available.
 - Admin navigation now shows only settings available to the current role; webhook management remains an Editor-level, workspace-scoped feature.
 - Admin static CSS, scripts, and branding assets use Blazor asset fingerprinting so deployments receive changed assets without stale browser caches.
@@ -34,6 +31,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Unauthorized API requests now return normal `401` or `403` responses instead of requiring an unconfigured authentication scheme.
+
+## [0.1.3] - 2026-08-21
+
+### Fixed
+
+- Corrected workspace permissions and administration authorization behavior.
 
 ## [0.1.0] - 2026-08-20
 

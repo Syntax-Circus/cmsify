@@ -177,7 +177,7 @@ function runPublicRestore({
   if (mutateScript) script = mutateScript(script);
   writeFileSync(scriptPath, script);
   writeFileSync(path.join(repo, "Cmsify.slnx"), "<Solution />");
-  const trackedIdentity = { ...packageIdentity, localUnsignedSha256: localUnsignedPackageSha256, contentHash, publicRestoreValidated: false };
+  const trackedIdentity = { ...packageIdentity, localUnsignedSha256: localUnsignedPackageSha256, publicSignedSha256: sha256(downloadBytes).toUpperCase(), contentHash, publicRestoreValidated: true };
   mutateIdentity?.(trackedIdentity);
   writeFileSync(evidencePath, JSON.stringify({ localFeedPackage: trackedIdentity }));
   for (const [assetIndex, asset] of affectedAssets.entries()) {
@@ -291,11 +291,18 @@ test("public restore authenticates exact public bytes in isolated NuGet state an
   for (const mutateIdentity of [
     (identity) => { delete identity.contentHash; },
     (identity) => { identity.contentHash = "wrong"; },
+    (identity) => { delete identity.publicSignedSha256; },
+    (identity) => { identity.publicSignedSha256 = "wrong"; },
   ]) {
     const result = runPublicRestore({ mutateIdentity });
     assert.notEqual(result.status, 0, result.stdout);
     assert.equal(result.calls.length, 0, result.calls.join("\n"));
   }
+
+  const wrongPublicSha = runPublicRestore({ mutateIdentity(identity) { identity.publicSignedSha256 = "0".repeat(64); } });
+  assert.notEqual(wrongPublicSha.status, 0, wrongPublicSha.stdout);
+  assert.equal(wrongPublicSha.calls.filter((call) => call.startsWith("curl ")).length, 1);
+  assert.equal(wrongPublicSha.calls.filter((call) => call.startsWith("dotnet nuget verify ")).length, 0);
 
   for (const options of [
     { verification: { output: "Successfully verified package.\n" } },
