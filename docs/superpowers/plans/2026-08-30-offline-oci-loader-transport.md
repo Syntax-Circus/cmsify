@@ -14,7 +14,7 @@
 
 - The original OCI archive, its selected descriptor, and `SHA256SUMS` remain the certified artifact identity; the Docker archive is disposable transport scratch and never a release subject.
 - Keep the CLI stable: `load --archive <oci.tar> --manifest <release-manifest.json> --kind <api|admin> --version <semver>`.
-- Keep exact helper identity `quay.io/skopeo/stable:v1.22.2@sha256:f7cfa282082cbfc25b754905225985584d1fbc410fef99e1b498c9b64087b755`.
+- Keep exact helper identity `quay.io/skopeo/stable:v1.22.2@sha256:a28a9c6195f71595b3184549c54c1301503d813de55842cfdd0bdd171e6c73e9`.
 - Skopeo runs with `--network none`, no Docker socket, a read-only OCI archive mount, and one writable run-owned scratch mount.
 - No registry, Docker network, source rebuild, external candidate pull, daemon reconfiguration, publication, push, Git tag, signature, attestation, promotion, or release.
 - Validate `linux/amd64`, strict SemVer, exact canonical refs, descriptor/config/blob sizes and SHA-256 values, five required OCI labels, config digest/image ID equality, and ordered config/Docker DiffID equality.
