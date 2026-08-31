@@ -22,12 +22,19 @@ const definitions = {
     documentName: `Cmsify NuGet SDK ${version}`,
     license: "MIT",
     names: ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching"],
+    inventoryNames: [
+      ["SyntaxCircus.Cmsify.Contracts", "Cmsify.Contracts"],
+      ["SyntaxCircus.Cmsify.Client"],
+      ["SyntaxCircus.Cmsify.Client.DistributedCaching"],
+    ],
+    requireExactInventorySubjects: true,
     purl: (name) => `pkg:nuget/${name}@${version}`,
   },
   npm: {
     documentName: `Cmsify npm SDK ${version}`,
     license: "MIT",
     names: ["@cmsify/client"],
+    requireExactInventorySubjects: true,
     purl: () => `pkg:npm/%40cmsify/client@${version}`,
   },
   api: {
@@ -68,25 +75,32 @@ function validateInventory(kind, document) {
     throw new Error(`SPDX ${kind} existing package inventory must have unique valid SPDXIDs.`);
   }
   const described = Array.isArray(document.documentDescribes) ? document.documentDescribes : [];
-  if (described.length === 0 || described.some((id) => !packageIds.includes(id))) {
+  if (described.some((id) => !packageIds.includes(id))) {
     throw new Error(`SPDX ${kind} requires documentDescribes target evidence from its existing package inventory.`);
   }
   const relationships = Array.isArray(document.relationships) ? document.relationships : [];
   if (relationships.length === 0) throw new Error(`SPDX ${kind} requires meaningful existing inventory relationships.`);
   const references = relationshipReferences(document);
   const describedIds = new Set(described);
+  const relationshipDescribedIds = [];
   for (const relationship of relationships) {
     for (const reference of [relationship?.spdxElementId, relationship?.relatedSpdxElement]) {
       if (!references.exists(reference)) throw new Error(`SPDX ${kind} has dangling relationship reference ${reference}.`);
     }
-    if (relationship?.spdxElementId === document.SPDXID && relationship?.relationshipType === "DESCRIBES" && !describedIds.has(relationship.relatedSpdxElement)) {
-      throw new Error(`SPDX ${kind} DESCRIBES relationship contradicts documentDescribes.`);
+    if (relationship?.spdxElementId === document.SPDXID && relationship?.relationshipType === "DESCRIBES") {
+      relationshipDescribedIds.push(relationship.relatedSpdxElement);
+      if (described.length > 0 && !describedIds.has(relationship.relatedSpdxElement)) {
+        throw new Error(`SPDX ${kind} DESCRIBES relationship contradicts documentDescribes.`);
+      }
     }
-    if (relationship?.relatedSpdxElement === document.SPDXID && relationship?.relationshipType === "DESCRIBED_BY" && !describedIds.has(relationship.spdxElementId)) {
-      throw new Error(`SPDX ${kind} DESCRIBED_BY relationship contradicts documentDescribes.`);
+    if (relationship?.relatedSpdxElement === document.SPDXID && relationship?.relationshipType === "DESCRIBED_BY") {
+      relationshipDescribedIds.push(relationship.spdxElementId);
+      if (described.length > 0 && !describedIds.has(relationship.spdxElementId)) {
+        throw new Error(`SPDX ${kind} DESCRIBED_BY relationship contradicts documentDescribes.`);
+      }
     }
   }
-  return { packages, described, relationships };
+  return { packages, described: described.length > 0 ? described : [...new Set(relationshipDescribedIds)], relationships };
 }
 
 function selectSubjects(kind, definition, packages, described, relationships) {
@@ -94,9 +108,12 @@ function selectSubjects(kind, definition, packages, described, relationships) {
   const used = new Set();
   const describedPackages = described.map((id) => packages.find((candidate) => candidate.SPDXID === id)).filter(Boolean);
   for (const [index, name] of definition.names.entries()) {
-    const exact = packages.filter((candidate) => candidate.name === name && !used.has(candidate));
+    const inventoryNames = definition.inventoryNames?.[index] ?? [name];
+    const exact = packages.filter((candidate) => inventoryNames.includes(candidate.name) && !used.has(candidate));
     if (exact.length > 1) throw new Error(`SPDX ${kind} has ambiguous existing target evidence for ${name}.`);
-    const subject = exact[0] ?? describedPackages[index] ?? describedPackages.find((candidate) => !used.has(candidate));
+    const subject = exact[0] ?? (definition.requireExactInventorySubjects
+      ? undefined
+      : describedPackages[index] ?? describedPackages.find((candidate) => !used.has(candidate)));
     if (!subject || used.has(subject)) throw new Error(`SPDX ${kind} is missing existing target evidence for ${name}.`);
     selected.push(subject);
     used.add(subject);
