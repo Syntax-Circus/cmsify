@@ -10,7 +10,7 @@ This is a point-in-time resume document for moving the remediation work to anoth
 - Exact Task 10 Cmsify implementation source tested: `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` (`Snapshot Cmsify retry configuration`); full implementation range `29ba5a8^..b68172d`.
 - Exact sibling source tested: `e5a7c57bbd3f24eb15c66e5d740e05fffd4f1bc3` (`Clarify cancellation ownership control`) on `feature/cmsify-resilience`; full change range `5216a18..e5a7c57`.
 - State: Tasks 1–11 are implemented and validated locally. Task 12 repository implementation and its preliminary whole-branch review fixes are implemented and source/policy-tested through the accepted SHA. F-01 through F-19 are remediated at the local source/policy level. The outer remediation Task 12 remains open only for the exact public dependency, definitive same-source candidate tuple, final clean consumers/accessibility/upgrade/smoke, hosted evidence, approvals, signing/attestation, immutable promotion, soak, stable tag, and final release.
-- Publication prerequisite: exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` bytes remain available only through the approved ignored local feed; the user must publish those bytes or approve and pin an exact stable replacement before ordinary public restore evidence can be collected.
+- Publication prerequisite: exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` bytes remain available only through the approved ignored local feed; the package owner must publish the exact prerelease publicly before ordinary public restore evidence can be collected. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries.
 - The evidence-only commit containing this refreshed handoff follows the accepted Task 12 implementation commit and changes documentation/release-contract evidence coverage only, not runtime, generated output, package bytes, or dependency locks.
 - No push, merge, tag, package publication, image publication, or release was performed in Task 10 or Task 11.
 
@@ -66,7 +66,7 @@ Tasks 1–11 are complete through local implementation and validation. Key Cmsif
 | Task 7 final | `64ee4fb` | Reader-first inventory, runtime decrypt telemetry, and actionable diagnostics; combined GO. |
 | Task 8 | `415a6a7` | Durable media reconciliation implemented and independently approved. |
 | Task 9 | through `26bd204` plus the evidence-only documentation commit | Moving-baseline fixture, final-review compatibility/safety fixes, exact-image upgrade/rollback, CI/release gates, runbook, and fresh validation evidence complete. |
-| Task 10 | `29ba5a8^..b68172d` plus its earlier evidence-only documentation commit; sibling `5216a18..e5a7c57` | Shared request-factory resilience, direct/DI/Admin parity, construction-time configuration, atomic logical breaker completion, hard synchronous/asynchronous deadline, stable scheduled request/response snapshots, post-sender observer scheduling isolation, retry ownership, cancellation/observer exclusion, and final local package validation complete; stable publication/replacement remains gated. |
+| Task 10 | `29ba5a8^..b68172d` plus its earlier evidence-only documentation commit; sibling `5216a18..e5a7c57` | Shared request-factory resilience, direct/DI/Admin parity, construction-time configuration, atomic logical breaker completion, hard synchronous/asynchronous deadline, stable scheduled request/response snapshots, post-sender observer scheduling isolation, retry ownership, cancellation/observer exclusion, and final local package validation complete; exact prerelease publication or a separately approved identity/pin-reviewed replacement remains gated. |
 | Task 11 | `a482873..bdaa0ff` plus the documentation commit containing this handoff | Exact SDK and twelve locks, unified xUnit v3, warning-free Release enforcement, Sass modules, bounded PostgreSQL resolved listing, deterministic media/webhook capacity invariants, open coverage/capacity trends, locked workflows/containers, and dependency automation complete locally; public restore remains gated. |
 | Task 12 repository implementation | through `da3a428` plus the evidence-only documentation commit containing this handoff | Exact candidate verification/build/promotion policy, clean consumers, production-like smoke, accessibility, compatibility/governance, supply-chain controls, offline OCI loading, isolated public-package proof, complete attestation subjects, certified-manifest smoke identity, and bounded diagnostics are implemented and source/policy-tested. Definitive public and hosted execution remains gated. |
 
@@ -103,8 +103,8 @@ These are explicitly non-blocking and must remain visible for final release adju
 - Task 2's external GitHub environment evidence.
 - Task 4's Syft relationship-only `DESCRIBES` handling and smoke cleanup trap requirement.
 - Task 5 package publication and all external release evidence remain explicit-approval gates.
-- Task 10's `SyntaxCircus.Http.Resilience` stable publication/replacement and clean public restore remain explicit user-owned gates.
-- Public/CI restore remains blocked until the user publishes the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` bytes or approves and pins an exact stable replacement; the ordinary locked restore and all downstream evidence must then be rerun.
+- Task 10's exact `SyntaxCircus.Http.Resilience` prerelease publication and clean public restore remain explicit user-owned gates; a replacement requires separate explicit approval and identity/pin review.
+- Public/CI restore remains blocked until the package owner publishes the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` prerelease publicly. A separately approved replacement is an alternative only after its package identity, version, content hash, central pin, and lock entries are reviewed; the ordinary locked restore and all downstream evidence must then be rerun.
 - exact candidate package certification and clean consumers for every NuGet/npm artifact, plus exact candidate container certification from the promoted OCI bytes and immutable digest, are implemented as fail-closed workflow/verifier contracts; definitive candidate execution remains unperformed.
 - Production-like PostgreSQL/API/Admin artifact smoke covering health/login plus CRUD, media, OIDC, webhook, and scheduled-publication scenario certification, including backup and restart certification, is implemented and source-tested; definitive hosted execution remains unperformed.
 - accessibility certification with the required trigger expansion and bounded evidence is implemented; definitive candidate and hosted accessibility remain unperformed.
@@ -126,7 +126,7 @@ The exact operating commands, report schemas, blocking/trend distinction, datase
 - Capacity contracts passed 15/15 and the real runner exited 0 at `05984108b84d708f3fae90260d971a387af71960`. Its `cmsify.capacity.v1` report used PostgreSQL 17.10, exact two-command resolved samples, webhook command count 3 with zero duplicates/overclaims, and `blockingInvariantsPassed: true`. A resolved p95 budget miss emitted a warning and `passed: false` without weakening or failing the blocking invariants.
 - The checked resolved fixture is 520 content items/2,600 published versions, the webhook fixture is 251 eligible rows for a batch of 100, and guarded media tests prove max+1 rejection without state plus incremental streaming/ownership. PostgreSQL 17 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` reported 33.405 ms for the earlier design-minimum 500/2,500 page and showed the version probes using existing indexes; no new index or migration was added.
 
-Public/CI restore remains blocked because `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` is not available from an approved public source. The user must publish those exact bytes or approve and pin a stable replacement, then force a clean ordinary public locked restore, verify asset/package identities, and rerun the focused/full gates. No hosted run, public restore, push, merge, tag, publication, or release is claimed here.
+Public/CI restore remains blocked because `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` is not available from an approved public source. The package owner must publish the exact prerelease publicly, then the release operator must run a clean ordinary public locked restore, verify asset/package identities, and rerun the focused/full gates. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries. No hosted run, public restore, push, merge, tag, publication, or release is claimed here.
 
 ## Historical Task 8 start point
 
@@ -153,7 +153,7 @@ Before implementation on the new computer:
 - Run one heavy process at a time. Before killing a suspected stale process, verify its command line and that its parent has exited; do not touch IDE, Docker, or unrelated session processes.
 - Do not push, merge, tag, publish, or release without explicit user approval.
 
-The historical resume instruction at this point was to continue with Task 8. The current resume point is the Task 10 stable-publication gate followed by Task 11, as recorded below.
+The historical resume instruction at this point was to continue with Task 8. The later resume point was the Task 10 exact-prerelease public-package gate followed by Task 11, as recorded below.
 
 ## Task 8 continuation result
 
@@ -310,7 +310,7 @@ The final package was copied into Cmsify's ignored `artifacts/local-nuget/http-r
 dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --force --no-cache --verbosity minimal
 ```
 
-Five `project.assets.json` graphs—client, distributed-cache add-on, client tests, Admin, and Admin tests—resolve `SyntaxCircus.Http.Resilience/0.2.0-cmsify.1` as type `package`, with the one content hash above and no sibling source path. Cache metadata names the ignored local feed, the cached `.nupkg` SHA-256 matches, `git ls-files -- artifacts/local-nuget` returns nothing, and `.gitignore` excludes the config, feed bytes, and package cache.
+Five `project.assets.json` graphs—client, distributed-cache add-on, client tests, Admin, and Admin tests—resolve `SyntaxCircus.Http.Resilience/0.2.0-cmsify.1` as type `package`, with the one content hash above and no sibling source path. Cache metadata names the ignored local feed, the cached unsigned `.nupkg` SHA-256 matches the local provenance SHA, `git ls-files -- artifacts/local-nuget` returns nothing, and `.gitignore` excludes the config, feed bytes, and package cache.
 
 ### Fresh validation
 
@@ -324,9 +324,9 @@ Five `project.assets.json` graphs—client, distributed-cache add-on, client tes
 
 Earlier Task 10 full-solution attempts exposed the existing Media API fixture/initial-reconciliation race, including one Critical Fix 3 occurrence during the single-MSBuild-node run in `AvailableAssetWithMissingBlob_ReturnsSanitizedProblemDetails`; its exact rerun passed and the subsequent single-MSBuild-node suite passed 527/527. The Critical Fix 4 single-MSBuild-node run passed 527/527 on its first authorized-Docker attempt, so no new Media occurrence was observed. Task 10 changed no Media source/test path. Preserve this Task 12 concern for final adjudication rather than hiding it.
 
-### User-owned stable-publication gate
+### User-owned public-package gate
 
-Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1` has not been published and exists only in ignored local artifacts. Public CI restore therefore remains blocked. The user must publish or otherwise provide the approved exact stable `SyntaxCircus.Http.Resilience` package; then Cmsify must replace the prerelease pin with that exact stable version, remove reliance on the local feed, force a clean public restore, verify every asset graph and package hash, and rerun the sibling/consumer/client/Admin/full Release gates. Do not claim this gate is complete until that evidence exists. No command in Task 10 pushed, merged, tagged, published, or released anything.
+Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1` has not been published and exists only in ignored local artifacts. Public CI restore therefore remains blocked. The package owner must publish the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` prerelease publicly; Cmsify retains that exact central pin, removes reliance on the local feed, runs a clean public locked restore, verifies the repository signature, content hash, every asset graph, and signed package-cache bytes, and reruns the sibling/consumer/client/Admin/full Release gates. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries. Do not claim this gate is complete until that evidence exists. No command in Task 10 pushed, merged, tagged, published, or released anything.
 
 ### Environment facts and limitations
 
@@ -335,11 +335,11 @@ Task 10 is complete locally, but the release dependency is not. `0.2.0-cmsify.1`
 - The documented and CI prerequisite remains Node 22. The local nvm installation exposed only Node 18.16.0, so the complete Node and TypeScript checks used the available newer Codex runtime Node 24.19.0 with npm 11.11.0. No Node check was skipped.
 - `npm ci` reported 8 dependency advisories (1 low, 1 moderate, 5 high, 1 critical); dependency remediation is outside Task 9.8 and remains visible for final release adjudication.
 - Stable `SyntaxCircus.Storage` `0.2.0` is pinned and resolved in Infrastructure/API assets. Its publication was user-confirmed; Task 9 did not publish it.
-- `SyntaxCircus.Http.Resilience` remains pinned to local-only `0.2.0-cmsify.1`; unlike the storage package, no stable publication has been confirmed. Public/CI restore is blocked until the user completes the replacement gate above.
+- `SyntaxCircus.Http.Resilience` remains pinned to local-only `0.2.0-cmsify.1`; unlike the storage package, its exact prerelease publication has not been confirmed. Public/CI restore is blocked until the package owner publishes it and the release operator completes the public-package gate above.
 - The candidate is a local content-addressed image, not a published release artifact. No external GitHub Actions run ID exists for this local evidence, and no release is certified solely by this handoff.
 
 ## Next task: public dependency and definitive release tuple
 
-Task 12 repository implementation and pre-publication review fixes are complete locally through accepted implementation `da3a428be6f12b9cdfbdde5a17daefab025615e0`; the preliminary evidence-only commit containing this handoff follows it. Do not redo that work. Resume with the explicit user-owned `SyntaxCircus.Http.Resilience` publication/replacement, then run the isolated ordinary public-restore gate. Publication itself is not authorized by this handoff.
+Task 12 repository implementation and pre-publication review fixes are complete locally through accepted implementation `a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e`; the preliminary evidence-only commit containing this handoff follows it. Do not redo that work. Resume when the package owner publishes the exact `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` prerelease publicly, then run the isolated ordinary public-restore gate. A replacement requires separate explicit approval and identity/pin review. Publication itself is not authorized by this handoff.
 
 After the public gate passes, build one definitive same-source package/API/Admin tuple and run its clean consumers, candidate accessibility, exact-image upgrade/rollback, production-like smoke, backup/restart, hosted accessibility, protected approvals, complete artifact attestations, registry signatures, immutable promotion, authenticated soak, stable tag verification, and final release gate in the order documented by the release runbook. Preserve the Task 9 rollback diagnostic omission and both historical media races for final adjudication. Do not push, merge, tag, publish, sign, attest, promote, or release without explicit approval.

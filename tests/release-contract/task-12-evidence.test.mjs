@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const evidencePath = path.join(root, "docs/evidence/task-12-local-verification.json");
-const sha = "da3a428be6f12b9cdfbdde5a17daefab025615e0";
+const sha = "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e";
 const readiness = readFileSync(path.join(root, "docs/v1-release-readiness.md"), "utf8");
+const handoff = readFileSync(path.join(root, "docs/v1-release-remediation-handoff.md"), "utf8");
 const releaseRunbook = readFileSync(path.join(root, "docs/release-runbook.md"), "utf8");
 const publishWorkflow = readFileSync(path.join(root, ".github/workflows/publish-cmsify.yml"), "utf8");
 const docs = ["docs/v1-release-readiness.md", "docs/v1-release-remediation-handoff.md", "docs/superpowers/plans/2026-08-24-v1-remediation.md"].map((file) => readFileSync(path.join(root, file), "utf8")).join("\n");
@@ -43,7 +44,14 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   for (const key of ["sourceSha", "sdkVersion", "nodeVersion", "dockerClientVersion", "dockerServerVersion", "localFeedPackage", "checks", "artifacts", "externalGates", "pendingReleaseGates", "knownDiagnostics"]) assert.ok(key in evidence, `missing ${key}`);
   assert.equal(evidence.sourceSha, sha, "evidence must not transplant a stale source SHA");
   assert.equal(evidence.sdkVersion, "10.0.400"); assert.equal(evidence.nodeVersion, "v24.14.1"); assert.equal(evidence.dockerClientVersion, "29.7.2"); assert.equal(evidence.dockerServerVersion, null);
-  assert.deepEqual(evidence.localFeedPackage, { id: "SyntaxCircus.Http.Resilience", version: "0.2.0-cmsify.1", sha256: "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C", contentHash: "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==", publicRestoreValidated: false });
+  assert.deepEqual(evidence.localFeedPackage, {
+    id: "SyntaxCircus.Http.Resilience",
+    version: "0.2.0-cmsify.1",
+    localUnsignedSha256: "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
+    contentHash: "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+    expectedRepositorySignature: { type: "Repository", serviceIndex: "https://api.nuget.org/v3/index.json", owner: "syntaxcircus" },
+    publicRestoreValidated: false,
+  });
   assert.deepEqual(evidence.checks, [
     { name: "release-contract suite", command: "node --test tests/release-contract/*.test.mjs", exitCode: 0, status: "passed", counts: { total: 504, passed: 504, failed: 0 }, sourceSha: sha },
     { name: "release-smoke source suite", command: "node --test tests/release-smoke/*.test.mjs", exitCode: 0, status: "passed", counts: { total: 91, passed: 91, failed: 0 }, sourceSha: sha },
@@ -97,6 +105,11 @@ function validate(evidence, documentText = docs, planText = outerPlan, readiness
   assert.match(readinessText, /^## Current SyntaxCircus package disposition$/m);
   assert.match(readinessText, /^## Completed repository remediation and current release remainder$/m);
   for (const claim of staleReadinessClaims) assert.doesNotMatch(readinessText, claim);
+  for (const publicationDocument of [readinessText, handoff]) {
+    assert.match(publicationDocument, /publish(?:es)? the exact `?SyntaxCircus\.Http\.Resilience`? `?0\.2\.0-cmsify\.1`?/i);
+    assert.match(publicationDocument, /replacement[^.\n]*(?:separate|explicit)[^.\n]*approv[^.\n]*(?:identity|pin)[^.\n]*review|(?:separate|explicit)[^.\n]*approv[^.\n]*replacement[^.\n]*(?:identity|pin)[^.\n]*review/i);
+    assert.doesNotMatch(publicationDocument, /must[^.\n]*(?:publish|provide)[^.\n]*(?:exact )?stable `?SyntaxCircus\.Http\.Resilience|must[^.\n]*replace[^.\n]*0\.2\.0-cmsify\.1[^.\n]*stable/i);
+  }
   for (let index = 1; index <= 19; index += 1) {
     const finding = `F-${String(index).padStart(2, "0")}`;
     const section = index <= 13
@@ -116,9 +129,12 @@ test("Task 12 evidence mutations are rejected", () => {
     (copy) => { copy.checks = []; }, (copy) => { copy.artifacts = []; },
     (copy) => { copy.sdkVersion = "0"; }, (copy) => { copy.nodeVersion = "v0"; }, (copy) => { copy.dockerClientVersion = "0"; }, (copy) => { copy.dockerServerVersion = "0"; },
     (copy) => { copy.checks[0].command = "stale"; }, (copy) => { copy.checks[0].counts.total = 0; }, (copy) => { copy.checks[4].reason = " "; },
-    (copy) => { copy.localFeedPackage.sha256 = "bad"; },
+    (copy) => { copy.localFeedPackage.localUnsignedSha256 = "bad"; },
     (copy) => { delete copy.localFeedPackage.contentHash; },
     (copy) => { copy.localFeedPackage.contentHash = "bad"; },
+    (copy) => { copy.localFeedPackage.expectedRepositorySignature.type = "Author"; },
+    (copy) => { copy.localFeedPackage.expectedRepositorySignature.serviceIndex = "https://example.invalid/v3/index.json"; },
+    (copy) => { copy.localFeedPackage.expectedRepositorySignature.owner = "attacker"; },
     (copy) => { copy.localFeedPackage.publicRestoreValidated = true; },
     (copy) => { copy.artifacts[0].status = "local-published"; }, (copy) => { copy.artifacts[0].status = "promotion-complete"; }, (copy) => { copy.artifacts[0].releaseCandidate = true; }, (copy) => { copy.artifacts[0].manifestDigest = copy.artifacts[0].imageId; },
     (copy) => { copy.sourceSha = "0".repeat(40); },

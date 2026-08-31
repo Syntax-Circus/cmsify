@@ -1,6 +1,6 @@
 {
   "schema": "cmsify.task12-evidence.v1",
-  "sourceSha": "da3a428be6f12b9cdfbdde5a17daefab025615e0",
+  "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e",
   "certification": {
     "status": "preliminary-local-non-certifying",
     "certifiesRelease": false,
@@ -30,15 +30,20 @@
   "localFeedPackage": {
     "id": "SyntaxCircus.Http.Resilience",
     "version": "0.2.0-cmsify.1",
-    "sha256": "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
+    "localUnsignedSha256": "17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C",
     "contentHash": "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+    "expectedRepositorySignature": {
+      "type": "Repository",
+      "serviceIndex": "https://api.nuget.org/v3/index.json",
+      "owner": "syntaxcircus"
+    },
     "publicRestoreValidated": false
   },
   "checks": [
-    { "name": "release-contract suite", "command": "node --test tests/release-contract/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 504, "passed": 504, "failed": 0 }, "sourceSha": "da3a428be6f12b9cdfbdde5a17daefab025615e0" },
-    { "name": "release-smoke source suite", "command": "node --test tests/release-smoke/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 91, "passed": 91, "failed": 0 }, "sourceSha": "da3a428be6f12b9cdfbdde5a17daefab025615e0" },
-    { "name": "upgrade unit suite", "command": "node --test tests/upgrade/unit/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 173, "passed": 173, "failed": 0 }, "sourceSha": "da3a428be6f12b9cdfbdde5a17daefab025615e0" },
-    { "name": "standalone release verifier", "command": "node scripts/release/verify-release-contract.mjs", "exitCode": 0, "status": "passed", "counts": null, "sourceSha": "da3a428be6f12b9cdfbdde5a17daefab025615e0" },
+    { "name": "release-contract suite", "command": "node --test tests/release-contract/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 504, "passed": 504, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    { "name": "release-smoke source suite", "command": "node --test tests/release-smoke/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 91, "passed": 91, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    { "name": "upgrade unit suite", "command": "node --test tests/upgrade/unit/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 173, "passed": 173, "failed": 0 }, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
+    { "name": "standalone release verifier", "command": "node scripts/release/verify-release-contract.mjs", "exitCode": 0, "status": "passed", "counts": null, "sourceSha": "a3454f3bcdfafd9688858c2cc3a2d0f569d3b48e" },
     {
       "name": "pre-publication full product sweep",
       "command": "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal",
