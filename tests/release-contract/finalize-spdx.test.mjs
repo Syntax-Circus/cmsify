@@ -43,6 +43,23 @@ function makeSyftLike(root) {
   }
 }
 
+function removeDirectoryScanDescribes(root, kind) {
+  mutateJsonFile(root, `sbom/cmsify-${kind}.spdx.json`, (document) => {
+    document.documentDescribes = [];
+    document.relationships = document.relationships.filter((relationship) =>
+      !(
+        (relationship.spdxElementId === document.SPDXID && relationship.relationshipType === "DESCRIBES") ||
+        (relationship.relatedSpdxElement === document.SPDXID && relationship.relationshipType === "DESCRIBED_BY")
+      ));
+    const directoryRoot = document.packages.find((candidate) => candidate.name === `fixture-${kind}-dependency`);
+    document.relationships.push({
+      spdxElementId: document.SPDXID,
+      relationshipType: "DESCRIBES",
+      relatedSpdxElement: directoryRoot.SPDXID,
+    });
+  });
+}
+
 test("finalizes real subject and dependency inventory without replacing SPDXIDs or dependency relationships", () => {
   const root = createValidCandidate();
   try {
@@ -66,6 +83,50 @@ test("finalizes real subject and dependency inventory without replacing SPDXIDs 
     refreshChecksums(root);
     const verified = spawnSync(process.execPath, [verifier, "--artifacts", root, "--version", VERSION, "--source-sha", SOURCE_SHA], { encoding: "utf8" });
     assert.equal(verified.status, 0, verified.stderr || verified.stdout);
+  } finally {
+    removeCandidate(root);
+  }
+});
+
+test("finalizes directory-scanned package inventories without input documentDescribes", () => {
+  const root = createValidCandidate();
+  try {
+    makeSyftLike(root);
+    removeDirectoryScanDescribes(root, "nuget");
+    removeDirectoryScanDescribes(root, "npm");
+    mutateJsonFile(root, "sbom/cmsify-nuget.spdx.json", (document) => {
+      document.packages.find((candidate) => candidate.name === "SyntaxCircus.Cmsify.Contracts").name = "Cmsify.Contracts";
+    });
+
+    const result = runFinalizer(root);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    for (const [kind, names] of [
+      ["nuget", ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching"]],
+      ["npm", ["@cmsify/client"]],
+    ]) {
+      const document = JSON.parse(readFileSync(candidatePath(root, `sbom/cmsify-${kind}.spdx.json`), "utf8"));
+      const subjectIds = names.map((name) => document.packages.find((candidate) => candidate.name === name)?.SPDXID);
+      assert.deepEqual(document.documentDescribes, subjectIds);
+      assert.ok(subjectIds.every(Boolean));
+    }
+  } finally {
+    removeCandidate(root);
+  }
+});
+
+test("rejects directory-scanned inventory without the exact named release subject", () => {
+  const root = createValidCandidate();
+  try {
+    makeSyftLike(root);
+    removeDirectoryScanDescribes(root, "npm");
+    mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => {
+      document.packages.find((candidate) => candidate.name === "@cmsify/client").name = "unrelated-package";
+    });
+
+    const result = runFinalizer(root);
+    assert.notEqual(result.status, 0, "unnamed directory-scanned subject unexpectedly finalized");
+    assert.match(result.stderr, /npm.*missing existing target evidence.*@cmsify\/client/i);
   } finally {
     removeCandidate(root);
   }
