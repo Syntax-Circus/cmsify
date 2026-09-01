@@ -291,6 +291,8 @@ function absorbCookies(jar, url, response) {
 
 function antiforgeryToken(html) {
   const patterns = [
+    /name=["']cmsify-csrf-token["'][^>]*content=["']([^"']+)["']/i,
+    /content=["']([^"']+)["'][^>]*name=["']cmsify-csrf-token["']/i,
     /name=["']__RequestVerificationToken["'][^>]*value=["']([^"']+)["']/i,
     /value=["']([^"']+)["'][^>]*name=["']__RequestVerificationToken["']/i,
   ];
