@@ -281,7 +281,7 @@ function requireObject(value, label) {
 }
 
 function requireGuid(value, label) {
-  assert(typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value), `${label} is not a GUID.`);
+  assert(typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value), `${label} is not a GUID.`);
   return value;
 }
 
