@@ -76,4 +76,15 @@ public sealed class AuthTests
         var result = Assert.IsType<StatusCodeResult>(context.Result);
         Assert.Equal(StatusCodes.Status401Unauthorized, result.StatusCode);
     }
+
+    [Fact]
+    public void ApiTokenIdentifierCandidates_IncludeBase64UrlIdentifiersContainingUnderscores()
+    {
+        const string identifier = "release_smoke_id";
+        var token = TokenUtility.GenerateApiToken(identifier);
+
+        var candidates = CmsifyOpaqueBearerAuthenticationHandler.GetApiTokenIdentifierCandidates(token);
+
+        Assert.Contains(identifier, candidates);
+    }
 }
