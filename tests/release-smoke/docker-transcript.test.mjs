@@ -642,7 +642,7 @@ test("restart and fresh restore preserve candidate IDs, validate archives, and m
   const context = {
     output,
     runId,
-    runtime: { names, destroyedNames: names, tlsDirectory, adminBase: "https://127.0.0.1:43000" },
+    runtime: { names, destroyedNames: names, tlsDirectory, apiBase: "http://127.0.0.1:41999", adminBase: "https://127.0.0.1:43000" },
     secrets: {
       postgresPassword: "pg-secret", minioAccessKey: "minio-key", minioSecretKey: "minio-secret",
       seedPassword: "seed-password", changedAdminPassword: "changed-password", oidcClientSecret: "oidc-secret", encryptionKey: Buffer.alloc(32).toString("base64"),
@@ -653,6 +653,7 @@ test("restart and fresh restore preserve candidate IDs, validate archives, and m
   };
 
   await adapter.restartCandidates(context);
+  assert.equal(context.runtime.apiBase, "http://127.0.0.1:42000");
   const restored = await adapter.restoreFresh(context);
   await adapter.verifyRestoredState(context);
 

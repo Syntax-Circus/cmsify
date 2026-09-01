@@ -666,6 +666,7 @@ export function createDockerAdapter({ run, repositoryRoot, signal }) {
       assert(before.api === context.candidates.api.imageId && before.admin === context.candidates.admin.imageId, "Running candidate image identity changed before restart.");
       await execute(["stop", "--time", "20", names.api, names.admin], "candidate-stop");
       await execute(["start", names.api, names.admin], "candidate-start");
+      context.runtime.apiBase = await mappedBase(names.api);
       const after = {
         api: await inspectContainerImage(names.api),
         admin: await inspectContainerImage(names.admin),
