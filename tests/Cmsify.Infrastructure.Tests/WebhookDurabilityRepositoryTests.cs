@@ -411,6 +411,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         await new WebhookDeliveryProcessor(clientFactory, retryWorker, validator, timeProvider).DeliverRetryAsync(secondClaim, 2, CancellationToken.None);
 
         Assert.Equal([eventId.ToString("D"), eventId.ToString("D")], handler.EventIds);
+        Assert.Equal(["workspace.updated", "workspace.updated"], handler.EventTypes);
         _ = validator.Received(2).ValidateAsync(endpoint.Url, Arg.Any<CancellationToken>());
         Assert.Equal(2, handler.Payloads.Count);
         Assert.Equal(handler.Payloads[0], handler.Payloads[1]);
@@ -1574,6 +1575,8 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
 
         public List<string> EventIds { get; } = [];
 
+        public List<string> EventTypes { get; } = [];
+
         public List<byte[]> Payloads { get; } = [];
 
         public List<string> Signatures { get; } = [];
@@ -1583,6 +1586,7 @@ public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             EventIds.Add(request.Headers.GetValues("X-Cmsify-Event-Id").Single());
+            EventTypes.Add(request.Headers.GetValues("X-Cmsify-Event").Single());
             Payloads.Add(await request.Content!.ReadAsByteArrayAsync(cancellationToken));
             Signatures.Add(request.Headers.GetValues("X-Cmsify-Signature").Single());
             Destinations.Add(request.Options.TryGetValue(PinnedWebhookTransport.DestinationKey, out var destination) ? destination : null);

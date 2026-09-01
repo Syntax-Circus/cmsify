@@ -61,6 +61,7 @@ public sealed class WebhookDeliveryProcessor
             request.Options.Set(PinnedWebhookTransport.DestinationKey, destination);
             request.Headers.Add("X-Cmsify-Signature", WebhookSigner.Sign(delivery.Secret, payloadBytes));
             request.Headers.Add("X-Cmsify-Event-Id", delivery.WebhookEventId.ToString("D"));
+            request.Headers.Add("X-Cmsify-Event", delivery.EventType);
 
             using var response = await httpClientFactory.CreateClient(nameof(WebhookDeliveryProcessor)).SendAsync(request, ct);
             return response.IsSuccessStatusCode
