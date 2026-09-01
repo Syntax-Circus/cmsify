@@ -16,6 +16,7 @@ using Testcontainers.PostgreSql;
 
 namespace Cmsify.Infrastructure.Tests;
 
+[Collection(OperationalMetricsTestGroup.Name)]
 public sealed class WebhookSecretRotationTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")

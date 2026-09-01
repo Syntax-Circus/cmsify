@@ -10,6 +10,7 @@ using NSubstitute;
 
 namespace Cmsify.Infrastructure.Tests;
 
+[Collection(OperationalMetricsTestGroup.Name)]
 public sealed class WebhookSecretRotationServiceLifecycleTests
 {
     private static readonly string CurrentKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));

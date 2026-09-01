@@ -1,11 +1,36 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using System.Reflection;
 using Cmsify.Infrastructure.BackgroundServices;
 
 namespace Cmsify.Infrastructure.Tests;
 
+[Collection(OperationalMetricsTestGroup.Name)]
 public sealed class CmsifyOperationalMetricsTests
 {
+    [Fact]
+    public void MeterListenerTests_UseNonParallelCollection()
+    {
+        var definition = typeof(OperationalMetricsTestGroup).GetCustomAttribute<CollectionDefinitionAttribute>();
+        Assert.NotNull(definition);
+        Assert.True(definition.DisableParallelization);
+
+        Type[] listenerTestTypes =
+        [
+            typeof(CmsifyOperationalMetricsTests),
+            typeof(WebhookDestinationValidatorTests),
+            typeof(WebhookDurabilityRepositoryTests),
+            typeof(WebhookSecretRotationTests),
+            typeof(WebhookSecretRotationServiceLifecycleTests)
+        ];
+        Assert.All(listenerTestTypes, type =>
+        {
+            var collection = type.GetCustomAttribute<CollectionAttribute>();
+            Assert.NotNull(collection);
+            Assert.Equal(OperationalMetricsTestGroup.Name, collection.Name);
+        });
+    }
+
     [Fact]
     public void SecretRotationRemaining_ReportsExplicitBoundedZerosAfterASuccessfulEmptyRefresh()
     {
