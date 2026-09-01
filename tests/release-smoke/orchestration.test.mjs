@@ -677,6 +677,7 @@ test("the real HTTP adapter uses health/static probes and conditional template/c
   const templateId = "11111111-1111-4111-8111-111111111111";
   const templateVersionId = "22222222-2222-4222-8222-222222222222";
   const contentId = "33333333-3333-4333-8333-333333333333";
+  let templateReads = 0;
   const respond = (value, { status = 200, headers = {} } = {}) => {
     const text = typeof value === "string" ? value : JSON.stringify(value);
     return { status, headers: new Headers(headers), bytes: Buffer.from(text), text, json: () => JSON.parse(text) };
@@ -688,7 +689,10 @@ test("the real HTTP adapter uses health/static probes and conditional template/c
     if (pathname === "/") return respond('<html><title>Cmsify Admin</title><script src="/_framework/blazor.web.js"></script></html>');
     if (pathname === "/_framework/blazor.web.js") return respond("globalThis.Blazor={};");
     if (pathname.endsWith("/templates") && input.method === "POST") return respond({ id: templateId, currentVersion: { id: templateVersionId, versionNumber: 1 } }, { status: 201, headers: { etag: '"template-1"' } });
-    if (pathname.endsWith(`/templates/${templateId}`) && input.method === "GET") return respond({ id: templateId }, { headers: { etag: '"template-1"' } });
+    if (pathname.endsWith(`/templates/${templateId}`) && input.method === "GET") {
+      templateReads += 1;
+      return respond({ id: templateId }, { headers: { etag: templateReads === 1 ? '"template-1"' : '"template-3"' } });
+    }
     if (pathname.endsWith(`/templates/${templateId}`) && input.method === "PUT") return respond({ id: templateId }, { headers: { etag: '"template-2"' } });
     if (pathname.endsWith(`/templates/${templateId}/versions/1/publish`) && input.method === "PUT") return respond({ id: templateVersionId, status: "Published" });
     if (pathname.endsWith("/content") && input.method === "POST") return respond({ id: contentId }, { status: 201, headers: { etag: '"content-1"' } });
@@ -710,6 +714,7 @@ test("the real HTTP adapter uses health/static probes and conditional template/c
 
   assert.equal(result.deletedContentId, contentId);
   const conditional = calls.filter((call) => call.headers["if-match"] || call.headers["If-Match"]);
-  assert.deepEqual(conditional.map((call) => call.headers["if-match"] ?? call.headers["If-Match"]), ['"template-1"', '"content-1"', '"content-2"', '"template-2"']);
+  assert.deepEqual(conditional.map((call) => call.headers["if-match"] ?? call.headers["If-Match"]), ['"template-1"', '"content-1"', '"content-2"', '"template-3"']);
+  assert.equal(templateReads, 2);
   assert.equal(calls.some((call) => new URL(call.url).pathname === "/_framework/blazor.web.js"), true);
 });
