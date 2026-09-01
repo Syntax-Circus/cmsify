@@ -22,7 +22,7 @@ function response({ status = 200, body = "", bytes, values, setCookies } = {}) {
   };
 }
 
-const workspaceId = "11111111-1111-4111-8111-111111111111";
+const workspaceId = "0198f1e4-7c2a-7b3c-8d4e-5f60718293a4";
 
 test("local login completes forced password change and proves the protected Admin API-backed route", async () => {
   const calls = [];
