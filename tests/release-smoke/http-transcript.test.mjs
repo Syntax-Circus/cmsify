@@ -45,13 +45,14 @@ test("local login completes forced password change and proves the protected Admi
     if (url.pathname === "/api/v1/workspaces") return response({ body: { items: [{ id: workspaceId, slug: "release-smoke" }] } });
     if (url.hostname === "admin.release-smoke.invalid" && url.pathname === "/login") {
       return response({
-        body: '<form><input name="__RequestVerificationToken" value="anti-token"></form>',
+        body: '<head><meta name="cmsify-csrf-token" content="anti-token"></head>',
         setCookies: ["antiforgery=anti; Path=/; Secure; HttpOnly; SameSite=Lax"],
       });
     }
     if (url.pathname === "/admin-auth/login") {
       assert.match(input.headers.cookie, /antiforgery=anti/);
       const form = new URLSearchParams(input.body);
+      assert.equal(form.get("__RequestVerificationToken"), "anti-token");
       assert.equal(form.get("password"), "Changed-Smoke-Password");
       return response({
         status: 302,
