@@ -10,6 +10,7 @@ using NSubstitute;
 
 namespace Cmsify.Infrastructure.Tests;
 
+[Collection(OperationalMetricsTestGroup.Name)]
 public sealed class WebhookDestinationValidatorTests
 {
     [Fact]

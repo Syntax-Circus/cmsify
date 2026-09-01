@@ -24,6 +24,7 @@ using System.Text.Json;
 
 namespace Cmsify.Infrastructure.Tests;
 
+[Collection(OperationalMetricsTestGroup.Name)]
 public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
