@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
@@ -80,11 +81,23 @@ public sealed class CmsifyOpaqueBearerAuthenticationHandler(
     private async Task<CurrentActorInfo> ResolveApiClientAsync(string token)
     {
         var now = DateTimeOffset.UtcNow;
-        var identifier = TryGetApiTokenIdentifier(token);
+        var identifiers = GetApiTokenIdentifierCandidates(token);
         var query = dbContext.ApiClients.Where(client => client.IsActive && !client.IsDeleted && (!client.ExpiresAt.HasValue || client.ExpiresAt > now));
-        var clients = identifier is not null
-            ? await query.Where(client => client.TokenIdentifier == identifier).ToListAsync(Context.RequestAborted)
-            : await query.Where(client => client.TokenIdentifier == null).ToListAsync(Context.RequestAborted);
+        var identifiedClients = await query
+            .Where(client => client.TokenIdentifier != null && identifiers.Contains(client.TokenIdentifier))
+            .ToListAsync(Context.RequestAborted);
+        var actor = await VerifyApiClientCandidatesAsync(identifiedClients, token, now);
+        if (actor.IsAuthenticated)
+        {
+            return actor;
+        }
+
+        var legacyClients = await query.Where(client => client.TokenIdentifier == null).ToListAsync(Context.RequestAborted);
+        return await VerifyApiClientCandidatesAsync(legacyClients, token, now);
+    }
+
+    private async Task<CurrentActorInfo> VerifyApiClientCandidatesAsync(IEnumerable<ApiClient> clients, string token, DateTimeOffset now)
+    {
         foreach (var client in clients)
         {
             if (!BCrypt.Net.BCrypt.Verify(token, client.TokenHash)) continue;
@@ -99,11 +112,32 @@ public sealed class CmsifyOpaqueBearerAuthenticationHandler(
         return CurrentActorInfo.Anonymous;
     }
 
-    private static string? TryGetApiTokenIdentifier(string token)
+    internal static string[] GetApiTokenIdentifierCandidates(string token)
     {
-        var parts = token.Split('_', StringSplitOptions.None);
-        return parts.Length == 3 && parts[0] == "cmsify" && parts[1].Length is > 0 and <= 64 && parts[2].Length > 0
-            ? parts[1]
-            : null;
+        const string prefix = "cmsify_";
+        if (!token.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        var candidates = new List<string>();
+        var separator = token.IndexOf('_', prefix.Length);
+        while (separator >= 0)
+        {
+            var identifierLength = separator - prefix.Length;
+            if (identifierLength > 64)
+            {
+                break;
+            }
+
+            if (identifierLength > 0 && separator < token.Length - 1)
+            {
+                candidates.Add(token.Substring(prefix.Length, identifierLength));
+            }
+
+            separator = token.IndexOf('_', separator + 1);
+        }
+
+        return [.. candidates];
     }
 }
