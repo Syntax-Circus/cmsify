@@ -432,8 +432,8 @@ jobs:
         run: |
           mkdir -p artifacts/oci/api artifacts/oci/admin && tar -xf artifacts/oci/cmsify-api.oci.tar -C artifacts/oci/api && tar -xf artifacts/oci/cmsify-admin.oci.tar -C artifacts/oci/admin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/api "docker.io/syntaxcircus/cmsify-api@$API_EXPECTED" | jq -r .digest)" = "$API_EXPECTED"
-          test "$(oras manifest fetch --descriptor --oci-layout-path artifacts/oci/admin "docker.io/syntaxcircus/cmsify-admin@$ADMIN_EXPECTED" | jq -r .digest)" = "$ADMIN_EXPECTED"
+          test "$(oras manifest fetch --descriptor --oci-layout "artifacts/oci/api@$API_EXPECTED" | jq -r .digest)" = "$API_EXPECTED"
+          test "$(oras manifest fetch --descriptor --oci-layout "artifacts/oci/admin@$ADMIN_EXPECTED" | jq -r .digest)" = "$ADMIN_EXPECTED"
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
           ACCEPT_MANIFESTS="application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json"
           for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do
@@ -467,8 +467,8 @@ jobs:
         run: |
           echo "$DOCKERHUB_TOKEN" | oras login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
           API_EXPECTED="$(jq -r '.oci.api.digest' artifacts/release-manifest.json)"; ADMIN_EXPECTED="$(jq -r '.oci.admin.digest' artifacts/release-manifest.json)"
-          oras cp --from-oci-layout-path artifacts/oci/api "docker.io/syntaxcircus/cmsify-api@$API_EXPECTED" "docker.io/syntaxcircus/cmsify-api:$VERSION"
-          oras cp --from-oci-layout-path artifacts/oci/admin "docker.io/syntaxcircus/cmsify-admin@$ADMIN_EXPECTED" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
+          oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED" "docker.io/syntaxcircus/cmsify-api:$VERSION"
+          oras cp --from-oci-layout "artifacts/oci/admin@$ADMIN_EXPECTED" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
           API_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)"; ADMIN_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)"
           test "$API_REMOTE" = "$API_EXPECTED" && test "$ADMIN_REMOTE" = "$ADMIN_EXPECTED"
           API_SUBJECT="docker.io/syntaxcircus/cmsify-api@$API_REMOTE"; ADMIN_SUBJECT="docker.io/syntaxcircus/cmsify-admin@$ADMIN_REMOTE"

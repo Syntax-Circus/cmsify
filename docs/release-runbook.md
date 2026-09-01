@@ -41,6 +41,6 @@ Abort before promotion if any command fails, a source SHA/tag/digest differs, a 
 
 ## Promote only certified bytes
 
-The promotion job must copy the certified OCI descriptor by digest and compare the remote digest before package publication. It must not rebuild an image. Before restoring traffic to a deployment, verify a matched database/media backup, the retained prior image digest, `/health/live`, `/health/ready`, Admin sign-in, representative authenticated reads, and representative media downloads. The public restore gate for `SyntaxCircus.Http.Resilience` remains user-owned until exact public bytes and clean restore evidence exist.
+The promotion job must copy the certified OCI descriptor by digest and compare the remote digest before package publication. Its pinned ORAS invocation uses the stable `--oci-layout path@digest` and `--from-oci-layout path@digest` forms; the experimental `--oci-layout-path` forms are not promotion evidence because they can fall through to a registry lookup. Promotion must not rebuild an image. Before restoring traffic to a deployment, verify a matched database/media backup, the retained prior image digest, `/health/live`, `/health/ready`, Admin sign-in, representative authenticated reads, and representative media downloads. The public restore gate for `SyntaxCircus.Http.Resilience` remains user-owned until exact public bytes and clean restore evidence exist.
 
 Use [Rollback runbook](rollback-runbook.md) when an abort criterion is met during or after deployment.
