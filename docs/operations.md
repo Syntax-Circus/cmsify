@@ -87,7 +87,7 @@ Use `/health/live` and `/health/ready` for container orchestration and monitorin
 
 ## Durable webhooks and scheduled publication
 
-Webhook-producing mutations write a durable outbox record in the same database transaction. Delivery is **at least once**: consumers must deduplicate attempts by `X-Cmsify-Event-Id`, which remains stable across retries. Cmsify signs the exact transmitted JSON bytes with the endpoint secret in `X-Cmsify-Signature`; validate the HMAC against those bytes, not a reserialized payload.
+Webhook-producing mutations write a durable outbox record in the same database transaction. Delivery is **at least once**: `X-Cmsify-Event` identifies the event type, and consumers must deduplicate attempts by `X-Cmsify-Event-Id`; both remain stable across retries. Cmsify signs the exact transmitted JSON bytes with the endpoint secret in `X-Cmsify-Signature`; validate the HMAC against those bytes, not a reserialized payload.
 
 Webhook egress is direct-only: there is no proxy configuration or proxy mode. Each delivery attempt resolves the endpoint host once, rejects the endpoint when resolution yields no addresses or a mixed result containing any private, loopback, or reserved address, and connects only to the approved result set while retaining the original host for HTTP and TLS. Ambient machine and environment proxy settings are bypassed. Automatic redirects are disabled, so a redirect response is a failed delivery rather than a new destination. Every retry performs a fresh resolution and validation before it connects. HTTPS is required by default; `Webhook__AllowHttp=false` must remain set, and HTTP may be enabled only for controlled development.
 

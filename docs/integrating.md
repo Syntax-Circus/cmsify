@@ -37,7 +37,7 @@ The workspace slug is useful for discovery and configuration, but requests to wo
 
 ## Webhook consumers
 
-Webhook delivery is at least once. Persist `X-Cmsify-Event-Id` and deduplicate by that stable event identity; retries reuse it. Verify `X-Cmsify-Signature` against the exact received request bytes using the endpoint secret. Non-success responses and transport failures are retried with exponential backoff until the configured maximum, then remain available to operators as dead letters. Cmsify revalidates the configured destination before every attempt.
+Webhook delivery is at least once. Use `X-Cmsify-Event` to identify the event type. Persist `X-Cmsify-Event-Id` and deduplicate by that stable event identity; retries reuse both headers. Verify `X-Cmsify-Signature` against the exact received request bytes using the endpoint secret. Non-success responses and transport failures are retried with exponential backoff until the configured maximum, then remain available to operators as dead letters. Cmsify revalidates the configured destination before every attempt.
 
 ## TypeScript client
 
