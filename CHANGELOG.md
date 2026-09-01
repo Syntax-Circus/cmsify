@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Releases are certified from a reviewed immutable SemVer tag. Branch and pull-request builds validate only and never publish artifacts or create tags.
+- The TypeScript SDK uses the owned npm identity `@syntaxcircus/cmsify-client`; trusted publishing leaves token-style registry configuration unset so npm can exchange the GitHub Actions OIDC token.
+
+### Release note
+
+- `v0.2.0` was not completed as a GitHub Release. Its NuGet submissions and OCI images were accepted before npm rejected the unowned `@cmsify/client` scope. That tag remains immutable historical evidence; the next complete same-source release is `v0.2.1`.
 
 ## [0.2.0] - 2026-08-31
 
@@ -19,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Public SDK packages (`SyntaxCircus.Cmsify.Contracts`, both .NET clients, and `@cmsify/client`) are MIT-licensed; the server repository and OCI images remain AGPL-3.0-or-later.
+- Public SDK packages (`SyntaxCircus.Cmsify.Contracts`, both .NET clients, and `@syntaxcircus/cmsify-client`) are MIT-licensed; the server repository and OCI images remain AGPL-3.0-or-later.
 - Workspace responses now include the actor-specific `canWrite` capability for permission-aware clients.
 - The Admin app now generates slugs from a new workspace, template, picklist, or component name until the slug is manually edited.
 - User-management forms show API validation details inline.

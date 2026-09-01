@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Server/repository artifacts are AGPL-3.0-or-later; `Cmsify.Contracts`, both .NET clients, and `@cmsify/client` are MIT.
+- Server/repository artifacts are AGPL-3.0-or-later; `Cmsify.Contracts`, both .NET clients, and `@syntaxcircus/cmsify-client` are MIT.
 - The .NET SDK supports .NET 10 only for v1.
 - The TypeScript SDK supports Node 20+ and compatible server/edge fetch runtimes; browser bundles are unsupported.
 - One reviewed `vX.Y.Z` tag promotes every public artifact from one immutable commit; branch builds never publish or tag.

@@ -37,7 +37,7 @@
 | 23 | `23_template_packages.md` | Post-MVP | `.ctp` format spec, import/export endpoints, onboarding preset UI, registry future |
 | 24 | `24_admin_ui_screen_catalog.md` | MVP | Screen catalog for admin app |
 | 25 | `25_cross_cutting.md` | MVP | URL versioning, ProblemDetails, ETag/concurrency, CORS, rate limiting, observability |
-| 26 | `26_typescript_sdk.md` | MVP | First-party `@cmsify/client` TypeScript SDK auto-generated from OpenAPI |
+| 26 | `26_typescript_sdk.md` | MVP | First-party `@syntaxcircus/cmsify-client` TypeScript SDK auto-generated from OpenAPI |
 
 ---
 
@@ -54,7 +54,7 @@ All decisions made during planning. Reference before making implementation choic
 - **Error contract:** RFC 7807 ProblemDetails for every non-2xx response. See `25_cross_cutting.md`.
 - **Optimistic concurrency:** PostgreSQL `xmin` mapped as RowVersion / ETag with `If-Match` enforcement on Content, Template, TemplateVersion, MediaAsset, WebhookEndpoint, Workspace updates.
 - **Deletion philosophy:** Soft delete (`IsDeleted` + `DeletedAt`) on user-visible entities (Workspace, Template, ContentItem, MediaAsset, User, Tag, WebhookEndpoint, ApiClient). Hard delete only on join tables, session/token tables, and append-only log tables. `AuditLog` is append-only and never deleted. Audit retention/archival is post-MVP.
-- **First-party SDK:** A TypeScript SDK (`@cmsify/client`) is built and shipped alongside the API. See `26_typescript_sdk.md`.
+- **First-party SDK:** A TypeScript SDK (`@syntaxcircus/cmsify-client`) is built and shipped alongside the API. See `26_typescript_sdk.md`.
 
 ### Solution Projects
 | Project | Type | Role |

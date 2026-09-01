@@ -7,7 +7,7 @@ Ship a first-party TypeScript client SDK auto-generated from the Cmsify OpenAPI 
 
 ## Package
 
-- **Name:** `@cmsify/client`
+- **Name:** `@syntaxcircus/cmsify-client`
 - **Repo location:** `sdk/typescript/` (top-level sibling of `src/`)
 - **Published to:** npm
 - **License:** MIT (matches the OSS license of Cmsify itself)
@@ -29,7 +29,7 @@ Two-layer SDK:
 Hand-written, on top of the generated client. Provides:
 
 ```ts
-import { CmsifyClient } from "@cmsify/client";
+import { CmsifyClient } from "@syntaxcircus/cmsify-client";
 
 const cms = new CmsifyClient({
   baseUrl: "https://cms.example.com",
@@ -112,7 +112,7 @@ sdk/typescript/
 - `npm test` runs Vitest against a mocked HTTP layer (no live API needed)
 - `npm run generate` regenerates the types from the local `Cmsify.Api` (started via `docker compose up api`) or from a pinned OpenAPI snapshot in `sdk/typescript/openapi.snapshot.json`
 - A drift check in CI compares the generated output against the committed files; fails the build if `Cmsify.Api`'s OpenAPI changed without regenerating the SDK
-- Versioning: SDK version tracks API version (`@cmsify/client@1.x.y` for `/api/v1`). Breaking API changes (new major) → new SDK major
+- Versioning: SDK version tracks API version (`@syntaxcircus/cmsify-client@1.x.y` for `/api/v1`). Breaking API changes (new major) → new SDK major
 
 ---
 
@@ -144,7 +144,7 @@ sdk/typescript/
 ---
 
 ## Deliverables
-- `@cmsify/client` package published to npm with full MVP read surface area
+- `@syntaxcircus/cmsify-client` package published to npm with full MVP read surface area
 - Typed against the API's OpenAPI document with CI-enforced drift detection
 - Ergonomic helpers for pagination, ETags, retries, and errors
 - README + framework examples demonstrating real-world use

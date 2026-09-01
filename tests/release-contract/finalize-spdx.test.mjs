@@ -65,7 +65,7 @@ test("finalizes real subject and dependency inventory without replacing SPDXIDs 
   try {
     makeSyftLike(root);
     const before = JSON.parse(readFileSync(candidatePath(root, "sbom/cmsify-npm.spdx.json"), "utf8"));
-    const subjectBefore = before.packages.find((candidate) => candidate.name === "@cmsify/client");
+    const subjectBefore = before.packages.find((candidate) => candidate.name === "@syntaxcircus/cmsify-client");
     const dependencyBefore = before.packages.find((candidate) => candidate.name === "fixture-npm-dependency");
     const dependencyRelationship = before.relationships.find((relationship) => relationship.relationshipType === "DEPENDS_ON");
 
@@ -73,7 +73,7 @@ test("finalizes real subject and dependency inventory without replacing SPDXIDs 
     assert.equal(result.status, 0, result.stderr || result.stdout);
 
     const after = JSON.parse(readFileSync(candidatePath(root, "sbom/cmsify-npm.spdx.json"), "utf8"));
-    assert.equal(after.packages.find((candidate) => candidate.name === "@cmsify/client").SPDXID, subjectBefore.SPDXID);
+    assert.equal(after.packages.find((candidate) => candidate.name === "@syntaxcircus/cmsify-client").SPDXID, subjectBefore.SPDXID);
     assert.deepEqual(after.packages.find((candidate) => candidate.name === "fixture-npm-dependency"), dependencyBefore);
     assert.ok(after.relationships.some((relationship) =>
       relationship.spdxElementId === dependencyRelationship.spdxElementId &&
@@ -103,7 +103,7 @@ test("finalizes directory-scanned package inventories without input documentDesc
 
     for (const [kind, names] of [
       ["nuget", ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching"]],
-      ["npm", ["@cmsify/client"]],
+      ["npm", ["@syntaxcircus/cmsify-client"]],
     ]) {
       const document = JSON.parse(readFileSync(candidatePath(root, `sbom/cmsify-${kind}.spdx.json`), "utf8"));
       const subjectIds = names.map((name) => document.packages.find((candidate) => candidate.name === name)?.SPDXID);
@@ -121,12 +121,12 @@ test("rejects directory-scanned inventory without the exact named release subjec
     makeSyftLike(root);
     removeDirectoryScanDescribes(root, "npm");
     mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => {
-      document.packages.find((candidate) => candidate.name === "@cmsify/client").name = "unrelated-package";
+      document.packages.find((candidate) => candidate.name === "@syntaxcircus/cmsify-client").name = "unrelated-package";
     });
 
     const result = runFinalizer(root);
     assert.notEqual(result.status, 0, "unnamed directory-scanned subject unexpectedly finalized");
-    assert.match(result.stderr, /npm.*missing existing target evidence.*@cmsify\/client/i);
+    assert.match(result.stderr, /npm.*missing existing target evidence.*@syntaxcircus\/cmsify-client/i);
   } finally {
     removeCandidate(root);
   }

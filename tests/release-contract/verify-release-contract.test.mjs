@@ -10,6 +10,30 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", ".
 const verifier = resolve(repositoryRoot, "scripts", "release", "verify-release-contract.mjs");
 const workflowPath = ".github/workflows/publish-cmsify.yml";
 
+test("uses the owned SyntaxCircus npm scope for the TypeScript SDK", () => {
+  const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, "sdk/typescript/package.json"), "utf8"));
+  const packageLock = JSON.parse(readFileSync(resolve(repositoryRoot, "sdk/typescript/package-lock.json"), "utf8"));
+  const workflow = readFileSync(resolve(repositoryRoot, workflowPath), "utf8");
+
+  assert.equal(packageJson.name, "@syntaxcircus/cmsify-client");
+  assert.equal(packageLock.name, "@syntaxcircus/cmsify-client");
+  assert.equal(packageLock.packages[""].name, "@syntaxcircus/cmsify-client");
+  assert.match(workflow, /registry\.npmjs\.org\/@syntaxcircus%2Fcmsify-client\/\$VERSION/);
+  assert.doesNotMatch(workflow, /@cmsify(?:%2F|\/)client/);
+});
+
+test("keeps token-style npm registry configuration out of OIDC promotion", () => {
+  const workflow = readFileSync(resolve(repositoryRoot, workflowPath), "utf8");
+  const promoteStart = workflow.indexOf("  promote:");
+  assert.notEqual(promoteStart, -1);
+  const promotion = workflow.slice(promoteStart);
+
+  assert.match(promotion, /permissions:\s*\{ contents: write, id-token: write \}/);
+  assert.match(promotion, /actions\/setup-node@[a-f0-9]+[\s\S]*with:\s*\{ node-version: "22" \}/);
+  assert.doesNotMatch(promotion, /registry-url|NODE_AUTH_TOKEN|NPM_TOKEN/);
+  assert.match(promotion, /npm publish artifacts\/npm\/\*\.tgz --access public --provenance --tag "\$NPM_CHANNEL"/);
+});
+
 const contractFiles = [
   "LICENSE",
   "CHANGELOG.md",
@@ -202,8 +226,21 @@ test("rejects source-built release accessibility", () => expectInvalid((root) =>
 test("rejects an omitted clean candidate package", () => expectInvalid((root) => mutateReleaseJob(root, "dotnet-consumer", (job) => job.replace('            <package pattern="SyntaxCircus.Cmsify.Contracts" />\n', "")), /clean \.NET consumer.*all three.*local source/i));
 test("rejects an unsigned promoted destination", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace(/\n\s*cosign sign --yes "\$API_SUBJECT"/, "")), /Cosign.*sign.*verify.*digest/i));
 test("rejects certification that skips artifact smoke", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("artifact-smoke, ", "")), /certify.*depend.*artifact-smoke/i));
-test("rejects the legacy npm repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /@cmsify\/client.*repository.*Syntax-Circus/i));
+test("rejects the legacy npm repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /@syntaxcircus\/cmsify-client.*repository.*Syntax-Circus/i));
+test("rejects an npm package outside the owned SyntaxCircus scope", () => expectInvalid((root) => {
+  const path = resolve(root, "sdk/typescript/package.json");
+  const packageJson = JSON.parse(readFileSync(path, "utf8"));
+  packageJson.name = "@unowned/cmsify-client";
+  writeFileSync(path, `${JSON.stringify(packageJson, null, 2)}\n`);
+}, /owned.*@syntaxcircus\/cmsify-client.*identity/i));
 test("rejects the legacy npm lockfile repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package-lock.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /package-lock.*repository.*Syntax-Circus/i));
+test("rejects an npm lockfile outside the owned SyntaxCircus scope", () => expectInvalid((root) => {
+  const path = resolve(root, "sdk/typescript/package-lock.json");
+  const lock = JSON.parse(readFileSync(path, "utf8"));
+  lock.name = "@unowned/cmsify-client";
+  lock.packages[""].name = "@unowned/cmsify-client";
+  writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`);
+}, /package-lock.*owned.*@syntaxcircus\/cmsify-client.*identity/i));
 test("rejects an npm lockfile without the source private marker", () => expectInvalid((root) => {
   const path = resolve(root, "sdk/typescript/package-lock.json");
   const lock = JSON.parse(readFileSync(path, "utf8"));
@@ -516,7 +553,7 @@ test("rejects experimental ORAS path syntax for exact local-layout digests", () 
 test("rejects Docker Hub preflight without a scoped Bearer token", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("https://auth.docker.io/token?service=registry.docker.io&scope=repository:$image:pull,push", "https://registry-1.docker.io/v2/token")), /Docker Hub.*scoped Bearer token/i));
 test("rejects Docker Hub preflight without all OCI and Docker manifest media types", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(", application/vnd.docker.distribution.manifest.list.v2+json", "")), /Docker Hub.*four manifest media types/i));
 test("rejects Docker Hub preflight that treats HTTP 200 as absent", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("case \"$status\" in 404) ;; *)", "case \"$status\" in 404|200) ;; *)")), /Docker Hub.*only HTTP 404/i));
-test("rejects a missing exact npm-version absence preflight", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("https://registry.npmjs.org/@cmsify%2Fclient/$VERSION", "https://registry.npmjs.org/@cmsify%2Fclient/latest")), /npm.*exact-version.*404/i));
+test("rejects a missing exact npm-version absence preflight", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("https://registry.npmjs.org/@syntaxcircus%2Fcmsify-client/$VERSION", "https://registry.npmjs.org/@syntaxcircus%2Fcmsify-client/latest")), /npm.*exact-version.*404/i));
 test("rejects a NuGet preflight that treats HTTP 200 as absent", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('case "$http_code" in 404) ;; 200) exit 1 ;;', 'case "$http_code" in 404|200) ;;')), /NuGet.*only.*HTTP 404/i));
 test("rejects a NuGet preflight that preserves uppercase prerelease versions", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('NUGET_VERSION="${VERSION,,}"', 'NUGET_VERSION="$VERSION"')), /NuGet.*normalize.*flat-container.*version/i));
 test("rejects package publication before OCI digest-preserving copy and equality", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED"', 'dotnet nuget push premature.nupkg\n          oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED"')), /OCI.*remote digest equality.*before.*NuGet.*npm/i));

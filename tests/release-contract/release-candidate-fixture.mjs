@@ -173,7 +173,7 @@ function defaultState() {
     })),
     npm: {
       metadata: {
-        name: "@cmsify/client",
+        name: "@syntaxcircus/cmsify-client",
         version: VERSION,
         description: "First-party TypeScript client for the Cmsify API.",
         license: "MIT",
@@ -216,7 +216,7 @@ function defaultState() {
     },
     spdx: {
       nuget: spdxState("nuget", packageIds, "MIT"),
-      npm: spdxState("npm", ["@cmsify/client"], "MIT"),
+      npm: spdxState("npm", ["@syntaxcircus/cmsify-client"], "MIT"),
       api: spdxState("api", ["syntaxcircus/cmsify-api"], "AGPL-3.0-or-later"),
       admin: spdxState("admin", ["syntaxcircus/cmsify-admin"], "AGPL-3.0-or-later"),
     },
@@ -350,7 +350,7 @@ function renderSpdx(root, state, manifests) {
       const result = { SPDXID, name, versionInfo: VERSION, licenseConcluded: sbom.license, licenseDeclared: sbom.license, downloadLocation: "NOASSERTION" };
       if (kind === "api" || kind === "admin") result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:oci/${name}@${manifests[kind].digest}` }];
       else if (kind === "nuget") result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:nuget/${name}@${VERSION}` }];
-      else result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:npm/%40cmsify/client@${VERSION}` }];
+      else result.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:npm/%40syntaxcircus/cmsify-client@${VERSION}` }];
       return result;
     });
     const dependency = {

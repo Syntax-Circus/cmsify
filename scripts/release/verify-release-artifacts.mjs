@@ -157,7 +157,7 @@ function verifyNpm(expectedFiles) {
 
   const metadata = parseJsonText(command("tar", ["-xOf", path, "package/package.json"], "Packed npm candidate"), "Packed npm package/package.json");
   if (!metadata) return;
-  expect(metadata.name === "@cmsify/client", "Packed npm name must be exactly @cmsify/client.");
+  expect(metadata.name === "@syntaxcircus/cmsify-client", "Packed npm name must be exactly @syntaxcircus/cmsify-client.");
   expect(metadata.version === version, `Packed npm version must be exactly ${version}.`);
   expect(metadata.license === "MIT", "Packed npm license must be exactly MIT.");
   expect(metadata.engines?.node === ">=20" || metadata.engines?.node === ">=20.0.0", "Packed npm Node floor must be exactly >=20.");
@@ -291,7 +291,7 @@ function verifyOci(expectedFiles, releaseManifest) {
 function verifySpdx(expectedFiles, oci) {
   const definitions = {
     nuget: { label: "NuGet", name: `Cmsify NuGet SDK ${version}`, packages: EXPECTED_NUGET, license: "MIT", purl: (name) => `pkg:nuget/${name}@${version}` },
-    npm: { label: "npm", name: `Cmsify npm SDK ${version}`, packages: ["@cmsify/client"], license: "MIT", purl: () => `pkg:npm/%40cmsify/client@${version}` },
+    npm: { label: "npm", name: `Cmsify npm SDK ${version}`, packages: ["@syntaxcircus/cmsify-client"], license: "MIT", purl: () => `pkg:npm/%40syntaxcircus/cmsify-client@${version}` },
     api: { label: "API", name: `Cmsify API OCI ${version}`, packages: ["syntaxcircus/cmsify-api"], license: "AGPL-3.0-or-later", purl: (name) => `pkg:oci/${name}@${oci.api?.digest}` },
     admin: { label: "Admin", name: `Cmsify Admin OCI ${version}`, packages: ["syntaxcircus/cmsify-admin"], license: "AGPL-3.0-or-later", purl: (name) => `pkg:oci/${name}@${oci.admin?.digest}` },
   };

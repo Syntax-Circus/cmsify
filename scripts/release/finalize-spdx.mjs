@@ -33,9 +33,9 @@ const definitions = {
   npm: {
     documentName: `Cmsify npm SDK ${version}`,
     license: "MIT",
-    names: ["@cmsify/client"],
+    names: ["@syntaxcircus/cmsify-client"],
     requireExactInventorySubjects: true,
-    purl: () => `pkg:npm/%40cmsify/client@${version}`,
+    purl: () => `pkg:npm/%40syntaxcircus/cmsify-client@${version}`,
   },
   api: {
     documentName: `Cmsify API OCI ${version}`,
