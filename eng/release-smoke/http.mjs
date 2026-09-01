@@ -472,7 +472,7 @@ export function createReleaseHttpAdapter({
     const updatedTemplate = await json(context.runtime.apiBase, templatePath, {
       method: "PUT", headers: { ...bearer(token), "if-match": templateEtag }, body: { name: "Release Smoke CRUD Updated", description: "Conditional update passed" },
     });
-    const updatedTemplateEtag = requiredHeader(updatedTemplate, "etag");
+    requiredHeader(updatedTemplate, "etag");
     await json(context.runtime.apiBase, `${templatePath}/versions/1/publish`, { method: "PUT", headers: bearer(token) });
 
     const contentPath = `/api/v1/workspaces/${workspace}/content`;
@@ -490,7 +490,8 @@ export function createReleaseHttpAdapter({
     });
     const updatedContentEtag = requiredHeader(updatedContent, "etag");
     await call(context.runtime.apiBase, itemPath, { method: "DELETE", headers: { ...bearer(token), "if-match": updatedContentEtag }, expectedStatuses: [204] });
-    await call(context.runtime.apiBase, templatePath, { method: "DELETE", headers: { ...bearer(token), "if-match": updatedTemplateEtag }, expectedStatuses: [204] });
+    const currentTemplate = await json(context.runtime.apiBase, templatePath, { headers: bearer(token) });
+    await call(context.runtime.apiBase, templatePath, { method: "DELETE", headers: { ...bearer(token), "if-match": requiredHeader(currentTemplate, "etag") }, expectedStatuses: [204] });
     return { deletedTemplateId: templateId, deletedContentId: contentId };
   }
 
