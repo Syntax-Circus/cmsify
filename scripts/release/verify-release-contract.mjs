@@ -621,23 +621,25 @@ expect(/<IsPackable[^>]*CmsifyReleaseBuild[^>]*>false<\/IsPackable>/i.test(sourc
 const packageJson = file("sdk/typescript/package.json");
 try {
   const typeScriptPackage = JSON.parse(packageJson);
-  expect(typeScriptPackage.license === "MIT", "@cmsify/client must declare the MIT license.");
-  expect(typeScriptPackage.version === "0.0.0-local", "@cmsify/client source version must be 0.0.0-local.");
-  expect(typeScriptPackage.private === true, "@cmsify/client source package must be private until the validated release build overrides it.");
-  expect(typeScriptPackage.repository?.type === "git" && typeScriptPackage.repository?.url === "git+https://github.com/Syntax-Circus/cmsify.git" && typeScriptPackage.repository?.directory === "sdk/typescript", "@cmsify/client repository must use canonical Syntax-Circus GitHub identity and sdk/typescript directory for trusted publishing provenance.");
-  expect(/^>=20(?:\.0\.0)?$/.test(typeScriptPackage.engines?.node ?? ""), "@cmsify/client must require Node 20 or later.");
+  expect(typeScriptPackage.name === "@syntaxcircus/cmsify-client", "The TypeScript SDK package name must use the owned @syntaxcircus/cmsify-client npm identity.");
+  expect(typeScriptPackage.license === "MIT", "@syntaxcircus/cmsify-client must declare the MIT license.");
+  expect(typeScriptPackage.version === "0.0.0-local", "@syntaxcircus/cmsify-client source version must be 0.0.0-local.");
+  expect(typeScriptPackage.private === true, "@syntaxcircus/cmsify-client source package must be private until the validated release build overrides it.");
+  expect(typeScriptPackage.repository?.type === "git" && typeScriptPackage.repository?.url === "git+https://github.com/Syntax-Circus/cmsify.git" && typeScriptPackage.repository?.directory === "sdk/typescript", "@syntaxcircus/cmsify-client repository must use canonical Syntax-Circus GitHub identity and sdk/typescript directory for trusted publishing provenance.");
+  expect(/^>=20(?:\.0\.0)?$/.test(typeScriptPackage.engines?.node ?? ""), "@syntaxcircus/cmsify-client must require Node 20 or later.");
 } catch {
   errors.push("sdk/typescript/package.json must be valid JSON.");
 }
 try {
   const typeScriptLock = JSON.parse(file("sdk/typescript/package-lock.json"));
   const rootPackage = typeScriptLock.packages?.[""];
+  expect(typeScriptLock.name === "@syntaxcircus/cmsify-client" && rootPackage?.name === "@syntaxcircus/cmsify-client", "sdk/typescript/package-lock.json must use the owned @syntaxcircus/cmsify-client npm identity.");
   expect(rootPackage?.private === true, "sdk/typescript/package-lock.json must record private=true to match the source package identity.");
   expect(rootPackage?.repository?.type === "git" && rootPackage?.repository?.url === "git+https://github.com/Syntax-Circus/cmsify.git" && rootPackage?.repository?.directory === "sdk/typescript", "sdk/typescript/package-lock.json repository must use canonical Syntax-Circus GitHub identity and sdk/typescript directory.");
 } catch {
   errors.push("sdk/typescript/package-lock.json must be valid JSON.");
 }
-expect(/MIT License/i.test(file("sdk/typescript/LICENSE")), "@cmsify/client archive must include the MIT license text.");
+expect(/MIT License/i.test(file("sdk/typescript/LICENSE")), "@syntaxcircus/cmsify-client archive must include the MIT license text.");
 
 for (const project of [
   "src/Cmsify.Contracts/Cmsify.Contracts.csproj",
@@ -989,7 +991,7 @@ expect(jobConditionRequiresSuccess(dotnetConsumer) && continueOnErrorIsDisabled(
 const nodeConsumer = jobBody("node-consumer");
 expect(/needs:\s*\[resolve, build\]/.test(nodeConsumer) && /matrix:[\s\S]*node-version:\s*\["20", "22"\]/s.test(nodeConsumer), "Clean Node consumer must test the single candidate on Node 20 and 22.");
 expect(/TARBALL="\$GITHUB_WORKSPACE\/artifacts\/npm\/cmsify-client-\$VERSION\.tgz"/.test(nodeConsumer) && /npm install --ignore-scripts --no-audit --no-fund "\$TARBALL"/.test(nodeConsumer), "Clean Node consumers must install only the downloaded candidate tarball and its declared registry dependencies.");
-expect(/Object\.keys\(dependencies\)\.length!==1[\s\S]*dependencies\["@cmsify\/client"\]\.startsWith\("file:"\)/s.test(nodeConsumer), "Clean Node consumers must prove the candidate tarball is their only direct dependency.");
+expect(/Object\.keys\(dependencies\)\.length!==1[\s\S]*dependencies\["@syntaxcircus\/cmsify-client"\]\.startsWith\("file:"\)/s.test(nodeConsumer), "Clean Node consumers must prove the candidate tarball is their only direct dependency.");
 expect(!/actions\/checkout|npm ci|test:consumer|file:\$\{?GITHUB_WORKSPACE.*node_modules/.test(nodeConsumer), "Clean Node consumers must not reuse source checkout dependencies or the source-tree consumer harness.");
 expect(jobConditionRequiresSuccess(nodeConsumer) && continueOnErrorIsDisabled(nodeConsumer) && stepConditions(nodeConsumer).every((condition) => condition === "success()"), "Clean Node consumer matrix must fail closed.");
 
@@ -1054,7 +1056,8 @@ expect(continueOnErrorIsDisabled(promotion), "The promotion job and steps must n
 expect(stepConditions(promotion).every((condition) => condition === "success()"), "Promotion step conditions must require normal success after certify.");
 expect(!/\b(dotnet pack|npm pack|npm run build|docker buildx build|docker build)\b/i.test(promotion), "Promotion must not rebuild mutable artifacts.");
 expect(!/--skip-duplicate|NUGET_API_KEY\s*:\s*\$\{\{\s*secrets\./i.test(promotion), "NuGet promotion must use the short-lived OIDC key and reject pre-existing package versions.");
-expect(/id-token:\s*write[\s\S]*registry-url:\s*https:\/\/registry\.npmjs\.org[\s\S]*npm@11\.11\.0[\s\S]*--provenance[\s\S]*--tag "\$NPM_CHANNEL"/s.test(promotion), "npm trusted publishing must have OIDC, registry configuration, supported npm, provenance, and a prerelease-safe tag.");
+expect(/id-token:\s*write[\s\S]*actions\/setup-node@[0-9a-f]{40}[\s\S]*with:\s*\{ node-version: "22" \}[\s\S]*npm@11\.11\.0[\s\S]*--provenance[\s\S]*--tag "\$NPM_CHANNEL"/s.test(promotion)
+  && !/registry-url|NODE_AUTH_TOKEN|NPM_TOKEN/.test(promotion), "npm trusted publishing must use OIDC without token-style setup-node registry authentication, supported npm, provenance, and a prerelease-safe tag.");
 expect(/sigstore\/cosign-installer@[0-9a-f]{40}\s+#\s+v\d+[\s\S]*cosign-release:\s*v\d+\.\d+\.\d+/s.test(promotion), "Protected promotion must install a SHA-pinned, versioned Cosign release.");
 expect(/--prerelease/.test(promotion), "GitHub Release promotion must mark SemVer prereleases as prereleases.");
 expect(!/docker push/i.test(promotion) && /oras cp --from-oci-layout\s+[\s\S]*oras manifest fetch --descriptor[\s\S]*test "\$API_REMOTE" = "\$API_EXPECTED"/s.test(promotion), "OCI promotion must copy certified descriptors and compare remote digests without mutable docker push.");
@@ -1072,7 +1075,7 @@ for (const mediaType of ["application/vnd.oci.image.manifest.v1+json", "applicat
   expect(promotion.includes(mediaType), "Docker Hub preflight Accept header must include all four manifest media types.");
 }
 expect(/status=.*curl[\s\S]*case "\$status" in 404\) ;; \*\)/s.test(promotion) && !/case "\$status" in[^\n]*(?:200|401|429|5\d\d)[^\n]*\) ;;/s.test(promotion), "Docker Hub manifest absence preflight must accept only HTTP 404.");
-expect(/registry\.npmjs\.org\/@cmsify%2Fclient\/\$VERSION[\s\S]*case "\$npm_status" in 404\) ;; \*\)/s.test(promotion), "npm exact-version preflight must accept only explicit HTTP 404 absence.");
+expect(/registry\.npmjs\.org\/@syntaxcircus%2Fcmsify-client\/\$VERSION[\s\S]*case "\$npm_status" in 404\) ;; \*\)/s.test(promotion), "npm exact-version preflight must accept only explicit HTTP 404 absence.");
 const ociEquality = promotion.indexOf('test "$API_REMOTE" = "$API_EXPECTED"');
 const apiSubject = promotion.indexOf('API_SUBJECT="docker.io/syntaxcircus/cmsify-api@$API_REMOTE"');
 const adminSubject = promotion.indexOf('ADMIN_SUBJECT="docker.io/syntaxcircus/cmsify-admin@$ADMIN_REMOTE"');

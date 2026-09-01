@@ -93,7 +93,7 @@ for (const [name, mutate, diagnostic] of nugetMutations) {
 }
 
 const npmMetadataMutations = [
-  ["name", (metadata) => { metadata.name = "@cmsify/not-client"; }, /npm.*name.*@cmsify\/client/i],
+  ["name", (metadata) => { metadata.name = "@syntaxcircus/not-client"; }, /npm.*name.*@syntaxcircus\/cmsify-client/i],
   ["version", (metadata) => { metadata.version = "9.9.9"; }, /npm.*version.*1\.2\.3/i],
   ["license", (metadata) => { metadata.license = "AGPL-3.0-or-later"; }, /npm.*license.*MIT/i],
   ["Node floor", (metadata) => { metadata.engines.node = ">=18"; }, /npm.*Node.*>=20/i],
@@ -201,7 +201,7 @@ test("rejects an OCI config whose rootfs diff_id does not match the uncompressed
 
 const spdxDefinitions = [
   ["nuget", "NuGet", "SyntaxCircus.Cmsify.Contracts", "AGPL-3.0-or-later", "MIT"],
-  ["npm", "npm", "@cmsify/client", "AGPL-3.0-or-later", "MIT"],
+  ["npm", "npm", "@syntaxcircus/cmsify-client", "AGPL-3.0-or-later", "MIT"],
   ["api", "API", "syntaxcircus/cmsify-api", "MIT", "AGPL-3.0-or-later"],
   ["admin", "Admin", "syntaxcircus/cmsify-admin", "MIT", "AGPL-3.0-or-later"],
 ];
@@ -220,9 +220,9 @@ test("rejects a one-byte release-manifest OCI digest disagreement even when chec
 test("rejects a release manifest whose OCI tag or full containerd name disagrees with the certified layout", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "release-manifest.json", (manifest) => { manifest.oci.api.tag = "wrong"; manifest.oci.api.imageName = `syntaxcircus/cmsify-admin:${VERSION}`; }); } }, /Release manifest OCI API tag.*1\.2\.3|containerd image name.*cmsify-api/i));
 test("rejects a one-byte OCI SPDX subject disagreement even when checksums match", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-api.spdx.json", (document) => { const reference = document.packages[0].externalRefs[0].referenceLocator; document.packages[0].externalRefs[0].referenceLocator = `${reference.slice(0, -1)}${reference.endsWith("0") ? "1" : "0"}`; }); } }, /SPDX API.*purl.*certified OCI digest/i));
 test("rejects a NuGet SPDX package with the wrong exact purl", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-nuget.spdx.json", (document) => { document.packages[0].externalRefs[0].referenceLocator = `pkg:nuget/SyntaxCircus.Cmsify.Wrong@${VERSION}`; }); } }, /SPDX NuGet.*purl.*SyntaxCircus\.Cmsify\.Contracts/i));
-test("rejects an npm SPDX package with the wrong scoped-package purl", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages[0].externalRefs[0].referenceLocator = `pkg:npm/@cmsify%2Fclient@${VERSION}`; }); } }, /SPDX npm.*purl.*%40cmsify\/client/i));
+test("rejects an npm SPDX package with the wrong scoped-package purl", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages[0].externalRefs[0].referenceLocator = `pkg:npm/@syntaxcircus%2Fcmsify-client@${VERSION}`; }); } }, /SPDX npm.*purl.*%40syntaxcircus\/cmsify-client/i));
 test("rejects swapped NuGet SPDX purls", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-nuget.spdx.json", (document) => { const first = document.packages[0].externalRefs[0].referenceLocator; document.packages[0].externalRefs[0].referenceLocator = document.packages[1].externalRefs[0].referenceLocator; document.packages[1].externalRefs[0].referenceLocator = first; }); } }, /SPDX NuGet.*purl.*SyntaxCircus\.Cmsify\.(?:Contracts|Client)/i));
-test("rejects an SPDX document with no retained dependency inventory", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages = document.packages.filter((candidate) => candidate.name === "@cmsify/client"); document.relationships = document.relationships.filter((relationship) => relationship.relationshipType === "DESCRIBES"); }); } }, /SPDX npm.*meaningful dependency inventory/i));
+test("rejects an SPDX document with no retained dependency inventory", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages = document.packages.filter((candidate) => candidate.name === "@syntaxcircus/cmsify-client"); document.relationships = document.relationships.filter((relationship) => relationship.relationshipType === "DESCRIBES"); }); } }, /SPDX npm.*meaningful dependency inventory/i));
 test("rejects a dangling SPDX relationship reference", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.relationships[0].relatedSpdxElement = "SPDXRef-missing-dependency"; }); } }, /SPDX npm.*relationship.*dangling.*SPDXRef-missing-dependency/i));
 test("rejects a contradictory SPDX DESCRIBES relationship", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.relationships.push({ spdxElementId: "SPDXRef-DOCUMENT", relationshipType: "DESCRIBES", relatedSpdxElement: "SPDXRef-npm-dependency" }); }); } }, /SPDX npm.*DESCRIBES relationship.*documentDescribes/i));
 test("rejects a retained dependency whose changed SPDXID leaves a stale relationship", () => expectInvalid({ afterRender({ root }) { mutateJsonFile(root, "sbom/cmsify-npm.spdx.json", (document) => { document.packages.find((candidate) => candidate.name === "fixture-npm-dependency").SPDXID = "SPDXRef-renamed-dependency"; }); } }, /SPDX npm.*relationship.*dangling.*SPDXRef-npm-dependency/i));

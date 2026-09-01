@@ -1,5 +1,5 @@
 {
-  "name": "@cmsify/client",
+  "name": "@syntaxcircus/cmsify-client",
   "version": "0.0.0-local",
   "private": true,
   "description": "First-party TypeScript client for the Cmsify API.",

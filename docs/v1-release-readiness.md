@@ -8,7 +8,7 @@
 
 **Decision:** Not ready to publish `0.2.0` until the definitive candidate, hosted, protected-approval, signing, promotion, soak, tag, and final-release evidence is produced. The public dependency and isolated public restore gate are complete.
 
-This report is a release gate, not a public delivery commitment. It covers the HTTP API, the handwritten .NET contracts and clients, `@cmsify/client`, published containers, production operation, and reuse of sibling `SyntaxCircus.*` packages.
+This report is a release gate, not a public delivery commitment. It covers the HTTP API, the handwritten .NET contracts and clients, `@syntaxcircus/cmsify-client`, published containers, production operation, and reuse of sibling `SyntaxCircus.*` packages.
 
 ## Task 12 local evidence ledger
 
@@ -25,7 +25,7 @@ The public-package gate is true. Every definitive-candidate, final-consumer/acce
 ## Locked v1 decisions
 
 - **Promise:** v1 covers a SemVer-stable HTTP API, both first-party SDKs, production containers, documented operation, and upgrades.
-- **Licensing:** server/repository artifacts are AGPL-3.0-or-later; `Cmsify.Contracts`, both .NET client packages, and `@cmsify/client` are MIT.
+- **Licensing:** server/repository artifacts are AGPL-3.0-or-later; `Cmsify.Contracts`, both .NET client packages, and `@syntaxcircus/cmsify-client` are MIT.
 - **.NET support:** the SDK supports .NET 10 only for v1.
 - **TypeScript support:** Node 20+ and compatible server/edge fetch runtimes are supported. Browser bundles are explicitly unsupported because Cmsify bearer credentials are server secrets.
 - **Promotion:** one reviewed `vX.Y.Z` tag promotes every artifact from the same commit.
@@ -43,7 +43,7 @@ The largest v1 risks identified by that original audit were not basic feature co
 
 - API controllers duplicate wire types that also exist in `Cmsify.Contracts`.
 - the TypeScript generation check validates generated code against a pinned snapshot, but never proves that snapshot matches the running API;
-- `@cmsify/client` claims behavior its high-level client does not safely provide;
+- `@syntaxcircus/cmsify-client` claims behavior its high-level client does not safely provide;
 - NuGet, npm, Docker, Git tags, and package licenses do not share one promotion/version policy;
 - no test proves that the latest `0.1.x` deployment upgrades to v1 without losing data or media;
 - documented Admin OIDC sign-in is not implemented; and
@@ -132,7 +132,7 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 - **Risk:** A controller change can compile, pass `generate:check`, and ship while the .NET contracts and TypeScript snapshot describe a different wire shape.
 - **Required outcome:** Use shared `Cmsify.Contracts` types at the API boundary where practical; otherwise add explicit mappings and contract tests. Export OpenAPI from the built API in CI, compare it non-mutatingly with the checked-in snapshot, then regenerate TypeScript from that verified document. Add a breaking-change diff gate for `/api/v1`.
 
-#### F-02 — `@cmsify/client` is not a truthful or safe v1 surface
+#### F-02 — `@syntaxcircus/cmsify-client` is not a truthful or safe v1 surface
 
 - **Score:** Impact 5, Risk 5, Effort 3 → **30**
 - **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; clean packed-candidate consumers remain an unperformed final gate.
@@ -146,7 +146,7 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 - **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; no definitive same-source tuple has been built, attested, promoted, tagged, or released.
 - **Evidence:** GitVersion publishes stable patches from `main` beginning at `0.1.x`, while TypeScript declares `1.0.0`. The NuGet/Docker workflow publishes on successful pushes to `main` and creates a tag afterward (`.github/workflows/publish-cmsify.yml:22-86`). npm publishes from a separate manual/GitHub Release workflow (`npm-publish-cmsify-client.yml:4-6`). The repository states AGPL-3.0-or-later, the .NET packages declare AGPL-3.0-only (`Cmsify.Contracts.csproj:15` and both client project files at line 15), and npm declares MIT (`package.json:5`).
 - **Risk:** Consumers can receive mismatched SDK/server versions and incompatible license representations, and a release tag does not identify the inputs that triggered all publications.
-- **Required outcome:** A reviewed `vX.Y.Z` tag must build and promote the API image, Admin image, all three NuGet packages, and npm package from one immutable commit. Server artifacts use AGPL-3.0-or-later; `Cmsify.Contracts`, both .NET clients, and `@cmsify/client` use MIT. Generate a GitHub Release and changelog entry from the same version and attach provenance/SBOM metadata.
+- **Required outcome:** A reviewed `vX.Y.Z` tag must build and promote the API image, Admin image, all three NuGet packages, and npm package from one immutable commit. Server artifacts use AGPL-3.0-or-later; `Cmsify.Contracts`, both .NET clients, and `@syntaxcircus/cmsify-client` use MIT. Generate a GitHub Release and changelog entry from the same version and attach provenance/SBOM metadata.
 
 #### F-04 — Latest prerelease-to-v1 upgrade and rollback
 

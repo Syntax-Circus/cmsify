@@ -41,12 +41,12 @@ Webhook delivery is at least once. Use `X-Cmsify-Event` to identify the event ty
 
 ## TypeScript client
 
-The repository contains `@cmsify/client`, generated from the API OpenAPI document and wrapped with typed helpers for workspaces, content, templates, media, health, and authentication. Its npm publication is pending; use the package from `sdk/typescript` during repository development. See [`sdk/typescript/README.md`](../sdk/typescript/README.md) for installation, examples, retries, ETags, and regeneration.
+The repository contains `@syntaxcircus/cmsify-client`, generated from the API OpenAPI document and wrapped with typed helpers for workspaces, content, templates, media, health, and authentication. Its npm publication is pending; use the package from `sdk/typescript` during repository development. See [`sdk/typescript/README.md`](../sdk/typescript/README.md) for installation, examples, retries, ETags, and regeneration.
 
 Example server-side configuration:
 
 ```ts
-import { CmsifyClient } from "@cmsify/client";
+import { CmsifyClient } from "@syntaxcircus/cmsify-client";
 
 const cms = new CmsifyClient({
   baseUrl: process.env.CMSIFY_API_URL!,

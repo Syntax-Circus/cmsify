@@ -1,4 +1,4 @@
-# `@cmsify/client`
+# `@syntaxcircus/cmsify-client`
 
 The first-party TypeScript client provides a typed, server/edge delivery facade for Cmsify content, templates, and media. It targets Node 20+ and modern edge runtimes; do not import it into browser bundles or expose its API token to client-side code.
 
@@ -20,7 +20,7 @@ npm run test:consumer
 ## Configure a server-side delivery client
 
 ```ts
-import { CmsifyClient } from "@cmsify/client";
+import { CmsifyClient } from "@syntaxcircus/cmsify-client";
 
 const cms = new CmsifyClient({
   baseUrl: process.env.CMSIFY_API_URL!,
@@ -54,7 +54,7 @@ Keep `CMSIFY_API_TOKEN` in a server-only secret store. The checked-in Next.js Ap
 The complete generated OpenAPI surface remains available without weakening the delivery facade:
 
 ```ts
-import { createCmsifyFetchClient, type paths } from "@cmsify/client";
+import { createCmsifyFetchClient, type paths } from "@syntaxcircus/cmsify-client";
 
 const raw = createCmsifyFetchClient(process.env.CMSIFY_API_URL!);
 const response = await raw.GET("/api/v1/workspaces/{workspaceId}/content", {

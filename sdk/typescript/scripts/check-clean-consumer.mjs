@@ -39,7 +39,7 @@ try {
     compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true },
   }, null, 2));
   writeFileSync(resolve(consumerRoot, "index.ts"), [
-    'import { CmsifyClient, createCmsifyFetchClient, type ContentListItem, type PagedResult } from "@cmsify/client";',
+    'import { CmsifyClient, createCmsifyFetchClient, type ContentListItem, type PagedResult } from "@syntaxcircus/cmsify-client";',
     'const cms = new CmsifyClient({ baseUrl: "https://cms.example", workspaceId: "5c2d8d41-16aa-4d08-910d-110644525b67" });',
     'const page: Promise<PagedResult<ContentListItem>> = cms.content.list({ status: "Review", page: 1, pageSize: 20 });',
     'const raw = createCmsifyFetchClient("https://cms.example");',

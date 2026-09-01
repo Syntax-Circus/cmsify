@@ -1,4 +1,4 @@
-import { CmsifyClient } from "@cmsify/client";
+import { CmsifyClient } from "@syntaxcircus/cmsify-client";
 
 export const cms = new CmsifyClient({
   baseUrl: process.env.CMSIFY_API_URL!,

@@ -199,7 +199,7 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 
 **SDKs and project work:**
 
-- [TypeScript client](sdk/typescript/README.md) — `@cmsify/client` usage, framework examples, pagination, errors, and regeneration.
+- [TypeScript client](sdk/typescript/README.md) — `@syntaxcircus/cmsify-client` usage, framework examples, pagination, errors, and regeneration.
 - [.NET client](sdk/dotnet/README.md) — NuGet packages, dependency injection, authentication, and service examples.
 - [Changelog](CHANGELOG.md) — released and upcoming changes.
 - [Project roadmap](docs/roadmap.md) — committed future work, when available.
