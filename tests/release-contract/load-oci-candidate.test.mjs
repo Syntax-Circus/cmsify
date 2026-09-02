@@ -18,7 +18,7 @@ import {
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const loaderUrl = pathToFileURL(resolve(repositoryRoot, "scripts", "release", "load-oci-candidate.mjs")).href;
-const skopeoImage = "quay.io/skopeo/stable:v1.22.2@sha256:e770070399e711f3e15bbda2802de4031f0f270180c5bf8dfbd4c2823c20c233";
+const skopeoImage = "quay.io/skopeo/stable:v1.22.2@sha256:0b98d4296bfd35680c09fd40a5bff17b8569715258a4bee0a7ae3ca500eaaece";
 const RUN_ID = "cmsify-oci-loader-test123";
 
 async function loaderModule() {
