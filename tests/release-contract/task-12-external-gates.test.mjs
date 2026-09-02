@@ -36,6 +36,9 @@ const runId = "12345";
 const tag = "v1.2.3";
 const version = "1.2.3";
 const signerWorkflow = "Syntax-Circus/cmsify/.github/workflows/publish-cmsify.yml";
+const soakSignerWorkflow = "Syntax-Circus/cmsify/.github/workflows/record-release-soak.yml";
+const soakRecorderRunId = "67890";
+const soakRecorderSourceSha = "3".repeat(40);
 const cosignIdentity = `https://github.com/${signerWorkflow}@refs/tags/${tag}`;
 const testNow = new Date(Math.floor(Date.now() / 1000) * 1000);
 const requiredInputs = [
@@ -54,6 +57,9 @@ const requiredInputs = [
   "CMSIFY_RELEASE_SOURCE_SHA",
   "CMSIFY_SOAK_EVIDENCE_PATH",
   "CMSIFY_SOAK_EVIDENCE_SHA256",
+  "CMSIFY_SOAK_RECORDER_RUN_ID",
+  "CMSIFY_SOAK_RECORDER_SOURCE_SHA",
+  "CMSIFY_SOAK_ATTESTATION_SIGNER_WORKFLOW",
 ];
 
 function sha256(value) {
@@ -104,6 +110,9 @@ function baseEnvironment(bin) {
     CMSIFY_SMOKE_JOB_ID: "203",
     CMSIFY_UPGRADE_ROLLBACK_JOB_ID: "204",
     CMSIFY_RELEASE_SOURCE_SHA: sourceSha,
+    CMSIFY_SOAK_RECORDER_RUN_ID: soakRecorderRunId,
+    CMSIFY_SOAK_RECORDER_SOURCE_SHA: soakRecorderSourceSha,
+    CMSIFY_SOAK_ATTESTATION_SIGNER_WORKFLOW: soakSignerWorkflow,
   };
 }
 
@@ -492,9 +501,12 @@ function arrangeSoak({ root, env }, overrides = {}) {
   const soak = {
     schema: "cmsify.hosted-soak-evidence.v1",
     releaseRunId: runId,
+    releaseTag: tag,
     sourceSha,
     smokeJobId: "203",
     upgradeRollbackJobId: "204",
+    soakRecorderRunId,
+    soakRecorderSourceSha,
     smokePassed: true,
     upgradeRollbackPassed: true,
     passed: true,
@@ -513,7 +525,20 @@ function arrangeSoak({ root, env }, overrides = {}) {
 function soakCommands(soakPath) {
   return {
     ...runAndJobsCommands(),
-    [`gh attestation verify ${soakPath} --repo Syntax-Circus/cmsify --signer-workflow ${signerWorkflow} --source-digest ${sourceSha}`]: {},
+    [`gh api repos/Syntax-Circus/cmsify/actions/runs/${soakRecorderRunId}`]: {
+      json: {
+        id: Number(soakRecorderRunId),
+        event: "workflow_dispatch",
+        head_sha: soakRecorderSourceSha,
+        head_branch: "main",
+        path: ".github/workflows/record-release-soak.yml",
+        workflow_ref: "Syntax-Circus/cmsify/.github/workflows/record-release-soak.yml@refs/heads/main",
+        status: "completed",
+        conclusion: "success",
+        created_at: minutesFromNow(-50),
+      },
+    },
+    [`gh attestation verify ${soakPath} --repo Syntax-Circus/cmsify --signer-workflow ${soakSignerWorkflow} --source-digest ${soakRecorderSourceSha}`]: {},
   };
 }
 
@@ -535,6 +560,9 @@ test("soak evidence is authenticated, boolean-exact, run-bound, and at least 60 
     { startedAtUtc: minutesFromNow(-109), completedAtUtc: minutesFromNow(-49) },
     { startedAtUtc: minutesFromNow(60), completedAtUtc: minutesFromNow(120) },
     { sourceSha: "2".repeat(40) },
+    { releaseTag: "v9.9.9" },
+    { soakRecorderRunId: "99999" },
+    { soakRecorderSourceSha: "4".repeat(40) },
   ]) {
     const result = runGate("hosted-smoke-soak", {
       commands: {},
@@ -545,6 +573,26 @@ test("soak evidence is authenticated, boolean-exact, run-bound, and at least 60 
       },
     });
     assert.notEqual(result.status, 0, `soak mutation unexpectedly passed: ${JSON.stringify(overrides)}`);
+  }
+
+  for (const mutateRecorder of [
+    (run) => { run.event = "push"; },
+    (run) => { run.head_sha = "4".repeat(40); },
+    (run) => { run.path = ".github/workflows/other.yml"; },
+    (run) => { run.workflow_ref = "Syntax-Circus/cmsify/.github/workflows/record-release-soak.yml@refs/heads/feature"; },
+    (run) => { run.conclusion = "failure"; },
+    (run) => { run.created_at = minutesFromNow(10); },
+  ]) {
+    const result = runGate("hosted-smoke-soak", {
+      commands: {},
+      arrange(context) {
+        const soakPath = arrangeSoak(context);
+        const fixture = soakCommands(soakPath);
+        mutateRecorder(fixture[`gh api repos/Syntax-Circus/cmsify/actions/runs/${soakRecorderRunId}`].json);
+        writeFileSync(context.env.CMSIFY_TASK12_STUB_FIXTURE, JSON.stringify({ commands: fixture }));
+      },
+    });
+    assert.notEqual(result.status, 0, "invalid soak recorder run unexpectedly passed");
   }
 });
 

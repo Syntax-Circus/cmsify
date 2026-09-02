@@ -649,6 +649,8 @@ for (const project of [
 
 const workflowPath = ".github/workflows/publish-cmsify.yml";
 const workflow = file(workflowPath);
+const soakWorkflowPath = ".github/workflows/record-release-soak.yml";
+const soakWorkflow = file(soakWorkflowPath);
 const accessibilityWorkflow = file(".github/workflows/admin-accessibility.yml");
 const openApiWorkflow = file(".github/workflows/openapi-contract.yml");
 const accessibilityPackage = file("eng/accessibility/package.json");
@@ -717,6 +719,13 @@ for (const [name, contents] of offlineTransportRunbooks) {
   expect(!hasContradictoryTransportClaim(contents), `${name} must state exclusively that temporary transport output is never certified, uploaded, or promoted.`);
 }
 expect(!existsSync(resolve(repositoryRoot, ".github/workflows/npm-publish-cmsify-client.yml")), "A separate npm publication workflow is forbidden; promotion must be unified.");
+expect(/workflow_dispatch:[\s\S]*release_run_id:[\s\S]*required:\s*true[\s\S]*release_tag:[\s\S]*required:\s*true/.test(soakWorkflow), "Dedicated soak recording must require the immutable release run ID and stable tag.");
+expect(/\[\[ "\$GITHUB_REF" == "refs\/heads\/main" \]\]/.test(soakWorkflow) && !/^\s+if:\s*github\.ref/m.test(soakWorkflow), "Dedicated soak recording must fail closed unless it executes from main.");
+expect(/actions\/runs\/\$RELEASE_RUN_ID[\s\S]*artifact-smoke[\s\S]*upgrade-rollback[\s\S]*SOAK_SECONDS[\s\S]*-lt 3600/.test(soakWorkflow), "Dedicated soak recording must authenticate the exact jobs and require an elapsed 60-minute interval.");
+expect(/actions\/upload-artifact@[0-9a-f]{40}[\s\S]*actions\/attest-build-provenance@[0-9a-f]{40}[\s\S]*subject-path:\s*soak-evidence\/cmsify-hosted-soak\.json/.test(soakWorkflow), "Dedicated soak evidence must be uploaded and attested with SHA-pinned actions.");
+for (const match of soakWorkflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
+  expect(/@[0-9a-f]{40}$/i.test(match[1]), `Soak recorder action must be pinned by immutable SHA: ${match[1]}`);
+}
 const approvedReleaseUploads = [
   { name: "release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}", paths: ["artifacts"] },
   { name: "release-smoke-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}", paths: ["${{ runner.temp }}/cmsify-release-smoke/evidence.json"] },

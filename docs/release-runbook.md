@@ -43,6 +43,16 @@ Abort before promotion if any command fails, a source SHA/tag/digest differs, a 
 
 If promotion partially publishes an immutable version, record every accepted registry write and stop. Do not move that tag to a repair commit, rebuild a missing ecosystem artifact under the same release claim, or create a GitHub Release that implies a complete same-source tuple. Correct the release machinery through review and use the next patch version for a new complete candidate. `v0.2.0` is the historical example: its NuGet submissions and OCI images were accepted before npm rejected the unowned `@cmsify/client` identity, so it has no GitHub Release and must not be reused; the corrected complete candidate is `v0.2.1`.
 
+## Record the authenticated soak
+
+After both `artifact-smoke` and `upgrade-rollback` have been successful for at least 60 minutes, dispatch `record-release-soak.yml` from `main` with the immutable release run ID and stable tag. The recorder does not sleep or rerun publication. It authenticates the original tag-push workflow, exact source SHA, unique successful smoke and upgrade jobs, elapsed interval, published non-draft release, and lightweight tag target; it then uploads and attests `cmsify-hosted-soak.json` from its own exact default-branch source commit.
+
+```powershell
+gh workflow run record-release-soak.yml --repo Syntax-Circus/cmsify --ref main -f release_run_id=$env:CMSIFY_RELEASE_RUN_ID -f release_tag=$env:CMSIFY_RELEASE_TAG
+```
+
+Retain the recorder run ID and source SHA, download its `cmsify-hosted-soak-<tag>-<release-run-id>` artifact without altering it, record its lowercase SHA-256, and supply the dedicated soak signer `Syntax-Circus/cmsify/.github/workflows/record-release-soak.yml` to the `hosted-smoke-soak` external gate. The release attestation signer remains `publish-cmsify.yml`; never claim that the later recorder was built from the older release tag.
+
 ## Promote only certified bytes
 
 The promotion job must copy the certified OCI descriptor by digest and compare the remote digest before package publication. Its pinned ORAS invocation uses the stable `--oci-layout path@digest` and `--from-oci-layout path@digest` forms; the experimental `--oci-layout-path` forms are not promotion evidence because they can fall through to a registry lookup. Promotion must not rebuild an image. Before restoring traffic to a deployment, verify a matched database/media backup, the retained prior image digest, `/health/live`, `/health/ready`, Admin sign-in, representative authenticated reads, and representative media downloads. The public restore gate for `SyntaxCircus.Http.Resilience` remains user-owned until exact public bytes and clean restore evidence exist.

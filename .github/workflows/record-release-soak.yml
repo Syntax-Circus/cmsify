@@ -1,0 +1,112 @@
+name: Record Cmsify release soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: "Successful publish-cmsify workflow run ID"
+        required: true
+        type: string
+      release_tag:
+        description: "Published stable tag, for example v0.2.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  attestations: write
+  id-token: write
+
+jobs:
+  record-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Authenticate release identity and record elapsed soak
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+
+          RELEASE_RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
+          EXPECTED_WORKFLOW_REF="$GITHUB_REPOSITORY/.github/workflows/publish-cmsify.yml@refs/tags/$RELEASE_TAG"
+          jq -e \
+            --arg runId "$RELEASE_RUN_ID" \
+            --arg tag "$RELEASE_TAG" \
+            --arg workflowRef "$EXPECTED_WORKFLOW_REF" \
+            '(.id | tostring) == $runId and
+            .event == "push" and
+            .path == ".github/workflows/publish-cmsify.yml" and
+            .workflow_ref == $workflowRef and
+            .head_branch == $tag and
+            .status == "completed" and
+            .conclusion == "success" and
+            (.head_sha | test("^[0-9a-f]{40}$"))' <<<"$RELEASE_RUN" >/dev/null
+          SOURCE_SHA="$(jq -er '.head_sha' <<<"$RELEASE_RUN")"
+
+          JOBS="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID/jobs?filter=latest&per_page=100")"
+          jq -e '[.jobs[] | select(.name == "artifact-smoke")] | length == 1' <<<"$JOBS" >/dev/null
+          jq -e '[.jobs[] | select(.name == "upgrade-rollback")] | length == 1' <<<"$JOBS" >/dev/null
+          SMOKE="$(jq -ec '.jobs[] | select(.name == "artifact-smoke")' <<<"$JOBS")"
+          UPGRADE="$(jq -ec '.jobs[] | select(.name == "upgrade-rollback")' <<<"$JOBS")"
+          jq -e '.status == "completed" and .conclusion == "success" and (.completed_at | type == "string")' <<<"$SMOKE" >/dev/null
+          jq -e '.status == "completed" and .conclusion == "success" and (.completed_at | type == "string")' <<<"$UPGRADE" >/dev/null
+
+          SMOKE_JOB_ID="$(jq -er '.id | tostring' <<<"$SMOKE")"
+          UPGRADE_JOB_ID="$(jq -er '.id | tostring' <<<"$UPGRADE")"
+          SMOKE_COMPLETED="$(jq -er '.completed_at' <<<"$SMOKE")"
+          UPGRADE_COMPLETED="$(jq -er '.completed_at' <<<"$UPGRADE")"
+          STARTED_AT="$(jq -nr --arg smoke "$SMOKE_COMPLETED" --arg upgrade "$UPGRADE_COMPLETED" '[$smoke, $upgrade] | map(fromdateiso8601) | max | todateiso8601')"
+          STARTED_EPOCH="$(date -u -d "$STARTED_AT" +%s)"
+          COMPLETED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          COMPLETED_EPOCH="$(date -u -d "$COMPLETED_AT" +%s)"
+          SOAK_SECONDS="$((COMPLETED_EPOCH - STARTED_EPOCH))"
+          if [[ "$SOAK_SECONDS" -lt 3600 ]]; then
+            echo "The exact smoke and upgrade jobs have soaked for only $SOAK_SECONDS seconds; at least 3600 are required." >&2
+            exit 1
+          fi
+
+          RELEASE="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          jq -e --arg sha "$SOURCE_SHA" '.draft == false and .prerelease == false and .target_commitish == $sha and (.published_at | type == "string")' <<<"$RELEASE" >/dev/null
+          TAG_REF="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG")"
+          jq -e --arg sha "$SOURCE_SHA" '.object.type == "commit" and .object.sha == $sha' <<<"$TAG_REF" >/dev/null
+
+          mkdir -p soak-evidence
+          EVIDENCE_FILTER='{schema:$schema,releaseRunId:$releaseRunId,releaseTag:$releaseTag,sourceSha:$sourceSha,smokeJobId:$smokeJobId,upgradeRollbackJobId:$upgradeRollbackJobId,soakRecorderRunId:$soakRecorderRunId,soakRecorderSourceSha:$soakRecorderSourceSha,smokePassed:$smokePassed,upgradeRollbackPassed:$upgradeRollbackPassed,passed:$passed,startedAtUtc:$startedAtUtc,completedAtUtc:$completedAtUtc}'
+          jq -n \
+            --arg schema "cmsify.hosted-soak-evidence.v1" \
+            --arg releaseRunId "$RELEASE_RUN_ID" \
+            --arg releaseTag "$RELEASE_TAG" \
+            --arg sourceSha "$SOURCE_SHA" \
+            --arg smokeJobId "$SMOKE_JOB_ID" \
+            --arg upgradeRollbackJobId "$UPGRADE_JOB_ID" \
+            --arg soakRecorderRunId "$GITHUB_RUN_ID" \
+            --arg soakRecorderSourceSha "$GITHUB_SHA" \
+            --argjson smokePassed true \
+            --argjson upgradeRollbackPassed true \
+            --argjson passed true \
+            --arg startedAtUtc "$STARTED_AT" \
+            --arg completedAtUtc "$COMPLETED_AT" \
+            "$EVIDENCE_FILTER" \
+            > soak-evidence/cmsify-hosted-soak.json
+          sha256sum soak-evidence/cmsify-hosted-soak.json
+
+      - name: Upload authenticated soak evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cmsify-hosted-soak-${{ inputs.release_tag }}-${{ inputs.release_run_id }}
+          path: soak-evidence/cmsify-hosted-soak.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attest exact soak evidence
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: soak-evidence/cmsify-hosted-soak.json
