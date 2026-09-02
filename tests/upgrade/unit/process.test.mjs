@@ -46,6 +46,17 @@ test("passes a constant input string through standard input without a shell", as
   assert.equal(result.stdout, statement);
 });
 
+test("passes bounded binary input through standard input without text conversion", async () => {
+  const archive = Buffer.from([0x50, 0x47, 0x44, 0x4d, 0x50, 0x00, 0xff]);
+  const result = await runProcess(node, evalScript("process.stdin.pipe(process.stdout)"), {
+    timeoutMs,
+    stdin: archive,
+    stdoutEncoding: "buffer",
+  });
+
+  assert.deepEqual(result.stdout, archive);
+});
+
 test("terminates a timed-out process", async () => {
   const marker = resolve(temporaryDirectory, "timeout-descendant-marker");
   await assert.rejects(

@@ -393,6 +393,82 @@ test("default preflight validates fixture and every image before the first resou
   }
 });
 
+test("default fixture restore streams the verified database fixture through psql stdin", async () => {
+  const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-fixture-stdin-"));
+  const fixtureDirectory = resolve(repositoryRoot, "fixture");
+  const databaseFixture = "SELECT 1;\n";
+  const execCalls = [];
+  const copyCalls = [];
+  const imageId = `sha256:${"c".repeat(64)}`;
+  const immutableImage = (repository) => ({
+    repository,
+    tag: "test",
+    digest: `sha256:${"d".repeat(64)}`,
+    platform: "linux/amd64",
+  });
+  const manifest = {
+    baseline: {
+      version: "0.1.3",
+      sourceSha: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      apiImage: immutableImage("baseline-api"),
+      postgresImage: immutableImage("postgres"),
+      minioImage: immutableImage("minio"),
+    },
+  };
+  const harness = {
+    inspectImage: async () => undefined,
+    inspectCandidateImage: async () => ({
+      reference: "cmsify-candidate:test",
+      imageId,
+      platform: "linux/amd64",
+      version: "1.0.0",
+      sourceSha: candidateSourceSha,
+      informationalVersion: `1.0.0+${candidateSourceSha}`,
+    }),
+    verifyPrerequisites: async () => ({ status: "passed" }),
+    writeEnvironment: async () => undefined,
+    up: async () => undefined,
+    exec: async (service, args, options) => {
+      execCalls.push({ service, args, options });
+      if (service === "minio" && args.slice(0, 2).join(" ") === "mc mirror") throw new Error("stop after fixture import");
+      return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+    },
+    copyTo: async (service, source, destination) => copyCalls.push({ service, source, destination }),
+    logs: async () => undefined,
+    cleanup: async () => undefined,
+  };
+
+  try {
+    mkdirSync(fixtureDirectory, { recursive: true });
+    writeFileSync(resolve(fixtureDirectory, "database.sql"), databaseFixture, "utf8");
+
+    await assert.rejects(() => rehearse({
+      repositoryRoot,
+      fixtureDirectory,
+      candidateImage: "cmsify-candidate:test",
+      candidateVersion: "1.0.0",
+      candidateSourceSha,
+      runId: "fixture-stdin-test-001",
+      dependencies: {
+        createDockerHarness: () => harness,
+        loadFixtureManifest: () => manifest,
+        verifyFixtureGenerationProvenance: () => undefined,
+        loadExpectedData: async () => ({ authentication: { readerToken: "cmsify_fixture-reader", adminPassword: "fixture-password" } }),
+        verifyFixtureChecksums: async () => verifiedChecksums(),
+      },
+    }), /restore-fixture phase failed/i);
+
+    const psql = execCalls.find(({ service, args }) => service === "postgres" && args[0] === "psql");
+    assert.ok(psql);
+    assert.equal(psql.args.includes("--file=-"), true);
+    assert.equal(psql.options.stdin, databaseFixture);
+    assert.equal(copyCalls.some(({ service }) => service === "postgres"), false);
+    assert.equal(copyCalls.some(({ service }) => service === "minio"), true);
+  } finally {
+    rmSync(repositoryRoot, { force: true, recursive: true });
+  }
+});
+
 test("default preflight failure for a missing tool cannot write the run env or start resources", async () => {
   const repositoryRoot = mkdtempSync(resolve(tmpdir(), "cmsify-rehearsal-prerequisite-"));
   const events = [];
@@ -532,6 +608,7 @@ test("default operations pass the candidate canary through isolated backup rollb
   const fixtureDirectory = resolve(repositoryRoot, "fixture");
   const events = [];
   const canaryId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const databaseBackup = Buffer.from([0x50, 0x47, 0x44, 0x4d, 0x50, 0x00, 0xff]);
   const controller = new AbortController();
   const imageId = `sha256:${"e".repeat(64)}`;
   const image = (repository) => ({ repository, tag: "test", digest: `sha256:${"f".repeat(64)}`, platform: "linux/amd64" });
@@ -570,6 +647,10 @@ test("default operations pass the candidate canary through isolated backup rollb
     exec: async (service, args, options) => {
       events.push(`exec:${service}:${args[0]}`);
       if (args[0] === "assertion-probe") assert.equal(options.signal, controller.signal);
+      if (args[0] === "pg_restore") {
+        assert.deepEqual(options.stdin, databaseBackup);
+        assert.equal(args.some((argument) => argument.endsWith(".dump")), false);
+      }
       return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
     },
     copyTo: async (service, source) => events.push(`copy:${service}:${source.includes("backup") ? "backup" : "fixture"}`),
@@ -583,6 +664,11 @@ test("default operations pass the candidate canary through isolated backup rollb
   };
 
   try {
+    mkdirSync(fixtureDirectory, { recursive: true });
+    writeFileSync(resolve(fixtureDirectory, "database.sql"), "SELECT 1;\n", "utf8");
+    const backupDirectory = resolve(repositoryRoot, "artifacts", "upgrade-tests", "default-test-001", "backup");
+    mkdirSync(backupDirectory, { recursive: true });
+    writeFileSync(resolve(backupDirectory, "database.dump"), databaseBackup);
     const report = await rehearse({
       repositoryRoot,
       fixtureDirectory,
@@ -637,8 +723,10 @@ test("default operations pass the candidate canary through isolated backup rollb
     assert.ok(events.indexOf("backup:verify-again") < events.indexOf("upgraded-volumes:remove"));
     assert.equal(events.filter((event) => event === "backup:verify-again").length, 2, "default discard must reverify again inside the destructive operation");
     const rollbackBaselineStart = events.lastIndexOf("up:baseline-api");
-    assert.ok(events.indexOf("upgraded-volumes:remove") < events.lastIndexOf("copy:postgres:backup"));
-    assert.ok(events.lastIndexOf("copy:postgres:backup") < rollbackBaselineStart);
+    const restoreIndex = events.lastIndexOf("exec:postgres:pg_restore");
+    assert.ok(events.indexOf("upgraded-volumes:remove") < restoreIndex);
+    assert.ok(restoreIndex < rollbackBaselineStart);
+    assert.equal(events.includes("copy:postgres:backup"), false);
     assert.ok(rollbackBaselineStart < events.indexOf("assert:rollback"));
     assert.equal(events.at(-1), "owned-resources:cleanup");
   } finally {

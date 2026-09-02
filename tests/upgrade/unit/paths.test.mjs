@@ -171,6 +171,23 @@ test("Docker exec opts into an interactive stdin pipe only when input is supplie
   assert.equal(calls[0].options.stdin, "SELECT 1;");
 });
 
+test("Docker exec forwards binary stdin without changing the Compose command boundary", async () => {
+  const scope = createRunScope(repositoryRoot, "safe-run-016");
+  const calls = [];
+  const archive = Buffer.from([0x50, 0x47, 0x44, 0x4d, 0x50, 0x00, 0xff]);
+  const executor = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
+  };
+  const harness = createDockerHarness(scope, executor);
+
+  await harness.exec("postgres", ["pg_restore", "--dbname", "cmsify"], { stdin: archive });
+
+  assert.deepEqual(calls[0].args.slice(-5), ["--no-TTY", "postgres", "pg_restore", "--dbname", "cmsify"]);
+  assert.equal(calls[0].args.includes("--interactive"), true);
+  assert.equal(calls[0].options.stdin, archive);
+});
+
 test("accepts Docker Hub's canonical repository spelling for an immutable digest", async () => {
   const scope = createRunScope(repositoryRoot, "safe-run-009");
   const digest = "sha256:e28a7c884ed4cc4933fbb58608ba8d1dd97bf6a1e443ef234e0a0aa8b5c51931";
