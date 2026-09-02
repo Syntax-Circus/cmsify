@@ -277,7 +277,7 @@ function renderNpm(root, state) {
   const staging = mkdtempSync(resolve(tmpdir(), "cmsify-npm-fixture-"));
   try {
     for (const [name, contents] of Object.entries({ ...state.members, "package/package.json": `${JSON.stringify(state.metadata, null, 2)}\n` })) write(staging, name, contents);
-    const target = resolve(root, `npm/cmsify-client-${VERSION}.tgz`);
+    const target = resolve(root, `npm/${state.fileName ?? `syntaxcircus-cmsify-client-${VERSION}.tgz`}`);
     mkdirSync(dirname(target), { recursive: true });
     execFileSync("tar", ["-czf", target, "-C", staging, "package"]);
   } finally {

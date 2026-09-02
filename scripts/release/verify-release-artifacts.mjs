@@ -137,7 +137,7 @@ function npmMember(metadata, field, expected, members, explicitValue) {
 
 function verifyNpm(expectedFiles) {
   const directory = resolve(artifacts, "npm");
-  const expectedName = `cmsify-client-${version}.tgz`;
+  const expectedName = `syntaxcircus-cmsify-client-${version}.tgz`;
   const actual = existsSync(directory) ? readdirSync(directory).filter((name) => statSync(resolve(directory, name)).isFile()) : [];
   expect(actual.length === 1 && actual[0] === expectedName, `npm candidate must contain exactly ${expectedName}.`);
   expectedFiles.add(`npm/${expectedName}`);
