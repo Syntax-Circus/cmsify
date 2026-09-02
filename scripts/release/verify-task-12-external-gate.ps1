@@ -23,6 +23,8 @@ $ErrorActionPreference = "Stop"
 $Repository = "Syntax-Circus/cmsify"
 $PublishWorkflowPath = ".github/workflows/publish-cmsify.yml"
 $AttestationSignerWorkflow = "Syntax-Circus/cmsify/.github/workflows/publish-cmsify.yml"
+$SoakWorkflowPath = ".github/workflows/record-release-soak.yml"
+$SoakAttestationSignerWorkflow = "Syntax-Circus/cmsify/.github/workflows/record-release-soak.yml"
 
 $GateInputs = [ordered]@{
     "public-package-restore"   = @()
@@ -31,7 +33,7 @@ $GateInputs = [ordered]@{
     "artifact-attestation"   = @("CMSIFY_CHECKSUMS_PATH", "CMSIFY_RELEASE_VERSION", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_ATTESTATION_SIGNER_WORKFLOW")
     "registry-signing"        = @("CMSIFY_API_DIGEST", "CMSIFY_ADMIN_DIGEST", "CMSIFY_RELEASE_TAG", "CMSIFY_COSIGN_CERTIFICATE_IDENTITY")
     "immutable-oci-promotion" = @("CMSIFY_RELEASE_VERSION", "CMSIFY_API_DIGEST", "CMSIFY_ADMIN_DIGEST")
-    "hosted-smoke-soak"       = @("CMSIFY_RELEASE_RUN_ID", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_RELEASE_TAG", "CMSIFY_SMOKE_JOB_ID", "CMSIFY_UPGRADE_ROLLBACK_JOB_ID", "CMSIFY_SOAK_EVIDENCE_PATH", "CMSIFY_SOAK_EVIDENCE_SHA256", "CMSIFY_ATTESTATION_SIGNER_WORKFLOW")
+    "hosted-smoke-soak"       = @("CMSIFY_RELEASE_RUN_ID", "CMSIFY_RELEASE_SOURCE_SHA", "CMSIFY_RELEASE_TAG", "CMSIFY_SMOKE_JOB_ID", "CMSIFY_UPGRADE_ROLLBACK_JOB_ID", "CMSIFY_SOAK_EVIDENCE_PATH", "CMSIFY_SOAK_EVIDENCE_SHA256", "CMSIFY_SOAK_RECORDER_RUN_ID", "CMSIFY_SOAK_RECORDER_SOURCE_SHA", "CMSIFY_SOAK_ATTESTATION_SIGNER_WORKFLOW")
     "final-release"           = @("CMSIFY_RELEASE_VERSION", "CMSIFY_RELEASE_TAG", "CMSIFY_RELEASE_SOURCE_SHA")
 }
 
@@ -212,6 +214,33 @@ function Assert-AttestationSignerWorkflow {
     param([Parameter(Mandatory = $true)][string] $Value)
     if ($Value -cne $AttestationSignerWorkflow) {
         throw "Attestation signer workflow locator is invalid."
+    }
+}
+
+function Assert-SoakAttestationSignerWorkflow {
+    param([Parameter(Mandatory = $true)][string] $Value)
+    if ($Value -cne $SoakAttestationSignerWorkflow) {
+        throw "Soak attestation signer workflow locator is invalid."
+    }
+}
+
+function Assert-SoakRecorderRunIdentity {
+    param(
+        [Parameter(Mandatory = $true)][object] $Run,
+        [Parameter(Mandatory = $true)][string] $RunId,
+        [Parameter(Mandatory = $true)][string] $SourceSha
+    )
+
+    Assert-FullSourceSha -Value $SourceSha
+    if ([string] $Run.id -ne $RunId -or
+        $Run.event -ne "workflow_dispatch" -or
+        $Run.path -ne $SoakWorkflowPath -or
+        $Run.workflow_ref -ne "$Repository/$SoakWorkflowPath@refs/heads/main" -or
+        $Run.head_sha -ne $SourceSha -or
+        $Run.head_branch -ne "main" -or
+        $Run.status -ne "completed" -or
+        $Run.conclusion -ne "success") {
+        throw "Soak recorder run workflow, event, branch, source, or conclusion is invalid."
     }
 }
 
@@ -533,8 +562,10 @@ function Test-HostedSmokeSoak {
     $runId = $Inputs.CMSIFY_RELEASE_RUN_ID
     $sourceSha = $Inputs.CMSIFY_RELEASE_SOURCE_SHA
     $tag = $Inputs.CMSIFY_RELEASE_TAG
-    $signerWorkflow = $Inputs.CMSIFY_ATTESTATION_SIGNER_WORKFLOW
-    Assert-AttestationSignerWorkflow -Value $signerWorkflow
+    $soakSignerWorkflow = $Inputs.CMSIFY_SOAK_ATTESTATION_SIGNER_WORKFLOW
+    $soakRecorderRunId = $Inputs.CMSIFY_SOAK_RECORDER_RUN_ID
+    $soakRecorderSourceSha = $Inputs.CMSIFY_SOAK_RECORDER_SOURCE_SHA
+    Assert-SoakAttestationSignerWorkflow -Value $soakSignerWorkflow
     $run = Get-ReleaseRun -RunId $runId
     Assert-ReleaseRunIdentity -Run $run -RunId $runId -SourceSha $sourceSha -Tag $tag
     $jobs = Get-ReleaseJobs -RunId $runId
@@ -543,6 +574,10 @@ function Test-HostedSmokeSoak {
     $smokeCompleted = ConvertTo-ExactUtcTimestamp -Value $smoke.completed_at -Label "Smoke job completion"
     $upgradeCompleted = ConvertTo-ExactUtcTimestamp -Value $upgrade.completed_at -Label "Upgrade/rollback job completion"
     $jobsCompleted = if ($smokeCompleted -gt $upgradeCompleted) { $smokeCompleted } else { $upgradeCompleted }
+    $soakRecorderRun = Get-ReleaseRun -RunId $soakRecorderRunId
+    Assert-SoakRecorderRunIdentity -Run $soakRecorderRun -RunId $soakRecorderRunId -SourceSha $soakRecorderSourceSha
+    $soakRecorderCreated = ConvertTo-ExactUtcTimestamp -Value $soakRecorderRun.created_at -Label "Soak recorder run creation"
+    if ($soakRecorderCreated -lt $jobsCompleted) { throw "Soak recorder run predates the exact release jobs." }
 
     $soakPath = $Inputs.CMSIFY_SOAK_EVIDENCE_PATH
     if (-not (Test-Path -LiteralPath $soakPath -PathType Leaf)) { throw "Soak evidence is missing." }
@@ -552,14 +587,17 @@ function Test-HostedSmokeSoak {
     if ($expectedHash -cnotmatch "^[0-9a-f]{64}$") { throw "Soak evidence SHA-256 is invalid." }
     $actualHash = (Get-FileHash -LiteralPath $soakPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualHash -cne $expectedHash) { throw "Soak evidence SHA-256 mismatch." }
-    Invoke-AttestationVerification -Subject ([IO.Path]::GetFullPath($soakPath)) -SignerWorkflow $signerWorkflow -SourceSha $sourceSha
+    Invoke-AttestationVerification -Subject ([IO.Path]::GetFullPath($soakPath)) -SignerWorkflow $soakSignerWorkflow -SourceSha $soakRecorderSourceSha
 
     try { $soak = Get-Content -Raw -LiteralPath $soakPath | ConvertFrom-Json -Depth 20 } catch { throw "Soak evidence is not valid JSON." }
     if ($soak.schema -cne "cmsify.hosted-soak-evidence.v1" -or
         $soak.releaseRunId -isnot [string] -or $soak.releaseRunId -cne $runId -or
+        $soak.releaseTag -isnot [string] -or $soak.releaseTag -cne $tag -or
         $soak.sourceSha -isnot [string] -or $soak.sourceSha -cne $sourceSha -or
         $soak.smokeJobId -isnot [string] -or $soak.smokeJobId -cne $Inputs.CMSIFY_SMOKE_JOB_ID -or
-        $soak.upgradeRollbackJobId -isnot [string] -or $soak.upgradeRollbackJobId -cne $Inputs.CMSIFY_UPGRADE_ROLLBACK_JOB_ID) {
+        $soak.upgradeRollbackJobId -isnot [string] -or $soak.upgradeRollbackJobId -cne $Inputs.CMSIFY_UPGRADE_ROLLBACK_JOB_ID -or
+        $soak.soakRecorderRunId -isnot [string] -or $soak.soakRecorderRunId -cne $soakRecorderRunId -or
+        $soak.soakRecorderSourceSha -isnot [string] -or $soak.soakRecorderSourceSha -cne $soakRecorderSourceSha) {
         throw "Soak evidence schema or immutable identity is invalid."
     }
     Assert-ExactJsonBoolean -Value $soak.smokePassed -Label "smokePassed"
@@ -568,7 +606,7 @@ function Test-HostedSmokeSoak {
     $started = ConvertTo-ExactUtcTimestamp -Value $soak.startedAtUtc -Label "Soak start"
     $completed = ConvertTo-ExactUtcTimestamp -Value $soak.completedAtUtc -Label "Soak completion"
     $now = [DateTimeOffset]::UtcNow
-    if ($started -lt $jobsCompleted -or $completed -le $started -or ($completed - $started).TotalMinutes -lt 60 -or $completed -gt $now.AddMinutes(5) -or ($now - $completed).TotalHours -gt 24) {
+    if ($started -lt $jobsCompleted -or $completed -lt $soakRecorderCreated -or $completed -le $started -or ($completed - $started).TotalMinutes -lt 60 -or $completed -gt $now.AddMinutes(5) -or ($now - $completed).TotalHours -gt 24) {
         throw "Soak evidence is stale, future-dated, shorter than 60 minutes, or not bound after the exact jobs."
     }
 }

@@ -9,6 +9,7 @@ import test from "node:test";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const verifier = resolve(repositoryRoot, "scripts", "release", "verify-release-contract.mjs");
 const workflowPath = ".github/workflows/publish-cmsify.yml";
+const soakWorkflowPath = ".github/workflows/record-release-soak.yml";
 
 test("uses the owned SyntaxCircus npm scope for the TypeScript SDK", () => {
   const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, "sdk/typescript/package.json"), "utf8"));
@@ -58,6 +59,7 @@ const contractFiles = [
   ".github/workflows/admin-accessibility.yml",
   ".github/workflows/openapi-contract.yml",
   ".github/workflows/upgrade-rollback.yml",
+  soakWorkflowPath,
   "SECURITY.md",
   "SUPPORT.md",
   ".github/CODEOWNERS",

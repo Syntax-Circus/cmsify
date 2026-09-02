@@ -25,7 +25,10 @@
     "CMSIFY_UPGRADE_ROLLBACK_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
     "CMSIFY_RELEASE_SOURCE_SHA": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
     "CMSIFY_SOAK_EVIDENCE_PATH": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_SOAK_EVIDENCE_SHA256": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" }
+    "CMSIFY_SOAK_EVIDENCE_SHA256": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_SOAK_RECORDER_RUN_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_SOAK_RECORDER_SOURCE_SHA": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
+    "CMSIFY_SOAK_ATTESTATION_SIGNER_WORKFLOW": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" }
   },
   "localFeedPackage": {
     "id": "SyntaxCircus.Http.Resilience",
