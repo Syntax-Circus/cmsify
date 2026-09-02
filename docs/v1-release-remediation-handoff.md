@@ -1,11 +1,27 @@
-# V1 release remediation handoff after Task 12 repository remediation
+# V1 release remediation closure handoff
 
-This is the point-in-time handoff for merging the remediation work and returning later for release certification. Do not publish from either feature branch. Merge this PR and the sibling resilience PR first, then resume from updated default branches by following the [post-merge release handoff plan](superpowers/plans/2026-08-30-post-merge-release-handoff.md). Do not redo Tasks 1–11 or the completed Task 12 repository implementation and pre-publication review fixes.
+Cmsify `v0.2.1` is released and certified. Tasks 1–12 and the overall completion gate are complete; this document now preserves the immutable release evidence and historical implementation detail. The pre-release resume instructions later in this file are retained as an audit trail and are superseded by this closure section.
+
+## Certification closure
+
+- Certification verifier revision: `8f4944de68aac5690f369b62e74e8464df1164b2`.
+- Certified release: [Cmsify v0.2.1](https://github.com/Syntax-Circus/cmsify/releases/tag/v0.2.1), source `26c064a81411c1ec303fa1dc07813841760d44ea`.
+- Exact release workflow: [33630027328](https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328).
+- Exact jobs: candidate accessibility `100250311429`, artifact smoke `100250311311`, upgrade/rollback `100250311267`, protected promotion `100251069594`.
+- OCI manifests: API `sha256:be1b34e4c61b305c9c7e1112bc52c2e25898a2c8ca300847c7909639f7aca6b7`; Admin `sha256:bfd965b6d94fe95543086c3665b5dfc13f08204f13a4855719775c0200dd6306`.
+- Candidate identity: 13 canonical subjects; `SHA256SUMS` SHA-256 `c6e08df96d04d6d3af4c973e9b2ba416cbc397e22ffba0d04305769f76b3f0eb`; release-manifest SHA-256 `293e0fc63e6e5916075e265fef1346f19890ce4bf76e1fa6e93b1d6a415d71dd`.
+- Authenticated soak: recorder run [33651575272](https://github.com/Syntax-Circus/cmsify/actions/runs/33651575272), recorder source `68d8e4cffc4873c5595ad37efc5849ecc7393f61`, evidence SHA-256 `c2fba7d5756d48d5d9e6ac2e761edc6b8a657f2996afeddbd1134125a7a17a22`, duration 3h13m57s.
+- Formal result: public restore, hosted accessibility, protected approval, artifact attestation, OCI signing, immutable promotion, hosted smoke/upgrade/soak, and final release gates all passed. The repository is release-ready and the certified release is already public.
+- Diagnostic adjudication: the Task 9 rollback diagnostic omission is closed by bounded atomic failure-report finalization and its mutation tests; the two historical media races are closed as release blockers by reconciliation-isolated repeated integration coverage plus the successful exact-candidate jobs.
+
+The authoritative machine-readable record is [`docs/evidence/task-12-local-verification.json`](evidence/task-12-local-verification.json). Keep the v0.2.0 partial-publication incident as historical evidence only; `v0.2.1` is the complete certified tuple.
 
 ## Resume point
 
-- PR source branch: `feature/readiness-audit`. After this PR merges, resume from updated `main`; do not resume release work or publish artifacts from this feature branch.
-- Accepted Task 12 repository implementation source: `fb983502c619bca7debb76eb7c01f436a9a6c913` (`main` after PR #18). This is the source SHA bound by the preliminary evidence ledger; the evidence-reconciliation commit containing this handoff follows it.
+Historical resume point, completed 2026-09-02:
+
+- PR source branch was `feature/readiness-audit`; all release work ultimately resumed from updated `main`.
+- Accepted pre-release Task 12 repository implementation source was `fb983502c619bca7debb76eb7c01f436a9a6c913` (`main` after PR #18).
 - Exact Task 11 reproducible-quality implementation source tested: `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4` (`Close dependency policy mutation gaps`); implementation range `a482873..bdaa0ff`.
 - Exact Task 10 Cmsify implementation source tested: `b68172d6f7d8bd0a1ab53c4b3ef083f5c83e7c42` (`Snapshot Cmsify retry configuration`); full implementation range `29ba5a8^..b68172d`.
 - Exact sibling source tested: `e5a7c57bbd3f24eb15c66e5d740e05fffd4f1bc3` (`Clarify cancellation ownership control`) on `feature/cmsify-resilience`; full change range `5216a18..e5a7c57`.

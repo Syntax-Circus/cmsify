@@ -104,13 +104,10 @@ function assertBoundAggregate(section, documentName) {
   assert.equal(aggregate, statedSum, `${documentName} aggregate test total must equal its component total`);
 }
 
-function assertNoPrematureCertification(section, documentName) {
-  assert.doesNotMatch(section, /\bfully certified\b/i, `${documentName} must not claim full certification`);
-  assert.doesNotMatch(
-    section,
-    /\bhosted(?: validation| checks?| workflows?)? (?:passed|succeeded|validated|green|certified)\b/i,
-    `${documentName} must not claim hosted validation succeeded`,
-  );
+function assertCertified(section, documentName) {
+  assert.match(section, /v0\.2\.1/i, `${documentName} must name the certified release`);
+  assert.match(section, /26c064a81411c1ec303fa1dc07813841760d44ea/i, `${documentName} must name the exact release source`);
+  assert.doesNotMatch(section, /current release is not certified|release remains open/i, `${documentName} must not reopen certification`);
 }
 
 function workflowCommands(relativePath, jobName) {
@@ -127,6 +124,7 @@ function validateDocumentationContract(documents) {
   const readinessEvidence = extractSection(readiness, "Task 11 quality and capacity evidence");
   const readinessF11 = extractSection(readiness, "F-11 — Release builds are noisy and do not enforce first-party warning quality");
   const readinessMedium = extractSection(readiness, "Medium findings and enhancements");
+  const handoffClosure = extractSection(handoff, "Certification closure");
   const handoffResume = extractSection(handoff, "Resume point");
   const handoffCarry = extractSection(handoff, "Carry to Task 12 final review");
   const handoffEvidence = extractSection(handoff, "Task 11 quality and capacity evidence");
@@ -165,17 +163,22 @@ function validateDocumentationContract(documents) {
   ]);
 
   assertIncludesAll(readinessUpdate, [
-    "F-11, F-16, and F-17 are remediated at the local source/test level",
-    "bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4",
-    "overall release decision remains **not ready**",
+    "Tasks 1–12 and the completion gate are complete",
+    "Release-ready and released",
   ]);
   assertIncludesAll(readinessF11, ["F-11", "bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4"]);
   assertIncludesAll(readinessMedium, ["F-16", "F-17", "bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4"]);
   assertIncludesAll(handoffResume, [
-    "Tasks 1–11 are implemented and validated locally",
-    "outer remediation Task 12 remains open",
+    "Historical resume point, completed 2026-09-02",
     "SyntaxCircus.Http.Resilience",
     "0.2.0-cmsify.1",
+  ]);
+  assertIncludesAll(handoffClosure, [
+    "33630027328",
+    "33651575272",
+    "100250311429",
+    "100251069594",
+    "all passed",
   ]);
   assertIncludesAll(handoffCarry, [
     "exact candidate package certification",
@@ -204,9 +207,8 @@ function validateDocumentationContract(documents) {
   assert.match(handoffCarry, /public(?:\/CI)? restore[^\n]+(?:complete|validated|passed)/i);
   assertBoundAggregate(readinessEvidence, "readiness evidence");
   assertBoundAggregate(handoffEvidence, "handoff evidence");
-  assertNoPrematureCertification(readinessUpdate, "readiness update");
-  assertNoPrematureCertification(handoffResume, "handoff resume");
-  assertNoPrematureCertification(handoffCarry, "handoff carry");
+  assertCertified(readinessUpdate, "readiness update");
+  assertCertified(handoffClosure, "handoff closure");
 
   assert.match(read("scripts/quality/summarize-coverage.mjs"), /schema: "cmsify\.coverage\.v1"/);
   assert.match(read("scripts/quality/merge-capacity-reports.mjs"), /schema: "cmsify\.capacity\.v1"/);
@@ -241,12 +243,12 @@ const mutations = [
   ["rejects a wrong aggregate total", (documents) => {
     documents["docs/v1-release-readiness.md"] = documents["docs/v1-release-readiness.md"].replace("587/587", "552/552");
   }, /aggregate test total/],
-  ["rejects a fully certified readiness status", (documents) => {
-    documents["docs/v1-release-readiness.md"] = documents["docs/v1-release-readiness.md"].replace("overall release decision remains **not ready**", "overall release decision is fully certified");
-  }, /full certification|not ready/],
-  ["rejects hosted validation success language", (documents) => {
-    documents["docs/v1-release-remediation-handoff.md"] = documents["docs/v1-release-remediation-handoff.md"].replace("## Authoritative plans and audit", "Hosted validation succeeded.\n\n## Authoritative plans and audit");
-  }, /hosted validation succeeded/],
+  ["rejects a reverted readiness status", (documents) => {
+    documents["docs/v1-release-readiness.md"] = documents["docs/v1-release-readiness.md"].replace("Release-ready and released", "Not ready");
+  }, /Release-ready and released/],
+  ["rejects the wrong certified release source", (documents) => {
+    documents["docs/v1-release-remediation-handoff.md"] = documents["docs/v1-release-remediation-handoff.md"].replaceAll("26c064a81411c1ec303fa1dc07813841760d44ea", "0123456789abcdef0123456789abcdef01234567");
+  }, /exact release source/],
   ["rejects removal of a required handoff carry", (documents) => {
     documents["docs/v1-release-remediation-handoff.md"] = documents["docs/v1-release-remediation-handoff.md"].replace("CRUD, media, OIDC, webhook, and scheduled-publication scenario certification", "scenario certification");
   }, /CRUD, media, OIDC/],

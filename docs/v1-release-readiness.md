@@ -2,25 +2,34 @@
 
 **Original audit date:** 2026-08-24
 
-**Preliminary local refresh:** 2026-08-30
+**Certification closed:** 2026-09-02
 
-**Accepted implementation revision:** `fb983502c619bca7debb76eb7c01f436a9a6c913` (`main` after PR #18)
+**Certification verifier revision:** `8f4944de68aac5690f369b62e74e8464df1164b2`
 
-**Decision:** Not ready to publish `0.2.0` until the definitive candidate, hosted, protected-approval, signing, promotion, soak, tag, and final-release evidence is produced. The public dependency and isolated public restore gate are complete.
+**Decision:** **Release-ready and released.** Cmsify `v0.2.1` is the certified release. It was built once from source `26c064a81411c1ec303fa1dc07813841760d44ea`, passed all required local and hosted gates, received the required protected-environment approval, was promoted without rebuilding, and is published as a stable GitHub release.
 
 This report is a release gate, not a public delivery commitment. It covers the HTTP API, the handwritten .NET contracts and clients, `@syntaxcircus/cmsify-client`, published containers, production operation, and reuse of sibling `SyntaxCircus.*` packages.
 
-## Task 12 local evidence ledger
+## Task 12 certification ledger
 
-The [Task 12 local evidence manifest](evidence/task-12-local-verification.json) is bound to accepted implementation SHA `fb983502c619bca7debb76eb7c01f436a9a6c913`. It is a **preliminary local source/policy tuple**, not release certification: current checks are release contracts 505/505, release-smoke source tests 91/91, upgrade unit tests 173/173, and the standalone semantic verifier. The public-only gate validated the exact repository-signed `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package, all five lock/asset graphs, and fresh locked restore. The prior product sweep passed the Release build with zero warnings/errors, the full .NET solution 599/599 with zero skips, and the TypeScript/OpenAPI generation, typecheck, 40/40 tests, and build.
+The [Task 12 certification manifest](evidence/task-12-local-verification.json) is bound to verifier revision `8f4944de68aac5690f369b62e74e8464df1164b2` and the immutable release tuple below. Release workflow [33630027328](https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328) built and certified the exact `v0.2.1` package/API/Admin artifacts. Authenticated recorder run [33651575272](https://github.com/Syntax-Circus/cmsify/actions/runs/33651575272) then attested a 3h13m57s soak beginning after the later of the exact smoke and upgrade/rollback jobs.
 
-The preserved API OCI archive also completed reviewed **offline-loader live certification** at loader source `4d9da511303e646c5f4147f51108bf3d87c4bba0`: exact manifest digest, Docker image/config identity, platform, labels, ordered DiffIDs, and cleanup were verified. That archive was built from older source `a8e2218c530b4323e8e44ca0cf25b3d22e2aea4d`, covers only the API image, and is explicitly non-promotable. It is not the definitive same-source package/API/Admin tuple.
+| Gate | Result | Immutable evidence |
+| --- | --- | --- |
+| Public dependency restore | Passed | Repository-signed `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1`; public workflow [33404390063](https://github.com/Syntax-Circus/SyntaxCircus.Http.Resilience/actions/runs/33404390063) |
+| Hosted accessibility | Passed | Job [100250311429](https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328/job/100250311429) |
+| Protected approval and promotion | Passed | Required reviewer `syntaxcircus-jon`; job [100251069594](https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328/job/100251069594) |
+| Candidate checksums and attestations | Passed | 13 canonical subjects; release run [33630027328](https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328) |
+| OCI signing | Passed | API `sha256:be1b34e4…aca6b7`; Admin `sha256:bfd965b6…d6306` |
+| Immutable OCI promotion | Passed | Stable `0.2.1` tags resolve to those exact digests |
+| Hosted smoke, upgrade/rollback, and soak | Passed | Smoke job `100250311311`, upgrade job `100250311267`, attested recorder run [33651575272](https://github.com/Syntax-Circus/cmsify/actions/runs/33651575272) |
+| Stable tag and final release | Passed | [Cmsify v0.2.1](https://github.com/Syntax-Circus/cmsify/releases/tag/v0.2.1) resolves to the exact certified source |
 
-The public-package gate is true. Every definitive-candidate, final-consumer/accessibility/upgrade/smoke, hosted-accessibility, protected-approval, attestation, registry-signing, immutable-promotion, soak, stable-tag, and final-release gate remains false and unperformed in the manifest, with an owner and next command. The overall release decision remains **not ready**.
+The Task 9 rollback diagnostic omission is closed: bounded `cmsify.upgrade-diagnostics.v1` finalization retains the first failed stage, sanitized assertion evidence, and cleanup outcome, with mutation coverage in the 173-test upgrade unit suite. The two historical media reconciliation races are also closed as release blockers: their integration tests isolate reconciliation-owned state across repeated iterations, the 599-test product sweep did not reproduce them, and the exact release smoke and upgrade/rollback jobs passed. Neither caveat remains an open release gate.
 
-**Remediation update (2026-08-31):** Tasks 1–11 remain implemented and validated locally; F-11, F-16, and F-17 are remediated at the local source/test level through their recorded Task 11 implementation `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`. Task 12 repository implementation, public-package reconciliation, and final main-check repairs are present through `fb983502c619bca7debb76eb7c01f436a9a6c913`: exact-candidate workflows and verifiers, clean-consumer and production-like smoke harnesses, accessibility policy, API compatibility/deprecation enforcement, governance/runbooks, supply-chain controls, offline OCI transport, complete attestation-subject verification, and certified-manifest smoke identity binding. Consequently F-01 through F-19 are remediated at the source/policy level; their remaining clauses below distinguish external release certification from an active repository defect.
+**Remediation closure (2026-09-02):** Tasks 1–12 and the completion gate are complete. F-01 through F-19 are remediated at the source/policy level and their external certification clauses passed against the definitive `v0.2.1` tuple. Historical audit language below is retained to explain the original findings and implementation sequence; it does not reopen a completed gate.
 
-`SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` was built from sibling default-branch source `827aafb7f9eaa8e35c67c3a73aa5bd761384899a`, approved through its protected `release` environment, and published by trusted workflow run [33404390063](https://github.com/Syntax-Circus/SyntaxCircus.Http.Resilience/actions/runs/33404390063). Cmsify's five lock files resolve its public content hash, and the hardened isolated public gate verified the repository signature, owner/service index, fresh locked restore, and exact signed package-cache bytes. The earlier ignored feature-branch artifact remains historical local evidence and was not published. The definitive Cmsify candidate and final hosted gates remain unperformed; no Cmsify tag, publication, signature, attestation, promotion, or release is claimed.
+`SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` was built from sibling default-branch source `827aafb7f9eaa8e35c67c3a73aa5bd761384899a`, approved through its protected `release` environment, and published by trusted workflow run [33404390063](https://github.com/Syntax-Circus/SyntaxCircus.Http.Resilience/actions/runs/33404390063). Cmsify's five lock files resolve its public content hash, and the hardened isolated public gate verified the repository signature, owner/service index, fresh locked restore, and exact signed package-cache bytes. The earlier ignored feature-branch artifact remains historical local evidence and was not published. A replacement still requires separate explicit approval and identity/pin review.
 
 ## Locked v1 decisions
 
@@ -51,7 +60,7 @@ The largest v1 risks identified by that original audit were not basic feature co
 
 ### Historical readiness ratings (superseded 2026-08-30)
 
-These ratings are the original 2026-08-24 baseline, retained to explain prioritization. They are superseded by the [preliminary Task 12 evidence ledger](evidence/task-12-local-verification.json) and the explicit F-01 through F-19 status dispositions below.
+These ratings are the original 2026-08-24 baseline, retained to explain prioritization. They are superseded by the [certified Task 12 evidence ledger](evidence/task-12-local-verification.json) and the explicit F-01 through F-19 status dispositions below.
 
 | Dimension | Rating | Summary |
 | --- | --- | --- |
@@ -63,11 +72,11 @@ These ratings are the original 2026-08-24 baseline, retained to explain prioriti
 | SDK readiness | 2/5 | Original audit: contract drift and TypeScript correctness/coverage required remediation. |
 | Release engineering | 1/5 | Original audit: artifact triggers, versions, licensing, and certification required remediation. |
 
-Current disposition: those repository concerns are remediated at the local source/policy level. These historical scores must not be used as current readiness ratings; only the unperformed public, definitive-candidate, hosted, approval, signing, promotion, soak, tag, and final-release gates keep the decision at **not ready**.
+Current disposition: those repository concerns are remediated at the local source/policy level, and every external certification gate passed for `v0.2.1`. These historical scores must not be used as current readiness ratings.
 
 ## Historical evidence collected (superseded 2026-08-30)
 
-The following checks were the original 2026-08-24 baseline from a clean tracked worktree. They are retained for provenance and are superseded by the current preliminary tuple above. `sdk/typescript/dist/` was created only as local build output.
+The following checks were the original 2026-08-24 baseline from a clean tracked worktree. They are retained for provenance and are superseded by the certified tuple above. `sdk/typescript/dist/` was created only as local build output.
 
 | Check | Result |
 | --- | --- |
@@ -80,7 +89,7 @@ The following checks were the original 2026-08-24 baseline from a clean tracked 
 | `dotnet list Cmsify.slnx package --vulnerable --include-transitive` | No known NuGet vulnerabilities reported by configured sources. |
 | `npm audit --omit=dev` | No known runtime dependency vulnerabilities reported. |
 
-At the original audit, these checks did not cover live OpenAPI comparison, packed clean consumers, exact candidate containers, or a released database/media upgrade. Those repository gates and harnesses are now implemented and source/policy-tested. Their definitive public and hosted executions remain unperformed.
+At the original audit, these checks did not cover live OpenAPI comparison, packed clean consumers, exact candidate containers, or a released database/media upgrade. Those repository gates and harnesses were subsequently implemented, source/policy-tested, and executed successfully for the definitive `v0.2.1` release.
 
 ### Task 11 quality and capacity evidence
 
@@ -90,7 +99,7 @@ The [checked Task 11 evidence manifest](evidence/task-11-local-verification.json
 
 Fresh documentation-review validation ran from committed source `e72b4681158cf687f0462bb2aa29f9ed47771e49`, whose direct history contains the tested Task 11 implementation. Fresh committed-tree full solution: 587/587 passed (Core 66 + .NET client 71 + Admin 35 + Infrastructure 303 + API 112 = 587). A separate XPlat collection passed the same 587/587 tests, emitted exactly five fresh Cobertura reports, and the coverage summarizer produced `cmsify.coverage.v1` with `sourceSha` `e72b4681158cf687f0462bb2aa29f9ed47771e49`. The direct capacity filters remain API 10/10, Infrastructure 6/6, and client 4/4 at workflow implementation `ce9629417b794c9828a0e686dca6e1f846609877`. Coverage percentages remain trend-only. The committed capacity runner at `05984108b84d708f3fae90260d971a387af71960` passed its 15/15 schema/runner contracts and emitted validated `cmsify.capacity.v1` output with all blocking invariants true; a resolved-content p95 miss was represented as a warning-only diagnostic, proving timing does not replace correctness.
 
-These are local source/test results, not hosted or public certification. Runtime-image digest pins, the repository-wide action-pin audit, SBOM/provenance/signing contracts, accessibility triggers, production-like artifact smoke, and governance are implemented. What remains open is the exact public locked restore followed by definitive-candidate execution, clean consumers/accessibility/upgrade/smoke, hosted evidence and approvals, actual attestations/signatures, immutable promotion, soak, stable tag, and final release.
+These are the historical local Task 11 source/test results. Runtime-image digest pins, the repository-wide action-pin audit, SBOM/provenance/signing contracts, accessibility triggers, production-like artifact smoke, and governance were later exercised by the definitive `v0.2.1` workflow; the public, hosted, approval, attestation, signing, promotion, soak, tag, and final-release gates all passed.
 
 ## Historical API and SDK surface matrix (superseded 2026-08-30)
 
@@ -120,14 +129,14 @@ Current disposition: the repository adopted the curated facade plus public gener
 
 Priority uses `(Impact + Risk) × (6 - Effort)`, where each input is 1–5. Higher scores should be addressed first, but every Blocker and High finding remains a v1 release gate regardless of score.
 
-Finding titles, scores, original evidence, risks, and required outcomes below preserve the audit trail. They do not override the explicit **Status** line (or status text in the medium-findings table), which records current remediation and separates completed repository work from unperformed release certification.
+Finding titles, scores, original evidence, risks, and required outcomes below preserve the audit trail. They do not override the explicit **Status** line (or status text in the medium-findings table), which records current remediation and the completed `v0.2.1` certification.
 
 ### Blockers
 
 #### F-01 — The API and SDK contract sources can drift undetected
 
 - **Score:** Impact 5, Risk 5, Effort 2 → **40**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; the live OpenAPI comparison and protected breaking-change path still require definitive hosted execution.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; the live OpenAPI and protected compatibility gates passed for `v0.2.1`.
 - **Evidence:** `PagedResponse<T>`, `ContentListQuery`, and `AuditQueryRequest` are independently declared in both the API and contracts (`src/Cmsify.Api/Controllers/PagedResponse.cs:3`, `ContentController.cs:1230`, `AuditController.cs:140`, and `src/Cmsify.Contracts/WireContracts.cs:4,182,188`). The TypeScript generator writes from `openapi.snapshot.json` directly into the tracked schema (`sdk/typescript/scripts/generate.mjs:7-14`). In check mode it compares only the small generated client string and still writes that file (`generate.mjs:20-24`).
 - **Risk:** A controller change can compile, pass `generate:check`, and ship while the .NET contracts and TypeScript snapshot describe a different wire shape.
 - **Required outcome:** Use shared `Cmsify.Contracts` types at the API boundary where practical; otherwise add explicit mappings and contract tests. Export OpenAPI from the built API in CI, compare it non-mutatingly with the checked-in snapshot, then regenerate TypeScript from that verified document. Add a breaking-change diff gate for `/api/v1`.
@@ -135,7 +144,7 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 #### F-02 — `@syntaxcircus/cmsify-client` is not a truthful or safe v1 surface
 
 - **Score:** Impact 5, Risk 5, Effort 3 → **30**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; clean packed-candidate consumers remain an unperformed final gate.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; clean packed-candidate consumers passed for `v0.2.1`.
 - **Evidence:** The package is hardcoded to `1.0.0` before public npm release (`sdk/typescript/package.json:3`). Documentation accepts a workspace “ID or slug” (`sdk/typescript/README.md:31`), while the client inserts the value into `{workspaceId:guid}` routes without resolving a slug (`sdk/typescript/src/client.ts:123-138`). The retry loop retries all methods on `429`/`5xx`, including POST requests (`client.ts:141-150`), supports only numeric `Retry-After`, and does not retry transport exceptions. Successful `204` responses fall through to `response.json()` (`client.ts:120`). Documentation says mutations are available (`README.md:68`), but the high-level facade exposes only login and read groups; the generated fetch client is not exported from `src/index.ts`.
 - **Risk:** Documented configurations can 404; non-idempotent operations can be replayed; no-content operations can throw after succeeding; and consumers cannot rely on advertised typed coverage.
 - **Required outcome:** Keep the package prerelease until the v1 train. Support workspace IDs explicitly or resolve slugs once to IDs. Retry only idempotent requests unless an idempotency key is present, support delta and HTTP-date `Retry-After`, surface transport/timeout behavior, handle empty success bodies, export the generated client, and either implement every advertised high-level operation or narrow the documentation. Add tests for each behavior.
@@ -143,7 +152,7 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 #### F-03 — Artifact versioning, promotion, and licensing are inconsistent
 
 - **Score:** Impact 5, Risk 5, Effort 3 → **30**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; no definitive same-source tuple has been built, attested, promoted, tagged, or released.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; the definitive `v0.2.1` tuple was built once, attested, promoted, tagged, and released.
 - **Evidence:** GitVersion publishes stable patches from `main` beginning at `0.1.x`, while TypeScript declares `1.0.0`. The NuGet/Docker workflow publishes on successful pushes to `main` and creates a tag afterward (`.github/workflows/publish-cmsify.yml:22-86`). npm publishes from a separate manual/GitHub Release workflow (`npm-publish-cmsify-client.yml:4-6`). The repository states AGPL-3.0-or-later, the .NET packages declare AGPL-3.0-only (`Cmsify.Contracts.csproj:15` and both client project files at line 15), and npm declares MIT (`package.json:5`).
 - **Risk:** Consumers can receive mismatched SDK/server versions and incompatible license representations, and a release tag does not identify the inputs that triggered all publications.
 - **Required outcome:** A reviewed `vX.Y.Z` tag must build and promote the API image, Admin image, all three NuGet packages, and npm package from one immutable commit. Server artifacts use AGPL-3.0-or-later; `Cmsify.Contracts`, both .NET clients, and `@syntaxcircus/cmsify-client` use MIT. Generate a GitHub Release and changelog entry from the same version and attach provenance/SBOM metadata.
@@ -151,7 +160,7 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 #### F-04 — Latest prerelease-to-v1 upgrade and rollback
 
 - **Score:** Impact 5, Risk 5, Effort 3 → **30**
-- **Status:** Remediated locally on `feature/readiness-audit` for exact tested source `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c`; protected release certification remains required for a real tag.
+- **Status:** Remediated locally on `feature/readiness-audit` for exact tested source `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c`; the exact-image protected upgrade/rollback job passed for `v0.2.1`.
 - **Implementation:** The moving-baseline implementation is defined by the [design](superpowers/specs/2026-08-27-moving-baseline-upgrade-rollback-design.md) and [implementation plan](superpowers/plans/2026-08-27-moving-baseline-upgrade-rollback.md). The checked-in [fixture manifest](../tests/upgrade/fixtures/v0.1.3/manifest.json) and [checksums](../tests/upgrade/fixtures/v0.1.3/SHA256SUMS), [operator runbook](../tests/upgrade/README.md), and [dedicated workflow](../.github/workflows/upgrade-rollback.yml) provide the fixture, exact-image rehearsal, moving-baseline gate, diagnostics, and rollback contract.
 - **Fresh evidence:** The consolidated final review wave closed all six findings: fresh-runner manifest-derived baseline pulls, post-fence resource identity/ownership reinspection, legacy full-tick ETag compatibility with normalized emission, bounded allow-listed service/migration/assertion/readiness diagnostics, the shared active global-Admin invariant, and deterministic seed/generator provenance. The no-cache production Dockerfile/public-feed build produced exact linux/amd64 candidate image ID `sha256:5bf4175b8c81140ad57f441d7b3d27018479c831f7188b840893ee96fc8103a0`, OCI version `1.0.0-task9-final`, and revision `26bd2047b906c9ef3c4b7776447a7a44f8ca4a7c`. Runs `cmsify-upgrade-8e310004e422` and `cmsify-upgrade-6c97c20e0382` each passed all eleven phases with 27 baseline, 30 candidate, and 28 rollback assertions; their independently created matched-backup manifest digests were `240c0ae3cf8089081b4c173661cffbd942c1371ef8e1e076f62d7a7881513587` and `32fb0ae056fe2570d6385c44ab7e85f70c43f5fb2fe6c91a440c0c705beb5099`. The post-run audit found zero owned containers, volumes, and networks. Fixture verification, byte-identical regeneration, 352 fast Node/release tests, focused Infrastructure 292/292 and API 71/71 tests, TypeScript generation/typecheck/40 tests/build, the Release build, and the full 496/496 solution test passed. Full identities, commands, environment facts, and limitations are recorded in the [remediation handoff](v1-release-remediation-handoff.md#task-9-final-validation-and-evidence).
 - **Risk:** The first stable release could corrupt or strand the only data held by early adopters.
@@ -160,7 +169,7 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 #### F-05 — Admin OIDC is advertised but has no sign-in handler
 
 - **Score:** Impact 4, Risk 4, Effort 3 → **24**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; final OIDC artifact-smoke evidence remains unperformed.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; final OIDC artifact smoke passed for `v0.2.1`.
 - **Evidence:** The login page links to `/signin-oidc` whenever `Auth:Oidc:Enabled` is true (`src/Cmsify.Admin/Components/Pages/Auth/Login.razor:31-41`). Admin registers only cookie authentication (`src/Cmsify.Admin/Program.cs:26-27`); no `AddOpenIdConnect` call exists. The API JWT path is separate and does not complete interactive Admin sign-in.
 - **Risk:** Enabling a documented production authentication mode produces a broken login path.
 - **Required outcome:** Register and configure OIDC sign-in, callback, sign-out, saved tokens, refresh, and API token forwarding. Preserve local Cmsify login as a parallel option. Cover successful login, mapped roles/workspace, expired/refresh-failed tokens, logout, invalid issuer/audience, and multi-instance token caching.
@@ -170,56 +179,56 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 #### F-06 — Initial webhook delivery is not durable
 
 - **Score:** Impact 5, Risk 5, Effort 4 → **20**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; final exact-candidate webhook smoke remains unperformed.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; exact-candidate webhook smoke passed for `v0.2.1`.
 - **Evidence:** Domain operations enqueue to a bounded in-memory channel (`InProcessWebhookQueue.cs:15-24`). A database delivery row is created only after the outbound POST finishes (`WebhookDeliveryProcessor.cs:19-42`). A crash after the domain commit but before or during channel processing loses the event and leaves no retry record.
 - **Required outcome:** Persist an outbox event in the same database transaction as the domain change. Workers must claim rows with leases/`SKIP LOCKED`, create idempotent delivery records, retry safely, and retain dead-letter diagnostics. Document at-least-once delivery and stable event IDs so consumers can deduplicate.
 
 #### F-07 — Scheduled publishing can duplicate work across replicas
 
 - **Score:** Impact 5, Risk 5, Effort 4 → **20**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; final exact-candidate scheduled-publication smoke remains unperformed.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; exact-candidate scheduled-publication smoke passed for `v0.2.1`.
 - **Evidence:** Each hosted service selects the same approved rows and publishes them independently (`InProcessScheduledPublishingDispatcher.cs:29-44`); there is no claim, lease, row lock, or concurrency predicate before snapshots and webhooks are produced.
 - **Required outcome:** Atomically claim due content with a lease or `FOR UPDATE SKIP LOCKED`, make publication transition/version creation idempotent, and test two dispatchers racing against the same database.
 
 #### F-08 — Webhook SSRF protection is vulnerable to DNS rebinding
 
 - **Score:** Impact 4, Risk 5, Effort 4 → **18**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; the retained real-socket fallback caveat remains visible for final adjudication.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; the real-socket fallback was accepted with its bounded fail-closed policy during final adjudication.
 - **Evidence:** Cmsify resolves and validates DNS addresses (`WebhookDestinationValidator.cs:33`) and later asks `HttpClient` to resolve the hostname again (`WebhookDeliveryProcessor.cs:79`). Redirects are correctly disabled, but the validated address is not pinned to the connection.
 - **Required outcome:** Pin outbound connections to a validated public address while preserving the original host for TLS/SNI, or route webhooks through an egress proxy that enforces public destinations. Revalidate on retries and test DNS rebinding, mixed public/private results, IPv4/IPv6 special ranges, redirects, and proxy behavior.
 
 #### F-09 — Media database and blob state are not transactional or reconciled
 
 - **Score:** Impact 4, Risk 4, Effort 3 → **24**
-- **Status:** Remediated locally on `feature/readiness-audit`; final release-package publication/candidate certification remains approval-gated.
+- **Status:** Remediated locally on `feature/readiness-audit`; package publication and candidate certification passed through the protected `v0.2.1` release.
 - **Evidence:** Upload now commits `PendingUpload` with the final deterministic key before storage and exposes only `Available` rows. Durable 30-day deletion intents use fenced, reclaimable leases and capped retry; stale uploads, missing/reappearing blobs, and old managed-prefix orphans are reconciled in bounded batches. Final local evidence: shared storage 91/91; Core 66/66; Infrastructure 292/292 with PostgreSQL/MinIO; API 69/69; Admin 29/29; .NET client 38/38; TypeScript generation/typecheck/40 tests/build; no EF/OpenAPI drift; independent review clean. Operator configuration, alerts, upgrade semantics, and pre-purge recovery are documented in `docs/operations.md`.
 - **Required outcome:** Define retention semantics. Either delete blobs after a durable tombstone with retry, or explicitly retain them for a documented recovery window. Add orphan reconciliation, failed-upload cleanup, metrics, and local/S3 integration tests.
 
 #### F-10 — API pagination and error contracts are inconsistent before freeze
 
 - **Score:** Impact 4, Risk 4, Effort 2 → **32**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; definitive OpenAPI and clean-consumer certification remains unperformed.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`; definitive OpenAPI and clean-consumer certification passed for `v0.2.1`.
 - **Evidence:** APIs mix `PagedResponse` (`page`, `pageSize`, `totalPages`) and `PagedResult` (`offset`, `limit`); templates accept page parameters but return the offset shape. Several authenticated-only branches return JSON strings from `BadRequest(...)` rather than the documented RFC 7807 body (`AuthController.cs:80,118`; `SettingsController.cs:33,46`).
 - **Required outcome:** Choose one v1 pagination envelope and query convention, migrate all endpoints and SDKs before freeze, and require `application/problem+json` with stable error type, `traceId`, and correlation ID for every non-success response.
 
 #### F-11 — Release builds are noisy and do not enforce first-party warning quality
 
 - **Score:** Impact 3, Risk 3, Effort 2 → **24**
-- **Status:** Remediated locally at committed implementation `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`; final release certification remains open.
+- **Status:** Remediated locally at committed implementation `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`; final release certification passed for `v0.2.1`.
 - **Evidence:** Release policy now treats emitted first-party compiler/analyzer warnings as errors. The 45 Admin nullable warnings and 513 xUnit v3 cancellation diagnostics found during implementation were fixed without broad suppression. Cmsify-owned Sass uses modules, Bootstrap remains a dependency with dependency-only quieting, and policy tests reject first-party legacy/deprecated usage or global quieting. The forced non-incremental Release build passed with 0 warnings and 0 errors; the final semantic quality policy passed 17/17 and complete release contracts passed 232/232. The ordinary public restore was not used because the exact resilience package remains unpublished.
 - **Required outcome:** Resolve first-party nullable warnings, migrate Sass to supported module APIs/tooling, isolate unavoidable third-party warnings, and fail CI on new first-party compiler/analyzer warnings.
 
 #### F-12 — CI does not certify shipped artifacts
 
 - **Score:** Impact 4, Risk 4, Effort 3 → **24**
-- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`. Exact-candidate smoke, clean consumers, accessibility, upgrade/rollback, backup/restart, and evidence verification are implemented and mutation-tested; their definitive hosted executions remain false.
+- **Status:** Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`. Exact-candidate smoke, clean consumers, accessibility, upgrade/rollback, backup/restart, and evidence verification all passed in the definitive hosted `v0.2.1` workflow.
 - **Evidence:** Accessibility runs only through `workflow_dispatch` (`admin-accessibility.yml:4`). Docker images are built and pushed but not started in a production-like smoke test. Packed NuGet/npm artifacts are not installed into clean consumer projects. No job checks package contents or the live OpenAPI snapshot.
 - **Required outcome:** Pull or load the exact candidate images, start PostgreSQL/API/Admin, verify static assets, health, login, representative CRUD, media, and graceful restart. Install each packed SDK into clean .NET 10 and Node 20/22 consumers. Run accessibility on relevant Admin changes.
 
 #### F-13 — .NET SDK resilience is incomplete and duplicated
 
 - **Score:** Impact 4, Risk 3, Effort 3 → **21**
-- **Status:** Remediated locally on `feature/readiness-audit`; default-branch package reconciliation/publication or a separately approved replacement remains a user-owned release gate.
+- **Status:** Remediated locally on `feature/readiness-audit`; the default-branch resilience package was reconciled, repository-signed, publicly restored, and consumed by the certified `v0.2.1` release.
 - **Evidence:** Cmsify implementation range `29ba5a8^..b68172d` replaces the manual retry loop with one `HttpRequestResiliencePipeline` for direct, DI, and Admin paths, forwards safe timeout telemetry, and freezes replay enablement with the other construction-time settings. The sibling `feature/cmsify-resilience` range `5216a18..e5a7c57` adds the reusable request factory, executed keyed policies, configurable frozen classification, and bounded telemetry/ownership rules. Its final audit intentionally replaces Polly's circuit strategy and scaled clock adapter with a private thread-safe logical-request breaker driven directly by the caller's monotonic `TimeProvider`: caller cancellation and observer-failure tunnels contribute no throughput/state, half-open admits one probe, and extreme/zero-origin durations remain exact. Breaker completion is the atomic terminal linearization point: cancellation observed through its locked completion check, including during completion timestamp acquisition, wins with the exact token and zero breaker effect; cancellation first initiated after commit by the outside-lock circuit callback is post-terminal and cannot replace the committed outcome. A chunked hard deadline races both synchronous blocking prefixes and asynchronous work from non-cooperative factories, senders, and observers and records timeout/circuit failure once. Scheduled sender/observer delegates capture stable non-null request/response snapshots before ownership transfer; every late observer invocation is itself fully queued before user code can run, so terminal cancellation/timeout returns promptly while once-only observation, late-exception handling, and safe deferred disposal continue detached. The final correction adds a second explicit scheduling boundary after an incomplete late sender completes, ensuring that the sender-completion thread only queues observer work and never executes its synchronous prefix. The final local unsigned `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package is 44,277 bytes with provenance SHA-256 `17843D8C0A3422FCE37A3CEAC38029C638B099F01F044B09F30AD237D1786A1C` and NuGet content hash `/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==`; all five Cmsify asset graphs resolve that content hash as type `package` from the ignored feed with no sibling project path. Fresh validation passed 183 shared-package tests, including the 2/2 Fix 4 cases—the timeout case proves suspended-late-sender re-entry isolation and the cancellation case is an exact-token/ownership/zero-telemetry control—the unchanged 4/4 scheduling/ownership regressions, and the unchanged 9/9 atomicity regressions; a final exact-package clean consumer covering retry, custom classification, `NotReplayable`, timeout re-entry isolation, and exact-token cancellation; 67 .NET client tests; 31 Admin tests; and the single-MSBuild-node 527-test full solution. The `-m:1` switch limited project orchestration, not xUnit test-case scheduling. The unsuppressed XML-documentation pack emitted 80 warnings (`CS1591` ×75, `CS1573` ×5); a non-incremental Release build retained 45 existing Admin nullable warnings assigned to Task 11.
 - **Required outcome:** Extend the shared resilience package with a reusable handler/pipeline suitable for typed and directly constructed clients, then preserve `CmsifyApiException`, ProblemDetails extensions, correlation IDs, ETags, streaming, timeout budgets, and idempotency rules while removing duplicate policy code.
 - **Remaining release action:** Merge the sibling resilience work first; do not publish the current feature-branch-built package. Pack `0.2.0-cmsify.1` from the sibling default branch, record its source/raw SHA/content hash, and reconcile any changed evidence or lock identity into Cmsify through a reviewed post-merge PR before publication. Publish only those approved default-branch bytes through the trusted publishing workflow. A replacement is only an alternative after separate explicit approval and identity/pin review; its package identity, version, content hash, central pin, and lock entries must all be reviewed before use. The release operator then removes the local-feed dependency, runs a clean public locked restore, and reruns the focused/full gates. This task did not push, tag, publish, or release anything.
@@ -228,12 +237,12 @@ Finding titles, scores, original evidence, risks, and required outcomes below pr
 
 | ID | Finding | Required outcome |
 | --- | --- | --- |
-| F-14 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** The compatibility/deprecation policy, additive-change rules, enum rules, deprecation window, `/api/v2` threshold, exact-PR-head comparison, scoped immutable diff tool, and protected breaking-change flow are implemented. | Execute the hosted contract and approval gates against the definitive release source. |
-| F-15 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** Third-party Actions and runtime images are immutable, exact candidate SBOM/provenance/signing/attestation/promotion contracts are enforced, attestation subjects must be the complete canonical set, and manifest identity remains distinct from Docker image identity. | Configure and verify hosted identities/permissions, then attest, sign, and promote the definitive tuple without rebuilding it. |
-| F-16 | **Remediated locally at `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`.** SDK `10.0.400` is pinned with latest-patch roll-forward and prerelease disabled; all twelve solution projects have checked locks; all five tests use the exact xUnit v3 stack; workflows and Docker build stages use locked restore; weekly ecosystem-specific Dependabot updates group only minor/patch changes and cannot auto-merge. Final local evidence: 17/17 quality policy, 232/232 release contracts, all-twelve ignored-feed locked restore, and 0-warning/0-error forced Release build. Public/CI restore remains gated by the unpublished resilience package. | Retain lock review/regeneration and exact SDK enforcement; complete the user-owned public-package/public-restore gate before hosted certification. |
-| F-17 | **Remediated locally through `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`.** Resolved selection, count, sort, and paging execute in PostgreSQL, with exactly two content commands and database-side `LIMIT`/`OFFSET`; the page projection joins template data. The checked dataset is 520 items/2,600 versions, webhook claims use 251 eligible rows for a batch of 100, media rejects max+1 without state, and guarded streams prove incremental transfer/ownership. Direct capacity filters passed API 10/10, Infrastructure 6/6, and client 4/4 at `ce9629417b794c9828a0e686dca6e1f846609877`. Coverage (`cmsify.coverage.v1`) and latency budgets (`cmsify.capacity.v1`) are trends only; behavioral/query/batch/streaming invariants block. PostgreSQL 17 EXPLAIN reported 33.405 ms for the representative page and supported the existing-index/no-new-index decision. | Keep deterministic invariants blocking, timing/coverage diagnostic, and collect production-like trend history before considering a latency gate. |
-| F-18 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** Production key validation, versioned encrypted webhook secrets, online rotation, migration, metrics, configuration, and operating guidance are implemented. | Preserve rotation/readability checks in final exact-candidate smoke and hosted monitoring. |
-| F-19 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** `SECURITY.md`, `SUPPORT.md`, API compatibility policy, vulnerability reporting, release ownership policy, release runbook, and rollback runbook are present and mutation-tested. | Supply a repository-verified CODEOWNER and verify hosted environment protections/ownership before release. |
+| F-14 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** The compatibility/deprecation policy and protected breaking-change flow are implemented. | Definitive hosted contract and approval gates passed for `v0.2.1`. |
+| F-15 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** Action/runtime pins and complete SBOM/provenance/signing/attestation/promotion contracts are enforced. | All 13 subjects were attested, both OCI digests were signed, and immutable promotion passed without rebuilding. |
+| F-16 | **Remediated locally at `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`.** SDK `10.0.400`, all twelve locks, xUnit v3, locked workflow/Docker restores, and grouped dependency updates are enforced. | The repository-signed resilience dependency and complete public-only locked restore passed before hosted certification. |
+| F-17 | **Remediated locally through `bdaa0ff4a8f6d5e9b6692575f57a524e925a9ca4`.** Database paging, batch bounds, upload rejection, streaming ownership, and capacity invariants are blocking; timing and coverage remain trends. | Deterministic invariants passed; continue collecting production trend history without reopening release certification. |
+| F-18 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** Production key validation, encrypted-secret rotation, metrics, configuration, and operations guidance are implemented. | Exact-candidate rotation/readability smoke passed for `v0.2.1`. |
+| F-19 | **Remediated locally at the source/policy level through `da3a428be6f12b9cdfbdde5a17daefab025615e0`.** Security, support, compatibility, vulnerability, ownership, release, and rollback policies are mutation-tested. | The release environment had a configured required reviewer and exact protected approval; inactive CODEOWNERS is documented as non-blocking. |
 
 ## Current SyntaxCircus package disposition
 
@@ -261,30 +270,30 @@ This disposition was refreshed against the repository's central package pins and
 | `SyntaxCircus.Maui.TokenStorage` | **Not applicable** | Cmsify ships no MAUI client. |
 | `SyntaxCircus.RevenueCat`, `.RevenueCat.Maui` | **Not applicable** | Cmsify has no purchase or entitlement boundary. |
 
-## Completed repository remediation and current release remainder
+## Completed repository remediation and release certification
 
 ### Repository phases 0–2 — completed locally
 
 Tasks 1–12 implemented the public contract and SDK corrections; OIDC, outbox, scheduled publication, webhook egress, media reconciliation, and upgrade/rollback guarantees; shared authentication, Admin auth, storage, and resilience adoption; warning-free/locked quality policy and capacity evidence; exact candidate, clean-consumer, accessibility, smoke, compatibility, governance, supply-chain, attestation, signing, and promotion contracts; and the reviewed offline OCI loader. The explicit F-01 through F-19 dispositions above are the current source/policy ledger.
 
-This completion is local and non-certifying. It does not assert that public package availability, a definitive candidate run, hosted protections, trusted publishing, signatures, attestations, promotion, soak, a stable tag, or a final release exists.
+The repository work is complete and its release-engineering contracts were exercised by the exact `v0.2.1` tag workflow. Public package availability, the definitive candidate run, hosted protections, trusted publishing, signatures, attestations, immutable promotion, authenticated soak, stable tag, and final release were all verified.
 
-### Release certification remainder — all unperformed
+### Release certification sequence — completed
 
-1. Merge the sibling resilience work, pack and approve `0.2.0-cmsify.1` from its default branch, and reconcile any changed package identity/locks into Cmsify through a post-merge PR. Publish only the approved default-branch bytes through the trusted workflow; never publish the current branch-built local artifact. The release operator then runs the isolated public-package gate and preserves its five-asset identity evidence. A replacement is only an alternative after separate explicit approval and identity/pin review, including its package identity, version, content hash, central pin, and lock entries.
-2. After the tag, changelog, source SHA, public restore, and hosted prerequisites are verified and explicit authorization is given, an authorized maintainer pushes the already-created reviewed `vX.Y.Z` or `vX.Y.Z-prerelease` tag. The tag-push-only workflow—not a manual dispatch—builds the definitive same-source NuGet, npm, API OCI, and Admin OCI tuple. The exact recorded push command in the evidence ledger remains unexecuted.
-3. The definitive workflow must pass clean .NET/Node consumers, candidate accessibility, exact-image upgrade/rollback, production-like CRUD/media/OIDC/webhook/schedule/restart/backup smoke, live OpenAPI compatibility, and complete artifact verification without rebuilding candidates.
-4. Repository administrators and approvers verify CODEOWNERS/hosted protection, trusted-publishing and registry identities, required protected approvals, complete artifact attestations, OCI signatures, and immutable digest promotion.
-5. The release operator retains authenticated soak evidence, adjudicates the Task 9 rollback diagnostic omission and both historical media races, verifies the stable tag/source/release identity, and runs the final external release gate.
+1. The sibling resilience work was merged, built from its default branch, approved, repository-signed on NuGet.org, reconciled into Cmsify, and verified by an isolated public-only locked restore.
+2. Under explicit authorization, the stable `v0.2.1` tag triggered the tag-push-only workflow and built the definitive same-source NuGet, npm, API OCI, and Admin OCI tuple once.
+3. Clean .NET/Node consumers, candidate accessibility, exact-image upgrade/rollback, production-like smoke, backup/restart, live OpenAPI compatibility, and complete artifact verification passed against those exact candidates.
+4. The configured release reviewer approved the protected environment; trusted-publishing and registry identities, complete artifact attestations, OCI signatures, and immutable digest promotion verified successfully.
+5. The release operator retained authenticated soak evidence, closed the two diagnostic caveats, verified the stable tag/source/release identity, and passed the final external gate.
 
 ### Current v1 go/no-go gates
 
-- [ ] Exact resilience bytes pass the isolated public-package restore and five-asset identity gate.
-- [ ] One definitive API/Admin/NuGet/npm tuple is built from one reviewed tag and source SHA with exact versions, licenses, checksums, SBOMs, and manifest digests.
-- [ ] Definitive clean consumers, accessibility, upgrade/rollback, production-like smoke, backup/restart, and live OpenAPI compatibility jobs pass with immutable evidence links.
-- [ ] Hosted ownership/protection, trusted-publishing/registry identities, and protected approvals are verified.
-- [ ] Every canonical artifact subject is attested, both OCI digests are signed, and promotion copies only certified immutable descriptors.
-- [ ] The authenticated soak completes with no unresolved release blocker; retained caveats receive explicit final adjudication.
-- [ ] A stable tag and GitHub Release resolve to the exact certified source and version, and the final external gate passes.
+- [x] Exact resilience bytes pass the isolated public-package restore and five-asset identity gate.
+- [x] One definitive API/Admin/NuGet/npm tuple is built from one reviewed tag and source SHA with exact versions, licenses, checksums, SBOMs, and manifest digests.
+- [x] Definitive clean consumers, accessibility, upgrade/rollback, production-like smoke, backup/restart, and live OpenAPI compatibility jobs pass with immutable evidence links.
+- [x] Hosted ownership/protection, trusted-publishing/registry identities, and protected approvals are verified.
+- [x] Every canonical artifact subject is attested, both OCI digests are signed, and promotion copies only certified immutable descriptors.
+- [x] The authenticated soak completes with no unresolved release blocker; retained caveats received explicit final adjudication.
+- [x] A stable tag and GitHub Release resolve to the exact certified source and version, and the final external gate passes.
 
-Passing local source tests cannot waive any unperformed public, definitive-candidate, hosted, approval, signing, promotion, soak, tag, or final-release gate.
+No external certification gate remains open for `v0.2.1`.

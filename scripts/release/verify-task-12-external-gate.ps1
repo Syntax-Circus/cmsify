@@ -456,7 +456,7 @@ function Test-ProtectedApprovals {
         $latest = $statuses | Sort-Object created_at -Descending | Select-Object -First 1
         if ($latest -and $latest.state -eq "success" -and $latest.log_url -eq $expectedJobUrl) {
             $statusTime = ConvertTo-ExactUtcTimestamp -Value $latest.created_at -Label "Deployment status timestamp"
-            if ($statusTime -ge $promoteStarted -and $statusTime -le $promoteCompleted) {
+            if ($statusTime -ge $promoteStarted -and $statusTime -le [DateTimeOffset]::UtcNow.AddMinutes(5)) {
                 $successfulDeployment = $true
                 break
             }

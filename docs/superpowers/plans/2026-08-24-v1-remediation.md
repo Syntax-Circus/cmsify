@@ -159,17 +159,17 @@
 
 **Produces:** Exact-candidate container/package/accessibility/backup/restart certification, pinned supply-chain controls and immutable digests, API compatibility/deprecation policy, governance files, and checked go/no-go evidence.
 
-Local evidence is tracked in [`docs/evidence/task-12-local-verification.json`](../../evidence/task-12-local-verification.json). It is a non-certifying ledger: all external gates remain open and Task 8 must resolve its two recorded breaker diagnostics before the completion gate can be adjudicated.
+Certification evidence is tracked in [`docs/evidence/task-12-local-verification.json`](../../evidence/task-12-local-verification.json). Cmsify `v0.2.1` is certified and released from source `26c064a81411c1ec303fa1dc07813841760d44ea`; all eight external gates passed. The Task 9 rollback diagnostic omission and both historical Task 8 media races were adjudicated closed as release blockers.
 
-- [ ] Add failing artifact, accessibility-trigger, policy-presence, and compatibility/deprecation checks.
-- [ ] Implement production-like PostgreSQL/API/Admin smoke, CRUD/media/OIDC/webhook/schedule/restart/backup coverage and clean consumers.
-- [ ] Add `SECURITY.md`, support/compatibility/deprecation policies, ownership, vulnerability reporting, and release/rollback runbooks.
-- [ ] Run every audit gate, update immutable evidence links/digests, perform whole-branch review, and commit.
+- [x] Add failing artifact, accessibility-trigger, policy-presence, and compatibility/deprecation checks.
+- [x] Implement production-like PostgreSQL/API/Admin smoke, CRUD/media/OIDC/webhook/schedule/restart/backup coverage and clean consumers.
+- [x] Add `SECURITY.md`, support/compatibility/deprecation policies, ownership, vulnerability reporting, and release/rollback runbooks.
+- [x] Run every audit gate, update immutable evidence links/digests, perform whole-branch review, and commit.
 
 ## Completion Gate
 
-- [ ] Re-read every F-01 through F-19 required outcome and every go/no-go checkbox against current evidence.
-- [ ] Run warning-free Release build; full .NET, TypeScript, accessibility, OpenAPI, upgrade, container, clean-consumer, security, concurrency, storage, and capacity suites.
-- [ ] Verify exact SemVer/source SHA/license/SBOM/provenance/digest agreement across all candidate artifacts.
-- [ ] Obtain clean per-task reviews and one clean whole-branch review.
-- [ ] Use `superpowers:finishing-a-development-branch` for final handoff; do not publish, push, merge, or create a release without explicit user approval.
+- [x] Re-read every F-01 through F-19 required outcome and every go/no-go checkbox against current evidence.
+- [x] Run warning-free Release build; full .NET, TypeScript, accessibility, OpenAPI, upgrade, container, clean-consumer, security, concurrency, storage, and capacity suites.
+- [x] Verify exact SemVer/source SHA/license/SBOM/provenance/digest agreement across all candidate artifacts.
+- [x] Obtain clean per-task reviews and one clean whole-branch review.
+- [x] Complete the final handoff under explicit user authorization; publication and release occurred only through the reviewed protected workflow.

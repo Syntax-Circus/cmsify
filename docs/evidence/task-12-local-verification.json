@@ -1,34 +1,42 @@
 {
   "schema": "cmsify.task12-evidence.v1",
-  "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913",
+  "sourceSha": "8f4944de68aac5690f369b62e74e8464df1164b2",
   "certification": {
-    "status": "preliminary-local-non-certifying",
-    "certifiesRelease": false,
-    "reason": "Local source, policy, public-package restore, and preserved-candidate evidence only; hosted candidate, approval, signing, promotion, soak, tag, and final-release gates remain unperformed."
+    "status": "certified",
+    "certifiesRelease": true,
+    "reason": "Cmsify 0.2.1 was built once from the exact v0.2.1 source, passed every local and hosted certification gate, received the required protected-environment approval, was promoted without rebuilding, and completed an authenticated soak longer than 60 minutes."
+  },
+  "release": {
+    "version": "0.2.1",
+    "tag": "v0.2.1",
+    "sourceSha": "26c064a81411c1ec303fa1dc07813841760d44ea",
+    "releaseRunId": "33630027328",
+    "publishedAtUtc": "2026-09-02T13:10:34Z",
+    "url": "https://github.com/Syntax-Circus/cmsify/releases/tag/v0.2.1"
   },
   "sdkVersion": "10.0.400",
   "nodeVersion": "v24.14.1",
   "dockerClientVersion": "29.7.2",
   "dockerServerVersion": null,
   "commandInputs": {
-    "CMSIFY_RELEASE_RUN_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_CHECKSUMS_PATH": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_API_DIGEST": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_ADMIN_DIGEST": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_RELEASE_VERSION": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_RELEASE_TAG": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_COSIGN_CERTIFICATE_IDENTITY": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_ATTESTATION_SIGNER_WORKFLOW": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_ACCESSIBILITY_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_PROMOTE_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_SMOKE_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_UPGRADE_ROLLBACK_JOB_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_RELEASE_SOURCE_SHA": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_SOAK_EVIDENCE_PATH": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_SOAK_EVIDENCE_SHA256": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_SOAK_RECORDER_RUN_ID": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_SOAK_RECORDER_SOURCE_SHA": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" },
-    "CMSIFY_SOAK_ATTESTATION_SIGNER_WORKFLOW": { "value": null, "reason": "Unperformed external gate; release operator must supply the immutable value.", "owner": "release operator" }
+    "CMSIFY_RELEASE_RUN_ID": { "value": "33630027328", "reason": "Exact successful tag-push release workflow run.", "owner": "release operator" },
+    "CMSIFY_CHECKSUMS_PATH": { "value": "cmsify-v0.2.1-candidate/SHA256SUMS", "reason": "Downloaded unmodified from the exact release-run candidate artifact; file SHA-256 c6e08df96d04d6d3af4c973e9b2ba416cbc397e22ffba0d04305769f76b3f0eb.", "owner": "release operator" },
+    "CMSIFY_API_DIGEST": { "value": "sha256:be1b34e4c61b305c9c7e1112bc52c2e25898a2c8ca300847c7909639f7aca6b7", "reason": "Exact promoted API OCI manifest digest.", "owner": "release operator" },
+    "CMSIFY_ADMIN_DIGEST": { "value": "sha256:bfd965b6d94fe95543086c3665b5dfc13f08204f13a4855719775c0200dd6306", "reason": "Exact promoted Admin OCI manifest digest.", "owner": "release operator" },
+    "CMSIFY_RELEASE_VERSION": { "value": "0.2.1", "reason": "Stable SemVer recorded by the candidate manifest and public release.", "owner": "release operator" },
+    "CMSIFY_RELEASE_TAG": { "value": "v0.2.1", "reason": "Stable tag resolving to the exact release source.", "owner": "release operator" },
+    "CMSIFY_COSIGN_CERTIFICATE_IDENTITY": { "value": "https://github.com/Syntax-Circus/cmsify/.github/workflows/publish-cmsify.yml@refs/tags/v0.2.1", "reason": "Exact keyless signing identity verified for both OCI digests.", "owner": "release operator" },
+    "CMSIFY_ATTESTATION_SIGNER_WORKFLOW": { "value": "Syntax-Circus/cmsify/.github/workflows/publish-cmsify.yml", "reason": "Exact trusted release workflow verified for every canonical candidate subject.", "owner": "release operator" },
+    "CMSIFY_ACCESSIBILITY_JOB_ID": { "value": "100250311429", "reason": "Exact successful candidate-accessibility job.", "owner": "release operator" },
+    "CMSIFY_PROMOTE_JOB_ID": { "value": "100251069594", "reason": "Exact successful protected promote job.", "owner": "release operator" },
+    "CMSIFY_SMOKE_JOB_ID": { "value": "100250311311", "reason": "Exact successful artifact-smoke job.", "owner": "release operator" },
+    "CMSIFY_UPGRADE_ROLLBACK_JOB_ID": { "value": "100250311267", "reason": "Exact successful upgrade-rollback job.", "owner": "release operator" },
+    "CMSIFY_RELEASE_SOURCE_SHA": { "value": "26c064a81411c1ec303fa1dc07813841760d44ea", "reason": "Exact commit resolved by v0.2.1 and recorded by the release manifest.", "owner": "release operator" },
+    "CMSIFY_SOAK_EVIDENCE_PATH": { "value": "cmsify-hosted-soak-v0.2.1-33630027328/cmsify-hosted-soak.json", "reason": "Downloaded unmodified from the authenticated soak-recorder artifact.", "owner": "release operator" },
+    "CMSIFY_SOAK_EVIDENCE_SHA256": { "value": "c2fba7d5756d48d5d9e6ac2e761edc6b8a657f2996afeddbd1134125a7a17a22", "reason": "Exact attested soak-evidence file digest.", "owner": "release operator" },
+    "CMSIFY_SOAK_RECORDER_RUN_ID": { "value": "33651575272", "reason": "Exact successful workflow-dispatch recorder run on main.", "owner": "release operator" },
+    "CMSIFY_SOAK_RECORDER_SOURCE_SHA": { "value": "68d8e4cffc4873c5595ad37efc5849ecc7393f61", "reason": "Exact main source used by the authenticated recorder workflow.", "owner": "release operator" },
+    "CMSIFY_SOAK_ATTESTATION_SIGNER_WORKFLOW": { "value": "Syntax-Circus/cmsify/.github/workflows/record-release-soak.yml", "reason": "Exact trusted soak-recorder workflow used to attest the evidence file.", "owner": "release operator" }
   },
   "localFeedPackage": {
     "id": "SyntaxCircus.Http.Resilience",
@@ -45,69 +53,51 @@
     "publicRestoreValidated": true
   },
   "checks": [
-    { "name": "release-contract suite", "command": "node --test tests/release-contract/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 505, "passed": 505, "failed": 0 }, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
-    { "name": "release-smoke source suite", "command": "node --test tests/release-smoke/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 91, "passed": 91, "failed": 0 }, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
-    { "name": "upgrade unit suite", "command": "node --test tests/upgrade/unit/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 173, "passed": 173, "failed": 0 }, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
-    { "name": "standalone release verifier", "command": "node scripts/release/verify-release-contract.mjs", "exitCode": 0, "status": "passed", "counts": null, "sourceSha": "fb983502c619bca7debb76eb7c01f436a9a6c913" },
-    {
-      "name": "pre-publication full product sweep",
-      "command": "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal",
-      "exitCode": 0,
-      "status": "passed",
-      "counts": { "total": 599, "passed": 599, "failed": 0 },
-      "sourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0",
-      "reason": "Accepted head only adds release-policy, smoke-evidence, workflow, and test changes after this successful ignored-feed product sweep; it is retained as preliminary local evidence, not final public-candidate certification."
-    },
-    {
-      "name": "pre-publication TypeScript SDK sweep",
-      "command": "npm run generate:check && npm run typecheck && npm test && npm run build",
-      "exitCode": 0,
-      "status": "passed",
-      "counts": { "total": 40, "passed": 40, "failed": 0 },
-      "sourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0",
-      "reason": "Accepted head only adds release-policy, smoke-evidence, workflow, and test changes after this successful ignored-feed product sweep; it is retained as preliminary local evidence, not final public-candidate certification."
-    }
+    { "name": "release-contract suite", "command": "node --test tests/release-contract/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 516, "passed": 516, "failed": 0 }, "sourceSha": "8f4944de68aac5690f369b62e74e8464df1164b2" },
+    { "name": "release-smoke source suite", "command": "node --test tests/release-smoke/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 91, "passed": 91, "failed": 0 }, "sourceSha": "68d8e4cffc4873c5595ad37efc5849ecc7393f61" },
+    { "name": "upgrade unit suite", "command": "node --test tests/upgrade/unit/*.test.mjs", "exitCode": 0, "status": "passed", "counts": { "total": 173, "passed": 173, "failed": 0 }, "sourceSha": "68d8e4cffc4873c5595ad37efc5849ecc7393f61" },
+    { "name": "standalone release verifier", "command": "node scripts/release/verify-release-contract.mjs", "exitCode": 0, "status": "passed", "counts": null, "sourceSha": "8f4944de68aac5690f369b62e74e8464df1164b2" },
+    { "name": "pre-publication full product sweep", "command": "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal", "exitCode": 0, "status": "passed", "counts": { "total": 599, "passed": 599, "failed": 0 }, "sourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0", "reason": "The later exact tag workflow rebuilt from public dependencies and passed its complete build, candidate, accessibility, smoke, upgrade/rollback, and promotion graph." },
+    { "name": "pre-publication TypeScript SDK sweep", "command": "npm run generate:check && npm run typecheck && npm test && npm run build", "exitCode": 0, "status": "passed", "counts": { "total": 40, "passed": 40, "failed": 0 }, "sourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0", "reason": "The packed npm artifact was subsequently certified and published by the exact tag workflow." }
   ],
   "artifacts": [
     {
-      "kind": "preserved preliminary API OCI candidate",
-      "status": "local-offline-loader-certified-non-promotable",
-      "releaseCandidate": false,
-      "version": "1.0.0-task12.a8e2218",
-      "sourceSha": "a8e2218c530b4323e8e44ca0cf25b3d22e2aea4d",
-      "loaderSourceSha": "4d9da511303e646c5f4147f51108bf3d87c4bba0",
-      "archiveSha256": "535CCD85AE5CED158D396534231F0D32E4ADA2ADD63EB089A499B07547236488",
-      "metadataSha256": "81BE3D015CC3E67C86221A858BCEF8550DC8ABDC5C8F4969D8A9D609FEFD35F3",
-      "manifestDigest": "sha256:f5ca59c7bab1dcb24ecf9ffadbc1daf819cfedbc7419c87bd5e07d5b80b8d79a",
-      "imageId": "sha256:69c7c6bb684f308e46b9385a3984b16fc2b6aa1600e542f7546c1cbb0d84b60b",
-      "platform": "linux/amd64",
-      "offlineLoaderLiveCertified": true,
-      "cleanupVerified": true,
-      "reason": "Reviewed live loader proof for the preserved API archive only; it predates the accepted implementation SHA and is not the definitive public package/API/Admin candidate tuple."
+      "kind": "definitive same-source release candidate",
+      "status": "published-certified",
+      "releaseCandidate": true,
+      "version": "0.2.1",
+      "sourceSha": "26c064a81411c1ec303fa1dc07813841760d44ea",
+      "releaseRunId": "33630027328",
+      "subjectCount": 13,
+      "checksumsSha256": "c6e08df96d04d6d3af4c973e9b2ba416cbc397e22ffba0d04305769f76b3f0eb",
+      "releaseManifestSha256": "293e0fc63e6e5916075e265fef1346f19890ce4bf76e1fa6e93b1d6a415d71dd",
+      "apiManifestDigest": "sha256:be1b34e4c61b305c9c7e1112bc52c2e25898a2c8ca300847c7909639f7aca6b7",
+      "adminManifestDigest": "sha256:bfd965b6d94fe95543086c3665b5dfc13f08204f13a4855719775c0200dd6306",
+      "attestationSignerWorkflow": "Syntax-Circus/cmsify/.github/workflows/publish-cmsify.yml",
+      "reason": "All thirteen canonical files passed checksum, manifest, and exact-source attestation verification; packages and OCI manifests were published or promoted without rebuilding."
     }
   ],
   "externalGates": {
-    "publicPackageRestore": { "passed": true, "reason": "The exact default-branch-built package is repository-signed on NuGet.org; its content hash, signature owner/service index, all five lock and asset graphs, fresh public-only locked restore, and restored signed package bytes were validated on 2026-08-31.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate public-package-restore", "evidenceLink": "https://github.com/Syntax-Circus/SyntaxCircus.Http.Resilience/actions/runs/33404390063" },
-    "hostedAccessibility": { "passed": false, "reason": "No hosted candidate accessibility workflow evidence exists for the definitive tuple.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-accessibility", "evidenceLink": null },
-    "protectedApprovals": { "passed": false, "reason": "No protected release approval has been verified.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate protected-approvals", "evidenceLink": null },
-    "artifactAttestation": { "passed": false, "reason": "No canonical definitive candidate set has hosted attestations.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate artifact-attestation", "evidenceLink": null },
-    "registrySigning": { "passed": false, "reason": "No definitive API/Admin registry digests have verified signatures.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate registry-signing", "evidenceLink": null },
-    "immutableOciPromotion": { "passed": false, "reason": "No definitive API/Admin OCI manifests have been promoted immutably.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate immutable-oci-promotion", "evidenceLink": null },
-    "hostedSmokeSoak": { "passed": false, "reason": "No definitive hosted smoke, upgrade/rollback, or authenticated soak evidence exists.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-smoke-soak", "evidenceLink": null },
-    "finalRelease": { "passed": false, "reason": "No stable tag or release is authorized or certified.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate final-release", "evidenceLink": null }
+    "publicPackageRestore": { "passed": true, "reason": "Repository signature, NuGet content hash, five lock/asset graphs, fresh public-only locked restore, and exact signed cache bytes verified again on 2026-09-02.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate public-package-restore", "evidenceLink": "https://github.com/Syntax-Circus/SyntaxCircus.Http.Resilience/actions/runs/33404390063" },
+    "hostedAccessibility": { "passed": true, "reason": "The exact candidate-accessibility job completed successfully.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-accessibility", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328/job/100250311429" },
+    "protectedApprovals": { "passed": true, "reason": "Required reviewer syntaxcircus-jon approved the release environment and the exact promote deployment completed successfully.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate protected-approvals", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328/job/100251069594" },
+    "artifactAttestation": { "passed": true, "reason": "Every one of the thirteen canonical candidate subjects passed exact-source GitHub attestation verification.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate artifact-attestation", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328" },
+    "registrySigning": { "passed": true, "reason": "Both promoted OCI digests passed keyless Cosign certificate, transparency-log, issuer, and tag-workflow identity verification.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate registry-signing", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328" },
+    "immutableOciPromotion": { "passed": true, "reason": "The stable API and Admin tags resolve to the exact candidate manifest digests.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate immutable-oci-promotion", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328" },
+    "hostedSmokeSoak": { "passed": true, "reason": "Exact artifact-smoke and upgrade-rollback jobs passed; attested evidence records a 3h13m57s soak from 2026-09-02T12:40:44Z through 2026-09-02T15:54:41Z.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-smoke-soak", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33651575272" },
+    "finalRelease": { "passed": true, "reason": "The public, non-draft, non-prerelease v0.2.1 release and tag resolve to the exact certified source.", "owner": "approver", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate final-release", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/releases/tag/v0.2.1" }
   },
   "pendingReleaseGates": {
-    "definitivePackageOciTuple": { "passed": false, "status": "unperformed", "reason": "The public resilience dependency gate passed. After the dated changelog and this evidence reconciliation merge and explicit authorization is given, an authorized maintainer must push an already-created, reviewed, v-prefixed SemVer tag to trigger the tag-push-only workflow; this recorded command has not been executed.", "owner": "authorized maintainer", "nextCommand": "git push origin \"refs/tags/$env:CMSIFY_RELEASE_TAG\"", "evidenceLink": null },
-    "finalConsumersAccessibilityUpgradeSmoke": { "passed": false, "status": "unperformed", "reason": "Clean NuGet/npm consumers, candidate accessibility, exact-image upgrade/rollback, and production-like smoke have not run against a definitive tuple.", "owner": "release operator", "nextCommand": "gh run watch $env:CMSIFY_RELEASE_RUN_ID --exit-status", "evidenceLink": null },
-    "soak": { "passed": false, "status": "unperformed", "reason": "The required authenticated hosted soak has not run for a certified tuple.", "owner": "release operator", "nextCommand": "pwsh -NoProfile -NonInteractive -File scripts/release/verify-task-12-external-gate.ps1 -Gate hosted-smoke-soak", "evidenceLink": null },
-    "stableTag": { "passed": false, "status": "unperformed", "reason": "No stable tag may be created until the preceding gates pass and explicit approval is given.", "owner": "approver and release operator", "nextCommand": "git tag --sign $env:CMSIFY_RELEASE_TAG $env:CMSIFY_RELEASE_SOURCE_SHA", "evidenceLink": null }
+    "definitivePackageOciTuple": { "passed": true, "status": "passed", "reason": "The tag workflow built one same-source NuGet/npm/API/Admin candidate tuple and published or promoted those exact artifacts.", "owner": "authorized maintainer", "nextCommand": "No action required; retain run 33630027328 and its attestations.", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328" },
+    "finalConsumersAccessibilityUpgradeSmoke": { "passed": true, "status": "passed", "reason": "Clean consumers, candidate accessibility, exact-image upgrade/rollback, and production-like smoke passed in the release graph.", "owner": "release operator", "nextCommand": "No action required; retain the exact release jobs.", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328" },
+    "soak": { "passed": true, "status": "passed", "reason": "Authenticated and attested evidence records a 3h13m57s soak after the later of the exact smoke and upgrade/rollback jobs.", "owner": "release operator", "nextCommand": "No action required; retain recorder run 33651575272 and evidence SHA-256 c2fba7d5756d48d5d9e6ac2e761edc6b8a657f2996afeddbd1134125a7a17a22.", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/actions/runs/33651575272" },
+    "stableTag": { "passed": true, "status": "passed", "reason": "The authorized stable v0.2.1 tag resolves to source 26c064a81411c1ec303fa1dc07813841760d44ea and has a public stable GitHub release.", "owner": "approver and release operator", "nextCommand": "No action required; v0.2.1 is immutable.", "evidenceLink": "https://github.com/Syntax-Circus/cmsify/releases/tag/v0.2.1" }
   },
   "knownDiagnostics": [
-    "The exact SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 default-branch candidate was published by the protected workflow and passed the public restore gate; the earlier ignored feature-branch artifact remains non-public historical evidence only.",
-    "Public restore validated the repository signature, NuGet content hash, all five lock and asset graphs, and exact signed package-cache bytes; hosted Cmsify candidate certification remains unperformed.",
-    "CODEOWNERS remains intentionally inactive until a repository-verified GitHub user or team is supplied; hosted protection configuration is external evidence.",
-    "The preserved API archive passed reviewed offline-loader live certification, but it predates the accepted implementation and is neither an API/Admin pair nor a definitive promotable candidate tuple.",
-    "The historical media reconciliation races remain an adjudication caveat; the latest preliminary full solution sweep passed 599/599 with zero skips and did not reproduce them.",
-    "The retained Task 9 rollback diagnostic omission still requires final candidate adjudication; local source tests do not convert it into hosted evidence."
+    "The exact SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 default-branch candidate is publicly repository-signed and its isolated public restore gate passed again on 2026-09-02.",
+    "CODEOWNERS remains intentionally inactive because no separately verified owner identity was committed; this is non-blocking because the release environment had a configured required reviewer and the exact run records syntaxcircus-jon's approval.",
+    "The Task 9 rollback diagnostic omission is closed: bounded cmsify.upgrade-diagnostics.v1 finalization retains the first failing stage, sanitized rollback evidence, and cleanup outcome; the 173-test upgrade unit suite and exact hosted upgrade/rollback job passed.",
+    "The two historical media reconciliation races are closed as release blockers: their integration tests now isolate reconciliation-owned state across repeated iterations, the 599-test product sweep passed without recurrence, and the exact release smoke and upgrade/rollback jobs passed.",
+    "The release closed at version 0.2.1 rather than the superseded 0.2.0 attempt; all certification identities in this ledger deliberately name v0.2.1."
   ]
 }
