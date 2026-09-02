@@ -36,15 +36,15 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
 
           RELEASE_RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
-          EXPECTED_WORKFLOW_REF="$GITHUB_REPOSITORY/.github/workflows/publish-cmsify.yml@refs/tags/$RELEASE_TAG"
           jq -e \
             --arg runId "$RELEASE_RUN_ID" \
             --arg tag "$RELEASE_TAG" \
-            --arg workflowRef "$EXPECTED_WORKFLOW_REF" \
+            --arg repository "$GITHUB_REPOSITORY" \
             '(.id | tostring) == $runId and
             .event == "push" and
             .path == ".github/workflows/publish-cmsify.yml" and
-            .workflow_ref == $workflowRef and
+            .head_repository.full_name == $repository and
+            .repository.full_name == $repository and
             .head_branch == $tag and
             .status == "completed" and
             .conclusion == "success" and
