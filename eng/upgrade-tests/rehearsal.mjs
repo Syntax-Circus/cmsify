@@ -181,10 +181,10 @@ async function restoreFixtureState(context) {
   await context.harness.up(["postgres", "minio"], dockerOptions(context));
   const readiness = await waitForInfrastructure(context);
   try {
-    await context.harness.copyTo("postgres", resolve(context.fixtureDirectory, "database.sql"), "/tmp/cmsify-upgrade-fixture.sql", dockerOptions(context));
+    const databaseFixture = await readSafeFile(context.repositoryRoot, resolve(context.fixtureDirectory, "database.sql"), "utf8");
     await context.harness.exec("postgres", [
-      "psql", "--username", "cmsify", "--dbname", "cmsify", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--file=/tmp/cmsify-upgrade-fixture.sql",
-    ], dockerOptions(context));
+      "psql", "--username", "cmsify", "--dbname", "cmsify", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--file=-",
+    ], { ...dockerOptions(context), stdin: databaseFixture });
     await configureMedia(context);
     await context.harness.copyTo("minio", `${resolve(context.fixtureDirectory, "media")}${sep}.`, "/tmp/cmsify-upgrade-fixture-media", dockerOptions(context));
     await context.harness.exec("minio", ["mc", "mirror", "--overwrite", "/tmp/cmsify-upgrade-fixture-media", "fixture/cmsify-upgrade"], dockerOptions(context));
@@ -201,11 +201,11 @@ async function restoreBackupState(context) {
   const readiness = await waitForInfrastructure(context);
   try {
     const backupDirectory = backupDirectoryFor(context.scope);
-    await context.harness.copyTo("postgres", resolve(backupDirectory, "database.dump"), "/tmp/cmsify-matched-restore.dump", dockerOptions(context));
+    const databaseBackup = await readSafeFile(context.repositoryRoot, resolve(backupDirectory, "database.dump"));
     await context.harness.exec("postgres", [
       "pg_restore", "--username", "cmsify", "--dbname", "cmsify", "--clean", "--if-exists",
-      "--no-owner", "--no-privileges", "--exit-on-error", "/tmp/cmsify-matched-restore.dump",
-    ], dockerOptions(context));
+      "--no-owner", "--no-privileges", "--exit-on-error",
+    ], { ...dockerOptions(context), stdin: databaseBackup });
     await configureMedia(context);
     await context.harness.copyTo("minio", `${resolve(backupDirectory, "media")}${sep}.`, "/tmp/cmsify-matched-restore-media", dockerOptions(context));
     await context.harness.exec("minio", ["mc", "mirror", "--overwrite", "/tmp/cmsify-matched-restore-media", "fixture/cmsify-upgrade"], dockerOptions(context));

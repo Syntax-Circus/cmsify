@@ -413,7 +413,7 @@ export function createDockerHarness(scope, executor = runProcess) {
       assert(options.signal === undefined || options.signal instanceof AbortSignal, "Docker exec signal must be an AbortSignal.");
       assert(options.redact === undefined || (Array.isArray(options.redact) && options.redact.every((value) => typeof value === "string")), "Docker exec redactions must be strings.");
       assert(options.stdoutEncoding === undefined || ["utf8", "buffer"].includes(options.stdoutEncoding), "Docker exec stdoutEncoding must be utf8 or buffer.");
-      assert(options.stdin === undefined || typeof options.stdin === "string", "Docker exec stdin must be a string.");
+      assert(options.stdin === undefined || typeof options.stdin === "string" || Buffer.isBuffer(options.stdin), "Docker exec stdin must be a string or buffer.");
       return compose(["exec", ...(options.stdin === undefined ? [] : ["--interactive"]), "--no-TTY", service, ...args], "docker-compose-exec", undefined, options);
     },
 

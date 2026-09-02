@@ -117,7 +117,7 @@ export class ProcessFailure extends Error {
 }
 
 /**
- * @typedef {{cwd?:string,env?:Record<string,string>,timeoutMs:number,signal?:AbortSignal,phase?:string,redact?:string[],stdoutEncoding?:"utf8"|"buffer",stdin?:string}} ProcessOptions
+ * @typedef {{cwd?:string,env?:Record<string,string>,timeoutMs:number,signal?:AbortSignal,phase?:string,redact?:string[],stdoutEncoding?:"utf8"|"buffer",stdin?:string|Buffer}} ProcessOptions
  * @typedef {{exitCode:number,stdout:string|Buffer,stderr:string,durationMs:number}} ProcessResult
  */
 
@@ -135,7 +135,7 @@ export function runProcess(command, args, options) {
   assert(options.env === undefined || (typeof options.env === "object" && Object.values(options.env).every((value) => typeof value === "string")), "Process environment values must be strings.");
   assert(options.redact === undefined || (Array.isArray(options.redact) && options.redact.every((value) => typeof value === "string")), "Additional process redactions must be strings.");
   assert(options.stdoutEncoding === undefined || ["utf8", "buffer"].includes(options.stdoutEncoding), "Process stdoutEncoding must be utf8 or buffer.");
-  assert(options.stdin === undefined || (typeof options.stdin === "string" && Buffer.byteLength(options.stdin, "utf8") <= MAX_CAPTURED_BYTES), "Process stdin must be a string no larger than one MiB.");
+  assert(options.stdin === undefined || ((typeof options.stdin === "string" || Buffer.isBuffer(options.stdin)) && Buffer.byteLength(options.stdin) <= MAX_CAPTURED_BYTES), "Process stdin must be a string or buffer no larger than one MiB.");
 
   const environment = { ...process.env, ...options.env };
   const redactions = collectRedactions(environment, options.redact ?? []);
@@ -207,7 +207,7 @@ export function runProcess(command, args, options) {
     child.once("error", (error) => fail(phase, null, error));
     if (options.stdin !== undefined) {
       child.stdin.once("error", () => terminate("stdin error"));
-      child.stdin.end(options.stdin, "utf8");
+      child.stdin.end(options.stdin, typeof options.stdin === "string" ? "utf8" : undefined);
     }
     child.once("close", (exitCode) => {
       const output = capturedOutput();
