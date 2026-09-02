@@ -156,7 +156,8 @@ function Assert-ReleaseRunIdentity {
     if ([string] $Run.id -ne $RunId -or
         $Run.event -ne "push" -or
         $Run.path -ne $PublishWorkflowPath -or
-        $Run.workflow_ref -ne "$Repository/$PublishWorkflowPath@refs/tags/$Tag" -or
+        $Run.head_repository.full_name -ne $Repository -or
+        $Run.repository.full_name -ne $Repository -or
         $Run.head_sha -ne $SourceSha -or
         $Run.head_branch -ne $Tag) {
         throw "Release run workflow, event, tag, or source identity is invalid."
@@ -235,7 +236,8 @@ function Assert-SoakRecorderRunIdentity {
     if ([string] $Run.id -ne $RunId -or
         $Run.event -ne "workflow_dispatch" -or
         $Run.path -ne $SoakWorkflowPath -or
-        $Run.workflow_ref -ne "$Repository/$SoakWorkflowPath@refs/heads/main" -or
+        $Run.head_repository.full_name -ne $Repository -or
+        $Run.repository.full_name -ne $Repository -or
         $Run.head_sha -ne $SourceSha -or
         $Run.head_branch -ne "main" -or
         $Run.status -ne "completed" -or

@@ -19,7 +19,9 @@ test("dedicated soak recorder authenticates an elapsed release interval and atte
   assert.match(workflow, /timeout-minutes:\s*10/);
 
   assert.match(workflow, /actions\/runs\/\$RELEASE_RUN_ID/);
-  assert.match(workflow, /publish-cmsify\.yml@refs\/tags\/\$RELEASE_TAG/);
+  assert.match(workflow, /\.head_repository\.full_name == \$repository/);
+  assert.match(workflow, /\.repository\.full_name == \$repository/);
+  assert.doesNotMatch(workflow, /workflow_ref/, "Actions REST run identity must not depend on the unavailable workflow_ref runtime field");
   assert.match(workflow, /artifact-smoke/);
   assert.match(workflow, /upgrade-rollback/);
   assert.match(workflow, /SOAK_SECONDS[\s\S]*-lt 3600/);
