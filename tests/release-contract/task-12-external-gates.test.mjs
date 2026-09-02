@@ -383,12 +383,23 @@ test("protected approval binds exact workflow, tag, SHA, promote job, reviewers,
     (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/actions/runs/${runId}/approvals`].json[0].state = "rejected"; },
     (commands) => { commands[`gh api repos/Syntax-Circus/cmsify/deployments?environment=release&sha=${sourceSha}&per_page=100`].json[0].ref = "v9.9.9"; },
     (commands) => { commands["gh api repos/Syntax-Circus/cmsify/deployments/301/statuses?per_page=100"].json[0].log_url = "https://github.com/Syntax-Circus/cmsify/actions/runs/99999/job/202"; },
+    (commands) => { commands["gh api repos/Syntax-Circus/cmsify/deployments/301/statuses?per_page=100"].json[0].created_at = minutesFromNow(10); },
   ]) {
     const commands = structuredClone(approvalCommands());
     mutate(commands);
     const result = runGate("protected-approvals", { commands });
     assert.notEqual(result.status, 0, `mutation unexpectedly passed: ${JSON.stringify(commands)}`);
   }
+});
+
+test("protected approval accepts GitHub finalizing deployment success after the promote job completes", () => {
+  const commands = approvalCommands();
+  commands["gh api repos/Syntax-Circus/cmsify/deployments/301/statuses?per_page=100"].json[0].created_at = new Date(
+    testNow.getTime() - 60 * 60_000 + 1_000,
+  ).toISOString().replace(".000Z", "Z");
+
+  const result = runGate("protected-approvals", { commands });
+  assert.equal(result.status, 0, result.stderr);
 });
 
 function runCanonicalAttestation(mutate) {
