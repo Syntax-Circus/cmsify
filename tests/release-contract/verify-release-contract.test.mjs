@@ -554,6 +554,7 @@ test("rejects Docker Hub preflight without a scoped Bearer token", () => expectI
 test("rejects Docker Hub preflight without all OCI and Docker manifest media types", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(", application/vnd.docker.distribution.manifest.list.v2+json", "")), /Docker Hub.*four manifest media types/i));
 test("rejects Docker Hub preflight that treats HTTP 200 as absent", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("case \"$status\" in 404) ;; *)", "case \"$status\" in 404|200) ;; *)")), /Docker Hub.*only HTTP 404/i));
 test("rejects a missing exact npm-version absence preflight", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace("https://registry.npmjs.org/@syntaxcircus%2Fcmsify-client/$VERSION", "https://registry.npmjs.org/@syntaxcircus%2Fcmsify-client/latest")), /npm.*exact-version.*404/i));
+test("rejects an unscoped npm candidate archive filename", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replaceAll("syntaxcircus-cmsify-client-$VERSION.tgz", "cmsify-client-$VERSION.tgz")), /npm.*scoped candidate archive filename/i));
 test("rejects a NuGet preflight that treats HTTP 200 as absent", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('case "$http_code" in 404) ;; 200) exit 1 ;;', 'case "$http_code" in 404|200) ;;')), /NuGet.*only.*HTTP 404/i));
 test("rejects a NuGet preflight that preserves uppercase prerelease versions", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('NUGET_VERSION="${VERSION,,}"', 'NUGET_VERSION="$VERSION"')), /NuGet.*normalize.*flat-container.*version/i));
 test("rejects package publication before OCI digest-preserving copy and equality", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED"', 'dotnet nuget push premature.nupkg\n          oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED"')), /OCI.*remote digest equality.*before.*NuGet.*npm/i));
@@ -570,9 +571,9 @@ test("rejects NuGet SBOM restore that can ignore a copied candidate archive", ()
   "",
 )), /NuGet SBOM.*map all three candidate IDs.*isolated source/i));
 test("rejects npm SBOM staging that installs from the source tree", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
-  'TARBALL="$GITHUB_WORKSPACE/artifacts/npm/cmsify-client-$VERSION.tgz"',
+  'TARBALL="$GITHUB_WORKSPACE/artifacts/npm/syntaxcircus-cmsify-client-$VERSION.tgz"',
   'TARBALL="$GITHUB_WORKSPACE/sdk/typescript"',
-)), /npm SBOM.*exact candidate tarball/i));
+)), /npm SBOM.*exact scoped candidate archive filename/i));
 test("rejects NuGet SBOM restore outside its isolated package cache", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
   '--packages "$NUGET_CACHE"',
   '--packages artifacts/nuget',

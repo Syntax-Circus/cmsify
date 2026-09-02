@@ -117,7 +117,7 @@ jobs:
           done
           dotnet restore --configfile "$NUGET_CONSUMER/NuGet.Config" --packages "$NUGET_CACHE" --no-http-cache
           NPM_CONSUMER="$SBOM_STAGING_ROOT/npm/consumer"
-          TARBALL="$GITHUB_WORKSPACE/artifacts/npm/cmsify-client-$VERSION.tgz"
+          TARBALL="$GITHUB_WORKSPACE/artifacts/npm/syntaxcircus-cmsify-client-$VERSION.tgz"
           test -f "$TARBALL"
           mkdir -p "$NPM_CONSUMER"
           cd "$NPM_CONSUMER"
@@ -321,7 +321,7 @@ jobs:
         run: |
           (cd artifacts && sha256sum --check SHA256SUMS)
           CONSUMER_ROOT="$RUNNER_TEMP/cmsify-node-consumer-${{ matrix.node-version }}"
-          TARBALL="$GITHUB_WORKSPACE/artifacts/npm/cmsify-client-$VERSION.tgz"
+          TARBALL="$GITHUB_WORKSPACE/artifacts/npm/syntaxcircus-cmsify-client-$VERSION.tgz"
           test -f "$TARBALL"
           mkdir -p "$CONSUMER_ROOT" && cd "$CONSUMER_ROOT"
           npm init --yes
