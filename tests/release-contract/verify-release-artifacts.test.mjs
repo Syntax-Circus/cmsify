@@ -44,6 +44,10 @@ test("accepts a complete Dockerless release candidate fixture", () => {
   }
 });
 
+test("rejects an unscoped npm candidate archive filename", () => expectInvalid({
+  mutate(state) { state.npm.fileName = `cmsify-client-${VERSION}.tgz`; },
+}, /npm candidate.*syntaxcircus-cmsify-client/i));
+
 test("models BuildKit-normalized Docker Hub identity in each OCI layout, metadata descriptor, and release manifest", () => {
   const root = createValidCandidate();
   try {
