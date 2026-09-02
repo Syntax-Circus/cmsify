@@ -681,7 +681,7 @@ if (ociLoaderSource) {
   }
 }
 expect(ociLoaderContract?.schema === "cmsify.oci-loader.v1", "OCI loader must expose schema cmsify.oci-loader.v1.");
-expect(ociLoaderContract?.skopeoImage === "quay.io/skopeo/stable:v1.22.2@sha256:e770070399e711f3e15bbda2802de4031f0f270180c5bf8dfbd4c2823c20c233", "OCI loader Skopeo helper must use the approved immutable versioned tag and linux/amd64 digest.");
+expect(ociLoaderContract?.skopeoImage === "quay.io/skopeo/stable:v1.22.2@sha256:0b98d4296bfd35680c09fd40a5bff17b8569715258a4bee0a7ae3ca500eaaece", "OCI loader Skopeo helper must use the approved immutable versioned tag and linux/amd64 digest.");
 expect(ociLoaderContract?.transport === "offline-docker-archive" && ociLoaderSource.includes('transport: "offline-docker-archive"'), "OCI loader must declare offline Docker-archive transport.");
 expect(ociLoaderSource.includes('"--network", "none"'), "Skopeo must run without network access.");
 expect(ociLoaderSource.includes("docker-archive:/scratch/candidate.docker.tar:"), "Skopeo must write only disposable Docker transport scratch.");

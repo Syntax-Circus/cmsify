@@ -17,7 +17,7 @@ import { pathToFileURL } from "node:url";
 
 import { runProcess } from "../../eng/upgrade-tests/process.mjs";
 
-export const SKOPEO_IMAGE = "quay.io/skopeo/stable:v1.22.2@sha256:e770070399e711f3e15bbda2802de4031f0f270180c5bf8dfbd4c2823c20c233";
+export const SKOPEO_IMAGE = "quay.io/skopeo/stable:v1.22.2@sha256:0b98d4296bfd35680c09fd40a5bff17b8569715258a4bee0a7ae3ca500eaaece";
 export const LOADER_CONTRACT = Object.freeze({
   schema: "cmsify.oci-loader.v1",
   skopeoImage: SKOPEO_IMAGE,
