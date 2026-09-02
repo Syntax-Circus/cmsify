@@ -10,6 +10,8 @@
 
 **Spec:** `docs/v1-release-remediation-handoff.md`, `docs/release-runbook.md`, and the user's requirement that publication must not originate from a feature branch.
 
+**Completed 2026-09-02:** Every task and completion criterion in this handoff was executed. `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` was published from its protected default-branch workflow, and Cmsify `v0.2.1` was certified and released from exact source `26c064a81411c1ec303fa1dc07813841760d44ea` by workflow [33630027328](https://github.com/Syntax-Circus/cmsify/actions/runs/33630027328). Authenticated soak recorder [33651575272](https://github.com/Syntax-Circus/cmsify/actions/runs/33651575272) completed the final gate. The unchecked steps below preserve the original operator procedure; they are not open work.
+
 ## Global Constraints
 
 - Do not publish `SyntaxCircus.Http.Resilience` from `feature/cmsify-resilience` or publish the ignored branch-built `.nupkg` currently used for local evidence.

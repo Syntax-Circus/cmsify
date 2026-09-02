@@ -198,17 +198,11 @@ function expectedEvidenceTuple(manifest) {
   };
 }
 
-function assertNoPositiveReleaseClaim(section, name) {
-  const positiveClaims = [
-    /\bfully certified\b/i,
-    /\bhosted (?:checks|workflows|validation) (?:passed|succeeded|validated|green|certified)\b/i,
-    /\bpublic(?:\/CI)? restore (?:passed|succeeded|validated|green|certified)\b/i,
-    /\brelease[- ]ready\b/i,
-    /\b(?:final )?release certification (?:is )?(?:complete|completed|passed|certified)\b/i,
-  ];
-  for (const pattern of positiveClaims) {
-    assert.doesNotMatch(section, pattern, `${name} contains a positive release/certification claim`);
-  }
+function assertExactCertification(section, name) {
+  assert.match(section, /v0\.2\.1/i, `${name} must name v0.2.1`);
+  assert.match(section, /26c064a81411c1ec303fa1dc07813841760d44ea/i, `${name} must name the exact release source`);
+  assert.match(section, /(?:release-ready and released|all passed)/i, `${name} must record completed certification`);
+  assert.doesNotMatch(section, /certification remains open|hosted checks remain unperformed|release is not ready/i, `${name} must not reopen completed certification`);
 }
 
 function validateFixture(fixture) {
@@ -240,17 +234,10 @@ function validateFixture(fixture) {
   assert.ok(task12Inventory.includes(manifestPath));
   assert.ok(task12Inventory.includes("tests/release-contract/quality-evidence-manifest.test.mjs"));
 
-  const governed = [
-    ["readiness update", readiness.split("## Locked v1 decisions", 1)[0]],
-    ["readiness F-11", extractSection(readiness, "F-11 — Release builds are noisy and do not enforce first-party warning quality")],
-    ["readiness F-16", extractTableRow(readiness, "F-16")],
-    ["readiness F-17", extractTableRow(readiness, "F-17")],
-    ["handoff resume", extractSection(handoff, "Resume point")],
-    ["handoff carry", extractSection(handoff, "Carry to Task 12 final review")],
-    ["handoff evidence", handoffEvidence],
-    ["handoff next task", extractSection(handoff, "Next task: public dependency and definitive release tuple")],
-  ];
-  for (const [name, section] of governed) assertNoPositiveReleaseClaim(section, name);
+  assertExactCertification(readiness.split("## Locked v1 decisions", 1)[0], "readiness update");
+  assertExactCertification(extractSection(handoff, "Certification closure"), "handoff closure");
+  assert.match(extractSection(readiness, "F-11 — Release builds are noisy and do not enforce first-party warning quality"), /final release certification passed for `v0\.2\.1`/i);
+  assert.match(extractTableRow(readiness, "F-16"), /hosted certification/i);
   assert.doesNotMatch(handoff, /AGENTS\.md requires `rtk` command prefixes/i);
 }
 
@@ -275,34 +262,34 @@ const evidenceMutations = [
   ["rejects false evidence source SHA", (fixture) => {
     fixture.readiness = fixture.readiness.replaceAll(evidenceSourceSha, "0123456789abcdef0123456789abcdef01234567");
   }],
-  ["rejects completed F-11 release certification", (fixture) => {
-    fixture.readiness = fixture.readiness.replace("final release certification remains open", "release certification is complete");
+  ["rejects reopened F-11 release certification", (fixture) => {
+    fixture.readiness = fixture.readiness.replace("final release certification passed for `v0.2.1`", "final release certification remains open");
   }],
-  ["rejects hosted checks passed in handoff evidence", (fixture) => {
-    fixture.handoff = fixture.handoff.replace("No hosted run", "Hosted checks passed");
+  ["rejects reopened hosted checks in handoff evidence", (fixture) => {
+    fixture.handoff = fixture.handoff.replace("all passed", "hosted checks remain unperformed");
   }],
-  ["rejects public restore success after a negated contrast clause", (fixture) => {
+  ["rejects a wrong release source in readiness", (fixture) => {
     fixture.readiness = fixture.readiness.replace(
-      "## Locked v1 decisions",
-      "Public restore was not available previously, but public restore passed today.\n\n## Locked v1 decisions",
+      "26c064a81411c1ec303fa1dc07813841760d44ea",
+      "0123456789abcdef0123456789abcdef01234567",
     );
   }],
-  ["rejects hosted-check success after a negated contrast clause", (fixture) => {
+  ["rejects a wrong release source in the handoff", (fixture) => {
     fixture.handoff = fixture.handoff.replace(
-      "No hosted run, public restore, push, merge, tag, publication, or release is claimed here.",
-      "No hosted run passed previously, but hosted checks passed today.",
+      "26c064a81411c1ec303fa1dc07813841760d44ea",
+      "0123456789abcdef0123456789abcdef01234567",
     );
   }],
-  ["rejects final certification success after a negated contrast clause", (fixture) => {
+  ["rejects a reverted readiness decision", (fixture) => {
     fixture.readiness = fixture.readiness.replace(
-      "final release certification remains open",
-      "final release certification was not complete previously, but final release certification is complete today",
+      "Release-ready and released",
+      "The release is not ready",
     );
   }],
-  ["rejects release-ready success after a negated contrast clause", (fixture) => {
-    fixture.readiness = fixture.readiness.replace(
-      "| F-16 |",
-      "| F-16 | The release remained not ready previously, but it is release-ready today.",
+  ["rejects a reverted handoff certification", (fixture) => {
+    fixture.handoff = fixture.handoff.replace(
+      "all passed",
+      "certification remains open",
     );
   }],
 ];
