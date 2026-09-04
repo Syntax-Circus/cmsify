@@ -68,6 +68,18 @@ public sealed class WorkspaceState
         return true;
     }
 
+    public void UpsertAvailable(WorkspaceDto workspace)
+    {
+        Available = Available
+            .Where(candidate => candidate.Id != workspace.Id)
+            .Append(workspace)
+            .OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.Id)
+            .ToArray();
+
+        Changed?.Invoke();
+    }
+
     public async Task SelectAsync(WorkspaceDto workspace)
     {
         Current = workspace;
