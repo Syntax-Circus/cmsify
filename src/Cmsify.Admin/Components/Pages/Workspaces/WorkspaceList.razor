@@ -169,7 +169,8 @@ else
             return;
         }
 
-        var canSave = editing.Id == Guid.Empty
+        var isNewWorkspace = editing.Id == Guid.Empty;
+        var canSave = isNewWorkspace
             ? CanCreateWorkspaces
             : items.FirstOrDefault(item => item.Id == editing.Id) is { } existing && CanManageWorkspace(existing);
         if (!canSave)
@@ -189,7 +190,7 @@ else
         try
         {
             var request = new WorkspaceRequest(editing.Name, editing.Slug.Value, editing.Description);
-            saved = editing.Id == Guid.Empty ? await Workspaces.CreateAsync(request) : await Workspaces.UpdateAsync(editing.Id, request);
+            saved = isNewWorkspace ? await Workspaces.CreateAsync(request) : await Workspaces.UpdateAsync(editing.Id, request);
         }
         catch (CmsifyApiException ex)
         {
@@ -202,12 +203,12 @@ else
             return;
         }
 
-        items.RemoveAll(item => item.Id == saved.Id);
-        items.Add(saved);
+        WorkspaceState.UpsertAvailable(saved);
+        items = WorkspaceState.Available.ToList();
         editing = null;
         Toasts.Success("Workspace saved");
 
-        if (items.Count == 1)
+        if (isNewWorkspace)
         {
             await WorkspaceState.SelectAsync(saved);
             Navigation.NavigateTo($"/workspaces/{saved.Id}");

@@ -28,6 +28,7 @@
     <PackageReference Include="SyntaxCircus.AspNetCore.Authentication" />
     <PackageReference Include="SyntaxCircus.AspNetCore.Serilog" />
     <PackageReference Include="SyntaxCircus.DotEnv" />
+    <PackageReference Include="SyntaxCircus.Observability" />
   </ItemGroup>
 
   <ItemGroup>

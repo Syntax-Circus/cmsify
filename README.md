@@ -40,6 +40,12 @@ The first API start applies database migrations and seeds the configured admin u
 
 Cmsify loads the base `appsettings.json` for each application, then normal environment variables. In Development it also loads dotenv files: repository-level `.env` values load first, and app-level `.env` or `.env.local` files under `src/Cmsify.Api` and `src/Cmsify.Admin` override them. Copy the root [`.env.example`](.env.example) for the standard local setup, or use the app-specific templates when running an app directly.
 
+### Optional SigNoz and GlitchTip telemetry
+
+API and Admin can independently export structured logs, ASP.NET Core/outbound HTTP traces, and runtime metrics to an external SigNoz-compatible OTLP endpoint. Set `OpenTelemetry__Enabled=true` with a valid `OpenTelemetry__OtlpEndpoint`; logs, traces, metrics, protocol, headers, service metadata, and trace sampling are individually configurable. An invalid enabled endpoint emits a safe warning and leaves export disabled.
+
+Set `Sentry__Dsn` to enable error reporting through a Sentry-compatible GlitchTip project. Events are error-level by default, PII collection is disabled, and GlitchTip trace sampling defaults to `0.0` but remains configurable. Keep DSNs and OTLP headers in deployment secrets; the production Compose template maps independent `API_*` and `ADMIN_*` values into each host. Cmsify does not provision telemetry services locally.
+
 Environment-variable names replace `:` with `__`. Comma-separated values are accepted for `Cors__AllowedOrigins` and `Media__AllowedMimeTypes`; use indexed names such as `TrustedProxy__TrustedProxies__0` for configuration arrays. Commented indexed values in the templates are optional examples, not active configuration.
 
 ### Shared hosting

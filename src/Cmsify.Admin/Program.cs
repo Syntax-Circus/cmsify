@@ -12,6 +12,9 @@ using SyntaxCircus.Blazor.Auth;
 using SyntaxCircus.DotEnv;
 using SyntaxCircus.Cmsify;
 using SyntaxCircus.Http.Resilience;
+using SyntaxCircus.AspNetCore.Serilog;
+using SyntaxCircus.Observability;
+using Sentry.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +22,13 @@ if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
 {
     builder.Configuration.AddSyntaxCircusDotEnvFiles(builder.Environment.ContentRootPath);
     builder.Configuration.AddEnvironmentVariables();
+}
+
+var telemetry = builder.AddSyntaxCircusObservability("cmsify-admin");
+builder.AddStandardSerilog(configureEnrichment: telemetry.ConfigureSerilog);
+if (telemetry.Options.Sentry.IsEnabled)
+{
+    builder.WebHost.UseSentry(sentry => telemetry.ConfigureSentry(sentry));
 }
 
 builder.Services.AddRazorComponents()
@@ -150,6 +160,7 @@ builder.Services.AddScoped<UserPreferencesState>();
 builder.Services.AddScoped<ToastState>();
 
 var app = builder.Build();
+telemetry.LogStartupWarning(app.Logger);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -188,4 +199,3 @@ static void AddMappedClaim(ClaimsIdentity identity, string targetClaimType, stri
 }
 
 public partial class Program;
-
