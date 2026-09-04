@@ -10,7 +10,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Cmsify.Contracts\Cmsify.Contracts.csproj" />
     <ProjectReference Include="..\Cmsify.Core\Cmsify.Core.csproj" />
-    <ProjectReference Include="..\Cmsify.Observability\Cmsify.Observability.csproj" />
     <ProjectReference Include="..\..\sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
   </ItemGroup>
 
@@ -25,5 +24,6 @@
     <PackageReference Include="SyntaxCircus.Blazor.Auth" />
     <PackageReference Include="SyntaxCircus.Blazor.Components" />
     <PackageReference Include="SyntaxCircus.DotEnv" />
+    <PackageReference Include="SyntaxCircus.Observability" />
   </ItemGroup>
 </Project>

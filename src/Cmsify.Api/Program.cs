@@ -7,7 +7,6 @@ using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Extensions;
 using Cmsify.Infrastructure.Persistence;
-using Cmsify.Observability;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -20,6 +19,7 @@ using SyntaxCircus.AspNetCore.Authentication;
 using SyntaxCircus.AspNetCore.Serilog;
 using SyntaxCircus.Cmsify.Contracts;
 using SyntaxCircus.DotEnv;
+using SyntaxCircus.Observability;
 using Sentry.AspNetCore;
 
 const string CorrelationHeaderName = "X-Correlation-Id";
@@ -32,10 +32,7 @@ if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
     builder.Configuration.AddEnvironmentVariables();
 }
 
-var telemetry = CmsifyTelemetryBootstrap.Register(
-    builder.Services,
-    builder.Configuration,
-    builder.Environment,
+var telemetry = builder.AddSyntaxCircusObservability(
     "cmsify-api",
     [CmsifyOperationalMetrics.MeterName]);
 builder.AddStandardSerilog(fileLoggingOptions =>
@@ -47,7 +44,7 @@ builder.AddStandardSerilog(fileLoggingOptions =>
 }, configureEnrichment: telemetry.ConfigureSerilog);
 if (telemetry.Options.Sentry.IsEnabled)
 {
-    builder.WebHost.UseSentry(telemetry.ConfigureSentry);
+    builder.WebHost.UseSentry(sentry => telemetry.ConfigureSentry(sentry));
 }
 
 builder.Services.AddControllers()
