@@ -80,6 +80,28 @@ public sealed class CmsifyClientDependencyInjectionTests
         handler.SendCount.ShouldBe(2);
     }
 
+    // CmsifyClient exposes both a (HttpClient, IOptions<CmsifyClientOptions>) and a
+    // (HttpClient, CmsifyClientOptions) constructor - two constructors of the same arity that both
+    // start with HttpClient. ActivatorUtilities-based typed-client construction can't disambiguate
+    // them and throws at resolution time. AddCmsifyClient avoids ActivatorUtilities entirely by
+    // registering CmsifyClient via an explicit AddTypedClient factory delegate instead of the naive
+    // services.AddHttpClient<CmsifyClient>() pattern. This test intentionally asserts that the naive
+    // pattern still fails today - it is not a bug in the test. It exists so that anyone who
+    // "simplifies" AddCmsifyClient back to services.AddHttpClient<CmsifyClient>() gets a failing test
+    // instead of a silent runtime regression.
+    [Fact]
+    public void DirectTypedClientRegistrationStillThrowsOnAmbiguousConstructors()
+    {
+        var services = new ServiceCollection();
+        services.Configure<CmsifyClientOptions>(options => options.BaseUrl = new Uri("https://cms.test"));
+        services.AddHttpClient<CmsifyClient>();
+        using var provider = services.BuildServiceProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(() => provider.GetRequiredService<CmsifyClient>());
+
+        exception.Message.ShouldContain("A suitable constructor for type 'CmsifyClient' could not be located.");
+    }
+
     [Fact]
     public async Task AddCmsifyClient_ForwardsSafeTimeoutCallback()
     {
