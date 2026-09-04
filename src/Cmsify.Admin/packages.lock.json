@@ -521,7 +521,7 @@
         "type": "CentralTransitive",
         "requested": "[0.2.0-cmsify.1, )",
         "resolved": "0.2.0-cmsify.1",
-        "contentHash": "/wzJoTLh3ebeAzOdaT0yUXXznF4C/26eWS6js5dDzzgDKsxNpeOL+s0ZJTwaxZYj6wG5cr9I4rUYOzpXOWoW+w==",
+        "contentHash": "NMTysZp25vAOrFJ67PkFUbWleijS54StWjT5GAXbRLWoxv+H69VBFgP6f+wR0YRTNvF/yMvlIallZu3ID7ue6w==",
         "dependencies": {
           "Microsoft.Extensions.Http.Resilience": "9.9.0"
         }
