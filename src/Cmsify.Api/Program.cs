@@ -4,8 +4,10 @@ using Cmsify.Api.HealthChecks;
 using Cmsify.Api.Queries;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
+using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Extensions;
 using Cmsify.Infrastructure.Persistence;
+using Cmsify.Observability;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -18,6 +20,7 @@ using SyntaxCircus.AspNetCore.Authentication;
 using SyntaxCircus.AspNetCore.Serilog;
 using SyntaxCircus.Cmsify.Contracts;
 using SyntaxCircus.DotEnv;
+using Sentry.AspNetCore;
 
 const string CorrelationHeaderName = "X-Correlation-Id";
 
@@ -29,13 +32,23 @@ if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
     builder.Configuration.AddEnvironmentVariables();
 }
 
+var telemetry = CmsifyTelemetryBootstrap.Register(
+    builder.Services,
+    builder.Configuration,
+    builder.Environment,
+    "cmsify-api",
+    [CmsifyOperationalMetrics.MeterName]);
 builder.AddStandardSerilog(fileLoggingOptions =>
 {
     fileLoggingOptions.Enabled = builder.Configuration.GetValue("Serilog:File:Enabled", false);
     fileLoggingOptions.Path = builder.Configuration["Serilog:File:Path"];
     fileLoggingOptions.RollingInterval = RollingInterval.Day;
     fileLoggingOptions.RetainedFileCountLimit = builder.Configuration.GetValue<int?>("Serilog:File:RetainedFileCountLimit", 14);
-});
+}, configureEnrichment: telemetry.ConfigureSerilog);
+if (telemetry.Options.Sentry.IsEnabled)
+{
+    builder.WebHost.UseSentry(telemetry.ConfigureSentry);
+}
 
 builder.Services.AddControllers()
     .AddJsonOptions(options => CmsifyJsonOptions.Configure(options.JsonSerializerOptions));
@@ -128,6 +141,7 @@ builder.Services.AddHealthChecks()
     .AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
 
 var app = builder.Build();
+telemetry.LogStartupWarning(app.Logger);
 
 if (!builder.Configuration.GetValue("Api:OpenApiExport", false))
 {

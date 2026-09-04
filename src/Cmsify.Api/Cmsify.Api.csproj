@@ -11,6 +11,7 @@
     <ProjectReference Include="..\Cmsify.Contracts\Cmsify.Contracts.csproj" />
     <ProjectReference Include="..\Cmsify.Core\Cmsify.Core.csproj" />
     <ProjectReference Include="..\Cmsify.Infrastructure\Cmsify.Infrastructure.csproj" />
+    <ProjectReference Include="..\Cmsify.Observability\Cmsify.Observability.csproj" />
   </ItemGroup>
 
   <ItemGroup>

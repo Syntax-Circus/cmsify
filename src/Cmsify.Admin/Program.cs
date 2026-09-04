@@ -2,6 +2,7 @@ using Cmsify.Admin.Auth;
 using Cmsify.Admin.Components;
 using Cmsify.Admin.Services;
 using Cmsify.Admin.State;
+using Cmsify.Observability;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -12,6 +13,8 @@ using SyntaxCircus.Blazor.Auth;
 using SyntaxCircus.DotEnv;
 using SyntaxCircus.Cmsify;
 using SyntaxCircus.Http.Resilience;
+using SyntaxCircus.AspNetCore.Serilog;
+using Sentry.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +22,17 @@ if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
 {
     builder.Configuration.AddSyntaxCircusDotEnvFiles(builder.Environment.ContentRootPath);
     builder.Configuration.AddEnvironmentVariables();
+}
+
+var telemetry = CmsifyTelemetryBootstrap.Register(
+    builder.Services,
+    builder.Configuration,
+    builder.Environment,
+    "cmsify-admin");
+builder.AddStandardSerilog(configureEnrichment: telemetry.ConfigureSerilog);
+if (telemetry.Options.Sentry.IsEnabled)
+{
+    builder.WebHost.UseSentry(telemetry.ConfigureSentry);
 }
 
 builder.Services.AddRazorComponents()
@@ -150,6 +164,7 @@ builder.Services.AddScoped<UserPreferencesState>();
 builder.Services.AddScoped<ToastState>();
 
 var app = builder.Build();
+telemetry.LogStartupWarning(app.Logger);
 
 if (!app.Environment.IsDevelopment())
 {

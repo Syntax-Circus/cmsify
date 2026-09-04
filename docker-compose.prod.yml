@@ -51,6 +51,21 @@ services:
       - Media__Operations__ManagedPrefixes__1=default/
       - Api__SwaggerEnabled=${Api__SwaggerEnabled:-false}
       - TrustedProxy__RequireTrustedProxiesInProduction=${TrustedProxy__RequireTrustedProxiesInProduction:-false}
+      - OpenTelemetry__Enabled=${API_OPENTELEMETRY__ENABLED:-false}
+      - OpenTelemetry__OtlpEndpoint=${API_OPENTELEMETRY__OTLPENDPOINT:-}
+      - OpenTelemetry__OtlpProtocol=${API_OPENTELEMETRY__OTLPPROTOCOL:-grpc}
+      - OpenTelemetry__Headers=${API_OPENTELEMETRY__HEADERS:-}
+      - OpenTelemetry__ExportLogs=${API_OPENTELEMETRY__EXPORTLOGS:-true}
+      - OpenTelemetry__ExportTraces=${API_OPENTELEMETRY__EXPORTTRACES:-true}
+      - OpenTelemetry__ExportMetrics=${API_OPENTELEMETRY__EXPORTMETRICS:-true}
+      - OpenTelemetry__TracesSampleRate=${API_OPENTELEMETRY__TRACESSAMPLERATE:-1.0}
+      - OpenTelemetry__ServiceName=${API_OPENTELEMETRY__SERVICENAME:-}
+      - OpenTelemetry__ServiceVersion=${API_OPENTELEMETRY__SERVICEVERSION:-}
+      - OpenTelemetry__Environment=${API_OPENTELEMETRY__ENVIRONMENT:-}
+      - Sentry__Dsn=${API_SENTRY__DSN:-}
+      - Sentry__Environment=${API_SENTRY__ENVIRONMENT:-}
+      - Sentry__Debug=${API_SENTRY__DEBUG:-false}
+      - Sentry__TracesSampleRate=${API_SENTRY__TRACESSAMPLERATE:-0.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,6 +87,21 @@ services:
       ASPNETCORE_URLS: http://+:8080
       Admin__ApiBaseUrl: http://api:8080
       Admin__DataProtection__KeysPath: /var/cmsify/admin-keys
+      OpenTelemetry__Enabled: ${ADMIN_OPENTELEMETRY__ENABLED:-false}
+      OpenTelemetry__OtlpEndpoint: ${ADMIN_OPENTELEMETRY__OTLPENDPOINT:-}
+      OpenTelemetry__OtlpProtocol: ${ADMIN_OPENTELEMETRY__OTLPPROTOCOL:-grpc}
+      OpenTelemetry__Headers: ${ADMIN_OPENTELEMETRY__HEADERS:-}
+      OpenTelemetry__ExportLogs: ${ADMIN_OPENTELEMETRY__EXPORTLOGS:-true}
+      OpenTelemetry__ExportTraces: ${ADMIN_OPENTELEMETRY__EXPORTTRACES:-true}
+      OpenTelemetry__ExportMetrics: ${ADMIN_OPENTELEMETRY__EXPORTMETRICS:-true}
+      OpenTelemetry__TracesSampleRate: ${ADMIN_OPENTELEMETRY__TRACESSAMPLERATE:-1.0}
+      OpenTelemetry__ServiceName: ${ADMIN_OPENTELEMETRY__SERVICENAME:-}
+      OpenTelemetry__ServiceVersion: ${ADMIN_OPENTELEMETRY__SERVICEVERSION:-}
+      OpenTelemetry__Environment: ${ADMIN_OPENTELEMETRY__ENVIRONMENT:-}
+      Sentry__Dsn: ${ADMIN_SENTRY__DSN:-}
+      Sentry__Environment: ${ADMIN_SENTRY__ENVIRONMENT:-}
+      Sentry__Debug: ${ADMIN_SENTRY__DEBUG:-false}
+      Sentry__TracesSampleRate: ${ADMIN_SENTRY__TRACESSAMPLERATE:-0.0}
     depends_on:
       api:
         condition: service_healthy
