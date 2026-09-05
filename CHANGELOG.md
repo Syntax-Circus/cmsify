@@ -6,9 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-05
+
 ### Added
 
 - Client-side `${{name}}` template rendering (`CmsifyTemplateRenderer.Render` in the .NET client, `renderCmsifyTemplate` in the TypeScript client) for substituting caller-supplied variables into Text/Markdown field values read from Cmsify content. Purely opt-in and client-side; the server has no concept of variables. See "Rendering field templates" in `docs/integrating.md`.
+
+### Fixed
+
+- An expired Admin session no longer redirects to a raw HTTP 400 error page. Signing back in after expiry now always reaches the login form, and any remaining antiforgery-token mismatch on the login/logout endpoints redirects to the login page with a friendly "session expired" message instead.
 
 ## [0.2.4] - 2026-09-04
 
