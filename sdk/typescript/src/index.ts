@@ -10,6 +10,7 @@ export {
   type TextFormatHint,
   type TextFormatHintConfig,
 } from "./formatting";
+export { renderCmsifyTemplate } from "./templating";
 export type * from "./types";
 export * as generated from "./generated/schema";
 export { createCmsifyFetchClient } from "./generated/client";

@@ -110,6 +110,26 @@ The partition must be stable and non-secret, and must distinguish authorization 
 
 For Redis or another shared cache, install `SyntaxCircus.Cmsify.Client.DistributedCaching`, configure an `IDistributedCache` provider in the host, and call `AddCmsifyContentDistributedCache` instead. The add-on stores JSON values, is provider-neutral, and fails open to a live Cmsify request when the cache is unavailable.
 
+### Rendering field templates
+
+Content authors can write `${{name}}` tokens (camelCase names, matching field-key casing) into Text or Markdown field values so a consuming application can substitute in values it owns — a support email address, a canonical hostname, anything that already lives in the app's own configuration rather than belonging in the CMS. This is opt-in and purely client-side: the Cmsify server has no concept of variables and never sees or stores rendered output, so `${{name}}` tokens are just literal text as far as the server and every other client are concerned until a consumer explicitly renders them.
+
+```csharp
+using SyntaxCircus.Cmsify;
+
+var rendered = CmsifyTemplateRenderer.Render(
+    faq.BodyMarkdown,
+    new Dictionary<string, string?> { ["supportEmail"] = options.SupportEmail });
+```
+
+```typescript
+import { renderCmsifyTemplate } from "@syntaxcircus/cmsify-client";
+
+const rendered = renderCmsifyTemplate(faq.bodyMarkdown, { supportEmail: options.supportEmail });
+```
+
+A variable name present in the dictionary with a `null` (or, in TypeScript, `null`/`undefined`) value renders as an empty string — an explicit "blank this out." A variable name **not** present in the dictionary at all is left untouched in the output as the literal `${{name}}` token, so a typo'd variable name (`${{supprtEmail}}`) is visibly wrong on the rendered page rather than silently disappearing. Nothing runs automatically on every field read — call `Render`/`renderCmsifyTemplate` explicitly on whichever field values you want substituted.
+
 ## Direct HTTP smoke test
 
 When diagnosing an integration, make one authenticated request outside the application:
