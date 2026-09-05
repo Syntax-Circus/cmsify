@@ -1,0 +1,67 @@
+@page "/about"
+@rendermode InteractiveServer
+@inject CmsifyClient Cmsify
+
+<div class="cms-page-head">
+    <div>
+        <h1>About Cmsify</h1>
+        <div class="lead">Confirm which build of the Admin and API are running.</div>
+    </div>
+</div>
+
+<div class="cms-card" style="max-width:680px">
+    <div class="mb-3">
+        <label class="form-label">Admin version</label>
+        <input class="form-control" value="@AdminBuildInfo.Version" readonly />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">API version</label>
+        @if (loadingApiVersion)
+        {
+            <input class="form-control" value="Checking..." readonly />
+        }
+        else if (apiVersion is null)
+        {
+            <input class="form-control" value="API unreachable" readonly />
+            <div class="form-text text-danger">Could not reach the API's health endpoint to read its version.</div>
+        }
+        else
+        {
+            <input class="form-control" value="@apiVersion" readonly />
+            @if (string.Equals(apiVersion, AdminBuildInfo.Version, StringComparison.Ordinal))
+            {
+                <div class="form-text text-success">Matches the Admin version.</div>
+            }
+            else
+            {
+                <div class="form-text text-warning">Does not match the Admin version — the Admin and API images may be out of sync.</div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private bool loadingApiVersion = true;
+    private string? apiVersion;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var health = await Cmsify.Health.ReadyAsync();
+            apiVersion = health?.Metadata?.Version;
+        }
+        catch (CmsifyApiException)
+        {
+            apiVersion = null;
+        }
+        catch (HttpRequestException)
+        {
+            apiVersion = null;
+        }
+        finally
+        {
+            loadingApiVersion = false;
+        }
+    }
+}
