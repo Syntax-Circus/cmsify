@@ -141,6 +141,24 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Login_WithInvalidAntiforgeryToken_RedirectsToLoginWithSessionExpiredError()
+    {
+        var client = CreateClient();
+
+        using var response = await client.PostAsync("/admin-auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = "stale-token",
+            ["email"] = "admin@example.com",
+            ["password"] = "correct",
+            ["returnUrl"] = "/workspaces"
+        }), TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldBe("/login?error=session-expired");
+        factory.ObservedRequests.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Login_WhenApiReturns401_RedirectsToLoginWithInvalidCredentialsError()
     {
         factory.Responder = _ => new HttpResponseMessage(HttpStatusCode.Unauthorized);
