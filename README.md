@@ -183,6 +183,25 @@ The template defaults to the named local-media volume. Set `Storage__Provider=s3
 
 The production Compose template reads signing-secret configuration only into the API container from `CMSIFY_API_KEYRING_ENV_FILE`; it does not pass the main Compose interpolation file through to the container. Copy [`docker-compose.prod.keyring.env.example`](docker-compose.prod.keyring.env.example) to an untracked deployment-only file, set `CMSIFY_API_KEYRING_ENV_FILE` to that path, and replace its active-key placeholder with a stable ID and canonical Base64 32-byte CSPRNG key. Add and retain every older `Secrets__EncryptionKeys__<keyId>` entry that may still be referenced by `v2` ciphertext. Missing, malformed, or placeholder keyring configuration fails API startup; never commit the deployment keyring file.
 
+For a first deploy, the keyring file only needs its first two lines edited:
+
+```bash
+# Generate a real 32-byte key (do this once):
+openssl rand -base64 32
+```
+
+```ini
+# .env.prod.keyring
+Secrets__ActiveKeyId=active_2026_08                          # keep, or rename (letters/digits/_/- only)
+Secrets__EncryptionKeys__active_2026_08=<paste-the-generated-key-here>  # id after "EncryptionKeys__" must match ActiveKeyId above
+
+# Leave the rest commented out on a first deploy — they only apply when rotating to a
+# new key later (Secrets__EncryptionKeys__<old-id>) or migrating from a legacy v1
+# deployment (Secrets__EncryptionKey, singular). Neither applies to a fresh install.
+```
+
+If you rename `active_2026_08`, rename it in *both* places — `Secrets__ActiveKeyId` and the `Secrets__EncryptionKeys__<id>` variable name — or the API refuses to start with "Secrets active key ID must name a configured encryption key."
+
 ## Documentation
 
 For a guide organized by task and audience, see the [documentation index](docs/README.md).
