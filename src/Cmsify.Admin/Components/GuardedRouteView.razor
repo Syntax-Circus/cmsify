@@ -33,7 +33,7 @@
 
         if (!Auth.IsAuthenticated && !isLogin)
         {
-            Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(path)}", replace: true);
+            Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(path)}", forceLoad: true, replace: true);
             return;
         }
 
@@ -51,7 +51,7 @@
 
         if (Auth.User is not { Id: var userId } || userId == Guid.Empty)
         {
-            Navigation.NavigateTo("/login", replace: true);
+            Navigation.NavigateTo("/login", forceLoad: true, replace: true);
             return;
         }
 

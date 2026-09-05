@@ -176,6 +176,16 @@ if (oidcEnabled)
 {
     app.UseBlazorTokenCache();
 }
+app.Use(async (context, next) =>
+{
+    await next();
+    if (context.Response.StatusCode == StatusCodes.Status400BadRequest
+        && !context.Response.HasStarted
+        && context.Request.Path.StartsWithSegments("/admin-auth"))
+    {
+        context.Response.Redirect("/login?error=session-expired");
+    }
+});
 app.UseAntiforgery();
 
 app.MapAdminAuthEndpoints();
