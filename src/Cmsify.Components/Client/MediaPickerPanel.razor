@@ -1,0 +1,39 @@
+@namespace SyntaxCircus.Cmsify.Components.Client
+
+<MediaPickerModal Visible="@Visible" Assets="@assets" OnSearch="SearchAsync" OnUpload="UploadAsync" OnSelect="SelectAsync" Closed="() => Closed.InvokeAsync()" />
+
+@code {
+    [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
+    [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public string? MimePrefix { get; set; }
+    [Parameter] public EventCallback<MediaAssetResponse> Selected { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
+
+    private IReadOnlyList<MediaAssetResponse> assets = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible)
+        {
+            await LoadAsync(null);
+        }
+    }
+
+    private async Task LoadAsync(string? search)
+    {
+        var page = await Client.Media.ListAsync(WorkspaceId, MimePrefix, search);
+        assets = page?.Items ?? [];
+    }
+
+    private Task SearchAsync(string search) => LoadAsync(search);
+
+    private async Task UploadAsync(InputFileChangeEventArgs args)
+    {
+        await using var stream = args.File.OpenReadStream(1_073_741_824);
+        await Client.Media.UploadAsync(WorkspaceId, stream, args.File.Name, args.File.ContentType);
+        await LoadAsync(null);
+    }
+
+    private async Task SelectAsync(MediaAssetResponse asset) => await Selected.InvokeAsync(asset);
+}
