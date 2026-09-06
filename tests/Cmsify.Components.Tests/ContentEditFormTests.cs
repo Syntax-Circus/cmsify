@@ -60,6 +60,31 @@ public sealed class ContentEditFormTests : BunitContext
     }
 
     [Fact]
+    public void ExcludesCurrentContentIdFromReferenceOptions()
+    {
+        var templateId = Guid.NewGuid();
+        var currentContentId = Guid.NewGuid();
+        var otherOptionId = Guid.NewGuid();
+        var field = TestFieldFactory.Create(templateId: templateId);
+        var templateVersion = CreateTemplateVersion(field);
+        var options = new List<ContentItemSummaryResponse>
+        {
+            new(currentContentId, Guid.NewGuid(), "Template", ContentStatus.Draft, "self-slug", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null),
+            new(otherOptionId, Guid.NewGuid(), "Template", ContentStatus.Draft, "other-slug", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null),
+        };
+
+        var cut = Render<ContentEditForm>(parameters => parameters
+            .Add(p => p.TemplateVersion, templateVersion)
+            .Add(p => p.FieldValues, new Dictionary<Guid, ContentFieldEditorValue>())
+            .Add(p => p.ReferenceOptionsByTemplateId, new Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> { [templateId] = options })
+            .Add(p => p.CurrentContentId, currentContentId));
+
+        var optionValues = cut.FindAll("select option").Select(el => el.GetAttribute("value")).ToList();
+        optionValues.ShouldNotContain(currentContentId.ToString());
+        optionValues.ShouldContain(otherOptionId.ToString());
+    }
+
+    [Fact]
     public void RendersErrorBannerWhenErrorIsSet()
     {
         var cut = Render<ContentEditForm>(parameters => parameters

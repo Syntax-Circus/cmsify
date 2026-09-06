@@ -55,6 +55,7 @@
     [Parameter] public EventCallback<TemplateFieldResponse> OnMediaPickRequested { get; set; }
     [Parameter] public EventCallback<TemplateFieldResponse> OnFilePickRequested { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
+    [Parameter] public Guid? CurrentContentId { get; set; }
 
     private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
         FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();
@@ -71,6 +72,7 @@
 
         return templateIds
             .SelectMany(id => ReferenceOptionsByTemplateId.TryGetValue(id, out var options) ? options : [])
+            .Where(option => option.Id != CurrentContentId)
             .GroupBy(option => option.Id)
             .Select(group => group.First())
             .OrderBy(option => option.Slug ?? option.Id.ToString())
