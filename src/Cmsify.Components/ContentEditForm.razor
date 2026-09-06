@@ -1,0 +1,79 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<div class="cmsify-form">
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="cmsify-form-error">@Error</div>
+    }
+    <div class="cmsify-form-fields">
+        @foreach (var field in TemplateVersion.Fields.OrderBy(f => f.Order))
+        {
+            var binding = PickListFieldBinding.FromFieldConfig(field.FieldConfig);
+            var resolvedPickList = binding.RevisionId.HasValue && PickListsByRevisionId.TryGetValue(binding.RevisionId.Value, out var pickList) ? pickList : null;
+            var referenceOptions = ReferenceOptionsForField(field);
+            <div class="cmsify-form-field">
+                <label class="cmsify-form-label">@field.Label @(field.IsRequired ? "*" : "")</label>
+                <FieldEditor Field="@field" Value="@GetOrCreateValue(field.Id)"
+                             ValueChanged="@(value => FieldValueChanged.InvokeAsync((field, value)))"
+                             ResolvedPickList="@resolvedPickList"
+                             ReferenceOptions="@referenceOptions"
+                             OnMediaPickRequested="@(() => OnMediaPickRequested.InvokeAsync(field))"
+                             OnFilePickRequested="@(() => OnFilePickRequested.InvokeAsync(field))"
+                             FieldTemplateOverrides="@FieldTemplateOverrides" />
+                @if (!string.IsNullOrWhiteSpace(field.HelpText))
+                {
+                    <div class="cmsify-form-help">@field.HelpText</div>
+                }
+            </div>
+        }
+    </div>
+    <div class="cmsify-form-metadata">
+        <label class="cmsify-form-label">Slug</label>
+        <input class="cmsify-field-input" value="@Slug" @oninput="e => SlugChanged.InvokeAsync(e.Value?.ToString())" />
+        <label class="cmsify-form-label">Locale</label>
+        <input class="cmsify-field-input" value="@Locale" @oninput="e => LocaleChanged.InvokeAsync(e.Value?.ToString())" />
+        <label class="cmsify-form-label">Tags</label>
+        <input class="cmsify-field-input" value="@Tags" @oninput="e => TagsChanged.InvokeAsync(e.Value?.ToString())" />
+    </div>
+    <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()">Save</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TemplateVersionResponse TemplateVersion { get; set; } = null!;
+    [Parameter, EditorRequired] public IReadOnlyDictionary<Guid, ContentFieldEditorValue> FieldValues { get; set; } = new Dictionary<Guid, ContentFieldEditorValue>();
+    [Parameter] public EventCallback<(TemplateFieldResponse Field, ContentFieldEditorValue Value)> FieldValueChanged { get; set; }
+    [Parameter] public IReadOnlyDictionary<Guid, PickListResponse> PickListsByRevisionId { get; set; } = new Dictionary<Guid, PickListResponse>();
+    [Parameter] public IReadOnlyDictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> ReferenceOptionsByTemplateId { get; set; } = new Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>>();
+    [Parameter] public string? Slug { get; set; }
+    [Parameter] public EventCallback<string?> SlugChanged { get; set; }
+    [Parameter] public string? Locale { get; set; }
+    [Parameter] public EventCallback<string?> LocaleChanged { get; set; }
+    [Parameter] public string? Tags { get; set; }
+    [Parameter] public EventCallback<string?> TagsChanged { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback<TemplateFieldResponse> OnMediaPickRequested { get; set; }
+    [Parameter] public EventCallback<TemplateFieldResponse> OnFilePickRequested { get; set; }
+    [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
+
+    private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
+        FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();
+
+    private IReadOnlyList<ContentItemSummaryResponse> ReferenceOptionsForField(TemplateFieldResponse field)
+    {
+        var templateIds = new List<Guid>();
+        if (field.TemplateId.HasValue)
+        {
+            templateIds.Add(field.TemplateId.Value);
+        }
+
+        templateIds.AddRange(field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value));
+
+        return templateIds
+            .SelectMany(id => ReferenceOptionsByTemplateId.TryGetValue(id, out var options) ? options : [])
+            .GroupBy(option => option.Id)
+            .Select(group => group.First())
+            .OrderBy(option => option.Slug ?? option.Id.ToString())
+            .ToList();
+    }
+}
