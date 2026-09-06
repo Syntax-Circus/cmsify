@@ -1,0 +1,16 @@
+.cmsify-field-select {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    font-family: var(--cmsify-font-family, inherit);
+    color: var(--cmsify-color-text, inherit);
+}
+
+.cmsify-field-select:focus {
+    outline: none;
+    border-color: var(--cmsify-color-border-focus, #86b7fe);
+    box-shadow: var(--cmsify-focus-ring, 0 0 0 0.2rem rgba(13, 110, 253, 0.25));
+}
