@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-05
+
 ### Added
 
 - The Admin app now shows its running build version in the sidebar and on a new `/about` page, alongside the API's reported version (read from `/health/ready`) with a match/mismatch indicator — useful for confirming a deploy landed both images in sync.
