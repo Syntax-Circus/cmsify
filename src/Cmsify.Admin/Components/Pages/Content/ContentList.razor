@@ -1,5 +1,6 @@
 @page "/workspaces/{WorkspaceId:guid}/content"
 @rendermode InteractiveServer
+@using SyntaxCircus.Cmsify.Components.Client
 @inject CmsifyClient Cmsify
 @inject NavigationManager Navigation
 @inject AuthState Auth
@@ -10,51 +11,25 @@
     <button class="btn btn-primary" @onclick="NewContent">New Content</button>
 </div>
 
-<div class="cms-card mb-3">
-    <div class="row g-2">
-        <div class="col-md-3"><input class="form-control" placeholder="Full-text search" @bind="q" /></div>
-        <div class="col-md-2"><InputSelect class="form-select" @bind-Value="status"><option value="">Any status</option>@foreach (var s in Enum.GetValues<ContentStatus>()) { <option value="@s">@s</option> }</InputSelect></div>
-        <div class="col-md-3"><InputSelect class="form-select" @bind-Value="templateId"><option value="">Any template</option>@foreach (var t in templates) { <option value="@t.Id">@t.Name</option> }</InputSelect></div>
-        <div class="col-md-2"><input class="form-control" placeholder="Locale" @bind="locale" /></div>
-        <div class="col-md-2"><button class="btn btn-outline-secondary w-100" @onclick="LoadAsync">Filter</button></div>
-    </div>
-</div>
-
 <div class="cms-card p-0">
-    <table class="cms-table">
-        <thead><tr><th>Title / Slug</th><th>Template</th><th>Status</th><th>Locale</th><th>Updated</th><th>Actions</th></tr></thead>
-        <tbody>
-        @foreach (var item in items)
-        {
-            <tr>
-                <td><strong>@(item.Slug ?? item.Id.ToString())</strong><div class="small text-muted">@string.Join(", ", item.Tags)</div></td>
-                <td>@item.TemplateName</td>
-                <td><StatusBadge Status="@item.Status" /></td>
-                <td>@item.LocaleCode</td>
-                <td><LocalTimeDisplay Value="@item.UpdatedAt" /></td>
-                <td>
-                    @{
-                        var submitState = ContentWorkflowActions.SubmitState(item.Status);
-                        var approveState = ContentWorkflowActions.ApproveState(item.Status);
-                        var rejectState = ContentWorkflowActions.RejectState(item.Status, CurrentRole);
-                        var publishState = ContentWorkflowActions.PublishState(item.Status, CurrentRole);
-                        var archiveState = ContentWorkflowActions.ArchiveState(item.Status);
-                        var restoreState = ContentWorkflowActions.RestoreState(item.Status, CurrentRole);
-                    }
-                    <div class="d-flex flex-wrap gap-1">
-                        <a class="btn btn-primary btn-sm" href="/workspaces/@WorkspaceId/content/@item.Id">Edit</a>
-                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, SubmitAction)">Submit</button>
-                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, ApproveAction)">Approve</button>
-                        <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(item.Id)">Reject</button>
-                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(item)">Publish</button>
-                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, ArchiveAction)">Archive</button>
-                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, RestoreAction)">Restore</button>
-                    </div>
-                </td>
-            </tr>
-        }
-        </tbody>
-    </table>
+    <ContentListPanel @ref="listPanel" Client="@Cmsify" WorkspaceId="@WorkspaceId" OnEdit="EditContent">
+        <RowActions Context="contentItem">
+            @{
+                var submitState = ContentWorkflowActions.SubmitState(contentItem.Status);
+                var approveState = ContentWorkflowActions.ApproveState(contentItem.Status);
+                var rejectState = ContentWorkflowActions.RejectState(contentItem.Status, CurrentRole);
+                var publishState = ContentWorkflowActions.PublishState(contentItem.Status, CurrentRole);
+                var archiveState = ContentWorkflowActions.ArchiveState(contentItem.Status);
+                var restoreState = ContentWorkflowActions.RestoreState(contentItem.Status, CurrentRole);
+            }
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, SubmitAction)">Submit</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ApproveAction)">Approve</button>
+            <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(contentItem.Id)">Reject</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(contentItem)">Publish</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ArchiveAction)">Archive</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, RestoreAction)">Restore</button>
+        </RowActions>
+    </ContentListPanel>
 </div>
 
 <PublishContentDialog WorkspaceId="@WorkspaceId" ContentId="@publishContentId" ContentStatus="@publishContentStatus"
@@ -63,14 +38,8 @@
 
 @code {
     private ContentClient Content => Cmsify.Content;
-    private TemplateClient Templates => Cmsify.Templates;
     [Parameter] public Guid WorkspaceId { get; set; }
-    private List<ContentItemSummaryResponse> items = [];
-    private IReadOnlyList<TemplateSummaryResponse> templates = [];
-    private ContentStatus? status;
-    private Guid? templateId;
-    private string? locale;
-    private string? q;
+    private ContentListPanel? listPanel;
     private const string SubmitAction = "submit";
     private const string ApproveAction = "approve";
     private const string ArchiveAction = "archive";
@@ -80,16 +49,9 @@
 
     private UserRole CurrentRole => Enum.TryParse<UserRole>(Auth.User?.Role, ignoreCase: true, out var role) ? role : UserRole.Reader;
 
-    protected override async Task OnParametersSetAsync()
-    {
-        templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(WorkspaceId));
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync() =>
-        items = ApiResponse.ItemsOrEmpty(await Content.ListAsync(WorkspaceId, status, templateId, locale, null, q)).ToList();
-
     private void NewContent() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/new");
+
+    private void EditContent(ContentItemSummaryResponse item) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
 
     private async Task RunTransitionAsync(Guid id, string action)
     {
@@ -104,7 +66,7 @@
         }
         finally
         {
-            await LoadAsync();
+            await ReloadListAsync();
         }
     }
 
@@ -121,7 +83,7 @@
         }
         finally
         {
-            await LoadAsync();
+            await ReloadListAsync();
         }
     }
 
@@ -136,6 +98,8 @@
     private async Task OnPublishedAsync(PublishContentResponse response)
     {
         Toasts.Success(response.Warnings.Count == 0 ? "Content published." : "Content published with warnings.");
-        await LoadAsync();
+        await ReloadListAsync();
     }
+
+    private Task ReloadListAsync() => listPanel is null ? Task.CompletedTask : listPanel.ReloadAsync();
 }

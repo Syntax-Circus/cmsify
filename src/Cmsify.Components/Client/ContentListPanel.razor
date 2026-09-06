@@ -2,12 +2,14 @@
 
 <ContentListView Items="@items" Templates="@templates" SearchText="@searchText" SearchTextChanged="@(v => searchText = v)"
                  Status="@status" StatusChanged="@(v => status = v)" TemplateId="@templateId" TemplateIdChanged="@(v => templateId = v)"
-                 Locale="@locale" LocaleChanged="@(v => locale = v)" OnFilter="LoadAsync" OnEdit="@(item => OnEdit.InvokeAsync(item))" />
+                 Locale="@locale" LocaleChanged="@(v => locale = v)" OnFilter="LoadAsync" OnEdit="@(item => OnEdit.InvokeAsync(item))"
+                 RowActions="@RowActions" />
 
 @code {
     [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
     [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
     [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? RowActions { get; set; }
 
     private List<ContentItemSummaryResponse> items = [];
     private IReadOnlyList<TemplateSummaryResponse> templates = [];
@@ -35,4 +37,6 @@
         var page = await Client.Content.ListAsync(WorkspaceId, status, templateId, locale, null, searchText);
         items = (page?.Items ?? []).ToList();
     }
+
+    public Task ReloadAsync() => LoadAsync();
 }

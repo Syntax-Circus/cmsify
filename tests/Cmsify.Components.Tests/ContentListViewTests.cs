@@ -45,4 +45,16 @@ public sealed class ContentListViewTests : BunitContext
 
         filtered.ShouldBeTrue();
     }
+
+    [Fact]
+    public void RendersRowActionsFragmentWhenProvided()
+    {
+        var item = CreateItem("first");
+        var cut = Render<ContentListView>(parameters => parameters
+            .Add(p => p.Items, new[] { item })
+            .Add(p => p.RowActions, (RenderFragment<ContentItemSummaryResponse>)(rowItem => builder =>
+                builder.AddMarkupContent(0, $"<button class=\"custom-action\">Act on {rowItem.Slug}</button>"))));
+
+        cut.Find(".custom-action").TextContent.ShouldBe("Act on first");
+    }
 }

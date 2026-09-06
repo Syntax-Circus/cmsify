@@ -49,4 +49,36 @@ public sealed class ContentListPanelTests : BunitContext
         edited.ShouldNotBeNull();
         edited!.Id.ShouldBe(contentId);
     }
+
+    [Fact]
+    public async Task PassesThroughRowActionsAndSupportsExplicitReload()
+    {
+        var workspaceId = Guid.NewGuid();
+        var loadCount = 0;
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            if (path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                loadCount++;
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentListPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.RowActions, (RenderFragment<ContentItemSummaryResponse>)(item => builder => builder.AddMarkupContent(0, "<span class=\"row-action\"></span>"))));
+
+        cut.WaitForState(() => loadCount == 1);
+
+        await cut.Instance.ReloadAsync();
+
+        cut.WaitForState(() => loadCount == 2);
+    }
 }

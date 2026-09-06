@@ -33,7 +33,13 @@
                     <td>@contentItem.Status</td>
                     <td>@contentItem.LocaleCode</td>
                     <td>@contentItem.UpdatedAt</td>
-                    <td><button type="button" class="cmsify-list-edit-button" @onclick="() => OnEdit.InvokeAsync(contentItem)">Edit</button></td>
+                    <td>
+                        <button type="button" class="cmsify-list-edit-button" @onclick="() => OnEdit.InvokeAsync(contentItem)">Edit</button>
+                        @if (RowActions is not null)
+                        {
+                            @RowActions(contentItem)
+                        }
+                    </td>
                 </tr>
             }
         </tbody>
@@ -53,6 +59,7 @@
     [Parameter] public EventCallback<string?> LocaleChanged { get; set; }
     [Parameter] public EventCallback OnFilter { get; set; }
     [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? RowActions { get; set; }
 
     private Task OnStatusChanged(ChangeEventArgs e) =>
         StatusChanged.InvokeAsync(Enum.TryParse<ContentStatus>(e.Value?.ToString(), out var status) ? status : null);
