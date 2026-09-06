@@ -130,6 +130,18 @@ const rendered = renderCmsifyTemplate(faq.bodyMarkdown, { supportEmail: options.
 
 A variable name present in the dictionary with a `null` (or, in TypeScript, `null`/`undefined`) value renders as an empty string — an explicit "blank this out." A variable name **not** present in the dictionary at all is left untouched in the output as the literal `${{name}}` token, so a typo'd variable name (`${{supprtEmail}}`) is visibly wrong on the rendered page rather than silently disappearing. Nothing runs automatically on every field read — call `Render`/`renderCmsifyTemplate` explicitly on whichever field values you want substituted.
 
+## Blazor content-editing components
+
+Blazor Server applications don't have to hand-build content-editing UI against the raw API. `SyntaxCircus.Cmsify.Components` provides a field editor for every template field type, a composed edit form/panel and list view/panel, and a media/reference picker — headless by default (CSS isolation plus `--cmsify-*` custom properties), with an optional `SyntaxCircus.Cmsify.Components.Theme` package for ready-made default styling. The SDK-backed panels take a `CmsifyClient` directly, so they compose with everything above:
+
+```razor
+@using SyntaxCircus.Cmsify.Components.Client
+
+<ContentEditPanel Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId" />
+```
+
+See the [`Cmsify.Components` README](../src/Cmsify.Components/README.md) for the full component set, extensibility hooks, and styling variables.
+
 ## Direct HTTP smoke test
 
 When diagnosing an integration, make one authenticated request outside the application:

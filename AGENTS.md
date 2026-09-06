@@ -9,6 +9,8 @@ Read this file before changing Cmsify. Keep changes scoped, preserve existing us
 - `src/Cmsify.Api` contains the versioned HTTP API, controllers, middleware, OpenAPI, authentication, rate limiting, and health endpoints.
 - `src/Cmsify.Admin` is the Blazor administration UI. It does not access the database directly; its service clients call the API.
 - `src/Cmsify.Contracts` contains shared handwritten public wire contracts used by the API, Admin, and .NET client.
+- `src/Cmsify.Components` contains the publishable `SyntaxCircus.Cmsify.Components` Blazor Server component library (field editors, composed edit/list panels, pickers). Presentational components take data via parameters; SDK-backed "smart" components live under a `Client` sub-namespace and take an explicit `CmsifyClient` parameter, never `@inject`. Admin consumes this package instead of maintaining its own editing markup.
+- `src/Cmsify.Components.Theme` contains the publishable `SyntaxCircus.Cmsify.Components.Theme` package: static default CSS for `Cmsify.Components`'s `--cmsify-*` custom properties. No components or code.
 - `sdk/typescript` contains the first-party client and checked-in OpenAPI-generated types.
 - `sdk/dotnet` contains the first-party .NET client, optional distributed content cache, and client tests.
 - `examples` contains server-side integration examples for supported application frameworks.
@@ -68,6 +70,7 @@ Run the narrowest relevant checks first, then the full solution test suite for c
 | Infrastructure, PostgreSQL, storage, audit, or hosted services | `Cmsify.Infrastructure.Tests` (PostgreSQL and MinIO Testcontainers) |
 | Controllers, middleware, auth, or HTTP contracts | `Cmsify.Api.Integration.Tests` (PostgreSQL Testcontainers) |
 | Admin UI or Admin authentication | `Cmsify.Admin.Integration.Tests`; run the accessibility workflow when markup or interaction changes |
+| `Cmsify.Components`/`Cmsify.Components.Theme` | `Cmsify.Components.Tests` (bUnit); re-run the full suite at least twice for SDK-backed component tests — they use `cut.WaitForState(...)` to avoid async races under full-suite load |
 | .NET SDK or Contracts | `SyntaxCircus.Cmsify.Client.Tests` |
 | TypeScript SDK or an OpenAPI contract | `npm run generate:check`, `npm run typecheck`, `npm test`, and `npm run build` from `sdk/typescript` |
 

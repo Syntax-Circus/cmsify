@@ -19,6 +19,7 @@ Use the guide that matches the job you are doing. The current API behavior is de
 - [Components and choice sets](content-components-and-choice-sets.md) — inline schemas, nested values, and immutable choice revisions.
 - [Reusable model packages](packages.md) — `.ctp` import/export and built-in starter packs.
 - [TypeScript client](../sdk/typescript/README.md) and [.NET client](../sdk/dotnet/README.md) — first-party SDK usage.
+- [Reusable Blazor components](../src/Cmsify.Components/README.md) — embed content-editing UI directly in a Blazor site instead of sending users to Cmsify Admin.
 
 ## Contribute or maintain
 
