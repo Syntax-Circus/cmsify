@@ -1,7 +1,7 @@
 @page "/workspaces/{WorkspaceId:guid}/content/new"
 @page "/workspaces/{WorkspaceId:guid}/content/{ContentId:guid}"
 @rendermode InteractiveServer
-@using System.Text.Json
+@using SyntaxCircus.Cmsify.Components.Client
 @inject CmsifyClient Cmsify
 @inject ToastState Toasts
 @inject NavigationManager Navigation
@@ -9,19 +9,11 @@
 
 <div class="cms-page-head">
     <div><h1>@(ContentId.HasValue ? "Edit Content" : "New Content")</h1><div class="lead">Dynamic form generated from the selected template version.</div></div>
-    <div class="d-flex gap-2">
-        @if (ContentId.HasValue)
-        {
-            <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/content/@ContentId/versions">Versions</a>
-        }
-        <button class="btn btn-primary" @onclick="SaveAsync">Save Draft</button>
-    </div>
+    @if (ContentId.HasValue)
+    {
+        <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/content/@ContentId/versions">Versions</a>
+    }
 </div>
-
-@if (!string.IsNullOrWhiteSpace(error))
-{
-    <div class="alert alert-danger">@error</div>
-}
 
 <div class="row g-3">
     <div class="col-lg-8">
@@ -29,24 +21,19 @@
             @if (!ContentId.HasValue)
             {
                 <label class="form-label">Template</label>
-                <InputSelect class="form-select mb-3" @bind-Value="selectedTemplateId" @bind-Value:after="LoadSelectedTemplateAsync">
+                <select class="form-select mb-3" @onchange="OnTemplateSelected">
                     <option value="">Select template</option>
                     @foreach (var template in templates)
                     {
                         <option value="@template.Id">@template.Name</option>
                     }
-                </InputSelect>
+                </select>
             }
-            @foreach (var field in fields)
+            @if (ContentId.HasValue || selectedTemplateId.HasValue)
             {
-                <div class="mb-3">
-                    <label class="form-label">@field.Label @(field.IsRequired ? "*" : "")</label>
-                    @RenderField(field)
-                    @if (!string.IsNullOrWhiteSpace(field.HelpText))
-                    {
-                        <div class="form-text">@field.HelpText</div>
-                    }
-                </div>
+                <ContentEditPanel @key="@(ContentId ?? selectedTemplateId)" Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId"
+                                  TemplateId="@(ContentId.HasValue ? null : selectedTemplateId)"
+                                  ItemChanged="@(i => item = i)" Saved="OnSavedAsync" Created="OnCreatedAsync" />
             }
         </div>
     </div>
@@ -71,21 +58,12 @@
                     <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(RestoreAction)">Restore</button>
                 </div>
             }
-            <label class="form-label mt-3">Slug</label>
-            <InputText class="form-control mb-1 font-monospace" @bind-Value="slug" aria-describedby="slug-rule" />
-            <div id="slug-rule" class="form-text mb-3">Optional. If supplied: @SlugRules.ValidationMessage</div>
-            <label class="form-label">Locale</label>
-            <InputText class="form-control mb-3" @bind-Value="locale" />
-            <label class="form-label">Tags</label>
-            <InputText class="form-control mb-3" @bind-Value="tags" />
-            <label class="form-label">Link Translation Target ID</label>
+            <label class="form-label mt-3">Link Translation Target ID</label>
             <InputText class="form-control mb-3" @bind-Value="translationTarget" />
             <button class="btn btn-outline-secondary btn-sm" @onclick="LinkTranslationAsync" disabled="@(!ContentId.HasValue)">Link Translation</button>
         </div>
     </div>
 </div>
-
-<MediaPickerModal Visible="@showMedia" WorkspaceId="@WorkspaceId" MimePrefix="@mediaMime" Selected="MediaSelectedAsync" Closed="() => showMedia = false" />
 
 @if (item is not null)
 {
@@ -97,7 +75,6 @@
 @code {
     private ContentClient Content => Cmsify.Content;
     private TemplateClient Templates => Cmsify.Templates;
-    private PickListClient PickLists => Cmsify.PickLists;
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid? ContentId { get; set; }
 
@@ -110,91 +87,20 @@
     private UserRole CurrentRole => Enum.TryParse<UserRole>(Auth.User?.Role, ignoreCase: true, out var role) ? role : UserRole.Reader;
 
     private IReadOnlyList<TemplateSummaryResponse> templates = [];
-    private TemplateVersionResponse? templateVersion;
     private ContentItemDetailResponse? item;
     private Guid? selectedTemplateId;
-    private string? slug;
-    private string? locale;
-    private string? tags;
     private string? translationTarget;
-    private string? error;
-    private bool showMedia;
-    private string? mediaMime;
-    private Guid mediaFieldId;
-    private readonly Dictionary<Guid, string?> textValues = [];
-    private readonly Dictionary<Guid, bool> boolValues = [];
-    private readonly Dictionary<Guid, Guid?> assetValues = [];
-    private readonly Dictionary<Guid, Guid?> referenceValues = [];
-    private readonly Dictionary<Guid, List<string>> multiPickValues = [];
-    private readonly Dictionary<Guid, List<string>> componentValues = [];
-    private Dictionary<Guid, PickListResponse> picklistCache = new();
-    private Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = new();
-
-    private IEnumerable<TemplateFieldResponse> fields => templateVersion is null ? Enumerable.Empty<TemplateFieldResponse>() : templateVersion.Fields.OrderBy(item => item.Order);
 
     protected override async Task OnParametersSetAsync()
     {
-        templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(WorkspaceId));
-        if (ContentId.HasValue)
-        {
-            await LoadContentAsync();
-        }
-    }
-
-    private async Task LoadContentAsync()
-    {
         if (!ContentId.HasValue)
         {
-            return;
-        }
-
-        textValues.Clear();
-        boolValues.Clear();
-        assetValues.Clear();
-        referenceValues.Clear();
-        multiPickValues.Clear();
-        componentValues.Clear();
-
-        var loaded = ApiResponse.Required(
-            await Content.GetAsync(WorkspaceId, ContentId.Value),
-            "loading content");
-        item = loaded;
-        slug = loaded.Slug;
-        locale = loaded.LocaleCode;
-        tags = string.Join(",", loaded.Tags);
-        var template = templates.FirstOrDefault(t => t.CurrentVersionId == loaded.TemplateVersionId);
-        if (template is not null)
-        {
-            selectedTemplateId = template.Id;
-            await LoadTemplateVersionAsync(template.Id);
-        }
-
-        foreach (var value in loaded.Fields)
-        {
-            textValues[value.FieldId] = value.TextValue;
-            boolValues[value.FieldId] = value.BoolValue ?? false;
-            assetValues[value.FieldId] = value.MediaAssetId ?? value.FileAssetId;
-            referenceValues[value.FieldId] = value.ChildContentItemId;
-            if (!string.IsNullOrWhiteSpace(value.TextValue))
-            {
-                if (!multiPickValues.TryGetValue(value.FieldId, out var existing))
-                {
-                    existing = [];
-                    multiPickValues[value.FieldId] = existing;
-                }
-                existing.Add(value.TextValue);
-            }
-            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue)
-            {
-                if (!componentValues.TryGetValue(value.FieldId, out var values))
-                {
-                    values = [];
-                    componentValues[value.FieldId] = values;
-                }
-                values.Add(value.JsonValue.Value.GetRawText());
-            }
+            templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(WorkspaceId));
         }
     }
+
+    private void OnTemplateSelected(ChangeEventArgs e) =>
+        selectedTemplateId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
 
     private async Task RunTransitionAsync(string action)
     {
@@ -205,16 +111,12 @@
 
         try
         {
-            await Content.TransitionAsync(WorkspaceId, ContentId.Value, action);
+            item = await Content.TransitionAsync(WorkspaceId, ContentId.Value, action);
             Toasts.Success("Content updated.");
         }
         catch (Exception ex)
         {
             Toasts.Danger(ex.Message);
-        }
-        finally
-        {
-            await LoadContentAsync();
         }
     }
 
@@ -227,16 +129,12 @@
 
         try
         {
-            await Content.RejectAsync(WorkspaceId, ContentId.Value, new RejectContentRequest("Rejected from content editor"));
+            item = await Content.RejectAsync(WorkspaceId, ContentId.Value, new RejectContentRequest("Rejected from content editor"));
             Toasts.Success("Content updated.");
         }
         catch (Exception ex)
         {
             Toasts.Danger(ex.Message);
-        }
-        finally
-        {
-            await LoadContentAsync();
         }
     }
 
@@ -244,477 +142,24 @@
 
     private void ClosePublishDialog() => publishContentId = null;
 
-    private async Task OnPublishedAsync(PublishContentResponse response)
+    private Task OnPublishedAsync(PublishContentResponse response)
     {
+        item = response.Content;
         Toasts.Success(response.Warnings.Count == 0 ? "Content published." : "Content published with warnings.");
-        await LoadContentAsync();
-    }
-
-    private async Task LoadSelectedTemplateAsync()
-    {
-        error = null;
-        templateVersion = null;
-        if (selectedTemplateId.HasValue)
-        {
-            await LoadTemplateVersionAsync(selectedTemplateId.Value);
-        }
-    }
-
-    private async Task LoadTemplateVersionAsync(Guid templateId)
-    {
-        var template = ApiResponse.Required(
-            await Templates.GetAsync(WorkspaceId, templateId),
-            "loading a template");
-        templateVersion = template.CurrentVersion ?? ApiResponse.Required(
-            await Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version"),
-            "creating a template draft");
-        await LoadPicklistsForFieldsAsync();
-        await LoadReferenceOptionsForFieldsAsync();
-    }
-
-    private async Task LoadPicklistsForFieldsAsync()
-    {
-        if (templateVersion is null)
-        {
-            return;
-        }
-
-        var ids = templateVersion.Fields
-            .Where(field => field.PrimitiveType == PrimitiveType.PickList)
-            .Select(GetPicklistBinding)
-            .Where(binding => binding.PicklistId.HasValue && binding.RevisionId.HasValue)
-            .Select(binding => binding.RevisionId!.Value)
-            .Distinct()
-            .ToList();
-
-        foreach (var id in ids)
-        {
-            if (picklistCache.ContainsKey(id))
-            {
-                continue;
-            }
-
-            var binding = templateVersion.Fields.Select(GetPicklistBinding).First(binding => binding.RevisionId == id);
-            try
-            {
-                if (binding.PicklistId is not { } picklistId)
-                {
-                    continue;
-                }
-
-                picklistCache[id] = ApiResponse.Required(
-                    await PickLists.GetRevisionAsync(WorkspaceId, picklistId, id),
-                    "loading a picklist revision");
-            }
-            catch (CmsifyApiException) { }
-        }
-    }
-
-    private static (Guid? PicklistId, Guid? RevisionId, bool Multiple) GetPicklistBinding(TemplateFieldResponse field)
-    {
-        if (field.FieldConfig is JsonElement config && config.ValueKind == JsonValueKind.Object)
-        {
-            Guid? picklistId = null;
-            Guid? revisionId = null;
-            var multiple = false;
-            if (config.TryGetProperty("picklistId", out var pickProp) && pickProp.ValueKind == JsonValueKind.String && Guid.TryParse(pickProp.GetString(), out var parsed))
-            {
-                picklistId = parsed;
-            }
-            if (config.TryGetProperty("multiple", out var multiProp) && (multiProp.ValueKind == JsonValueKind.True || multiProp.ValueKind == JsonValueKind.False))
-            {
-                multiple = multiProp.GetBoolean();
-            }
-            if (config.TryGetProperty("picklistRevisionId", out var revisionProp) && revisionProp.ValueKind == JsonValueKind.String && Guid.TryParse(revisionProp.GetString(), out var parsedRevision))
-            {
-                revisionId = parsedRevision;
-            }
-            return (picklistId, revisionId, multiple);
-        }
-
-        return (null, null, false);
-    }
-
-    private async Task LoadReferenceOptionsForFieldsAsync()
-    {
-        if (templateVersion is null)
-        {
-            return;
-        }
-
-        var templateIds = templateVersion.Fields
-            .SelectMany(GetReferenceTemplateIds)
-            .Distinct()
-            .ToList();
-
-        foreach (var templateId in templateIds)
-        {
-            if (referenceOptionsByTemplateId.ContainsKey(templateId))
-            {
-                continue;
-            }
-
-            referenceOptionsByTemplateId[templateId] = ApiResponse.ItemsOrEmpty(
-                await Content.ListAsync(WorkspaceId, null, templateId, null, null, null));
-        }
-    }
-
-    private static IEnumerable<Guid> GetReferenceTemplateIds(TemplateFieldResponse field)
-    {
-        if (field.TemplateId.HasValue)
-        {
-            yield return field.TemplateId.Value;
-        }
-
-        foreach (var allowedType in field.AllowedTypes)
-        {
-            if (allowedType.AllowedTemplateId.HasValue)
-            {
-                yield return allowedType.AllowedTemplateId.Value;
-            }
-        }
-    }
-
-    private RenderFragment RenderField(TemplateFieldResponse field) => builder =>
-    {
-        var sequence = 0;
-        if (field.ComponentId.HasValue)
-        {
-            if (!componentValues.TryGetValue(field.Id, out var values))
-            {
-                values = ["{}"];
-                componentValues[field.Id] = values;
-            }
-            for (var index = 0; index < values.Count; index++)
-            {
-                var valueIndex = index;
-                builder.OpenElement(sequence++, "textarea");
-                builder.AddAttribute(sequence++, "class", "form-control font-monospace mb-2");
-                builder.AddAttribute(sequence++, "rows", "8");
-                builder.AddAttribute(sequence++, "placeholder", "{ \"fieldKey\": \"value\" }");
-                builder.AddAttribute(sequence++, "value", values[valueIndex]);
-                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => values[valueIndex] = e.Value?.ToString() ?? "{}"));
-                builder.CloseElement();
-            }
-            if (!field.MaxOccurrences.HasValue || values.Count < field.MaxOccurrences.Value)
-            {
-                builder.OpenElement(sequence++, "button");
-                builder.AddAttribute(sequence++, "type", "button");
-                builder.AddAttribute(sequence++, "class", "btn btn-sm btn-outline-secondary");
-                builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, () => values.Add("{}")));
-                builder.AddContent(sequence++, "Add component");
-                builder.CloseElement();
-            }
-            return;
-        }
-
-        if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
-        {
-            if (field.CompositionMode == CompositionMode.Reference)
-            {
-                var options = GetReferenceTemplateIds(field)
-                    .SelectMany(templateId => referenceOptionsByTemplateId.GetValueOrDefault(templateId) ?? [])
-                    .Where(option => option.Id != ContentId)
-                    .GroupBy(option => option.Id)
-                    .Select(group => group.First())
-                    .OrderBy(option => option.Slug ?? option.Id.ToString())
-                    .ToList();
-
-                builder.OpenElement(sequence++, "select");
-                builder.AddAttribute(sequence++, "class", "form-select");
-                builder.AddAttribute(sequence++, "value", referenceValues.GetValueOrDefault(field.Id)?.ToString() ?? "");
-                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e =>
-                {
-                    referenceValues[field.Id] = Guid.TryParse(e.Value?.ToString(), out var selected) ? selected : null;
-                }));
-                builder.OpenElement(sequence++, "option");
-                builder.AddAttribute(sequence++, "value", "");
-                builder.AddContent(sequence++, field.IsRequired ? "Select referenced content" : "None");
-                builder.CloseElement();
-                foreach (var option in options)
-                {
-                    builder.OpenElement(sequence++, "option");
-                    builder.AddAttribute(sequence++, "value", option.Id.ToString());
-                    builder.AddContent(sequence++, $"{option.Slug ?? option.Id.ToString()} ({option.Status})");
-                    builder.CloseElement();
-                }
-                builder.CloseElement();
-            }
-            else
-            {
-                builder.OpenElement(sequence++, "div");
-                builder.AddAttribute(sequence++, "class", "alert alert-warning py-2 px-3 small mb-0");
-                builder.AddContent(sequence++, "Inline child content editing is not available yet. Use a reference field or create the child content separately.");
-                builder.CloseElement();
-            }
-        }
-        else if (field.PrimitiveType == PrimitiveType.Boolean)
-        {
-            builder.OpenElement(sequence++, "input");
-            builder.AddAttribute(sequence++, "type", "checkbox");
-            builder.AddAttribute(sequence++, "class", "form-check-input");
-            builder.AddAttribute(sequence++, "checked", boolValues.GetValueOrDefault(field.Id));
-            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => boolValues[field.Id] = (bool?)e.Value ?? false));
-            builder.CloseElement();
-        }
-        else if (field.PrimitiveType is PrimitiveType.Markdown or PrimitiveType.RichText)
-        {
-            builder.OpenElement(sequence++, "textarea");
-            builder.AddAttribute(sequence++, "class", "form-control");
-            builder.AddAttribute(sequence++, "rows", "6");
-            builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id));
-            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
-            builder.CloseElement();
-            if (field.PrimitiveType == PrimitiveType.Markdown)
-            {
-                builder.OpenElement(sequence++, "pre");
-                builder.AddAttribute(sequence++, "class", "cms-card cms-card--quiet mt-2");
-                builder.AddContent(sequence++, textValues.GetValueOrDefault(field.Id));
-                builder.CloseElement();
-            }
-        }
-        else if (field.PrimitiveType is PrimitiveType.Media or PrimitiveType.File)
-        {
-            builder.OpenElement(sequence++, "button");
-            builder.AddAttribute(sequence++, "type", "button");
-            builder.AddAttribute(sequence++, "class", "btn btn-outline-secondary");
-            builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, () => OpenMedia(field)));
-            builder.AddContent(sequence++, assetValues.GetValueOrDefault(field.Id)?.ToString() ?? "Select asset");
-            builder.CloseElement();
-        }
-        else if (field.PrimitiveType == PrimitiveType.PickList)
-        {
-            var binding = GetPicklistBinding(field);
-            if (!binding.PicklistId.HasValue || !binding.RevisionId.HasValue || !picklistCache.TryGetValue(binding.RevisionId.Value, out var picklist))
-            {
-                builder.OpenElement(sequence++, "div");
-                builder.AddAttribute(sequence++, "class", "alert alert-warning py-2 px-3 small mb-0");
-                builder.AddContent(sequence++, "This field has no picklist bound. Edit the template to bind one.");
-                builder.CloseElement();
-            }
-            else if (binding.Multiple)
-            {
-                builder.OpenElement(sequence++, "select");
-                builder.AddAttribute(sequence++, "class", "form-select");
-                builder.AddAttribute(sequence++, "multiple", true);
-                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e =>
-                {
-                    var values = e.Value switch
-                    {
-                        string[] arr => arr.ToList(),
-                        IEnumerable<object> enumerable => enumerable.Select(x => x?.ToString() ?? "").ToList(),
-                        _ => new List<string>()
-                    };
-                    multiPickValues[field.Id] = values;
-                }));
-                var selected = multiPickValues.GetValueOrDefault(field.Id) ?? [];
-                foreach (var option in picklist.Options.OrderBy(o => o.Order))
-                {
-                    builder.OpenElement(sequence++, "option");
-                    builder.AddAttribute(sequence++, "value", option.Value);
-                    if (selected.Contains(option.Value))
-                    {
-                        builder.AddAttribute(sequence++, "selected", true);
-                    }
-                    builder.AddContent(sequence++, option.Label);
-                    builder.CloseElement();
-                }
-                builder.CloseElement();
-            }
-            else
-            {
-                builder.OpenElement(sequence++, "select");
-                builder.AddAttribute(sequence++, "class", "form-select");
-                builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id) ?? "");
-                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
-                builder.OpenElement(sequence++, "option");
-                builder.AddAttribute(sequence++, "value", "");
-                builder.AddContent(sequence++, field.IsRequired ? "— Select —" : "— None —");
-                builder.CloseElement();
-                foreach (var option in picklist.Options.OrderBy(o => o.Order))
-                {
-                    builder.OpenElement(sequence++, "option");
-                    builder.AddAttribute(sequence++, "value", option.Value);
-                    builder.AddContent(sequence++, option.Label);
-                    builder.CloseElement();
-                }
-                builder.CloseElement();
-            }
-        }
-        else if (field.PrimitiveType == PrimitiveType.Link)
-        {
-            builder.OpenElement(sequence++, "input");
-            builder.AddAttribute(sequence++, "type", "url");
-            builder.AddAttribute(sequence++, "class", "form-control");
-            builder.AddAttribute(sequence++, "placeholder", "https://example.com");
-            builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id));
-            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
-            builder.CloseElement();
-        }
-        else if (field.PrimitiveType == PrimitiveType.Quote)
-        {
-            builder.OpenElement(sequence++, "textarea");
-            builder.AddAttribute(sequence++, "class", "form-control");
-            builder.AddAttribute(sequence++, "rows", "4");
-            builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id));
-            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
-            builder.CloseElement();
-        }
-        else if (field.PrimitiveType == PrimitiveType.Separator)
-        {
-            builder.OpenElement(sequence++, "hr");
-            builder.CloseElement();
-        }
-        else
-        {
-            builder.OpenElement(sequence++, "input");
-            builder.AddAttribute(sequence++, "class", "form-control");
-            builder.AddAttribute(sequence++, "value", textValues.GetValueOrDefault(field.Id));
-            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => textValues[field.Id] = e.Value?.ToString()));
-            builder.CloseElement();
-        }
-    };
-
-    private void OpenMedia(TemplateFieldResponse field)
-    {
-        mediaFieldId = field.Id;
-        mediaMime = field.PrimitiveType == PrimitiveType.Media ? "image/" : null;
-        showMedia = true;
-    }
-
-    private Task MediaSelectedAsync(MediaAssetResponse asset)
-    {
-        assetValues[mediaFieldId] = asset.Id;
-        showMedia = false;
         return Task.CompletedTask;
     }
 
-    private async Task SaveAsync()
+    private Task OnSavedAsync(ContentItemDetailResponse saved)
     {
-        if (templateVersion is null)
-        {
-            error = "Select a template first.";
-            return;
-        }
+        Toasts.Success("Draft saved");
+        return Task.CompletedTask;
+    }
 
-        if (!string.IsNullOrWhiteSpace(slug) && !SlugRules.IsValid(slug))
-        {
-            error = SlugRules.ValidationMessage;
-            return;
-        }
-
-        var values = new List<ContentFieldValueRequest>();
-        foreach (var field in fields)
-        {
-            if (field.ComponentId.HasValue)
-            {
-                var rawValues = componentValues.GetValueOrDefault(field.Id) ?? [];
-                foreach (var raw in rawValues)
-                {
-                    try
-                    {
-                        using var document = JsonDocument.Parse(raw);
-                        if (document.RootElement.ValueKind != JsonValueKind.Object)
-                        {
-                            error = $"Component field '{field.Label}' must contain JSON objects.";
-                            return;
-                        }
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
-                    }
-                    catch (JsonException)
-                    {
-                        error = $"Component field '{field.Label}' contains invalid JSON.";
-                        return;
-                    }
-                }
-                continue;
-            }
-            if (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(allowedType => allowedType.AllowedTemplateId.HasValue))
-            {
-                if (referenceValues.GetValueOrDefault(field.Id) is Guid referencedId)
-                {
-                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
-                }
-
-                continue;
-            }
-
-            if (field.PrimitiveType == PrimitiveType.PickList)
-            {
-                var binding = GetPicklistBinding(field);
-                if (binding.Multiple)
-                {
-                    var selected = multiPickValues.GetValueOrDefault(field.Id) ?? [];
-                    var index = 0;
-                    foreach (var selectedValue in selected)
-                    {
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order + index, ValueKind.PickList, selectedValue, null, null, null, null, null));
-                        index++;
-                    }
-                }
-                else
-                {
-                    var single = textValues.GetValueOrDefault(field.Id);
-                    if (!string.IsNullOrWhiteSpace(single))
-                    {
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.PickList, single, null, null, null, null, null));
-                    }
-                }
-                continue;
-            }
-
-            values.Add(new ContentFieldValueRequest(
-                field.Id,
-                field.Order,
-                field.PrimitiveType switch
-                {
-                    PrimitiveType.Boolean => ValueKind.Boolean,
-                    PrimitiveType.Media => ValueKind.Media,
-                    PrimitiveType.File => ValueKind.File,
-                    PrimitiveType.Markdown => ValueKind.Markdown,
-                    PrimitiveType.RichText => ValueKind.RichText,
-                    PrimitiveType.Link => ValueKind.Link,
-                    PrimitiveType.Quote => ValueKind.Quote,
-                    PrimitiveType.Separator => ValueKind.Separator,
-                    _ => ValueKind.Text
-                },
-                textValues.GetValueOrDefault(field.Id),
-                boolValues.GetValueOrDefault(field.Id),
-                field.PrimitiveType == PrimitiveType.Media ? assetValues.GetValueOrDefault(field.Id) : null,
-                field.PrimitiveType == PrimitiveType.File ? assetValues.GetValueOrDefault(field.Id) : null,
-                null,
-                null));
-        }
-        var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        try
-        {
-            error = null;
-            if (ContentId.HasValue)
-            {
-                item = ApiResponse.Required(
-                    await Content.UpdateAsync(WorkspaceId, ContentId.Value, new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values)),
-                    "updating content");
-                Toasts.Success("Draft saved");
-            }
-            else
-            {
-                var created = ApiResponse.Required(
-                    await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values)),
-                    "creating content");
-                item = created;
-                Toasts.Success("Draft created");
-                Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{created.Id}");
-            }
-        }
-        catch (CmsifyApiException ex)
-        {
-            error = ex.Message;
-            if (ex.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && ContentId.HasValue)
-            {
-                await LoadContentAsync();
-                error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
-            }
-        }
+    private Task OnCreatedAsync(ContentItemDetailResponse created)
+    {
+        Toasts.Success("Draft created");
+        Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{created.Id}");
+        return Task.CompletedTask;
     }
 
     private async Task LinkTranslationAsync()
@@ -723,12 +168,11 @@
         {
             try
             {
-                error = null;
                 await Content.LinkTranslationAsync(WorkspaceId, ContentId.Value, new LinkTranslationRequest(targetId));
             }
             catch (CmsifyApiException ex)
             {
-                error = ex.Message;
+                Toasts.Danger(ex.Message);
             }
         }
     }

@@ -11,6 +11,8 @@
     <ProjectReference Include="..\Cmsify.Contracts\Cmsify.Contracts.csproj" />
     <ProjectReference Include="..\Cmsify.Core\Cmsify.Core.csproj" />
     <ProjectReference Include="..\..\sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
+    <ProjectReference Include="..\Cmsify.Components\Cmsify.Components.csproj" />
+    <ProjectReference Include="..\Cmsify.Components.Theme\Cmsify.Components.Theme.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -699,6 +699,8 @@
           "SyntaxCircus.Blazor.Auth": "[0.1.6, )",
           "SyntaxCircus.Blazor.Components": "[0.1.1, )",
           "SyntaxCircus.Cmsify.Client": "[0.0.0-local, )",
+          "SyntaxCircus.Cmsify.Components": "[0.0.0-local, )",
+          "SyntaxCircus.Cmsify.Components.Theme": "[0.0.0-local, )",
           "SyntaxCircus.Cmsify.Contracts": "[0.0.0-local, )",
           "SyntaxCircus.DotEnv": "[0.1.2, )",
           "SyntaxCircus.Observability": "[0.1.1, )"
@@ -716,6 +718,16 @@
           "SyntaxCircus.Cmsify.Contracts": "[0.0.0-local, )",
           "SyntaxCircus.Http.Resilience": "[0.2.0-cmsify.1, )"
         }
+      },
+      "SyntaxCircus.Cmsify.Components": {
+        "type": "Project",
+        "dependencies": {
+          "SyntaxCircus.Cmsify.Client": "[0.0.0-local, )",
+          "SyntaxCircus.Cmsify.Contracts": "[0.0.0-local, )"
+        }
+      },
+      "SyntaxCircus.Cmsify.Components.Theme": {
+        "type": "Project"
       },
       "SyntaxCircus.Cmsify.Contracts": {
         "type": "Project"

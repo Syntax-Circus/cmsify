@@ -499,6 +499,16 @@
           "SyntaxCircus.Http.Resilience": "[0.2.0-cmsify.1, )"
         }
       },
+      "SyntaxCircus.Cmsify.Components": {
+        "type": "Project",
+        "dependencies": {
+          "SyntaxCircus.Cmsify.Client": "[0.0.0-local, )",
+          "SyntaxCircus.Cmsify.Contracts": "[0.0.0-local, )"
+        }
+      },
+      "SyntaxCircus.Cmsify.Components.Theme": {
+        "type": "Project"
+      },
       "SyntaxCircus.Cmsify.Contracts": {
         "type": "Project"
       },
