@@ -107,7 +107,7 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
             return AuditAction.Deleted;
         }
 
-        if (entry.Entity is ContentItem && entry.Properties.Any(property => property.Metadata.Name == nameof(ContentItem.Status) && property.IsModified))
+        if (entry.Entity is ContentVersion && entry.Properties.Any(property => property.Metadata.Name == nameof(ContentVersion.Status) && property.IsModified))
         {
             return AuditAction.StatusChanged;
         }
