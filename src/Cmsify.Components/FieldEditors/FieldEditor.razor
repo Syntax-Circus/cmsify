@@ -1,0 +1,98 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+@if (TryGetOverride(out var overrideFragment))
+{
+    @overrideFragment(RenderContext)
+}
+else if (Field.ComponentId.HasValue)
+{
+    <ComponentFieldEditor Values="@Value.ComponentValues" MaxOccurrences="@Field.MaxOccurrences"
+                          ValuesChanged="@(values => UpdateAsync(v => v.ComponentValues = values))" />
+}
+else if (IsCompositionField)
+{
+    @if (Field.CompositionMode == CompositionMode.Reference)
+    {
+        <ReferenceFieldEditor Options="@ReferenceOptions" Value="@Value.ChildContentItemId" IsRequired="@Field.IsRequired"
+                              ValueChanged="@(id => UpdateAsync(v => v.ChildContentItemId = id))" />
+    }
+    else
+    {
+        <div class="cmsify-field-warning">Inline child content editing is not available yet. Use a reference field or create the child content separately.</div>
+    }
+}
+else
+{
+    switch (Field.PrimitiveType)
+    {
+        case PrimitiveType.Boolean:
+            <BooleanFieldEditor Value="@Value.BoolValue" ValueChanged="@(v => UpdateAsync(x => x.BoolValue = v))" />
+            break;
+        case PrimitiveType.Markdown:
+            <MarkdownFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            break;
+        case PrimitiveType.RichText:
+            <RichTextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            break;
+        case PrimitiveType.Media:
+            <MediaFieldEditor SelectedAsset="@Value.SelectedMediaAsset" OnPickRequested="OnMediaPickRequested" />
+            break;
+        case PrimitiveType.File:
+            <FileFieldEditor SelectedAsset="@Value.SelectedFileAsset" OnPickRequested="OnFilePickRequested" />
+            break;
+        case PrimitiveType.PickList:
+            <PickListFieldEditor PickList="@ResolvedPickList" Multiple="@PickListBinding.Multiple" IsRequired="@Field.IsRequired"
+                                  Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))"
+                                  SelectedValues="@Value.MultiValues" SelectedValuesChanged="@(v => UpdateAsync(x => x.MultiValues = v))" />
+            break;
+        case PrimitiveType.Link:
+            <LinkFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            break;
+        case PrimitiveType.Quote:
+            <QuoteFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            break;
+        case PrimitiveType.Separator:
+            <SeparatorFieldEditor />
+            break;
+        default:
+            <TextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            break;
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public TemplateFieldResponse Field { get; set; } = null!;
+    [Parameter, EditorRequired] public ContentFieldEditorValue Value { get; set; } = null!;
+    [Parameter] public EventCallback<ContentFieldEditorValue> ValueChanged { get; set; }
+    [Parameter] public PickListResponse? ResolvedPickList { get; set; }
+    [Parameter] public IReadOnlyList<ContentItemSummaryResponse> ReferenceOptions { get; set; } = [];
+    [Parameter] public EventCallback OnMediaPickRequested { get; set; }
+    [Parameter] public EventCallback OnFilePickRequested { get; set; }
+    [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
+
+    private bool IsCompositionField =>
+        Field.TemplateId.HasValue || Field.IsOpen || Field.AllowedTypes.Any(allowed => allowed.AllowedTemplateId.HasValue);
+
+    private PickListFieldBinding PickListBinding => PickListFieldBinding.FromFieldConfig(Field.FieldConfig);
+
+    private FieldEditorRenderContext RenderContext => new(Field, Value, ValueChanged);
+
+    private bool TryGetOverride(out RenderFragment<FieldEditorRenderContext> fragment)
+    {
+        if (Field.PrimitiveType.HasValue && FieldTemplateOverrides is not null &&
+            FieldTemplateOverrides.TryGetValue(Field.PrimitiveType.Value, out var found))
+        {
+            fragment = found;
+            return true;
+        }
+
+        fragment = null!;
+        return false;
+    }
+
+    private Task UpdateAsync(Action<ContentFieldEditorValue> mutate)
+    {
+        mutate(Value);
+        return ValueChanged.InvokeAsync(Value);
+    }
+}
