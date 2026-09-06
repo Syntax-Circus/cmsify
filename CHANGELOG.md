@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-06
+
+### Added
+
+- New publishable package `SyntaxCircus.Cmsify.Components`: headless, restylable Blazor Server components for editing and managing Cmsify content, for embedding content editing directly in a consuming site instead of sending users to Cmsify Admin. Includes a field editor for every template field type, a `FieldEditor` dispatcher with a per-field-type override hook, composed `ContentEditForm`/`ContentListView` components, SDK-backed `Client.ContentEditPanel`/`Client.ContentListPanel` drop-in panels, and a shared media/reference picker. Structural styling only; every visual property is a `--cmsify-*` CSS custom property.
+- New publishable package `SyntaxCircus.Cmsify.Components.Theme`: optional default styling for `SyntaxCircus.Cmsify.Components`, matching Admin's current look. Purely static CSS; omit it to theme the components yourself.
+
+### Changed
+
+- The Admin app's Content Editor and Content List pages now run on the new `SyntaxCircus.Cmsify.Components` package instead of Admin's previous hand-rolled markup, and its bespoke media picker has been replaced by the shared component.
+
+### Fixed
+
+- The Admin sidebar's build-version display (added in 0.3.1) sometimes rendered as literal text (`v@AdminBuildInfo.Version`) instead of the actual version, due to a Razor markup-parsing quirk. It now always shows the resolved version.
+
 ## [0.3.1] - 2026-09-05
 
 ### Added
