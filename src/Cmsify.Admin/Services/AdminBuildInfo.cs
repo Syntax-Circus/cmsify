@@ -10,4 +10,6 @@ public static class AdminBuildInfo
         .SingleOrDefault()?.InformationalVersion
         ?? typeof(AdminBuildInfo).Assembly.GetName().Version?.ToString()
         ?? "unknown";
+
+    public static string ShortVersion { get; } = Version.Split('+', 2)[0];
 }

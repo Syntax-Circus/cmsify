@@ -1,11 +1,11 @@
 :root {
-    --cmsify-color-text: #212529;
-    --cmsify-color-border: #dee2e6;
+    --cmsify-color-text: var(--bs-body-color, #212529);
+    --cmsify-color-border: var(--bs-border-color, #dee2e6);
     --cmsify-color-border-focus: #6D28D9;
-    --cmsify-color-danger: #B91C1C;
-    --cmsify-color-muted: #6c757d;
+    --cmsify-color-danger: var(--bs-danger, #B91C1C);
+    --cmsify-color-muted: var(--bs-secondary-color, #6c757d);
     --cmsify-color-overlay: rgba(0, 0, 0, 0.5);
-    --cmsify-color-surface: #ffffff;
+    --cmsify-color-surface: var(--bs-body-bg, #ffffff);
     --cmsify-color-field-background: transparent;
     --cmsify-color-on-accent: white;
     --cmsify-radius: 0.375rem;

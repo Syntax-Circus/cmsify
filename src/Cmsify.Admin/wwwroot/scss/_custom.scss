@@ -537,6 +537,19 @@ button.cms-ws-switcher:hover {
   color: #cbd3e2;
 }
 
+[data-bs-theme="dark"] .btn-outline-secondary {
+  --bs-btn-color: var(--bs-secondary-color);
+  --bs-btn-border-color: var(--bs-secondary-color);
+  --bs-btn-hover-color: var(--cms-bg);
+  --bs-btn-hover-bg: var(--bs-secondary-color);
+  --bs-btn-hover-border-color: var(--bs-secondary-color);
+  --bs-btn-active-color: var(--cms-bg);
+  --bs-btn-active-bg: var(--bs-secondary-color);
+  --bs-btn-active-border-color: var(--bs-secondary-color);
+  --bs-btn-disabled-color: var(--bs-secondary-color);
+  --bs-btn-disabled-border-color: var(--bs-secondary-color);
+}
+
 .btn-primary:focus,
 .btn-primary:focus-visible {
   box-shadow: 0 0 0 3px rgba(109, 40, 217, .25);
