@@ -1,0 +1,10 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<button type="button" class="cmsify-field-picker-button" @onclick="() => OnPickRequested.InvokeAsync()">
+    @(SelectedAsset?.FileName ?? "Select asset")
+</button>
+
+@code {
+    [Parameter] public MediaAssetResponse? SelectedAsset { get; set; }
+    [Parameter] public EventCallback OnPickRequested { get; set; }
+}

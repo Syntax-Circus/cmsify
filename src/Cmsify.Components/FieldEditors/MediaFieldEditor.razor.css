@@ -1,0 +1,15 @@
+.cmsify-field-picker-button {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    background: transparent;
+    color: var(--cmsify-color-text, inherit);
+    font-family: var(--cmsify-font-family, inherit);
+    cursor: pointer;
+}
+
+.cmsify-field-picker-button:hover {
+    border-color: var(--cmsify-color-border-focus, #86b7fe);
+}
