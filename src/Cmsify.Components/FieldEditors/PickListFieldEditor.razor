@@ -1,0 +1,48 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+@if (PickList is null)
+{
+    <div class="cmsify-field-warning">This field has no picklist bound. Edit the template to bind one.</div>
+}
+else if (Multiple)
+{
+    <select class="cmsify-field-select" multiple @onchange="OnMultiChange">
+        @foreach (var option in PickList.Options.OrderBy(o => o.Order))
+        {
+            <option value="@option.Value" selected="@SelectedValues.Contains(option.Value)">@option.Label</option>
+        }
+    </select>
+}
+else
+{
+    <select class="cmsify-field-select" value="@Value" @onchange="OnSingleChange">
+        <option value="">@(IsRequired ? "Select an option" : "None")</option>
+        @foreach (var option in PickList.Options.OrderBy(o => o.Order))
+        {
+            <option value="@option.Value">@option.Label</option>
+        }
+    </select>
+}
+
+@code {
+    [Parameter] public PickListResponse? PickList { get; set; }
+    [Parameter] public bool Multiple { get; set; }
+    [Parameter] public bool IsRequired { get; set; }
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyList<string> SelectedValues { get; set; } = [];
+    [Parameter] public EventCallback<IReadOnlyList<string>> SelectedValuesChanged { get; set; }
+
+    private Task OnSingleChange(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString());
+
+    private Task OnMultiChange(ChangeEventArgs e)
+    {
+        IReadOnlyList<string> values = e.Value switch
+        {
+            string[] array => array,
+            IEnumerable<object> enumerable => enumerable.Select(x => x?.ToString() ?? "").ToList(),
+            _ => []
+        };
+        return SelectedValuesChanged.InvokeAsync(values);
+    }
+}
