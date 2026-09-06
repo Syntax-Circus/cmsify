@@ -66,12 +66,7 @@
 }
 
 .cmsify-list-edit-button {
-    padding: 0.25rem 0.5rem;
     border: 1px solid var(--cmsify-color-border, #ced4da);
-    border-radius: 0.25rem;
     background: transparent;
     color: var(--cmsify-color-text, inherit);
-    font-size: 0.875rem;
-    line-height: 1.5;
-    cursor: pointer;
 }
