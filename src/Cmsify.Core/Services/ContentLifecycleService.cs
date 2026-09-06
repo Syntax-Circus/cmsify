@@ -30,27 +30,27 @@ public sealed class ContentLifecycleService : IContentLifecycleService
             || (allowOverride && AllowedOverrideTransitions.Contains((from, to)));
     }
 
-    public Task TransitionAsync(ContentItem item, ContentStatus to, Guid actorId, bool allowOverride = false)
+    public Task TransitionAsync(ContentVersion version, ContentStatus to, Guid actorId, bool allowOverride = false)
     {
-        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(version);
 
-        if (!CanTransition(item.Status, to, allowOverride))
+        if (!CanTransition(version.Status, to, allowOverride))
         {
-            throw new DomainException($"Content cannot transition from {item.Status} to {to}.");
+            throw new DomainException($"Content version cannot transition from {version.Status} to {to}.");
         }
 
         var now = DateTimeOffset.UtcNow;
-        item.Status = to;
-        item.UpdatedAt = now;
-        item.UpdatedByUserId = actorId;
+        version.Status = to;
+        version.UpdatedAt = now;
+        version.UpdatedByUserId = actorId;
 
         if (to == ContentStatus.Published)
         {
-            item.PublishedAt ??= now;
+            version.PublishedAt ??= now;
         }
         else if (to == ContentStatus.Archived)
         {
-            item.ArchivedAt ??= now;
+            version.ArchivedAt ??= now;
         }
 
         return Task.CompletedTask;
