@@ -21,51 +21,51 @@ services:
     ports:
       - "127.0.0.1:${CMSIFY_API_PORT:-5000}:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__Cmsify=Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
-      - Seed__Admin__Email=${SEED_ADMIN_EMAIL:-admin@example.com}
-      - Seed__Admin__DisplayName=${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
-      - Seed__Admin__Password=${Seed__Admin__Password:?Seed__Admin__Password is required}
-      - Secrets__Rotation__Enabled=${Secrets__Rotation__Enabled:-false}
-      - Secrets__Rotation__BatchSize=${Secrets__Rotation__BatchSize:-100}
-      - Secrets__Rotation__DelaySeconds=${Secrets__Rotation__DelaySeconds:-5}
-      - Storage__Provider=${Storage__Provider:-local}
-      - Storage__Local__BasePath=/var/cmsify/media
-      - Storage__Local__RootPath=/var/cmsify/media
-      - Storage__S3__BucketName=${Storage__S3__BucketName:-}
-      - Storage__S3__Region=${Storage__S3__Region:-us-east-1}
-      - Storage__S3__AccessKey=${Storage__S3__AccessKey:-}
-      - Storage__S3__SecretKey=${Storage__S3__SecretKey:-}
-      - Storage__S3__ServiceUrl=${Storage__S3__ServiceUrl:-}
-      - Media__Operations__ReconciliationIntervalSeconds=${Media__Operations__ReconciliationIntervalSeconds:-300}
-      - Media__Operations__LeaseDurationSeconds=${Media__Operations__LeaseDurationSeconds:-300}
-      - Media__Operations__BatchSize=${Media__Operations__BatchSize:-100}
-      - Media__Operations__RetryBaseSeconds=${Media__Operations__RetryBaseSeconds:-30}
-      - Media__Operations__RetryCapSeconds=${Media__Operations__RetryCapSeconds:-3600}
-      - Media__Operations__RetentionDays=${Media__Operations__RetentionDays:-30}
-      - Media__Operations__OrphanGraceHours=${Media__Operations__OrphanGraceHours:-24}
-      - Media__Operations__AbandonedUploadMinutes=${Media__Operations__AbandonedUploadMinutes:-30}
-      - Media__Operations__ManagedPrefixes__0=cmsify/media/
-      - Media__Operations__ManagedPrefixes__1=default/
-      - Api__SwaggerEnabled=${Api__SwaggerEnabled:-false}
-      - TrustedProxy__RequireTrustedProxiesInProduction=${TrustedProxy__RequireTrustedProxiesInProduction:-false}
-      - OpenTelemetry__Enabled=${API_OPENTELEMETRY__ENABLED:-false}
-      - OpenTelemetry__OtlpEndpoint=${API_OPENTELEMETRY__OTLPENDPOINT:-}
-      - OpenTelemetry__OtlpProtocol=${API_OPENTELEMETRY__OTLPPROTOCOL:-grpc}
-      - OpenTelemetry__Headers=${API_OPENTELEMETRY__HEADERS:-}
-      - OpenTelemetry__ExportLogs=${API_OPENTELEMETRY__EXPORTLOGS:-true}
-      - OpenTelemetry__ExportTraces=${API_OPENTELEMETRY__EXPORTTRACES:-true}
-      - OpenTelemetry__ExportMetrics=${API_OPENTELEMETRY__EXPORTMETRICS:-true}
-      - OpenTelemetry__TracesSampleRate=${API_OPENTELEMETRY__TRACESSAMPLERATE:-1.0}
-      - OpenTelemetry__ServiceName=${API_OPENTELEMETRY__SERVICENAME:-}
-      - OpenTelemetry__ServiceVersion=${API_OPENTELEMETRY__SERVICEVERSION:-}
-      - OpenTelemetry__Environment=${API_OPENTELEMETRY__ENVIRONMENT:-}
-      - Sentry__Dsn=${API_SENTRY__DSN:-}
-      - Sentry__Environment=${API_SENTRY__ENVIRONMENT:-}
-      - Sentry__Debug=${API_SENTRY__DEBUG:-false}
-      - Sentry__TracesSampleRate=${API_SENTRY__TRACESSAMPLERATE:-0.0}
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Cmsify: Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
+      Seed__Admin__Email: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      Seed__Admin__DisplayName: ${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
+      Seed__Admin__Password: ${Seed__Admin__Password:?Seed__Admin__Password is required}
+      Secrets__Rotation__Enabled: ${Secrets__Rotation__Enabled:-false}
+      Secrets__Rotation__BatchSize: ${Secrets__Rotation__BatchSize:-100}
+      Secrets__Rotation__DelaySeconds: ${Secrets__Rotation__DelaySeconds:-5}
+      Storage__Provider: ${Storage__Provider:-local}
+      Storage__Local__BasePath: /var/cmsify/media
+      Storage__Local__RootPath: /var/cmsify/media
+      Storage__S3__BucketName: ${Storage__S3__BucketName:-}
+      Storage__S3__Region: ${Storage__S3__Region:-us-east-1}
+      Storage__S3__AccessKey: ${Storage__S3__AccessKey:-}
+      Storage__S3__SecretKey: ${Storage__S3__SecretKey:-}
+      Storage__S3__ServiceUrl: ${Storage__S3__ServiceUrl:-}
+      Media__Operations__ReconciliationIntervalSeconds: ${Media__Operations__ReconciliationIntervalSeconds:-300}
+      Media__Operations__LeaseDurationSeconds: ${Media__Operations__LeaseDurationSeconds:-300}
+      Media__Operations__BatchSize: ${Media__Operations__BatchSize:-100}
+      Media__Operations__RetryBaseSeconds: ${Media__Operations__RetryBaseSeconds:-30}
+      Media__Operations__RetryCapSeconds: ${Media__Operations__RetryCapSeconds:-3600}
+      Media__Operations__RetentionDays: ${Media__Operations__RetentionDays:-30}
+      Media__Operations__OrphanGraceHours: ${Media__Operations__OrphanGraceHours:-24}
+      Media__Operations__AbandonedUploadMinutes: ${Media__Operations__AbandonedUploadMinutes:-30}
+      Media__Operations__ManagedPrefixes__0: cmsify/media/
+      Media__Operations__ManagedPrefixes__1: default/
+      Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
+      TrustedProxy__RequireTrustedProxiesInProduction: ${TrustedProxy__RequireTrustedProxiesInProduction:-false}
+      OpenTelemetry__Enabled: ${API_OPENTELEMETRY__ENABLED:-false}
+      OpenTelemetry__OtlpEndpoint: ${API_OPENTELEMETRY__OTLPENDPOINT:-}
+      OpenTelemetry__OtlpProtocol: ${API_OPENTELEMETRY__OTLPPROTOCOL:-grpc}
+      OpenTelemetry__Headers: ${API_OPENTELEMETRY__HEADERS:-}
+      OpenTelemetry__ExportLogs: ${API_OPENTELEMETRY__EXPORTLOGS:-true}
+      OpenTelemetry__ExportTraces: ${API_OPENTELEMETRY__EXPORTTRACES:-true}
+      OpenTelemetry__ExportMetrics: ${API_OPENTELEMETRY__EXPORTMETRICS:-true}
+      OpenTelemetry__TracesSampleRate: ${API_OPENTELEMETRY__TRACESSAMPLERATE:-1.0}
+      OpenTelemetry__ServiceName: ${API_OPENTELEMETRY__SERVICENAME:-}
+      OpenTelemetry__ServiceVersion: ${API_OPENTELEMETRY__SERVICEVERSION:-}
+      OpenTelemetry__Environment: ${API_OPENTELEMETRY__ENVIRONMENT:-}
+      Sentry__Dsn: ${API_SENTRY__DSN:-}
+      Sentry__Environment: ${API_SENTRY__ENVIRONMENT:-}
+      Sentry__Debug: ${API_SENTRY__DEBUG:-false}
+      Sentry__TracesSampleRate: ${API_SENTRY__TRACESSAMPLERATE:-0.0}
     depends_on:
       postgres:
         condition: service_healthy

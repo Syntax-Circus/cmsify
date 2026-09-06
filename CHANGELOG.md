@@ -16,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - The .NET SDK's `HealthClient.LiveAsync`/`ReadyAsync` (`client.Health`) now return a typed `HealthCheckResponse` (with `Status` and `Metadata.Version`/`Metadata.GeneratedAt`) instead of an untyped payload.
 
+### Fixed
+
+- Release promotion now also publishes the `:latest` Docker Hub tag alongside the version-numbered tag for stable (non-prerelease) releases. Previously only the versioned tag was pushed, leaving `:latest` stuck on an old release.
+
 ## [0.3.0] - 2026-09-05
 
 ### Added

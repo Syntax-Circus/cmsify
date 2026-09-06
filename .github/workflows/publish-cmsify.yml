@@ -471,6 +471,12 @@ jobs:
           oras cp --from-oci-layout "artifacts/oci/admin@$ADMIN_EXPECTED" "docker.io/syntaxcircus/cmsify-admin:$VERSION"
           API_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-api:$VERSION" | jq -r .digest)"; ADMIN_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-admin:$VERSION" | jq -r .digest)"
           test "$API_REMOTE" = "$API_EXPECTED" && test "$ADMIN_REMOTE" = "$ADMIN_EXPECTED"
+          if [ "$IS_PRERELEASE" != true ]; then
+            oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED" "docker.io/syntaxcircus/cmsify-api:latest"
+            oras cp --from-oci-layout "artifacts/oci/admin@$ADMIN_EXPECTED" "docker.io/syntaxcircus/cmsify-admin:latest"
+            API_LATEST_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-api:latest" | jq -r .digest)"; ADMIN_LATEST_REMOTE="$(oras manifest fetch --descriptor "docker.io/syntaxcircus/cmsify-admin:latest" | jq -r .digest)"
+            test "$API_LATEST_REMOTE" = "$API_EXPECTED" && test "$ADMIN_LATEST_REMOTE" = "$ADMIN_EXPECTED"
+          fi
           API_SUBJECT="docker.io/syntaxcircus/cmsify-api@$API_REMOTE"; ADMIN_SUBJECT="docker.io/syntaxcircus/cmsify-admin@$ADMIN_REMOTE"
           CERTIFICATE_IDENTITY="https://github.com/$GITHUB_WORKFLOW_REF"
           cosign sign --yes "$API_SUBJECT"
