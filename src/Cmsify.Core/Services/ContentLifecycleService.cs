@@ -17,16 +17,24 @@ public sealed class ContentLifecycleService : IContentLifecycleService
         (ContentStatus.Archived, ContentStatus.Draft)
     };
 
-    public bool CanTransition(ContentStatus from, ContentStatus to)
+    private static readonly IReadOnlySet<(ContentStatus From, ContentStatus To)> AllowedOverrideTransitions = new HashSet<(ContentStatus, ContentStatus)>
     {
-        return from == to || AllowedTransitions.Contains((from, to));
+        (ContentStatus.Draft, ContentStatus.Published),
+        (ContentStatus.Review, ContentStatus.Published)
+    };
+
+    public bool CanTransition(ContentStatus from, ContentStatus to, bool allowOverride = false)
+    {
+        return from == to
+            || AllowedTransitions.Contains((from, to))
+            || (allowOverride && AllowedOverrideTransitions.Contains((from, to)));
     }
 
-    public Task TransitionAsync(ContentItem item, ContentStatus to, Guid actorId)
+    public Task TransitionAsync(ContentItem item, ContentStatus to, Guid actorId, bool allowOverride = false)
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        if (!CanTransition(item.Status, to))
+        if (!CanTransition(item.Status, to, allowOverride))
         {
             throw new DomainException($"Content cannot transition from {item.Status} to {to}.");
         }

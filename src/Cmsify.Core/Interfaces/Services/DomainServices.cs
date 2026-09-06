@@ -24,9 +24,9 @@ public interface IFieldConfigValidator
 
 public interface IContentLifecycleService
 {
-    bool CanTransition(ContentStatus from, ContentStatus to);
+    bool CanTransition(ContentStatus from, ContentStatus to, bool allowOverride = false);
 
-    Task TransitionAsync(ContentItem item, ContentStatus to, Guid actorId);
+    Task TransitionAsync(ContentItem item, ContentStatus to, Guid actorId, bool allowOverride = false);
 }
 
 public interface IContentSearchVectorBuilder

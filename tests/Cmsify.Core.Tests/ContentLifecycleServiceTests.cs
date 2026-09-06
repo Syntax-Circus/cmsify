@@ -62,4 +62,50 @@ public sealed class ContentLifecycleServiceTests
 
         await Assert.ThrowsAsync<DomainException>(() => new ContentLifecycleService().TransitionAsync(item, ContentStatus.Published, Guid.CreateVersion7()));
     }
+
+    [Theory]
+    [InlineData(ContentStatus.Draft, ContentStatus.Published)]
+    [InlineData(ContentStatus.Review, ContentStatus.Published)]
+    public void CanTransition_ReturnsTrue_ForOverrideTransitions_WhenAllowed(ContentStatus from, ContentStatus to)
+    {
+        var service = new ContentLifecycleService();
+
+        Assert.True(service.CanTransition(from, to, allowOverride: true));
+    }
+
+    [Theory]
+    [InlineData(ContentStatus.Draft, ContentStatus.Published)]
+    [InlineData(ContentStatus.Review, ContentStatus.Published)]
+    public void CanTransition_ReturnsFalse_ForOverrideTransitions_WhenNotAllowed(ContentStatus from, ContentStatus to)
+    {
+        var service = new ContentLifecycleService();
+
+        Assert.False(service.CanTransition(from, to));
+    }
+
+    [Fact]
+    public void CanTransition_ReturnsFalse_ForArchivedToPublished_EvenWithOverride()
+    {
+        var service = new ContentLifecycleService();
+
+        Assert.False(service.CanTransition(ContentStatus.Archived, ContentStatus.Published, allowOverride: true));
+    }
+
+    [Fact]
+    public async Task TransitionAsync_UpdatesStatus_ForOverrideTransition_WhenAllowed()
+    {
+        var actorId = Guid.CreateVersion7();
+        var item = new ContentItem
+        {
+            WorkspaceId = Guid.CreateVersion7(),
+            TemplateVersionId = Guid.CreateVersion7(),
+            Status = ContentStatus.Draft
+        };
+
+        await new ContentLifecycleService().TransitionAsync(item, ContentStatus.Published, actorId, allowOverride: true);
+
+        Assert.Equal(ContentStatus.Published, item.Status);
+        Assert.Equal(actorId, item.UpdatedByUserId);
+        Assert.NotNull(item.PublishedAt);
+    }
 }

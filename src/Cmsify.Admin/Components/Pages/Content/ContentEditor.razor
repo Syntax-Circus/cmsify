@@ -5,6 +5,7 @@
 @inject CmsifyClient Cmsify
 @inject ToastState Toasts
 @inject NavigationManager Navigation
+@inject AuthState Auth
 
 <div class="cms-page-head">
     <div><h1>@(ContentId.HasValue ? "Edit Content" : "New Content")</h1><div class="lead">Dynamic form generated from the selected template version.</div></div>
@@ -55,6 +56,20 @@
             @if (item is not null)
             {
                 <StatusBadge Status="@item.Status" />
+                var submitState = ContentWorkflowActions.SubmitState(item.Status);
+                var approveState = ContentWorkflowActions.ApproveState(item.Status);
+                var rejectState = ContentWorkflowActions.RejectState(item.Status, CurrentRole);
+                var publishState = ContentWorkflowActions.PublishState(item.Status, CurrentRole);
+                var archiveState = ContentWorkflowActions.ArchiveState(item.Status);
+                var restoreState = ContentWorkflowActions.RestoreState(item.Status, CurrentRole);
+                <div class="d-flex flex-wrap gap-1 mt-2">
+                    <button class="btn btn-outline-secondary btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(SubmitAction)">Submit</button>
+                    <button class="btn btn-outline-secondary btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(ApproveAction)">Approve</button>
+                    <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="RunRejectAsync">Reject</button>
+                    <button class="btn btn-outline-secondary btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="OpenPublishDialog">Publish</button>
+                    <button class="btn btn-outline-secondary btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(ArchiveAction)">Archive</button>
+                    <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(RestoreAction)">Restore</button>
+                </div>
             }
             <label class="form-label mt-3">Slug</label>
             <InputText class="form-control mb-1 font-monospace" @bind-Value="slug" aria-describedby="slug-rule" />
@@ -72,12 +87,27 @@
 
 <MediaPickerModal Visible="@showMedia" WorkspaceId="@WorkspaceId" MimePrefix="@mediaMime" Selected="MediaSelectedAsync" Closed="() => showMedia = false" />
 
+@if (item is not null)
+{
+    <PublishContentDialog WorkspaceId="@WorkspaceId" ContentId="@publishContentId" ContentStatus="@item.Status"
+                          CanOverrideWorkflow="@(CurrentRole >= UserRole.Admin)" Cmsify="@Cmsify"
+                          OnClosed="ClosePublishDialog" OnPublished="OnPublishedAsync" />
+}
+
 @code {
     private ContentClient Content => Cmsify.Content;
     private TemplateClient Templates => Cmsify.Templates;
     private PickListClient PickLists => Cmsify.PickLists;
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid? ContentId { get; set; }
+
+    private const string SubmitAction = "submit";
+    private const string ApproveAction = "approve";
+    private const string ArchiveAction = "archive";
+    private const string RestoreAction = "restore";
+    private Guid? publishContentId;
+
+    private UserRole CurrentRole => Enum.TryParse<UserRole>(Auth.User?.Role, ignoreCase: true, out var role) ? role : UserRole.Reader;
 
     private IReadOnlyList<TemplateSummaryResponse> templates = [];
     private TemplateVersionResponse? templateVersion;
@@ -164,6 +194,60 @@
                 values.Add(value.JsonValue.Value.GetRawText());
             }
         }
+    }
+
+    private async Task RunTransitionAsync(string action)
+    {
+        if (!ContentId.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            await Content.TransitionAsync(WorkspaceId, ContentId.Value, action);
+            Toasts.Success("Content updated.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Danger(ex.Message);
+        }
+        finally
+        {
+            await LoadContentAsync();
+        }
+    }
+
+    private async Task RunRejectAsync()
+    {
+        if (!ContentId.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            await Content.RejectAsync(WorkspaceId, ContentId.Value, new RejectContentRequest("Rejected from content editor"));
+            Toasts.Success("Content updated.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Danger(ex.Message);
+        }
+        finally
+        {
+            await LoadContentAsync();
+        }
+    }
+
+    private void OpenPublishDialog() => publishContentId = ContentId;
+
+    private void ClosePublishDialog() => publishContentId = null;
+
+    private async Task OnPublishedAsync(PublishContentResponse response)
+    {
+        Toasts.Success(response.Warnings.Count == 0 ? "Content published." : "Content published with warnings.");
+        await LoadContentAsync();
     }
 
     private async Task LoadSelectedTemplateAsync()

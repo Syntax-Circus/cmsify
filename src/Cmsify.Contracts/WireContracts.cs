@@ -98,7 +98,7 @@ public sealed record CreateContentItemRequest(Guid TemplateVersionId, string? Sl
 
 public sealed record UpdateContentItemRequest(string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? PublishAt, IReadOnlyList<string> Tags, IReadOnlyList<ContentFieldValueRequest> Fields);
 
-public sealed record PublishContentRequest(DateTimeOffset? PublishAt, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt);
+public sealed record PublishContentRequest(DateTimeOffset? PublishAt, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, bool? OverrideWorkflow = null);
 public sealed record PublishContentResponse(ContentItemDetailResponse Content, IReadOnlyList<string> Warnings);
 
 public sealed record LinkTranslationRequest(Guid TargetContentItemId);

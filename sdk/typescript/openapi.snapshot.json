@@ -7416,6 +7416,10 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "overrideWorkflow": {
+            "type": "boolean",
+            "nullable": true
           }
         },
         "additionalProperties": false
