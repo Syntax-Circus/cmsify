@@ -65,7 +65,7 @@
     cursor: pointer;
 }
 
-.cmsify-list-edit-button {
+:where(.cmsify-list-edit-button) {
     border: 1px solid var(--cmsify-color-border, #ced4da);
     background: transparent;
     color: var(--cmsify-color-text, inherit);

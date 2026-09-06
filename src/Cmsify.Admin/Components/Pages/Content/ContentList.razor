@@ -12,7 +12,7 @@
 </div>
 
 <div class="cms-card p-0">
-    <ContentListPanel @ref="listPanel" Client="@Cmsify" WorkspaceId="@WorkspaceId" OnEdit="EditContent">
+    <ContentListPanel @ref="listPanel" Client="@Cmsify" WorkspaceId="@WorkspaceId" OnEdit="EditContent" EditButtonClass="btn btn-outline-primary btn-sm">
         <TitleTemplate Context="contentItem">
             <strong>@(contentItem.Slug ?? contentItem.Id.ToString())</strong>
             <div class="small text-muted">@string.Join(", ", contentItem.Tags)</div>
@@ -32,11 +32,11 @@
                 var archiveState = ContentWorkflowActions.ArchiveState(contentItem.Status);
                 var restoreState = ContentWorkflowActions.RestoreState(contentItem.Status, CurrentRole);
             }
-            <button class="btn btn-outline-secondary btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, SubmitAction)">Submit</button>
-            <button class="btn btn-outline-secondary btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ApproveAction)">Approve</button>
+            <button class="btn btn-outline-info btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, SubmitAction)">Submit</button>
+            <button class="btn btn-outline-success btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ApproveAction)">Approve</button>
             <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(contentItem.Id)">Reject</button>
-            <button class="btn btn-outline-secondary btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(contentItem)">Publish</button>
-            <button class="btn btn-outline-secondary btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ArchiveAction)">Archive</button>
+            <button class="btn btn-success btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(contentItem)">Publish</button>
+            <button class="btn btn-outline-danger btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ArchiveAction)">Archive</button>
             <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, RestoreAction)">Restore</button>
         </RowActions>
     </ContentListPanel>
