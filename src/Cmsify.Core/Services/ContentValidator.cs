@@ -7,21 +7,21 @@ namespace Cmsify.Core.Services;
 
 public sealed class ContentValidator : IContentValidator
 {
-    public ValidationResult Validate(ContentItem item, TemplateVersion version)
+    public ValidationResult Validate(ContentVersion version, TemplateVersion templateVersion)
     {
-        ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(templateVersion);
 
         var failures = new List<ValidationFailure>();
-        var valuesByField = item.FieldValues.GroupBy(value => value.FieldId).ToDictionary(group => group.Key, group => group.ToList());
-        var fieldIds = version.Fields.Select(field => field.Id).ToHashSet();
+        var valuesByField = version.FieldValues.GroupBy(value => value.FieldId).ToDictionary(group => group.Key, group => group.ToList());
+        var fieldIds = templateVersion.Fields.Select(field => field.Id).ToHashSet();
 
-        foreach (var value in item.FieldValues.Where(value => !fieldIds.Contains(value.FieldId)))
+        foreach (var value in version.FieldValues.Where(value => !fieldIds.Contains(value.FieldId)))
         {
-            failures.Add(new ValidationFailure(nameof(ContentItem.FieldValues), $"Field value '{value.Id}' targets a field not present on the template version."));
+            failures.Add(new ValidationFailure(nameof(ContentVersion.FieldValues), $"Field value '{value.Id}' targets a field not present on the template version."));
         }
 
-        foreach (var field in version.Fields)
+        foreach (var field in templateVersion.Fields)
         {
             valuesByField.TryGetValue(field.Id, out var values);
             var count = values?.Count ?? 0;
@@ -51,7 +51,7 @@ public sealed class ContentValidator : IContentValidator
         return new ValidationResult(failures);
     }
 
-    private static void ValidateValueKind(TemplateField field, ContentFieldValue value, ICollection<ValidationFailure> failures)
+    private static void ValidateValueKind(TemplateField field, ContentVersionFieldValue value, ICollection<ValidationFailure> failures)
     {
         if (field.ComponentId.HasValue)
         {
