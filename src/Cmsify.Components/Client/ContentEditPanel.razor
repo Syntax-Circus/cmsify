@@ -18,6 +18,7 @@
     [Parameter] public Guid? TemplateId { get; set; }
     [Parameter] public EventCallback<ContentItemDetailResponse> Saved { get; set; }
     [Parameter] public EventCallback<ContentItemDetailResponse> Created { get; set; }
+    [Parameter] public EventCallback<ContentItemDetailResponse?> ItemChanged { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
 
     private TemplateVersionResponse templateVersion = new(Guid.Empty, Guid.Empty, 0, TemplateVersionStatus.Draft, null, null, [], []);
@@ -58,6 +59,7 @@
         var loadedItem = await Client.Content.GetAsync(WorkspaceId, ContentId!.Value)
             ?? throw new InvalidOperationException("Cmsify API returned no payload while loading content.");
         item = loadedItem;
+        await ItemChanged.InvokeAsync(item);
         slug = loadedItem.Slug;
         locale = loadedItem.LocaleCode;
         tags = string.Join(",", loadedItem.Tags);
@@ -302,6 +304,7 @@
                     new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values))
                     ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
                 item = updated;
+                await ItemChanged.InvokeAsync(item);
                 await Saved.InvokeAsync(updated);
             }
             else
@@ -310,6 +313,7 @@
                     new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values))
                     ?? throw new InvalidOperationException("Cmsify API returned no payload while creating content.");
                 item = createdItem;
+                await ItemChanged.InvokeAsync(item);
                 await Created.InvokeAsync(createdItem);
             }
         }

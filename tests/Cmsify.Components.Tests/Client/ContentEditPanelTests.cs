@@ -162,6 +162,43 @@ public sealed class ContentEditPanelTests : BunitContext
     }
 
     [Fact]
+    public void RaisesItemChangedAfterLoadingExistingContent()
+    {
+        var workspaceId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{contentId}}", "templateVersionId": "{{Guid.NewGuid()}}", "templateName": "Article",
+                      "status": "Draft", "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z", "publishedAt": null, "fields": [] }
+                    """);
+            }
+            if (path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        ContentItemDetailResponse? changed = null;
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, contentId)
+            .Add(p => p.ItemChanged, EventCallback.Factory.Create<ContentItemDetailResponse?>(this, i => changed = i)));
+
+        cut.WaitForState(() => changed is not null);
+
+        changed.ShouldNotBeNull();
+        changed!.Id.ShouldBe(contentId);
+        changed.Status.ShouldBe(ContentStatus.Draft);
+    }
+
+    [Fact]
     public void SavingInvalidComponentFieldJsonSetsErrorInsteadOfThrowing()
     {
         var workspaceId = Guid.NewGuid();
