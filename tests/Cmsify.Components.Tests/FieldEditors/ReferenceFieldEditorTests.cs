@@ -35,4 +35,20 @@ public sealed class ReferenceFieldEditorTests : BunitContext
 
         cut.Find("option").TextContent.ShouldBe("None");
     }
+
+    [Fact]
+    public void ClearsValueWhenPlaceholderIsSelected()
+    {
+        var options = new[] { CreateOption("first-post") };
+        var initialValue = Guid.NewGuid();
+        Guid? changed = initialValue;
+        var cut = Render<ReferenceFieldEditor>(parameters => parameters
+            .Add(p => p.Options, options)
+            .Add(p => p.Value, initialValue)
+            .Add(p => p.ValueChanged, EventCallback.Factory.Create<Guid?>(this, v => changed = v)));
+
+        cut.Find("select").Change("");
+
+        changed.ShouldBeNull();
+    }
 }
