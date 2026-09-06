@@ -1,0 +1,38 @@
+@namespace SyntaxCircus.Cmsify.Components.Client
+
+<ContentListView Items="@items" Templates="@templates" SearchText="@searchText" SearchTextChanged="@(v => searchText = v)"
+                 Status="@status" StatusChanged="@(v => status = v)" TemplateId="@templateId" TemplateIdChanged="@(v => templateId = v)"
+                 Locale="@locale" LocaleChanged="@(v => locale = v)" OnFilter="LoadAsync" OnEdit="@(item => OnEdit.InvokeAsync(item))" />
+
+@code {
+    [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
+    [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
+    [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
+
+    private List<ContentItemSummaryResponse> items = [];
+    private IReadOnlyList<TemplateSummaryResponse> templates = [];
+    private string? searchText;
+    private ContentStatus? status;
+    private Guid? templateId;
+    private string? locale;
+    private bool loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loaded)
+        {
+            return;
+        }
+
+        loaded = true;
+        var templatePage = await Client.Templates.ListAsync(WorkspaceId);
+        templates = templatePage?.Items ?? [];
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var page = await Client.Content.ListAsync(WorkspaceId, status, templateId, locale, null, searchText);
+        items = (page?.Items ?? []).ToList();
+    }
+}
