@@ -419,3 +419,4 @@ docs/user-guide/CoreMusica-UserGuide.html
 
 # FLAC test fixtures (large binaries — generate locally with ffmpeg)
 tests/CoreMusica.Tests.Integration/Fixtures/*.flac
+sdk/typescript/dist
