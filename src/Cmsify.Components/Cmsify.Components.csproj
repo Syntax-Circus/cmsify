@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>SyntaxCircus.Cmsify.Components</PackageId>
+    <Title>Syntax Circus LLC Cmsify Components</Title>
+    <Description>Reusable, restylable Blazor components for editing and managing Cmsify content: field editors, a composed content edit form, and a content list view, with optional SDK-backed smart wrappers.</Description>
+    <Authors>Syntax Circus LLC</Authors>
+    <Company>Syntax Circus LLC</Company>
+    <Copyright>Copyright © Syntax Circus LLC</Copyright>
+    <PackageTags>cms;headless-cms;cmsify;content-management;blazor;components</PackageTags>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Syntax-Circus/cmsify</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Syntax-Circus/cmsify</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cmsify.Contracts\Cmsify.Contracts.csproj" />
+    <ProjectReference Include="..\..\sdk\dotnet\src\SyntaxCircus.Cmsify.Client\SyntaxCircus.Cmsify.Client.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE-MIT.txt" Pack="true" PackagePath="\" Link="LICENSE-MIT.txt" />
+  </ItemGroup>
+</Project>
