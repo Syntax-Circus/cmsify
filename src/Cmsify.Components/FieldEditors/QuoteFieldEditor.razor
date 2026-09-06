@@ -1,0 +1,10 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<textarea class="cmsify-field-textarea" rows="4" @oninput="OnInput">@Value</textarea>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    private Task OnInput(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString());
+}

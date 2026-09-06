@@ -1,0 +1,5 @@
+.cmsify-field-separator {
+    border: none;
+    border-top: 1px solid var(--cmsify-color-border, #ced4da);
+    margin: var(--cmsify-spacing-md, 0.75rem) 0;
+}

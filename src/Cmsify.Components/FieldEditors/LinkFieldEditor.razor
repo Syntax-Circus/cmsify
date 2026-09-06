@@ -1,0 +1,10 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<input type="url" class="cmsify-field-input" placeholder="https://example.com" value="@Value" @oninput="OnInput" />
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    private Task OnInput(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString());
+}
