@@ -51,7 +51,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();
         services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();
-        services.AddScoped<IContentItemRepository, ContentItemRepository>();
         services.AddScoped<IMediaAssetRepository, MediaAssetRepository>();
         services.AddScoped<ITagRepository, TagRepository>();
         services.AddScoped<IUserRepository, UserRepository>();

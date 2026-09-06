@@ -14,9 +14,6 @@ internal static class RepositoryMapping
     public static TemplateVersionDto ToDto(this TemplateVersion entity) =>
         new(entity.Id, entity.TemplateId, entity.VersionNumber, entity.Status, entity.PublishedAt, entity.Notes);
 
-    public static ContentItemDto ToDto(this ContentItem entity) =>
-        new(entity.Id, entity.WorkspaceId, entity.TemplateVersionId, entity.Status, entity.Slug, entity.LocaleCode, entity.TranslationGroupId, entity.PublishAt, entity.PublishedAt, entity.ArchivedAt, entity.CreatedAt, entity.UpdatedAt);
-
     public static MediaAssetDto ToDto(this MediaAsset entity) =>
         new(entity.Id, entity.WorkspaceId, entity.FileName, entity.MimeType, entity.SizeBytes, entity.StorageKey, entity.StorageProvider, entity.AltText);
 
