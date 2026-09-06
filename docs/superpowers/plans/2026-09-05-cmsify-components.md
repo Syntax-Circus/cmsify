@@ -3633,24 +3633,15 @@ Deliberate simplifications versus today's page (acceptable per the spec's "dogfo
 **Files:**
 - Modify: `src/Cmsify.Admin/Components/Pages/Content/ContentEditor.razor`
 - Modify: `src/Cmsify.Admin/Cmsify.Admin.csproj`
-- Modify: `Directory.Packages.props`
+- Modify: `src/Cmsify.Admin/Components/App.razor`
 
 **Interfaces:**
 - Consumes: `SyntaxCircus.Cmsify.Components.Client.ContentEditPanel` (Tasks 13, 17).
 - Produces: nothing new (leaf consumer).
 
-- [ ] **Step 1: Add package references for the new components package (and its theme) to Admin**
+- [ ] **Step 1: Do not touch `Directory.Packages.props` for this**
 
-Add to `Directory.Packages.props`, alphabetically after `AWSSDK.S3` (note: `bunit` from Task 1 already sits there — add these two right after it, keeping alphabetical order overall):
-
-```xml
-    <PackageVersion Include="SyntaxCircus.Cmsify.Components" Version="0.0.0-local" />
-    <PackageVersion Include="SyntaxCircus.Cmsify.Components.Theme" Version="0.0.0-local" />
-```
-
-Note: unlike third-party dependencies, these versions are placeholders — within this repo, Admin references the projects directly via `ProjectReference` (Step 2), and central package versions are irrelevant to in-repo project references. This entry exists only so `dotnet restore --locked-mode` has a version to record if anything outside this repo ever adds a `PackageReference` to them; add it for consistency with how every other in-repo package appears in this file, but it has no effect here.
-
-Actually — check first whether `SyntaxCircus.Cmsify.Client` or `Cmsify.Contracts` appear in `Directory.Packages.props` today (they do not, per the file read in exploration: only third-party and external `SyntaxCircus.*` packages are centrally versioned; in-repo `ProjectReference`s are never listed there). Skip this step entirely — do not add these lines. Proceed directly to Step 2.
+`Directory.Packages.props` centrally versions only third-party and external `SyntaxCircus.*` NuGet dependencies — in-repo `ProjectReference`s (like `Cmsify.Contracts` and `SyntaxCircus.Cmsify.Client`, already referenced by Admin) never appear there. `SyntaxCircus.Cmsify.Components` and `.Theme` are in-repo `ProjectReference`s too (Step 2), so this file needs no change. This step exists only to record that the omission is deliberate, not an oversight — proceed to Step 2.
 
 - [ ] **Step 2: Add `ProjectReference`s to `Cmsify.Admin.csproj`**
 
@@ -3663,7 +3654,7 @@ placed in the existing `<ItemGroup>` alongside the `Cmsify.Contracts`/`Cmsify.Co
 
 - [ ] **Step 3: Reference the theme stylesheet from Admin's host page**
 
-Find Admin's root host page (the file with the `<head>` markup that already references `wwwroot/css/app.css` — typically `src/Cmsify.Admin/Components/App.razor`). Add, immediately after the existing stylesheet `<link>`:
+In `src/Cmsify.Admin/Components/App.razor`, add immediately after the existing `<link rel="stylesheet" href="@Assets["css/app.css"]" />` line:
 
 ```html
 <link rel="stylesheet" href="_content/SyntaxCircus.Cmsify.Components.Theme/cmsify-theme.css" />
