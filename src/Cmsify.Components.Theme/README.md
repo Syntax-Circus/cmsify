@@ -22,7 +22,8 @@ Omit this package entirely if you want to set the `--cmsify-*` variables yoursel
 | `--cmsify-color-danger` | `#B91C1C` |
 | `--cmsify-color-muted` | `#6c757d` |
 | `--cmsify-color-overlay` | `rgba(0, 0, 0, 0.5)` |
-| `--cmsify-color-surface` | `Canvas` |
+| `--cmsify-color-surface` | `#ffffff` |
+| `--cmsify-color-field-background` | `transparent` |
 | `--cmsify-color-on-accent` | `white` |
 | `--cmsify-radius` | `0.375rem` |
 | `--cmsify-spacing-sm` | `0.375rem` |

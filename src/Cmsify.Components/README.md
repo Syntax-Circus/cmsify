@@ -65,7 +65,8 @@ Components ship with structural CSS only (via CSS isolation). Every visual prope
 | `--cmsify-color-danger` | Error/warning text and borders |
 | `--cmsify-color-muted` | Secondary/help text |
 | `--cmsify-color-overlay` | Modal backdrop background (e.g. `MediaPickerModal`) |
-| `--cmsify-color-surface` | Modal/dialog surface background |
+| `--cmsify-color-surface` | Modal/dialog surface background — defaults to an explicit light color (`#ffffff`) rather than a system keyword, so it stays readable against `--cmsify-color-text` regardless of the host page's own light/dark theme |
+| `--cmsify-color-field-background` | Background of text inputs, textareas, and selects — defaults to `transparent` so fields blend into whatever surface they sit on; override this if you want filled-in form controls |
 | `--cmsify-color-on-accent` | Text color on accent-colored surfaces (e.g. the save button) |
 | `--cmsify-radius` | Corner radius for inputs, buttons, cards |
 | `--cmsify-spacing-sm` | Small padding/gap |
