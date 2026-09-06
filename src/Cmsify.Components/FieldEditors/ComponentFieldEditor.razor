@@ -5,7 +5,8 @@
     var valueIndex = index;
     <textarea class="cmsify-field-textarea cmsify-field-textarea--code" rows="8"
               placeholder='{ "fieldKey": "value" }'
-              @oninput="e => OnItemChanged(valueIndex, e)">@DisplayValues[valueIndex]</textarea>
+              value="@DisplayValues[valueIndex]"
+              @oninput="e => OnItemChanged(valueIndex, e)"></textarea>
 }
 @if (!MaxOccurrences.HasValue || DisplayValues.Count < MaxOccurrences.Value)
 {

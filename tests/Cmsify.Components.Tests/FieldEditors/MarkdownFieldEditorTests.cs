@@ -15,7 +15,7 @@ public sealed class MarkdownFieldEditorTests : BunitContext
             .Add(p => p.Value, "# Heading")
             .Add(p => p.ValueChanged, EventCallback.Factory.Create<string?>(this, v => changed = v)));
 
-        cut.Find("textarea").TextContent.ShouldBe("# Heading");
+        cut.Find("textarea").GetAttribute("value").ShouldBe("# Heading");
         cut.Find("pre.cmsify-field-markdown-preview").TextContent.ShouldBe("# Heading");
 
         cut.Find("textarea").Input("## Updated");

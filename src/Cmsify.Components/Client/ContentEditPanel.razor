@@ -6,7 +6,7 @@
                  Slug="@slug" SlugChanged="@(v => slug = v)" Locale="@locale" LocaleChanged="@(v => locale = v)"
                  Tags="@tags" TagsChanged="@(v => tags = v)" Error="@error" OnSave="SaveAsync"
                  OnMediaPickRequested="OpenMediaPickerAsync" OnFilePickRequested="OpenFilePickerAsync"
-                 FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" />
+                 FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText" />
 
 <MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix"
                    Selected="OnAssetSelectedAsync" Closed="() => pickerVisible = false" />
@@ -20,6 +20,7 @@
     [Parameter] public EventCallback<ContentItemDetailResponse> Created { get; set; }
     [Parameter] public EventCallback<ContentItemDetailResponse?> ItemChanged { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
+    [Parameter] public string? SlugHelpText { get; set; }
 
     private TemplateVersionResponse templateVersion = new(Guid.Empty, Guid.Empty, 0, TemplateVersionStatus.Draft, null, null, [], []);
     private ContentItemDetailResponse? item;
@@ -88,11 +89,25 @@
             }
             if (value.MediaAssetId.HasValue)
             {
-                editorValue.SelectedMediaAsset = await Client.Media.GetAsync(WorkspaceId, value.MediaAssetId.Value);
+                try
+                {
+                    editorValue.SelectedMediaAsset = await Client.Media.GetAsync(WorkspaceId, value.MediaAssetId.Value);
+                }
+                catch (CmsifyApiException)
+                {
+                    editorValue.FallbackMediaAssetId = value.MediaAssetId.Value;
+                }
             }
             if (value.FileAssetId.HasValue)
             {
-                editorValue.SelectedFileAsset = await Client.Media.GetAsync(WorkspaceId, value.FileAssetId.Value);
+                try
+                {
+                    editorValue.SelectedFileAsset = await Client.Media.GetAsync(WorkspaceId, value.FileAssetId.Value);
+                }
+                catch (CmsifyApiException)
+                {
+                    editorValue.FallbackFileAssetId = value.FileAssetId.Value;
+                }
             }
         }
     }
@@ -287,8 +302,8 @@
                 },
                 value.TextValue,
                 value.BoolValue,
-                field.PrimitiveType == PrimitiveType.Media ? value.SelectedMediaAsset?.Id : null,
-                field.PrimitiveType == PrimitiveType.File ? value.SelectedFileAsset?.Id : null,
+                field.PrimitiveType == PrimitiveType.Media ? value.SelectedMediaAsset?.Id ?? value.FallbackMediaAssetId : null,
+                field.PrimitiveType == PrimitiveType.File ? value.SelectedFileAsset?.Id ?? value.FallbackFileAssetId : null,
                 null,
                 null));
         }

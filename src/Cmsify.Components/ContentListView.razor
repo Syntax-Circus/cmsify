@@ -28,11 +28,38 @@
             @foreach (var contentItem in Items)
             {
                 <tr>
-                    <td>@(contentItem.Slug ?? contentItem.Id.ToString())</td>
+                    <td>
+                        @if (TitleTemplate is not null)
+                        {
+                            @TitleTemplate(contentItem)
+                        }
+                        else
+                        {
+                            @(contentItem.Slug ?? contentItem.Id.ToString())
+                        }
+                    </td>
                     <td>@contentItem.TemplateName</td>
-                    <td>@contentItem.Status</td>
+                    <td>
+                        @if (StatusTemplate is not null)
+                        {
+                            @StatusTemplate(contentItem)
+                        }
+                        else
+                        {
+                            @contentItem.Status
+                        }
+                    </td>
                     <td>@contentItem.LocaleCode</td>
-                    <td>@contentItem.UpdatedAt</td>
+                    <td>
+                        @if (UpdatedTemplate is not null)
+                        {
+                            @UpdatedTemplate(contentItem)
+                        }
+                        else
+                        {
+                            @contentItem.UpdatedAt
+                        }
+                    </td>
                     <td>
                         <button type="button" class="cmsify-list-edit-button" @onclick="() => OnEdit.InvokeAsync(contentItem)">Edit</button>
                         @if (RowActions is not null)
@@ -60,6 +87,9 @@
     [Parameter] public EventCallback OnFilter { get; set; }
     [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
     [Parameter] public RenderFragment<ContentItemSummaryResponse>? RowActions { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? TitleTemplate { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? StatusTemplate { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? UpdatedTemplate { get; set; }
 
     private Task OnStatusChanged(ChangeEventArgs e) =>
         StatusChanged.InvokeAsync(Enum.TryParse<ContentStatus>(e.Value?.ToString(), out var status) ? status : null);

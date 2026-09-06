@@ -15,7 +15,7 @@
                 </div>
                 <InputFile OnChange="e => OnUpload.InvokeAsync(e)" />
                 <div class="cmsify-picker-grid">
-                    @foreach (var asset in Assets)
+                    @foreach (var asset in Items)
                     {
                         <button type="button" class="cmsify-picker-item" @onclick="() => OnSelect.InvokeAsync(asset)">
                             <strong>@asset.FileName</strong>
@@ -33,7 +33,7 @@
 
 @code {
     [Parameter] public bool Visible { get; set; }
-    [Parameter] public new IReadOnlyList<MediaAssetResponse> Assets { get; set; } = [];
+    [Parameter] public IReadOnlyList<MediaAssetResponse> Items { get; set; } = [];
     [Parameter] public EventCallback<string> OnSearch { get; set; }
     [Parameter] public EventCallback<InputFileChangeEventArgs> OnUpload { get; set; }
     [Parameter] public EventCallback<MediaAssetResponse> OnSelect { get; set; }

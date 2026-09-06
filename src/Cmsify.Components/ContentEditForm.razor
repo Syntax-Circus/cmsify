@@ -29,7 +29,13 @@
     </div>
     <div class="cmsify-form-metadata">
         <label class="cmsify-form-label">Slug</label>
-        <input class="cmsify-field-input" value="@Slug" @oninput="e => SlugChanged.InvokeAsync(e.Value?.ToString())" />
+        <input class="cmsify-field-input" id="cmsify-slug-input" value="@Slug"
+               aria-describedby="@(string.IsNullOrWhiteSpace(SlugHelpText) ? null : "cmsify-slug-help")"
+               @oninput="e => SlugChanged.InvokeAsync(e.Value?.ToString())" />
+        @if (!string.IsNullOrWhiteSpace(SlugHelpText))
+        {
+            <div id="cmsify-slug-help" class="cmsify-form-help">@SlugHelpText</div>
+        }
         <label class="cmsify-form-label">Locale</label>
         <input class="cmsify-field-input" value="@Locale" @oninput="e => LocaleChanged.InvokeAsync(e.Value?.ToString())" />
         <label class="cmsify-form-label">Tags</label>
@@ -50,6 +56,7 @@
     [Parameter] public EventCallback<string?> LocaleChanged { get; set; }
     [Parameter] public string? Tags { get; set; }
     [Parameter] public EventCallback<string?> TagsChanged { get; set; }
+    [Parameter] public string? SlugHelpText { get; set; }
     [Parameter] public string? Error { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback<TemplateFieldResponse> OnMediaPickRequested { get; set; }

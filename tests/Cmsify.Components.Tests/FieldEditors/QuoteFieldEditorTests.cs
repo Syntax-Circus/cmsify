@@ -17,7 +17,7 @@ public sealed class QuoteFieldEditorTests : BunitContext
 
         var textarea = cut.Find("textarea");
         textarea.GetAttribute("rows").ShouldBe("4");
-        textarea.TextContent.ShouldBe("a quote");
+        textarea.GetAttribute("value").ShouldBe("a quote");
 
         textarea.Input("an updated quote");
 

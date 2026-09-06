@@ -13,6 +13,16 @@
 
 <div class="cms-card p-0">
     <ContentListPanel @ref="listPanel" Client="@Cmsify" WorkspaceId="@WorkspaceId" OnEdit="EditContent">
+        <TitleTemplate Context="contentItem">
+            <strong>@(contentItem.Slug ?? contentItem.Id.ToString())</strong>
+            <div class="small text-muted">@string.Join(", ", contentItem.Tags)</div>
+        </TitleTemplate>
+        <StatusTemplate Context="contentItem">
+            <StatusBadge Status="@contentItem.Status" />
+        </StatusTemplate>
+        <UpdatedTemplate Context="contentItem">
+            <LocalTimeDisplay Value="@contentItem.UpdatedAt" />
+        </UpdatedTemplate>
         <RowActions Context="contentItem">
             @{
                 var submitState = ContentWorkflowActions.SubmitState(contentItem.Status);

@@ -12,7 +12,7 @@ public sealed class ComponentFieldEditorTests : BunitContext
     {
         var cut = Render<ComponentFieldEditor>();
 
-        cut.Find("textarea").TextContent.ShouldBe("{}");
+        cut.Find("textarea").GetAttribute("value").ShouldBe("{}");
     }
 
     [Fact]

@@ -25,7 +25,7 @@ public sealed class MediaPickerModalTests : BunitContext
         var asset = CreateAsset("logo.png");
         var cut = Render<MediaPickerModal>(parameters => parameters
             .Add(p => p.Visible, true)
-            .Add(p => p.Assets, new[] { asset })
+            .Add(p => p.Items, new[] { asset })
             .Add(p => p.OnSelect, EventCallback.Factory.Create<MediaAssetResponse>(this, a => selected = a)));
 
         cut.Find(".cmsify-picker-item").TextContent.ShouldContain("logo.png");

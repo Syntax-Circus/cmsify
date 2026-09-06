@@ -17,7 +17,7 @@ public sealed class RichTextFieldEditorTests : BunitContext
 
         var textarea = cut.Find("textarea");
         textarea.GetAttribute("rows").ShouldBe("6");
-        textarea.TextContent.ShouldBe("<p>hi</p>");
+        textarea.GetAttribute("value").ShouldBe("<p>hi</p>");
 
         textarea.Input("<p>updated</p>");
 

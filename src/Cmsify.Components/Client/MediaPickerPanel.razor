@@ -1,6 +1,6 @@
 @namespace SyntaxCircus.Cmsify.Components.Client
 
-<MediaPickerModal Visible="@Visible" Assets="@assets" OnSearch="SearchAsync" OnUpload="UploadAsync" OnSelect="SelectAsync" Closed="() => Closed.InvokeAsync()" />
+<MediaPickerModal Visible="@Visible" Items="@assets" OnSearch="SearchAsync" OnUpload="UploadAsync" OnSelect="SelectAsync" Closed="() => Closed.InvokeAsync()" />
 
 @code {
     [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;

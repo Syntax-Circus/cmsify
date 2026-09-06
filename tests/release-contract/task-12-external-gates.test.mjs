@@ -153,6 +153,8 @@ const affectedAssets = [
   "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/obj/project.assets.json",
   "src/Cmsify.Admin/obj/project.assets.json",
   "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json",
+  "src/Cmsify.Components/obj/project.assets.json",
+  "tests/Cmsify.Components.Tests/obj/project.assets.json",
 ];
 
 function publicAssets(libraryPacksSource, contentHash) {
@@ -286,7 +288,7 @@ test("declares exactly the immutable inputs consumed by gate subcommands", () =>
   assert.deepEqual(JSON.parse(result.stdout).sort(), [...requiredInputs].sort());
 });
 
-test("public restore authenticates exact public bytes in isolated NuGet state and exactly five restored graphs", () => {
+test("public restore authenticates exact public bytes in isolated NuGet state and exactly seven restored graphs", () => {
   const valid = runPublicRestore();
   assert.equal(valid.status, 0, `${valid.stderr}\n${valid.verifyOutput}`);
   assert.notEqual(sha256(signedPublicPackageBytes).toUpperCase(), localUnsignedPackageSha256, "signed public bytes must differ from local unsigned provenance bytes");

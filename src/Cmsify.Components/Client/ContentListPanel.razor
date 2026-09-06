@@ -3,13 +3,16 @@
 <ContentListView Items="@items" Templates="@templates" SearchText="@searchText" SearchTextChanged="@(v => searchText = v)"
                  Status="@status" StatusChanged="@(v => status = v)" TemplateId="@templateId" TemplateIdChanged="@(v => templateId = v)"
                  Locale="@locale" LocaleChanged="@(v => locale = v)" OnFilter="LoadAsync" OnEdit="@(item => OnEdit.InvokeAsync(item))"
-                 RowActions="@RowActions" />
+                 RowActions="@RowActions" TitleTemplate="@TitleTemplate" StatusTemplate="@StatusTemplate" UpdatedTemplate="@UpdatedTemplate" />
 
 @code {
     [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
     [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
     [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
     [Parameter] public RenderFragment<ContentItemSummaryResponse>? RowActions { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? TitleTemplate { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? StatusTemplate { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? UpdatedTemplate { get; set; }
 
     private List<ContentItemSummaryResponse> items = [];
     private IReadOnlyList<TemplateSummaryResponse> templates = [];

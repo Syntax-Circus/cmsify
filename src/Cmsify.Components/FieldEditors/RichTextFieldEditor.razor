@@ -1,6 +1,6 @@
 @namespace SyntaxCircus.Cmsify.Components
 
-<textarea class="cmsify-field-textarea" rows="@Rows" @oninput="OnInput">@Value</textarea>
+<textarea class="cmsify-field-textarea" rows="@Rows" value="@Value" @oninput="OnInput"></textarea>
 
 @code {
     [Parameter] public string? Value { get; set; }

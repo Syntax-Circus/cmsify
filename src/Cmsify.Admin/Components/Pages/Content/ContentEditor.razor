@@ -33,6 +33,7 @@
             {
                 <ContentEditPanel @key="@(ContentId ?? selectedTemplateId)" Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId"
                                   TemplateId="@(ContentId.HasValue ? null : selectedTemplateId)"
+                                  SlugHelpText="@($"Optional. If supplied: {SlugRules.ValidationMessage}")"
                                   ItemChanged="@(i => item = i)" Saved="OnSavedAsync" Created="OnCreatedAsync" />
             }
         </div>
