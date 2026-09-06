@@ -3,6 +3,8 @@
 [![.NET tests](https://github.com/Syntax-Circus/cmsify/actions/workflows/dotnet-test.yml/badge.svg)](https://github.com/Syntax-Circus/cmsify/actions/workflows/dotnet-test.yml)
 [![NuGet: SyntaxCircus.Cmsify.Client](https://img.shields.io/nuget/v/SyntaxCircus.Cmsify.Client.svg?label=NuGet%20Client)](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client)
 [![NuGet: SyntaxCircus.Cmsify.Client.DistributedCaching](https://img.shields.io/nuget/v/SyntaxCircus.Cmsify.Client.DistributedCaching.svg?label=NuGet%20Distributed%20Caching)](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client.DistributedCaching)
+[![NuGet: SyntaxCircus.Cmsify.Components](https://img.shields.io/nuget/v/SyntaxCircus.Cmsify.Components.svg?label=NuGet%20Components)](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Components)
+[![NuGet: SyntaxCircus.Cmsify.Components.Theme](https://img.shields.io/nuget/v/SyntaxCircus.Cmsify.Components.Theme.svg?label=NuGet%20Components%20Theme)](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Components.Theme)
 [![Docker: syntaxcircus/cmsify-api](https://img.shields.io/docker/v/syntaxcircus/cmsify-api?label=Docker%20API&sort=semver)](https://hub.docker.com/r/syntaxcircus/cmsify-api)
 [![Docker: syntaxcircus/cmsify-admin](https://img.shields.io/docker/v/syntaxcircus/cmsify-admin?label=Docker%20Admin&sort=semver)](https://hub.docker.com/r/syntaxcircus/cmsify-admin)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
@@ -14,6 +16,7 @@ Cmsify is a headless CMS with composable, versioned templates, built with .NET 1
 ## Published artifacts
 
 - **NuGet SDK packages:** [`SyntaxCircus.Cmsify.Client`](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client) and [`SyntaxCircus.Cmsify.Client.DistributedCaching`](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Client.DistributedCaching)
+- **NuGet Blazor component packages:** [`SyntaxCircus.Cmsify.Components`](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Components) (reusable, restylable content-editing UI) and [`SyntaxCircus.Cmsify.Components.Theme`](https://www.nuget.org/packages/SyntaxCircus.Cmsify.Components.Theme) (optional default styling) — see [`src/Cmsify.Components/README.md`](src/Cmsify.Components/README.md)
 - **Docker Hub images:** [`syntaxcircus/cmsify-api`](https://hub.docker.com/r/syntaxcircus/cmsify-api) and [`syntaxcircus/cmsify-admin`](https://hub.docker.com/r/syntaxcircus/cmsify-admin)
 
 ## Start locally
@@ -226,6 +229,7 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 
 - [TypeScript client](sdk/typescript/README.md) — `@syntaxcircus/cmsify-client` usage, framework examples, pagination, errors, and regeneration.
 - [.NET client](sdk/dotnet/README.md) — NuGet packages, dependency injection, authentication, and service examples.
+- [Reusable Blazor components](src/Cmsify.Components/README.md) — `SyntaxCircus.Cmsify.Components` field editors, composed edit/list panels, extensibility hooks, and CSS theming; [`SyntaxCircus.Cmsify.Components.Theme`](src/Cmsify.Components.Theme/README.md) for default styling.
 - [Changelog](CHANGELOG.md) — released and upcoming changes.
 - [Project roadmap](docs/roadmap.md) — committed future work, when available.
 
@@ -237,6 +241,8 @@ For a guide organized by task and audience, see the [documentation index](docs/R
 | `src/Cmsify.Infrastructure` | EF Core/PostgreSQL, storage, authentication, audit, and background services |
 | `src/Cmsify.Api` | Versioned HTTP API, OpenAPI, middleware, and health endpoints |
 | `src/Cmsify.Admin` | Blazor administration UI; all data access goes through the API |
+| `src/Cmsify.Components` | Reusable, restylable Blazor Server content-editing components (`SyntaxCircus.Cmsify.Components`); Admin dogfoods these instead of hand-rolled markup |
+| `src/Cmsify.Components.Theme` | Optional default styling for `Cmsify.Components` (`SyntaxCircus.Cmsify.Components.Theme`) |
 | `sdk/typescript` | Generated OpenAPI types and the ergonomic TypeScript client |
 | `sdk/dotnet` | Shared wire contracts and the `SyntaxCircus.Cmsify.Client` NuGet client |
 | `examples` | Next.js, Astro, and SvelteKit server-side integration examples |

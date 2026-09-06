@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>SyntaxCircus.Cmsify.Components.Theme</PackageId>
+    <Title>Syntax Circus LLC Cmsify Components Theme</Title>
+    <Description>Optional default Bootstrap-flavored theme (CSS custom property values) for SyntaxCircus.Cmsify.Components. Purely static assets — no components, no code.</Description>
+    <Authors>Syntax Circus LLC</Authors>
+    <Company>Syntax Circus LLC</Company>
+    <Copyright>Copyright © Syntax Circus LLC</Copyright>
+    <PackageTags>cms;headless-cms;cmsify;blazor;components;theme</PackageTags>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Syntax-Circus/cmsify</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Syntax-Circus/cmsify</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE-MIT.txt" Pack="true" PackagePath="\" Link="LICENSE-MIT.txt" />
+  </ItemGroup>
+</Project>

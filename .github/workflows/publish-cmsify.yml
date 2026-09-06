@@ -61,6 +61,8 @@ jobs:
           dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
           dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
           dotnet pack sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
+          dotnet pack src/Cmsify.Components/Cmsify.Components.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
+          dotnet pack src/Cmsify.Components.Theme/Cmsify.Components.Theme.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
       - name: Pack npm candidate once
         working-directory: sdk/typescript
         run: |
@@ -84,12 +86,12 @@ jobs:
           NUGET_SOURCE="$SBOM_STAGING_ROOT/nuget/candidate-source"
           NUGET_CACHE="$SBOM_STAGING_ROOT/nuget/packages"
           mkdir -p "$NUGET_CONSUMER" "$NUGET_SOURCE" "$NUGET_CACHE"
-          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching SyntaxCircus.Cmsify.Components SyntaxCircus.Cmsify.Components.Theme; do
             candidate="$GITHUB_WORKSPACE/artifacts/nuget/$package.$VERSION.nupkg"
             test -f "$candidate"
             cp "$candidate" "$NUGET_SOURCE/"
           done
-          test "$(find "$NUGET_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 3
+          test "$(find "$NUGET_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 5
           dotnet new console --framework net10.0 --no-restore --output "$NUGET_CONSUMER"
           cat > "$NUGET_CONSUMER/NuGet.Config" <<EOF
           <?xml version="1.0" encoding="utf-8"?>
@@ -104,6 +106,8 @@ jobs:
                 <package pattern="SyntaxCircus.Cmsify.Contracts" />
                 <package pattern="SyntaxCircus.Cmsify.Client" />
                 <package pattern="SyntaxCircus.Cmsify.Client.DistributedCaching" />
+                <package pattern="SyntaxCircus.Cmsify.Components" />
+                <package pattern="SyntaxCircus.Cmsify.Components.Theme" />
               </packageSource>
               <packageSource key="nuget.org">
                 <package pattern="*" />
@@ -112,7 +116,7 @@ jobs:
           </configuration>
           EOF
           cd "$NUGET_CONSUMER"
-          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching SyntaxCircus.Cmsify.Components SyntaxCircus.Cmsify.Components.Theme; do
             dotnet add package "$package" --version "$VERSION" --no-restore
           done
           dotnet restore --configfile "$NUGET_CONSUMER/NuGet.Config" --packages "$NUGET_CACHE" --no-http-cache
@@ -256,7 +260,7 @@ jobs:
         with:
           name: release-candidate-${{ needs.resolve.outputs.version }}-${{ needs.resolve.outputs.source_sha }}
           path: artifacts
-      - name: Restore all three candidates through an isolated local source
+      - name: Restore all five candidates through an isolated local source
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
         shell: bash
@@ -265,12 +269,12 @@ jobs:
           CONSUMER_ROOT="$RUNNER_TEMP/cmsify-dotnet-consumer"
           LOCAL_SOURCE="$CONSUMER_ROOT/candidate-source"
           mkdir -p "$LOCAL_SOURCE"
-          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching SyntaxCircus.Cmsify.Components SyntaxCircus.Cmsify.Components.Theme; do
             candidate="$GITHUB_WORKSPACE/artifacts/nuget/$package.$VERSION.nupkg"
             test -f "$candidate"
             cp "$candidate" "$LOCAL_SOURCE/"
           done
-          test "$(find "$LOCAL_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 3
+          test "$(find "$LOCAL_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 5
           cd "$CONSUMER_ROOT"
           dotnet new console --framework net10.0 --no-restore
           cat > NuGet.Config <<EOF
@@ -286,6 +290,8 @@ jobs:
                 <package pattern="SyntaxCircus.Cmsify.Contracts" />
                 <package pattern="SyntaxCircus.Cmsify.Client" />
                 <package pattern="SyntaxCircus.Cmsify.Client.DistributedCaching" />
+                <package pattern="SyntaxCircus.Cmsify.Components" />
+                <package pattern="SyntaxCircus.Cmsify.Components.Theme" />
               </packageSource>
               <packageSource key="nuget.org">
                 <package pattern="Microsoft.*" />
@@ -296,7 +302,7 @@ jobs:
             </packageSourceMapping>
           </configuration>
           EOF
-          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+          for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching SyntaxCircus.Cmsify.Components SyntaxCircus.Cmsify.Components.Theme; do
             dotnet add package "$package" --version "$VERSION" --no-restore
           done
           dotnet restore --configfile NuGet.Config --packages "$CONSUMER_ROOT/package-cache" --no-http-cache
@@ -452,7 +458,7 @@ jobs:
         shell: bash
         run: |
           NUGET_VERSION="${VERSION,,}"
-          for package in syntaxcircus.cmsify.contracts syntaxcircus.cmsify.client syntaxcircus.cmsify.client.distributedcaching; do http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://api.nuget.org/v3-flatcontainer/$package/$NUGET_VERSION/$package.$NUGET_VERSION.nupkg")" || exit 1; case "$http_code" in 404) ;; 200) exit 1 ;; *) echo "Unexpected NuGet preflight HTTP $http_code"; exit 1 ;; esac; done
+          for package in syntaxcircus.cmsify.contracts syntaxcircus.cmsify.client syntaxcircus.cmsify.client.distributedcaching syntaxcircus.cmsify.components syntaxcircus.cmsify.components.theme; do http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://api.nuget.org/v3-flatcontainer/$package/$NUGET_VERSION/$package.$NUGET_VERSION.nupkg")" || exit 1; case "$http_code" in 404) ;; 200) exit 1 ;; *) echo "Unexpected NuGet preflight HTTP $http_code"; exit 1 ;; esac; done
       - name: Reject existing npm exact version before promotion
         shell: bash
         run: |

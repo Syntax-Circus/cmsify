@@ -1,0 +1,99 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<div class="cmsify-list">
+    <div class="cmsify-list-filters">
+        <input class="cmsify-field-input" placeholder="Full-text search" value="@SearchText" @oninput="e => SearchTextChanged.InvokeAsync(e.Value?.ToString())" />
+        <select class="cmsify-field-select" value="@Status?.ToString()" @onchange="OnStatusChanged">
+            <option value="">Any status</option>
+            @foreach (var status in Enum.GetValues<ContentStatus>())
+            {
+                <option value="@status">@status</option>
+            }
+        </select>
+        <select class="cmsify-field-select" value="@TemplateId?.ToString()" @onchange="OnTemplateChanged">
+            <option value="">Any template</option>
+            @foreach (var template in Templates)
+            {
+                <option value="@template.Id">@template.Name</option>
+            }
+        </select>
+        <input class="cmsify-field-input" placeholder="Locale" value="@Locale" @oninput="e => LocaleChanged.InvokeAsync(e.Value?.ToString())" />
+        <button type="button" class="cmsify-list-filter-button" @onclick="() => OnFilter.InvokeAsync()">Filter</button>
+    </div>
+    <table class="cmsify-list-table">
+        <thead>
+            <tr><th>Title / Slug</th><th>Template</th><th>Status</th><th>Locale</th><th>Updated</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var contentItem in Items)
+            {
+                <tr>
+                    <td>
+                        @if (TitleTemplate is not null)
+                        {
+                            @TitleTemplate(contentItem)
+                        }
+                        else
+                        {
+                            @(contentItem.Slug ?? contentItem.Id.ToString())
+                        }
+                    </td>
+                    <td>@contentItem.TemplateName</td>
+                    <td>
+                        @if (StatusTemplate is not null)
+                        {
+                            @StatusTemplate(contentItem)
+                        }
+                        else
+                        {
+                            @contentItem.Status
+                        }
+                    </td>
+                    <td>@contentItem.LocaleCode</td>
+                    <td>
+                        @if (UpdatedTemplate is not null)
+                        {
+                            @UpdatedTemplate(contentItem)
+                        }
+                        else
+                        {
+                            @contentItem.UpdatedAt
+                        }
+                    </td>
+                    <td>
+                        <button type="button" class="cmsify-list-edit-button" @onclick="() => OnEdit.InvokeAsync(contentItem)">Edit</button>
+                        @if (RowActions is not null)
+                        {
+                            @RowActions(contentItem)
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<ContentItemSummaryResponse> Items { get; set; } = [];
+    [Parameter] public IReadOnlyList<TemplateSummaryResponse> Templates { get; set; } = [];
+    [Parameter] public string? SearchText { get; set; }
+    [Parameter] public EventCallback<string?> SearchTextChanged { get; set; }
+    [Parameter] public ContentStatus? Status { get; set; }
+    [Parameter] public EventCallback<ContentStatus?> StatusChanged { get; set; }
+    [Parameter] public Guid? TemplateId { get; set; }
+    [Parameter] public EventCallback<Guid?> TemplateIdChanged { get; set; }
+    [Parameter] public string? Locale { get; set; }
+    [Parameter] public EventCallback<string?> LocaleChanged { get; set; }
+    [Parameter] public EventCallback OnFilter { get; set; }
+    [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? RowActions { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? TitleTemplate { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? StatusTemplate { get; set; }
+    [Parameter] public RenderFragment<ContentItemSummaryResponse>? UpdatedTemplate { get; set; }
+
+    private Task OnStatusChanged(ChangeEventArgs e) =>
+        StatusChanged.InvokeAsync(Enum.TryParse<ContentStatus>(e.Value?.ToString(), out var status) ? status : null);
+
+    private Task OnTemplateChanged(ChangeEventArgs e) =>
+        TemplateIdChanged.InvokeAsync(Guid.TryParse(e.Value?.ToString(), out var id) ? id : null);
+}

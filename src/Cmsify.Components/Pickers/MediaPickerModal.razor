@@ -1,0 +1,45 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+@if (Visible)
+{
+    <div class="cmsify-picker-backdrop">
+        <div class="cmsify-picker-dialog" role="dialog" aria-modal="true">
+            <div class="cmsify-picker-header">
+                <h2 class="cmsify-picker-title">Select media</h2>
+                <button type="button" class="cmsify-picker-close" @onclick="() => Closed.InvokeAsync()" aria-label="Close">&times;</button>
+            </div>
+            <div class="cmsify-picker-body">
+                <div class="cmsify-picker-search">
+                    <input class="cmsify-field-input" placeholder="Search filename" value="@searchTerm" @oninput="OnSearchInput" />
+                    <button type="button" class="cmsify-picker-search-button" @onclick="() => OnSearch.InvokeAsync(searchTerm)">Search</button>
+                </div>
+                <InputFile OnChange="e => OnUpload.InvokeAsync(e)" />
+                <div class="cmsify-picker-grid">
+                    @foreach (var asset in Items)
+                    {
+                        <button type="button" class="cmsify-picker-item" @onclick="() => OnSelect.InvokeAsync(asset)">
+                            <strong>@asset.FileName</strong>
+                            <span class="cmsify-picker-item-meta">@asset.MimeType</span>
+                        </button>
+                    }
+                </div>
+            </div>
+            <div class="cmsify-picker-footer">
+                <button type="button" class="cmsify-picker-cancel" @onclick="() => Closed.InvokeAsync()">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public IReadOnlyList<MediaAssetResponse> Items { get; set; } = [];
+    [Parameter] public EventCallback<string> OnSearch { get; set; }
+    [Parameter] public EventCallback<InputFileChangeEventArgs> OnUpload { get; set; }
+    [Parameter] public EventCallback<MediaAssetResponse> OnSelect { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
+
+    private string searchTerm = "";
+
+    private void OnSearchInput(ChangeEventArgs e) => searchTerm = e.Value?.ToString() ?? "";
+}

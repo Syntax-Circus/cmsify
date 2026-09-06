@@ -55,6 +55,8 @@ nav:
   - SDKs:
       - TypeScript client: sdk/typescript.md
       - .NET client: sdk/dotnet.md
+      - Blazor components: components.md
+      - Blazor components theme: components-theme.md
   - Project:
       - Changelog: changelog.md
       - Roadmap: roadmap.md

@@ -155,6 +155,8 @@ function defaultState() {
     "SyntaxCircus.Cmsify.Contracts",
     "SyntaxCircus.Cmsify.Client",
     "SyntaxCircus.Cmsify.Client.DistributedCaching",
+    "SyntaxCircus.Cmsify.Components",
+    "SyntaxCircus.Cmsify.Components.Theme",
   ];
   return {
     version: VERSION,

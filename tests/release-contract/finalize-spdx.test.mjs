@@ -102,7 +102,7 @@ test("finalizes directory-scanned package inventories without input documentDesc
     assert.equal(result.status, 0, result.stderr || result.stdout);
 
     for (const [kind, names] of [
-      ["nuget", ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching"]],
+      ["nuget", ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching", "SyntaxCircus.Cmsify.Components", "SyntaxCircus.Cmsify.Components.Theme"]],
       ["npm", ["@syntaxcircus/cmsify-client"]],
     ]) {
       const document = JSON.parse(readFileSync(candidatePath(root, `sbom/cmsify-${kind}.spdx.json`), "utf8"));

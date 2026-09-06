@@ -1,0 +1,36 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+@for (var index = 0; index < DisplayValues.Count; index++)
+{
+    var valueIndex = index;
+    <textarea class="cmsify-field-textarea cmsify-field-textarea--code" rows="8"
+              placeholder='{ "fieldKey": "value" }'
+              value="@DisplayValues[valueIndex]"
+              @oninput="e => OnItemChanged(valueIndex, e)"></textarea>
+}
+@if (!MaxOccurrences.HasValue || DisplayValues.Count < MaxOccurrences.Value)
+{
+    <button type="button" class="cmsify-field-add-button" @onclick="AddValue">Add component</button>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<string> Values { get; set; } = [];
+    [Parameter] public EventCallback<IReadOnlyList<string>> ValuesChanged { get; set; }
+    [Parameter] public int? MaxOccurrences { get; set; }
+
+    private IReadOnlyList<string> DisplayValues => Values.Count == 0 ? ["{}"] : Values;
+
+    private Task OnItemChanged(int index, ChangeEventArgs e)
+    {
+        var updated = DisplayValues.ToList();
+        updated[index] = e.Value?.ToString() ?? "{}";
+        return ValuesChanged.InvokeAsync(updated);
+    }
+
+    private Task AddValue()
+    {
+        var updated = DisplayValues.ToList();
+        updated.Add("{}");
+        return ValuesChanged.InvokeAsync(updated);
+    }
+}

@@ -331,7 +331,9 @@ function Test-PublicPackageRestore {
             @{ Asset = "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/obj/project.assets.json"; Lock = "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/packages.lock.json"; LockType = "CentralTransitive" },
             @{ Asset = "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/obj/project.assets.json"; Lock = "sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/packages.lock.json"; LockType = "CentralTransitive" },
             @{ Asset = "src/Cmsify.Admin/obj/project.assets.json"; Lock = "src/Cmsify.Admin/packages.lock.json"; LockType = "CentralTransitive" },
-            @{ Asset = "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json"; Lock = "tests/Cmsify.Admin.Integration.Tests/packages.lock.json"; LockType = "CentralTransitive" }
+            @{ Asset = "tests/Cmsify.Admin.Integration.Tests/obj/project.assets.json"; Lock = "tests/Cmsify.Admin.Integration.Tests/packages.lock.json"; LockType = "CentralTransitive" },
+            @{ Asset = "src/Cmsify.Components/obj/project.assets.json"; Lock = "src/Cmsify.Components/packages.lock.json"; LockType = "CentralTransitive" },
+            @{ Asset = "tests/Cmsify.Components.Tests/obj/project.assets.json"; Lock = "tests/Cmsify.Components.Tests/packages.lock.json"; LockType = "CentralTransitive" }
         )
         foreach ($definition in $graphDefinitions) {
             $lockPath = Join-Path $repositoryRoot $definition.Lock
@@ -400,7 +402,7 @@ function Test-PublicPackageRestore {
             }
             $verified += $relativePath
         }
-        if ($verified.Count -ne 5) { throw "Public restore must verify exactly five affected asset graphs." }
+        if ($verified.Count -ne 7) { throw "Public restore must verify exactly seven affected asset graphs." }
     }
     finally {
         if ($temporaryRootCreated -and (Test-Path -LiteralPath $temporaryRoot)) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force }

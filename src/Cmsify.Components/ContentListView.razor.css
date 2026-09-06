@@ -1,0 +1,66 @@
+.cmsify-list-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cmsify-spacing-sm, 0.375rem);
+    margin-bottom: var(--cmsify-spacing-md, 0.75rem);
+}
+
+.cmsify-list-filters > * {
+    flex: 1 1 160px;
+}
+
+.cmsify-field-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    font-family: var(--cmsify-font-family, inherit);
+    color: var(--cmsify-color-text, inherit);
+    background: var(--cmsify-color-field-background, transparent);
+}
+
+.cmsify-field-input:focus {
+    outline: none;
+    border-color: var(--cmsify-color-border-focus, #86b7fe);
+    box-shadow: var(--cmsify-focus-ring, 0 0 0 0.2rem rgba(13, 110, 253, 0.25));
+}
+
+.cmsify-field-select {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    font-family: var(--cmsify-font-family, inherit);
+    color: var(--cmsify-color-text, inherit);
+    background: var(--cmsify-color-field-background, transparent);
+}
+
+.cmsify-field-select:focus {
+    outline: none;
+    border-color: var(--cmsify-color-border-focus, #86b7fe);
+    box-shadow: var(--cmsify-focus-ring, 0 0 0 0.2rem rgba(13, 110, 253, 0.25));
+}
+
+.cmsify-list-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.cmsify-list-table th, .cmsify-list-table td {
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border-bottom: 1px solid var(--cmsify-color-border, #ced4da);
+    text-align: left;
+}
+
+.cmsify-list-filter-button, .cmsify-list-edit-button {
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    background: transparent;
+    color: var(--cmsify-color-text, inherit);
+    cursor: pointer;
+}

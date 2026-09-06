@@ -1,0 +1,345 @@
+@namespace SyntaxCircus.Cmsify.Components.Client
+@using System.Text.Json
+
+<ContentEditForm TemplateVersion="@templateVersion" FieldValues="@fieldValues" FieldValueChanged="OnFieldValueChangedAsync"
+                 PickListsByRevisionId="@pickListsByRevisionId" ReferenceOptionsByTemplateId="@referenceOptionsByTemplateId"
+                 Slug="@slug" SlugChanged="@(v => slug = v)" Locale="@locale" LocaleChanged="@(v => locale = v)"
+                 Tags="@tags" TagsChanged="@(v => tags = v)" Error="@error" OnSave="SaveAsync"
+                 OnMediaPickRequested="OpenMediaPickerAsync" OnFilePickRequested="OpenFilePickerAsync"
+                 FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText" />
+
+<MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix"
+                   Selected="OnAssetSelectedAsync" Closed="() => pickerVisible = false" />
+
+@code {
+    [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
+    [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
+    [Parameter] public Guid? ContentId { get; set; }
+    [Parameter] public Guid? TemplateId { get; set; }
+    [Parameter] public EventCallback<ContentItemDetailResponse> Saved { get; set; }
+    [Parameter] public EventCallback<ContentItemDetailResponse> Created { get; set; }
+    [Parameter] public EventCallback<ContentItemDetailResponse?> ItemChanged { get; set; }
+    [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
+    [Parameter] public string? SlugHelpText { get; set; }
+
+    private TemplateVersionResponse templateVersion = new(Guid.Empty, Guid.Empty, 0, TemplateVersionStatus.Draft, null, null, [], []);
+    private ContentItemDetailResponse? item;
+    private readonly Dictionary<Guid, ContentFieldEditorValue> fieldValues = [];
+    private readonly Dictionary<Guid, PickListResponse> pickListsByRevisionId = [];
+    private readonly Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = [];
+    private string? slug;
+    private string? locale;
+    private string? tags;
+    private string? error;
+    private bool pickerVisible;
+    private string? pickerMimePrefix;
+    private Guid pickerFieldId;
+    private bool pickerIsFileField;
+    private bool loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loaded)
+        {
+            return;
+        }
+
+        loaded = true;
+        if (ContentId.HasValue)
+        {
+            await LoadContentAsync();
+        }
+        else if (TemplateId.HasValue)
+        {
+            await LoadTemplateVersionAsync(TemplateId.Value);
+        }
+    }
+
+    private async Task LoadContentAsync()
+    {
+        var loadedItem = await Client.Content.GetAsync(WorkspaceId, ContentId!.Value)
+            ?? throw new InvalidOperationException("Cmsify API returned no payload while loading content.");
+        item = loadedItem;
+        await ItemChanged.InvokeAsync(item);
+        slug = loadedItem.Slug;
+        locale = loadedItem.LocaleCode;
+        tags = string.Join(",", loadedItem.Tags);
+
+        var templates = (await Client.Templates.ListAsync(WorkspaceId))?.Items ?? [];
+        var template = templates.FirstOrDefault(t => t.CurrentVersionId == loadedItem.TemplateVersionId);
+        if (template is not null)
+        {
+            await LoadTemplateVersionAsync(template.Id);
+        }
+
+        fieldValues.Clear();
+        foreach (var value in loadedItem.Fields)
+        {
+            var editorValue = GetOrAddValue(value.FieldId);
+            editorValue.TextValue = value.TextValue;
+            editorValue.BoolValue = value.BoolValue ?? false;
+            editorValue.ChildContentItemId = value.ChildContentItemId;
+            if (!string.IsNullOrWhiteSpace(value.TextValue))
+            {
+                editorValue.MultiValues = [.. editorValue.MultiValues, value.TextValue];
+            }
+            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue)
+            {
+                editorValue.ComponentValues = [.. editorValue.ComponentValues, value.JsonValue.Value.GetRawText()];
+            }
+            if (value.MediaAssetId.HasValue)
+            {
+                try
+                {
+                    editorValue.SelectedMediaAsset = await Client.Media.GetAsync(WorkspaceId, value.MediaAssetId.Value);
+                }
+                catch (CmsifyApiException)
+                {
+                    editorValue.FallbackMediaAssetId = value.MediaAssetId.Value;
+                }
+            }
+            if (value.FileAssetId.HasValue)
+            {
+                try
+                {
+                    editorValue.SelectedFileAsset = await Client.Media.GetAsync(WorkspaceId, value.FileAssetId.Value);
+                }
+                catch (CmsifyApiException)
+                {
+                    editorValue.FallbackFileAssetId = value.FileAssetId.Value;
+                }
+            }
+        }
+    }
+
+    private ContentFieldEditorValue GetOrAddValue(Guid fieldId)
+    {
+        if (!fieldValues.TryGetValue(fieldId, out var value))
+        {
+            value = new ContentFieldEditorValue();
+            fieldValues[fieldId] = value;
+        }
+
+        return value;
+    }
+
+    private async Task LoadTemplateVersionAsync(Guid templateId)
+    {
+        var template = await Client.Templates.GetAsync(WorkspaceId, templateId)
+            ?? throw new InvalidOperationException("Cmsify API returned no payload while loading a template.");
+        templateVersion = template.CurrentVersion
+            ?? await Client.Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version")
+            ?? throw new InvalidOperationException("Cmsify API returned no payload while creating a template draft.");
+
+        await LoadPickListsAsync();
+        await LoadReferenceOptionsAsync();
+    }
+
+    private async Task LoadPickListsAsync()
+    {
+        var bindings = templateVersion.Fields
+            .Where(field => field.PrimitiveType == PrimitiveType.PickList)
+            .Select(field => PickListFieldBinding.FromFieldConfig(field.FieldConfig))
+            .Where(binding => binding.PickListId.HasValue && binding.RevisionId.HasValue)
+            .Select(binding => (binding.PickListId!.Value, binding.RevisionId!.Value))
+            .Distinct()
+            .ToList();
+
+        foreach (var (pickListId, revisionId) in bindings)
+        {
+            if (pickListsByRevisionId.ContainsKey(revisionId))
+            {
+                continue;
+            }
+
+            try
+            {
+                var pickList = await Client.PickLists.GetRevisionAsync(WorkspaceId, pickListId, revisionId);
+                if (pickList is not null)
+                {
+                    pickListsByRevisionId[revisionId] = pickList;
+                }
+            }
+            catch (CmsifyApiException)
+            {
+            }
+        }
+    }
+
+    private async Task LoadReferenceOptionsAsync()
+    {
+        var templateIds = templateVersion.Fields
+            .SelectMany(field => field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value)
+                .Concat(field.TemplateId.HasValue ? [field.TemplateId.Value] : []))
+            .Distinct()
+            .ToList();
+
+        foreach (var templateId in templateIds)
+        {
+            if (referenceOptionsByTemplateId.ContainsKey(templateId))
+            {
+                continue;
+            }
+
+            var page = await Client.Content.ListAsync(WorkspaceId, null, templateId, null, null, null);
+            referenceOptionsByTemplateId[templateId] = page?.Items ?? [];
+        }
+    }
+
+    private Task OnFieldValueChangedAsync((TemplateFieldResponse Field, ContentFieldEditorValue Value) change)
+    {
+        fieldValues[change.Field.Id] = change.Value;
+        return Task.CompletedTask;
+    }
+
+    private Task OpenMediaPickerAsync(TemplateFieldResponse field)
+    {
+        pickerFieldId = field.Id;
+        pickerIsFileField = false;
+        pickerMimePrefix = "image/";
+        pickerVisible = true;
+        return Task.CompletedTask;
+    }
+
+    private Task OpenFilePickerAsync(TemplateFieldResponse field)
+    {
+        pickerFieldId = field.Id;
+        pickerIsFileField = true;
+        pickerMimePrefix = null;
+        pickerVisible = true;
+        return Task.CompletedTask;
+    }
+
+    private Task OnAssetSelectedAsync(MediaAssetResponse asset)
+    {
+        var value = GetOrAddValue(pickerFieldId);
+        if (pickerIsFileField)
+        {
+            value.SelectedFileAsset = asset;
+        }
+        else
+        {
+            value.SelectedMediaAsset = asset;
+        }
+
+        pickerVisible = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        var values = new List<ContentFieldValueRequest>();
+        foreach (var field in templateVersion.Fields.OrderBy(f => f.Order))
+        {
+            var value = GetOrAddValue(field.Id);
+
+            if (field.ComponentId.HasValue)
+            {
+                foreach (var raw in value.ComponentValues)
+                {
+                    try
+                    {
+                        using var document = JsonDocument.Parse(raw);
+                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        {
+                            error = $"Component field '{field.Label}' must contain JSON objects.";
+                            return;
+                        }
+                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
+                    }
+                    catch (JsonException)
+                    {
+                        error = $"Component field '{field.Label}' contains invalid JSON.";
+                        return;
+                    }
+                }
+                continue;
+            }
+
+            var isComposition = field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue);
+            if (isComposition)
+            {
+                if (value.ChildContentItemId is { } referencedId)
+                {
+                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
+                }
+                continue;
+            }
+
+            if (field.PrimitiveType == PrimitiveType.PickList)
+            {
+                var binding = PickListFieldBinding.FromFieldConfig(field.FieldConfig);
+                if (binding.Multiple)
+                {
+                    var index = 0;
+                    foreach (var selectedValue in value.MultiValues)
+                    {
+                        values.Add(new ContentFieldValueRequest(field.Id, field.Order + index, ValueKind.PickList, selectedValue, null, null, null, null, null));
+                        index++;
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(value.TextValue))
+                {
+                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.PickList, value.TextValue, null, null, null, null, null));
+                }
+                continue;
+            }
+
+            values.Add(new ContentFieldValueRequest(
+                field.Id,
+                field.Order,
+                field.PrimitiveType switch
+                {
+                    PrimitiveType.Boolean => ValueKind.Boolean,
+                    PrimitiveType.Media => ValueKind.Media,
+                    PrimitiveType.File => ValueKind.File,
+                    PrimitiveType.Markdown => ValueKind.Markdown,
+                    PrimitiveType.RichText => ValueKind.RichText,
+                    PrimitiveType.Link => ValueKind.Link,
+                    PrimitiveType.Quote => ValueKind.Quote,
+                    PrimitiveType.Separator => ValueKind.Separator,
+                    _ => ValueKind.Text
+                },
+                value.TextValue,
+                value.BoolValue,
+                field.PrimitiveType == PrimitiveType.Media ? value.SelectedMediaAsset?.Id ?? value.FallbackMediaAssetId : null,
+                field.PrimitiveType == PrimitiveType.File ? value.SelectedFileAsset?.Id ?? value.FallbackFileAssetId : null,
+                null,
+                null));
+        }
+
+        var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        try
+        {
+            error = null;
+            if (ContentId.HasValue)
+            {
+                var updated = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
+                    new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values))
+                    ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
+                item = updated;
+                await ItemChanged.InvokeAsync(item);
+                await Saved.InvokeAsync(updated);
+            }
+            else
+            {
+                var createdItem = await Client.Content.CreateAsync(WorkspaceId,
+                    new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values))
+                    ?? throw new InvalidOperationException("Cmsify API returned no payload while creating content.");
+                item = createdItem;
+                await ItemChanged.InvokeAsync(item);
+                await Created.InvokeAsync(createdItem);
+            }
+        }
+        catch (CmsifyApiException ex)
+        {
+            error = ex.Message;
+            if (ex.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && ContentId.HasValue)
+            {
+                await LoadContentAsync();
+                error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
+            }
+        }
+    }
+}

@@ -1,0 +1,19 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<select class="cmsify-field-select" value="@Value?.ToString()" @onchange="OnChange">
+    <option value="">@(IsRequired ? "Select referenced content" : "None")</option>
+    @foreach (var option in Options)
+    {
+        <option value="@option.Id">@(option.Slug ?? option.Id.ToString()) (@option.Status)</option>
+    }
+</select>
+
+@code {
+    [Parameter] public IReadOnlyList<ContentItemSummaryResponse> Options { get; set; } = [];
+    [Parameter] public Guid? Value { get; set; }
+    [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
+    [Parameter] public bool IsRequired { get; set; }
+
+    private Task OnChange(ChangeEventArgs e) =>
+        ValueChanged.InvokeAsync(Guid.TryParse(e.Value?.ToString(), out var selected) ? selected : null);
+}

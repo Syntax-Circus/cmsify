@@ -52,6 +52,8 @@ def rewrite_links(text: str) -> str:
         "../tests/upgrade/README.md": f"{REPOSITORY_URL}/tree/main/tests/upgrade",
         "../.github/workflows/upgrade-rollback.yml": f"{REPOSITORY_URL}/blob/main/.github/workflows/upgrade-rollback.yml",
         "../../docs/integrating.md": "../integrating.md",
+        "../src/Cmsify.Components/README.md": "components.md",
+        "../src/Cmsify.Components.Theme/README.md": "components-theme.md",
         "../../examples": f"{REPOSITORY_URL}/tree/main/examples",
         "../examples/nextjs-app-router/cmsify.ts": f"{REPOSITORY_URL}/blob/main/examples/nextjs-app-router/cmsify.ts",
         "../examples/dotnet/CmsifyClientSample.cs": f"{REPOSITORY_URL}/blob/main/examples/dotnet/CmsifyClientSample.cs",
@@ -84,6 +86,8 @@ def main() -> None:
 
     write_markdown(STAGED / "sdk" / "typescript.md", ROOT / "sdk" / "typescript" / "README.md")
     write_markdown(STAGED / "sdk" / "dotnet.md", ROOT / "sdk" / "dotnet" / "README.md")
+    write_markdown(STAGED / "components.md", ROOT / "src" / "Cmsify.Components" / "README.md")
+    write_markdown(STAGED / "components-theme.md", ROOT / "src" / "Cmsify.Components.Theme" / "README.md")
     write_markdown(STAGED / "changelog.md", ROOT / "CHANGELOG.md")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")

@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - "src/Cmsify.Admin/**"
+      - "src/Cmsify.Components/**"
+      - "src/Cmsify.Components.Theme/**"
       - "src/Cmsify.Contracts/**"
       - "src/Cmsify.Core/**"
       - "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/**"
@@ -18,6 +20,8 @@ on:
   pull_request:
     paths:
       - "src/Cmsify.Admin/**"
+      - "src/Cmsify.Components/**"
+      - "src/Cmsify.Components.Theme/**"
       - "src/Cmsify.Contracts/**"
       - "src/Cmsify.Core/**"
       - "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/**"

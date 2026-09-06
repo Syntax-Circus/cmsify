@@ -55,6 +55,8 @@ const contractFiles = [
   "src/Cmsify.Admin/Dockerfile",
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj",
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj",
+  "src/Cmsify.Components/Cmsify.Components.csproj",
+  "src/Cmsify.Components.Theme/Cmsify.Components.Theme.csproj",
   ".github/workflows/dotnet-test.yml",
   ".github/workflows/admin-accessibility.yml",
   ".github/workflows/openapi-contract.yml",
@@ -212,7 +214,7 @@ test("rejects an OpenAPI comparison without the /api/v1 scope", () => expectInva
 test("rejects an OpenAPI tool failure that can become an approval result", () => expectInvalid((root) => mutateOpenApiWorkflow(root, (workflow) => workflow.replace("elif [[ $result -eq 1 ]]; then", "else")), /exit 1 as breaking.*fatal/i));
 for (const event of ["push", "pull_request"]) {
   test(`rejects paths-ignore substituted for ${event} accessibility paths`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace("    paths:", "    paths-ignore:")), /Accessibility path triggers.*main pushes.*pull requests/i));
-  test(`rejects duplicated ${event} accessibility paths`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Contracts/**"\n', '      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Admin/**"\n')), /Accessibility path triggers.*main pushes.*pull requests/i));
+  test(`rejects duplicated ${event} accessibility paths`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - "src/Cmsify.Admin/**"\n')), /Accessibility path triggers.*main pushes.*pull requests/i));
   test(`rejects a negated required ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - "!src/Cmsify.Admin/**"\n')), new RegExp(`Accessibility ${event} path triggers must not contain negative entries`, "i")));
   test(`rejects a single-quoted negated ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n      - \'!src/Cmsify.Admin/**\'\n')), new RegExp(`Accessibility ${event} path triggers must not contain negative entries`, "i")));
   test(`rejects a blank/comment-separated negated ${event} accessibility path`, () => expectInvalid((root) => mutateAccessibilityEventPaths(root, event, (body) => body.replace('      - "src/Cmsify.Admin/**"\n', '      - "src/Cmsify.Admin/**"\n\n      # later path entry\n      - "!src/Cmsify.Admin/**"\n')), new RegExp(`Accessibility ${event} path triggers must not contain negative entries`, "i")));
@@ -225,7 +227,7 @@ for (const event of ["push", "pull_request"]) {
   }
 }
 test("rejects source-built release accessibility", () => expectInvalid((root) => mutateReleaseJob(root, "candidate-accessibility", (job) => job.replace(/node scripts\/release\/load-oci-candidate\.mjs load --archive artifacts\/oci\/cmsify-admin\.oci\.tar[^\n]*/, "dotnet run --project src/Cmsify.Admin/Cmsify.Admin.csproj")), /candidate accessibility.*Admin.*archive|candidate accessibility.*must not rebuild/i));
-test("rejects an omitted clean candidate package", () => expectInvalid((root) => mutateReleaseJob(root, "dotnet-consumer", (job) => job.replace('            <package pattern="SyntaxCircus.Cmsify.Contracts" />\n', "")), /clean \.NET consumer.*all three.*local source/i));
+test("rejects an omitted clean candidate package", () => expectInvalid((root) => mutateReleaseJob(root, "dotnet-consumer", (job) => job.replace('            <package pattern="SyntaxCircus.Cmsify.Contracts" />\n', "")), /clean \.NET consumer.*all five.*local source/i));
 test("rejects an unsigned promoted destination", () => expectInvalid((root) => mutateReleaseJob(root, "promote", (job) => job.replace(/\n\s*cosign sign --yes "\$API_SUBJECT"/, "")), /Cosign.*sign.*verify.*digest/i));
 test("rejects certification that skips artifact smoke", () => expectInvalid((root) => mutateReleaseJob(root, "certify", (job) => job.replace("artifact-smoke, ", "")), /certify.*depend.*artifact-smoke/i));
 test("rejects the legacy npm repository owner identity", () => expectInvalid((root) => { const path = resolve(root, "sdk/typescript/package.json"); writeFileSync(path, readFileSync(path, "utf8").replace("github.com/Syntax-Circus/cmsify", "github.com/SyntaxCircus/cmsify")); }, /@syntaxcircus\/cmsify-client.*repository.*Syntax-Circus/i));
@@ -561,17 +563,17 @@ test("rejects a NuGet preflight that treats HTTP 200 as absent", () => expectInv
 test("rejects a NuGet preflight that preserves uppercase prerelease versions", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('NUGET_VERSION="${VERSION,,}"', 'NUGET_VERSION="$VERSION"')), /NuGet.*normalize.*flat-container.*version/i));
 test("rejects package publication before OCI digest-preserving copy and equality", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED"', 'dotnet nuget push premature.nupkg\n          oras cp --from-oci-layout "artifacts/oci/api@$API_EXPECTED"')), /OCI.*remote digest equality.*before.*NuGet.*npm/i));
 test("rejects release npm packing without the resolved source SHA", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('npm pkg set version="$VERSION" gitHead="$SOURCE_SHA"', 'npm pkg set version="$VERSION"')), /npm candidate.*gitHead.*SOURCE_SHA/i));
-test("rejects NuGet packing without explicit source SHA binding", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replaceAll(' -p:RepositoryCommit="$SOURCE_SHA"', "")), /three NuGet candidates.*RepositoryCommit.*SOURCE_SHA/i));
+test("rejects NuGet packing without explicit source SHA binding", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replaceAll(' -p:RepositoryCommit="$SOURCE_SHA"', "")), /five NuGet candidates.*RepositoryCommit.*SOURCE_SHA/i));
 test("rejects OCI layouts whose platform descriptor can be obscured by inline Buildx provenance", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace(" --provenance=false", "")), /OCI candidate.*canonical Docker Hub BuildKit/i));
 test("rejects OCI output without the canonical Docker Hub tag and containerd annotations", () => expectInvalid((root) => mutateWorkflow(root, (workflow) => workflow.replace('--annotation "manifest-descriptor:io.containerd.image.name=docker.io/syntaxcircus/cmsify-api:$VERSION" ', "")), /OCI candidate.*canonical Docker Hub/i));
 test("rejects NuGet SBOM staging that omits an exact candidate archive", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
-  "for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do",
+  "for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching SyntaxCircus.Cmsify.Components SyntaxCircus.Cmsify.Components.Theme; do",
   "for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client; do",
-)), /NuGet SBOM.*all three exact candidate archives/i));
+)), /NuGet SBOM.*all five exact candidate archives/i));
 test("rejects NuGet SBOM restore that can ignore a copied candidate archive", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
   '                <package pattern="SyntaxCircus.Cmsify.Contracts" />\n',
   "",
-)), /NuGet SBOM.*map all three candidate IDs.*isolated source/i));
+)), /NuGet SBOM.*map all five candidate IDs.*isolated source/i));
 test("rejects npm SBOM staging that installs from the source tree", () => expectInvalid((root) => mutateReleaseJob(root, "build", (job) => job.replace(
   'TARBALL="$GITHUB_WORKSPACE/artifacts/npm/syntaxcircus-cmsify-client-$VERSION.tgz"',
   'TARBALL="$GITHUB_WORKSPACE/sdk/typescript"',
