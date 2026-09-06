@@ -5999,6 +5999,21 @@
             "format": "date-time",
             "nullable": true
           },
+          "publishAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "pendingEffectiveStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "pendingEffectiveEndAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
           "fields": {
             "type": "array",
             "items": {

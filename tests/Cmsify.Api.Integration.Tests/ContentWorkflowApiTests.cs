@@ -112,6 +112,37 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Publish_WithScheduledPublishAt_ReturnsPendingScheduleFieldsOnDetail()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+        var (workspaceId, contentId) = await SeedContentAsync(factory, ContentStatus.Approved);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish",
+            new { publishAt = "2026-12-01T00:00:00Z", effectiveStartAt = "2026-12-01T00:00:00Z", effectiveEndAt = "2026-12-26T00:00:00Z" },
+            TestContext.Current.CancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PublishContentResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.Equal(SyntaxCircus.Cmsify.Contracts.ContentStatus.Approved, body.Content.Status);
+        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), body.Content.PublishAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), body.Content.PendingEffectiveStartAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-12-26T00:00:00Z"), body.Content.PendingEffectiveEndAt);
+
+        var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/{contentId}", TestContext.Current.CancellationToken);
+        getResponse.EnsureSuccessStatusCode();
+        var getBody = await getResponse.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.ContentItemDetailResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(getBody);
+        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), getBody.PublishAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), getBody.PendingEffectiveStartAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-12-26T00:00:00Z"), getBody.PendingEffectiveEndAt);
+    }
+
+    [Fact]
     public async Task Publish_WithOverrideAndAdminRole_FromArchived_Returns422()
     {
         await using var factory = new WebApplicationFactory<Program>();

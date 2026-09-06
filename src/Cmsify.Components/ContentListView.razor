@@ -61,11 +61,13 @@
                         }
                     </td>
                     <td>
-                        <button type="button" class="@($"{EditButtonClass} cmsify-list-edit-button")" @onclick="() => OnEdit.InvokeAsync(contentItem)">Edit</button>
-                        @if (RowActions is not null)
-                        {
-                            @RowActions(contentItem)
-                        }
+                        <div class="cmsify-list-row-actions">
+                            <button type="button" class="@($"{EditButtonClass} cmsify-list-edit-button")" @onclick="() => OnEdit.InvokeAsync(contentItem)">Edit</button>
+                            @if (RowActions is not null)
+                            {
+                                @RowActions(contentItem)
+                            }
+                        </div>
                     </td>
                 </tr>
             }

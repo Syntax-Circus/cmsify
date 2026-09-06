@@ -65,6 +65,12 @@
     cursor: pointer;
 }
 
+.cmsify-list-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cmsify-spacing-sm, 0.375rem);
+}
+
 :where(.cmsify-list-edit-button) {
     border: 1px solid var(--cmsify-color-border, #ced4da);
     background: transparent;

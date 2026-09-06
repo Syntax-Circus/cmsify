@@ -11,7 +11,10 @@
     <div><h1>@(ContentId.HasValue ? "Edit Content" : "New Content")</h1><div class="lead">Dynamic form generated from the selected template version.</div></div>
     @if (ContentId.HasValue)
     {
-        <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/content/@ContentId/versions">Versions</a>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary" @onclick="DuplicateAsync">Duplicate</button>
+            <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/content/@ContentId/versions">Versions</a>
+        </div>
     }
 </div>
 
@@ -58,6 +61,21 @@
                     <button class="btn btn-outline-secondary btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(ArchiveAction)">Archive</button>
                     <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(RestoreAction)">Restore</button>
                 </div>
+                @if (item.PublishAt.HasValue)
+                {
+                    <div class="small text-muted mt-2">
+                        Scheduled to publish: <LocalTimeDisplay Value="@item.PublishAt.Value" />
+                        @if (item.PendingEffectiveStartAt.HasValue || item.PendingEffectiveEndAt.HasValue)
+                        {
+                            <div>
+                                Effective window:
+                                @if (item.PendingEffectiveStartAt.HasValue) { <LocalTimeDisplay Value="@item.PendingEffectiveStartAt.Value" /> } else { <text>(open start)</text> }
+                                –
+                                @if (item.PendingEffectiveEndAt.HasValue) { <LocalTimeDisplay Value="@item.PendingEffectiveEndAt.Value" /> } else { <text>(open end)</text> }
+                            </div>
+                        }
+                    </div>
+                }
             }
             <label class="form-label mt-3">Link Translation Target ID</label>
             <InputText class="form-control mb-3" @bind-Value="translationTarget" />
@@ -161,6 +179,31 @@
         Toasts.Success("Draft created");
         Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{created.Id}");
         return Task.CompletedTask;
+    }
+
+    private async Task DuplicateAsync()
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var fields = item.Fields
+                .Select(f => new ContentFieldValueRequest(f.FieldId, f.Order, f.ValueKind, f.TextValue, f.BoolValue, f.MediaAssetId, f.FileAssetId, f.ChildContentItemId, f.JsonValue))
+                .ToList();
+            var created = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(item.TemplateVersionId, null, item.LocaleCode, null, item.Tags, fields));
+            if (created is not null)
+            {
+                Toasts.Success("Duplicated as new draft.");
+                Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{created.Id}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Toasts.Danger(ex.Message);
+        }
     }
 
     private async Task LinkTranslationAsync()

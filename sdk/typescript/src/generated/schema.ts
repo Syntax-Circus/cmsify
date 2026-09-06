@@ -3874,6 +3874,12 @@ export interface components {
             updatedAt: string;
             /** Format: date-time */
             publishedAt?: string | null;
+            /** Format: date-time */
+            publishAt?: string | null;
+            /** Format: date-time */
+            pendingEffectiveStartAt?: string | null;
+            /** Format: date-time */
+            pendingEffectiveEndAt?: string | null;
             fields: components["schemas"]["ContentFieldValueResponse"][];
         };
         ContentItemSummaryResponse: {
