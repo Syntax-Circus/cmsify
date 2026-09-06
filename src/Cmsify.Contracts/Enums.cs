@@ -35,12 +35,6 @@ public enum ContentStatus
     Archived
 }
 
-public enum ContentVersionStatus
-{
-    Published,
-    Retired
-}
-
 public enum ValueKind
 {
     Text,
