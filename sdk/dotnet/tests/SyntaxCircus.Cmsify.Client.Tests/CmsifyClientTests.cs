@@ -82,6 +82,23 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task Health_ReadyAsync_DeserializesVersionMetadata()
+    {
+        var client = CreateClient(_ => Json(HttpStatusCode.OK, new
+        {
+            status = "Healthy",
+            checks = Array.Empty<object>(),
+            metadata = new { version = "0.3.0+abc123", generatedAt = "2026-09-05T00:00:00Z" }
+        }));
+
+        var response = await client.Health.ReadyAsync(TestContext.Current.CancellationToken);
+
+        response!.Status.ShouldBe("Healthy");
+        response.Metadata!.Version.ShouldBe("0.3.0+abc123");
+        response.Metadata.GeneratedAt.ShouldBe(DateTimeOffset.Parse("2026-09-05T00:00:00Z"));
+    }
+
+    [Fact]
     public async Task ErrorResponse_MapsProblemDetails()
     {
         var client = CreateClient(_ => Json(HttpStatusCode.NotFound, new { type = "https://cmsify.dev/errors/not-found", title = "Not found", status = 404, traceId = "trace-1", detail = "Missing" }));

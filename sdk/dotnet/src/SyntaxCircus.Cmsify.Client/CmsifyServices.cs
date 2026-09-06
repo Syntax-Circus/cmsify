@@ -16,8 +16,8 @@ public sealed class AuthClient(CmsifyClient client)
 
 public sealed class HealthClient(CmsifyClient client)
 {
-    public Task LiveAsync(CancellationToken ct = default) => client.GetAsync<object>("/health/live", ct);
-    public Task ReadyAsync(CancellationToken ct = default) => client.GetAsync<object>("/health/ready", ct);
+    public Task<HealthCheckResponse?> LiveAsync(CancellationToken ct = default) => client.GetAsync<HealthCheckResponse>("/health/live", ct);
+    public Task<HealthCheckResponse?> ReadyAsync(CancellationToken ct = default) => client.GetAsync<HealthCheckResponse>("/health/ready", ct);
 }
 
 public sealed class WorkspaceClient(CmsifyClient client)

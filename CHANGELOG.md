@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-05
+
+### Added
+
+- The Admin app now shows its running build version in the sidebar and on a new `/about` page, alongside the API's reported version (read from `/health/ready`) with a match/mismatch indicator — useful for confirming a deploy landed both images in sync.
+- Admins can now publish content directly from Draft or Review, skipping Submit/Approve, via a confirmation dialog in the Admin UI (`PublishContentRequest.OverrideWorkflow`, requiring both the Admin role and explicit opt-in — existing callers see no behavior change unless they opt in).
+- Reject (Review → Draft) and Restore (Archived → Draft) buttons on the Admin content list — both existed in the API already but had no UI entry point.
+- The Content Editor's Lifecycle card now shows the same workflow action buttons (Submit/Approve/Reject/Publish/Archive/Restore) as the content list, so reviewing content no longer requires navigating back to the list.
+
+### Changed
+
+- The .NET SDK's `HealthClient.LiveAsync`/`ReadyAsync` (`client.Health`) now return a typed `HealthCheckResponse` (with `Status` and `Metadata.Version`/`Metadata.GeneratedAt`) instead of an untyped payload.
+
+### Fixed
+
+- Release promotion now also publishes the `:latest` Docker Hub tag alongside the version-numbered tag for stable (non-prerelease) releases. Previously only the versioned tag was pushed, leaving `:latest` stuck on an old release.
+- Content workflow buttons (Submit/Approve/Archive) in the Admin UI previously failed silently when clicked on an item in the wrong status. They're now disabled with a tooltip explaining why when not applicable, and any remaining server-side rejection shows an error toast instead of doing nothing.
+
 ## [0.3.0] - 2026-09-05
 
 ### Added

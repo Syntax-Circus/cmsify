@@ -1,0 +1,145 @@
+@if (ContentId.HasValue)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Publish content</h5>
+                    <button type="button" class="btn-close" @onclick="Close" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrWhiteSpace(publishError))
+                    {
+                        <div class="alert alert-danger">@publishError</div>
+                    }
+                    @if (publishWarnings.Count > 0)
+                    {
+                        <div class="alert alert-warning">
+                            @foreach (var warning in publishWarnings)
+                            {
+                                <div>@warning</div>
+                            }
+                        </div>
+                    }
+                    @if (NeedsOverrideConfirmation)
+                    {
+                        <div class="alert alert-warning">
+                            <div>This will publish directly from <strong>@ContentStatus</strong>, skipping Submit/Approve.</div>
+                            <div class="form-check mt-2">
+                                <input id="overrideConfirmed" class="form-check-input" type="checkbox" @bind="overrideConfirmed" />
+                                <label class="form-check-label" for="overrideConfirmed">I understand, publish anyway</label>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Schedule publish at (UTC, optional)</label>
+                            <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="publishAtInput" />
+                        </div>
+                        <div class="form-check mb-3">
+                            <input id="boundedOverride" class="form-check-input" type="checkbox" @bind="boundedOverride" />
+                            <label class="form-check-label" for="boundedOverride">Publish as bounded override instead of default</label>
+                        </div>
+                        @if (boundedOverride)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label">Effective start (UTC)</label>
+                                <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="effectiveStartInput" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Effective end (UTC, exclusive)</label>
+                                <input class="form-control" placeholder="2026-12-26T00:00:00Z" @bind="effectiveEndInput" />
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" type="button" @onclick="Close">Cancel</button>
+                    <button class="btn btn-primary" type="button" disabled="@(NeedsOverrideConfirmation && !overrideConfirmed)" @onclick="PublishAsync">Publish</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public Guid? ContentId { get; set; }
+    [Parameter] public ContentStatus ContentStatus { get; set; }
+    [Parameter] public bool CanOverrideWorkflow { get; set; }
+    [Parameter, EditorRequired] public CmsifyClient Cmsify { get; set; } = default!;
+    [Parameter] public EventCallback OnClosed { get; set; }
+    [Parameter] public EventCallback<PublishContentResponse> OnPublished { get; set; }
+
+    private Guid? lastContentId;
+    private bool boundedOverride;
+    private string? publishAtInput;
+    private string? effectiveStartInput;
+    private string? effectiveEndInput;
+    private string? publishError;
+    private IReadOnlyList<string> publishWarnings = [];
+    private bool overrideConfirmed;
+
+    private bool NeedsOverrideConfirmation => CanOverrideWorkflow && ContentStatus is ContentStatus.Draft or ContentStatus.Review;
+
+    protected override void OnParametersSet()
+    {
+        if (ContentId == lastContentId)
+        {
+            return;
+        }
+
+        lastContentId = ContentId;
+        boundedOverride = false;
+        publishAtInput = null;
+        effectiveStartInput = null;
+        effectiveEndInput = null;
+        publishError = null;
+        publishWarnings = [];
+        overrideConfirmed = false;
+    }
+
+    private Task Close() => OnClosed.InvokeAsync();
+
+    private async Task PublishAsync()
+    {
+        if (!ContentId.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            var request = new PublishContentRequest(
+                NeedsOverrideConfirmation ? null : ParseUtcDateTimeOffset(publishAtInput),
+                !NeedsOverrideConfirmation && boundedOverride ? ParseUtcDateTimeOffset(effectiveStartInput) : null,
+                !NeedsOverrideConfirmation && boundedOverride ? ParseUtcDateTimeOffset(effectiveEndInput) : null,
+                NeedsOverrideConfirmation && overrideConfirmed);
+            var response = ApiResponse.Required(
+                await Cmsify.Content.PublishAsync(WorkspaceId, ContentId.Value, request),
+                "publishing content");
+            publishWarnings = response.Warnings;
+            await OnPublished.InvokeAsync(response);
+            if (publishWarnings.Count == 0)
+            {
+                await Close();
+            }
+        }
+        catch (Exception ex)
+        {
+            publishError = ex.Message;
+        }
+    }
+
+    private static DateTimeOffset? ParseUtcDateTimeOffset(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTime.SpecifyKind(DateTime.Parse(value), DateTimeKind.Utc);
+    }
+}

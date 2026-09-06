@@ -432,8 +432,15 @@ public sealed class ContentController : ControllerBase
         }
         var effectiveRange = effectiveRangeResult.Value!;
 
+        var allowOverride = (request?.OverrideWorkflow ?? false) && currentActor.Role >= UserRole.Admin;
+
         if (request?.PublishAt is not null)
         {
+            if (request.OverrideWorkflow == true)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "invalid-state-transition", "Invalid content state transition", "Workflow override is not supported for scheduled publication.");
+            }
+
             if (content.Status != ContentStatus.Approved)
             {
                 return this.Error(StatusCodes.Status422UnprocessableEntity, "invalid-state-transition", "Content must be approved before scheduling publication");
@@ -448,12 +455,12 @@ public sealed class ContentController : ControllerBase
             return Ok(new PublishContentResponse(await ToDetailResponseAsync(content.Id, ct: ct), []));
         }
 
-        if (!lifecycleService.CanTransition(content.Status, ContentStatus.Published))
+        if (!lifecycleService.CanTransition(content.Status, ContentStatus.Published, allowOverride))
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "invalid-state-transition", "Invalid content state transition", $"Content cannot transition from {content.Status} to {ContentStatus.Published}.");
         }
 
-        await lifecycleService.TransitionAsync(content, ContentStatus.Published, currentActor.UserId ?? Guid.Empty);
+        await lifecycleService.TransitionAsync(content, ContentStatus.Published, currentActor.UserId ?? Guid.Empty, allowOverride);
         content.PublishAt = null;
         content.PendingEffectiveStartAt = null;
         content.PendingEffectiveEndAt = null;

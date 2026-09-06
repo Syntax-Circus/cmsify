@@ -2,6 +2,8 @@
 @rendermode InteractiveServer
 @inject CmsifyClient Cmsify
 @inject NavigationManager Navigation
+@inject AuthState Auth
+@inject ToastState Toasts
 
 <div class="cms-page-head">
     <div><h1>Content</h1><div class="lead">Find, filter, and move content through the lifecycle.</div></div>
@@ -31,12 +33,22 @@
                 <td>@item.LocaleCode</td>
                 <td><LocalTimeDisplay Value="@item.UpdatedAt" /></td>
                 <td>
-                    <div class="d-flex gap-1">
+                    @{
+                        var submitState = ContentWorkflowActions.SubmitState(item.Status);
+                        var approveState = ContentWorkflowActions.ApproveState(item.Status);
+                        var rejectState = ContentWorkflowActions.RejectState(item.Status, CurrentRole);
+                        var publishState = ContentWorkflowActions.PublishState(item.Status, CurrentRole);
+                        var archiveState = ContentWorkflowActions.ArchiveState(item.Status);
+                        var restoreState = ContentWorkflowActions.RestoreState(item.Status, CurrentRole);
+                    }
+                    <div class="d-flex flex-wrap gap-1">
                         <a class="btn btn-primary btn-sm" href="/workspaces/@WorkspaceId/content/@item.Id">Edit</a>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, SubmitAction)">Submit</button>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ApproveAction)">Approve</button>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => OpenPublishDialog(item.Id)">Publish</button>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => TransitionAsync(item.Id, ArchiveAction)">Archive</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, SubmitAction)">Submit</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, ApproveAction)">Approve</button>
+                        <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(item.Id)">Reject</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(item)">Publish</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, ArchiveAction)">Archive</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(item.Id, RestoreAction)">Restore</button>
                     </div>
                 </td>
             </tr>
@@ -45,58 +57,9 @@
     </table>
 </div>
 
-@if (publishContentId.HasValue)
-{
-    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Publish content</h5>
-                    <button type="button" class="btn-close" @onclick="ClosePublishDialog" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    @if (!string.IsNullOrWhiteSpace(publishError))
-                    {
-                        <div class="alert alert-danger">@publishError</div>
-                    }
-                    @if (publishWarnings.Count > 0)
-                    {
-                        <div class="alert alert-warning">
-                            @foreach (var warning in publishWarnings)
-                            {
-                                <div>@warning</div>
-                            }
-                        </div>
-                    }
-                    <div class="mb-3">
-                        <label class="form-label">Schedule publish at (UTC, optional)</label>
-                        <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="publishAtInput" />
-                    </div>
-                    <div class="form-check mb-3">
-                        <input id="boundedOverride" class="form-check-input" type="checkbox" @bind="boundedOverride" />
-                        <label class="form-check-label" for="boundedOverride">Publish as bounded override instead of default</label>
-                    </div>
-                    @if (boundedOverride)
-                    {
-                        <div class="mb-3">
-                            <label class="form-label">Effective start (UTC)</label>
-                            <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="effectiveStartInput" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Effective end (UTC, exclusive)</label>
-                            <input class="form-control" placeholder="2026-12-26T00:00:00Z" @bind="effectiveEndInput" />
-                        </div>
-                    }
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-outline-secondary" type="button" @onclick="ClosePublishDialog">Cancel</button>
-                    <button class="btn btn-primary" type="button" @onclick="PublishAsync">Publish</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="modal-backdrop show"></div>
-}
+<PublishContentDialog WorkspaceId="@WorkspaceId" ContentId="@publishContentId" ContentStatus="@publishContentStatus"
+                      CanOverrideWorkflow="@(CurrentRole >= UserRole.Admin)" Cmsify="@Cmsify"
+                      OnClosed="ClosePublishDialog" OnPublished="OnPublishedAsync" />
 
 @code {
     private ContentClient Content => Cmsify.Content;
@@ -111,13 +74,11 @@
     private const string SubmitAction = "submit";
     private const string ApproveAction = "approve";
     private const string ArchiveAction = "archive";
+    private const string RestoreAction = "restore";
     private Guid? publishContentId;
-    private bool boundedOverride;
-    private string? publishAtInput;
-    private string? effectiveStartInput;
-    private string? effectiveEndInput;
-    private string? publishError;
-    private IReadOnlyList<string> publishWarnings = [];
+    private ContentStatus publishContentStatus;
+
+    private UserRole CurrentRole => Enum.TryParse<UserRole>(Auth.User?.Role, ignoreCase: true, out var role) ? role : UserRole.Reader;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -130,61 +91,51 @@
 
     private void NewContent() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/new");
 
-    private async Task TransitionAsync(Guid id, string action)
+    private async Task RunTransitionAsync(Guid id, string action)
     {
-        await Content.TransitionAsync(WorkspaceId, id, action);
-        await LoadAsync();
+        try
+        {
+            await Content.TransitionAsync(WorkspaceId, id, action);
+            Toasts.Success("Content updated.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Danger(ex.Message);
+        }
+        finally
+        {
+            await LoadAsync();
+        }
     }
 
-    private void OpenPublishDialog(Guid id)
+    private async Task RunRejectAsync(Guid id)
     {
-        publishContentId = id;
-        boundedOverride = false;
-        publishAtInput = null;
-        effectiveStartInput = null;
-        effectiveEndInput = null;
-        publishError = null;
-        publishWarnings = [];
+        try
+        {
+            await Content.RejectAsync(WorkspaceId, id, new RejectContentRequest("Rejected from content list"));
+            Toasts.Success("Content updated.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Danger(ex.Message);
+        }
+        finally
+        {
+            await LoadAsync();
+        }
+    }
+
+    private void OpenPublishDialog(ContentItemSummaryResponse item)
+    {
+        publishContentId = item.Id;
+        publishContentStatus = item.Status;
     }
 
     private void ClosePublishDialog() => publishContentId = null;
 
-    private async Task PublishAsync()
+    private async Task OnPublishedAsync(PublishContentResponse response)
     {
-        if (!publishContentId.HasValue)
-        {
-            return;
-        }
-
-        try
-        {
-            var request = new PublishContentRequest(
-                ParseUtcDateTimeOffset(publishAtInput),
-                boundedOverride ? ParseUtcDateTimeOffset(effectiveStartInput) : null,
-                boundedOverride ? ParseUtcDateTimeOffset(effectiveEndInput) : null);
-            var response = ApiResponse.Required(
-                await Content.PublishAsync(WorkspaceId, publishContentId.Value, request),
-                "publishing content");
-            publishWarnings = response.Warnings;
-            await LoadAsync();
-            if (publishWarnings.Count == 0)
-            {
-                ClosePublishDialog();
-            }
-        }
-        catch (Exception ex)
-        {
-            publishError = ex.Message;
-        }
-    }
-
-    private static DateTimeOffset? ParseUtcDateTimeOffset(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return DateTime.SpecifyKind(DateTime.Parse(value), DateTimeKind.Utc);
+        Toasts.Success(response.Warnings.Count == 0 ? "Content published." : "Content published with warnings.");
+        await LoadAsync();
     }
 }

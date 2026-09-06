@@ -4277,6 +4277,7 @@ export interface components {
             effectiveStartAt?: string | null;
             /** Format: date-time */
             effectiveEndAt?: string | null;
+            overrideWorkflow?: boolean | null;
         };
         PublishContentResponse: {
             content: components["schemas"]["ContentItemDetailResponse"];
