@@ -1,0 +1,9 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<RichTextFieldEditor Value="@Value" ValueChanged="ValueChanged" Rows="6" />
+<pre class="cmsify-field-markdown-preview">@Value</pre>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+}
