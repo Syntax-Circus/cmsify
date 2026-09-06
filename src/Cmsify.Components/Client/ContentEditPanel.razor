@@ -135,10 +135,16 @@
                 continue;
             }
 
-            var pickList = await Client.PickLists.GetRevisionAsync(WorkspaceId, pickListId, revisionId);
-            if (pickList is not null)
+            try
             {
-                pickListsByRevisionId[revisionId] = pickList;
+                var pickList = await Client.PickLists.GetRevisionAsync(WorkspaceId, pickListId, revisionId);
+                if (pickList is not null)
+                {
+                    pickListsByRevisionId[revisionId] = pickList;
+                }
+            }
+            catch (CmsifyApiException)
+            {
             }
         }
     }
@@ -214,8 +220,21 @@
             {
                 foreach (var raw in value.ComponentValues)
                 {
-                    using var document = JsonDocument.Parse(raw);
-                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
+                    try
+                    {
+                        using var document = JsonDocument.Parse(raw);
+                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        {
+                            error = $"Component field '{field.Label}' must contain JSON objects.";
+                            return;
+                        }
+                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
+                    }
+                    catch (JsonException)
+                    {
+                        error = $"Component field '{field.Label}' contains invalid JSON.";
+                        return;
+                    }
                 }
                 continue;
             }

@@ -160,4 +160,103 @@ public sealed class ContentEditPanelTests : BunitContext
         saved.ShouldNotBeNull();
         saved!.Id.ShouldBe(contentId);
     }
+
+    [Fact]
+    public void SavingInvalidComponentFieldJsonSetsErrorInsteadOfThrowing()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var componentId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "block", "label": "Block", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": null, "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": "{{componentId}}" }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId));
+
+        cut.WaitForState(() => cut.FindAll("textarea").Count > 0);
+
+        cut.Find("textarea").Input("not valid json");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
+
+        cut.Find(".cmsify-form-error").TextContent.ShouldContain("invalid JSON");
+    }
+
+    [Fact]
+    public void LoadingTemplateSkipsPickListFieldWhenRevisionLookupFails()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var pickListId = Guid.NewGuid();
+        var revisionId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "color", "label": "Color", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "PickList", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": { "picklistId": "{{pickListId}}", "picklistRevisionId": "{{revisionId}}", "multiple": false },
+                            "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/picklists/{pickListId}/revisions/{revisionId}")
+            {
+                return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId));
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-field-warning").Count > 0);
+
+        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("no picklist bound");
+    }
 }
