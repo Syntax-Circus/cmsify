@@ -21,11 +21,13 @@ const definitions = {
   nuget: {
     documentName: `Cmsify NuGet SDK ${version}`,
     license: "MIT",
-    names: ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching"],
+    names: ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching", "SyntaxCircus.Cmsify.Components", "SyntaxCircus.Cmsify.Components.Theme"],
     inventoryNames: [
       ["SyntaxCircus.Cmsify.Contracts", "Cmsify.Contracts"],
       ["SyntaxCircus.Cmsify.Client"],
       ["SyntaxCircus.Cmsify.Client.DistributedCaching"],
+      ["SyntaxCircus.Cmsify.Components"],
+      ["SyntaxCircus.Cmsify.Components.Theme"],
     ],
     requireExactInventorySubjects: true,
     purl: (name) => `pkg:nuget/${name}@${version}`,

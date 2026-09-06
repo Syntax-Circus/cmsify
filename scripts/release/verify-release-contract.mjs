@@ -645,6 +645,8 @@ for (const project of [
   "src/Cmsify.Contracts/Cmsify.Contracts.csproj",
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj",
   "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj",
+  "src/Cmsify.Components/Cmsify.Components.csproj",
+  "src/Cmsify.Components.Theme/Cmsify.Components.Theme.csproj",
 ]) projectMetadata(project);
 
 const workflowPath = ".github/workflows/publish-cmsify.yml";
@@ -743,11 +745,12 @@ expect(/is_prerelease/i.test(workflow) && /npm_channel/i.test(workflow), "Releas
 expect(/npm pkg delete private[\s\S]*npm pkg set version=/s.test(workflow), "Release npm candidate must remove private rather than serializing it as a string.");
 expect(/npm pkg set version="\$VERSION" gitHead="\$SOURCE_SHA"[\s\S]*npm pack --pack-destination/s.test(workflow), "Release npm candidate gitHead must equal resolved SOURCE_SHA before its sole npm pack.");
 const nugetPackCommands = [...workflow.matchAll(/dotnet pack[^\n]+/g)].map((match) => match[0]);
-expect(nugetPackCommands.length === 3 && nugetPackCommands.every((command) => command.includes('-p:RepositoryCommit="$SOURCE_SHA"') && command.includes("-p:IncludeSymbols=false")), "All three NuGet candidates must bind RepositoryCommit to SOURCE_SHA and suppress symbol packages explicitly.");
+expect(nugetPackCommands.length === 5 && nugetPackCommands.every((command) => command.includes('-p:RepositoryCommit="$SOURCE_SHA"') && command.includes("-p:IncludeSymbols=false")), "All five NuGet candidates must bind RepositoryCommit to SOURCE_SHA and suppress symbol packages explicitly.");
 const prereleaseDependencyPackExceptions = nugetPackCommands.filter((command) => command.includes("-p:WarningsNotAsErrors=NU5104"));
-expect(prereleaseDependencyPackExceptions.length === 2
+expect(prereleaseDependencyPackExceptions.length === 3
   && prereleaseDependencyPackExceptions.some((command) => command.includes("sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj"))
-  && prereleaseDependencyPackExceptions.some((command) => command.includes("sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj")), "Only the .NET client candidates may retain NU5104 as a non-fatal warning for their exact reviewed SyntaxCircus.Http.Resilience prerelease dependency.");
+  && prereleaseDependencyPackExceptions.some((command) => command.includes("sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj"))
+  && prereleaseDependencyPackExceptions.some((command) => command.includes("src/Cmsify.Components/Cmsify.Components.csproj")), "Only the .NET client candidates and Cmsify.Components may retain NU5104 as a non-fatal warning for their exact reviewed SyntaxCircus.Http.Resilience prerelease dependency.");
 
 for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
   expect(/@[0-9a-f]{40}$/i.test(match[1]), `Release action must be pinned by immutable SHA: ${match[1]}`);
@@ -869,8 +872,8 @@ expect(/anchore\/sbom-action\/download-syft@[0-9a-f]{40}[\s\S]*syft-version:/s.t
 expect(/oci-archive:artifacts\/oci\/cmsify-api\.oci\.tar[\s\S]*oci-archive:artifacts\/oci\/cmsify-admin\.oci\.tar/s.test(workflow), "OCI SPDX generation must scan the exact candidate archives without depending on a mutable daemon tag.");
 expect(/SBOM_STAGING_ROOT:\s*\$\{\{ runner\.temp \}\}\/cmsify-sbom-inputs/.test(buildJob), "Package SBOM staging must use a run-owned temporary root outside artifacts.");
 expect(/NUGET_CONSUMER="\$SBOM_STAGING_ROOT\/nuget\/consumer"[\s\S]*NUGET_SOURCE="\$SBOM_STAGING_ROOT\/nuget\/candidate-source"[\s\S]*NUGET_CACHE="\$SBOM_STAGING_ROOT\/nuget\/packages"/s.test(buildJob), "NuGet SBOM inputs must use isolated consumer, candidate-source, and package-cache trees.");
-expect(/<add key="candidate" value="\$NUGET_SOURCE" \/>[\s\S]*<packageSource key="candidate">\s*<package pattern="SyntaxCircus\.Cmsify\.Contracts" \/>\s*<package pattern="SyntaxCircus\.Cmsify\.Client" \/>\s*<package pattern="SyntaxCircus\.Cmsify\.Client\.DistributedCaching" \/>\s*<\/packageSource>/s.test(buildJob), "NuGet SBOM restore must map all three candidate IDs to its isolated source.");
-expect(/for package in SyntaxCircus\.Cmsify\.Contracts SyntaxCircus\.Cmsify\.Client SyntaxCircus\.Cmsify\.Client\.DistributedCaching; do\s+candidate="\$GITHUB_WORKSPACE\/artifacts\/nuget\/\$package\.\$VERSION\.nupkg"\s+test -f "\$candidate"\s+cp "\$candidate" "\$NUGET_SOURCE\/"[\s\S]*find "\$NUGET_SOURCE"[^\n]*'\*\.nupkg'[^\n]*-eq 3/s.test(buildJob), "NuGet SBOM staging must consume all three exact candidate archives from the build output.");
+expect(/<add key="candidate" value="\$NUGET_SOURCE" \/>[\s\S]*<packageSource key="candidate">\s*<package pattern="SyntaxCircus\.Cmsify\.Contracts" \/>\s*<package pattern="SyntaxCircus\.Cmsify\.Client" \/>\s*<package pattern="SyntaxCircus\.Cmsify\.Client\.DistributedCaching" \/>\s*<package pattern="SyntaxCircus\.Cmsify\.Components" \/>\s*<package pattern="SyntaxCircus\.Cmsify\.Components\.Theme" \/>\s*<\/packageSource>/s.test(buildJob), "NuGet SBOM restore must map all five candidate IDs to its isolated source.");
+expect(/for package in SyntaxCircus\.Cmsify\.Contracts SyntaxCircus\.Cmsify\.Client SyntaxCircus\.Cmsify\.Client\.DistributedCaching SyntaxCircus\.Cmsify\.Components SyntaxCircus\.Cmsify\.Components\.Theme; do\s+candidate="\$GITHUB_WORKSPACE\/artifacts\/nuget\/\$package\.\$VERSION\.nupkg"\s+test -f "\$candidate"\s+cp "\$candidate" "\$NUGET_SOURCE\/"[\s\S]*find "\$NUGET_SOURCE"[^\n]*'\*\.nupkg'[^\n]*-eq 5/s.test(buildJob), "NuGet SBOM staging must consume all five exact candidate archives from the build output.");
 expect(/dotnet restore --configfile "\$NUGET_CONSUMER\/NuGet\.Config" --packages "\$NUGET_CACHE" --no-http-cache/.test(buildJob), "NuGet SBOM restore must resolve the candidate dependency closure into its isolated package cache.");
 expect(/NPM_CONSUMER="\$SBOM_STAGING_ROOT\/npm\/consumer"[\s\S]*TARBALL="\$GITHUB_WORKSPACE\/artifacts\/npm\/syntaxcircus-cmsify-client-\$VERSION\.tgz"[\s\S]*test -f "\$TARBALL"[\s\S]*cd "\$NPM_CONSUMER"[\s\S]*NPM_CONFIG_CACHE="\$SBOM_STAGING_ROOT\/npm-cache" npm install --ignore-scripts --no-audit --no-fund "\$TARBALL"/s.test(buildJob), "npm SBOM staging must install the exact scoped candidate archive filename into an isolated consumer and cache.");
 expect(/dir:"\$NUGET_CACHE" -o spdx-json=artifacts\/sbom\/cmsify-nuget\.spdx\.json[\s\S]*dir:"\$NPM_CONSUMER" -o spdx-json=artifacts\/sbom\/cmsify-npm\.spdx\.json/s.test(buildJob) && !/dir:artifacts\/(?:nuget|npm)\b/.test(buildJob), "Package SBOM generation must scan the populated restored and installed trees, never candidate archive directories.");
@@ -987,13 +990,13 @@ expect(/if:\s*always\(\)[\s\S]*actions\/upload-artifact@[0-9a-f]{40}[\s\S]*acces
 
 const dotnetConsumer = jobBody("dotnet-consumer");
 expect(/needs:\s*\[resolve, build\]/.test(dotnetConsumer) && /global-json-file:\s*source\/global\.json/.test(dotnetConsumer), "Clean .NET consumer must use the repository-pinned .NET 10 SDK and single build candidate.");
-expect(/LOCAL_SOURCE="\$CONSUMER_ROOT\/candidate-source"/.test(dotnetConsumer) && /find "\$LOCAL_SOURCE"[^\n]*'\*\.nupkg'[^\n]*wc -l[^\n]*-eq 3/.test(dotnetConsumer), "Clean .NET consumer must copy exactly three nupkg files into a run-owned local source.");
-for (const packageId of ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching"]) {
-  expect(dotnetConsumer.includes(`<package pattern=\"${packageId}\" />`), `Clean .NET consumer must map all three candidate packages to its local source, including ${packageId}.`);
+expect(/LOCAL_SOURCE="\$CONSUMER_ROOT\/candidate-source"/.test(dotnetConsumer) && /find "\$LOCAL_SOURCE"[^\n]*'\*\.nupkg'[^\n]*wc -l[^\n]*-eq 5/.test(dotnetConsumer), "Clean .NET consumer must copy exactly five nupkg files into a run-owned local source.");
+for (const packageId of ["SyntaxCircus.Cmsify.Contracts", "SyntaxCircus.Cmsify.Client", "SyntaxCircus.Cmsify.Client.DistributedCaching", "SyntaxCircus.Cmsify.Components", "SyntaxCircus.Cmsify.Components.Theme"]) {
+  expect(dotnetConsumer.includes(`<package pattern=\"${packageId}\" />`), `Clean .NET consumer must map all five candidate packages to its local source, including ${packageId}.`);
 }
-expect(/<packageSource key="candidate">[\s\S]*SyntaxCircus\.Cmsify\.Contracts[\s\S]*SyntaxCircus\.Cmsify\.Client[\s\S]*SyntaxCircus\.Cmsify\.Client\.DistributedCaching[\s\S]*<\/packageSource>/s.test(dotnetConsumer), "Clean .NET consumer must map all three Cmsify IDs only to the local source.");
+expect(/<packageSource key="candidate">[\s\S]*SyntaxCircus\.Cmsify\.Contracts[\s\S]*SyntaxCircus\.Cmsify\.Client[\s\S]*SyntaxCircus\.Cmsify\.Client\.DistributedCaching[\s\S]*SyntaxCircus\.Cmsify\.Components[\s\S]*SyntaxCircus\.Cmsify\.Components\.Theme[\s\S]*<\/packageSource>/s.test(dotnetConsumer), "Clean .NET consumer must map all five Cmsify IDs only to the local source.");
 const publicMapping = dotnetConsumer.match(/<packageSource key="nuget\.org">([\s\S]*?)<\/packageSource>/)?.[1] ?? "";
-expect(/SyntaxCircus\.Http\.Resilience/.test(publicMapping) && !/pattern="\*"|SyntaxCircus\.Cmsify/.test(publicMapping), "Clean .NET consumer public source must allow declared external dependencies but disable all three Cmsify package IDs.");
+expect(/SyntaxCircus\.Http\.Resilience/.test(publicMapping) && !/pattern="\*"|SyntaxCircus\.Cmsify/.test(publicMapping), "Clean .NET consumer public source must allow declared external dependencies but disable all five Cmsify package IDs.");
 expect(/dotnet add package "\$package" --version "\$VERSION" --no-restore/.test(dotnetConsumer) && /dotnet restore --configfile NuGet\.Config --packages "\$CONSUMER_ROOT\/package-cache" --no-http-cache/.test(dotnetConsumer) && /dotnet build --configuration Release --no-restore/.test(dotnetConsumer), "Clean .NET consumer must restore through its isolated mapping and build without a second restore.");
 expect(jobConditionRequiresSuccess(dotnetConsumer) && continueOnErrorIsDisabled(dotnetConsumer) && stepConditions(dotnetConsumer).every((condition) => condition === "success()"), "Clean .NET consumer must fail closed.");
 

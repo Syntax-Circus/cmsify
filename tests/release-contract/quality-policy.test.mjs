@@ -458,12 +458,12 @@ const expectedReleaseConsumerRun = `(cd artifacts && sha256sum --check SHA256SUM
 CONSUMER_ROOT="$RUNNER_TEMP/cmsify-dotnet-consumer"
 LOCAL_SOURCE="$CONSUMER_ROOT/candidate-source"
 mkdir -p "$LOCAL_SOURCE"
-for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching SyntaxCircus.Cmsify.Components SyntaxCircus.Cmsify.Components.Theme; do
   candidate="$GITHUB_WORKSPACE/artifacts/nuget/$package.$VERSION.nupkg"
   test -f "$candidate"
   cp "$candidate" "$LOCAL_SOURCE/"
 done
-test "$(find "$LOCAL_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 3
+test "$(find "$LOCAL_SOURCE" -maxdepth 1 -type f -name '*.nupkg' | wc -l)" -eq 5
 cd "$CONSUMER_ROOT"
 dotnet new console --framework net10.0 --no-restore
 cat > NuGet.Config <<EOF
@@ -479,6 +479,8 @@ cat > NuGet.Config <<EOF
       <package pattern="SyntaxCircus.Cmsify.Contracts" />
       <package pattern="SyntaxCircus.Cmsify.Client" />
       <package pattern="SyntaxCircus.Cmsify.Client.DistributedCaching" />
+      <package pattern="SyntaxCircus.Cmsify.Components" />
+      <package pattern="SyntaxCircus.Cmsify.Components.Theme" />
     </packageSource>
     <packageSource key="nuget.org">
       <package pattern="Microsoft.*" />
@@ -489,7 +491,7 @@ cat > NuGet.Config <<EOF
   </packageSourceMapping>
 </configuration>
 EOF
-for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching; do
+for package in SyntaxCircus.Cmsify.Contracts SyntaxCircus.Cmsify.Client SyntaxCircus.Cmsify.Client.DistributedCaching SyntaxCircus.Cmsify.Components SyntaxCircus.Cmsify.Components.Theme; do
   dotnet add package "$package" --version "$VERSION" --no-restore
 done
 dotnet restore --configfile NuGet.Config --packages "$CONSUMER_ROOT/package-cache" --no-http-cache
@@ -718,8 +720,8 @@ test("enables lock files and maintains one for every solution project", () => {
   assert.equal(
     directoryBuildProps.includes("<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>"),
     true);
-  assert.equal(projectPaths.length, 12);
-  assert.equal(lockFiles.length, 12);
+  assert.equal(projectPaths.length, 15);
+  assert.equal(lockFiles.length, 15);
   assert.deepEqual(lockFiles.sort(), expectedLockFiles.sort());
 });
 
@@ -782,6 +784,7 @@ test("treats Release warnings as errors without broadening suppression policy", 
     "sdk/dotnet/src/SyntaxCircus.Cmsify.Client.DistributedCaching/SyntaxCircus.Cmsify.Client.DistributedCaching.csproj:$(NoWarn);1591",
     "sdk/dotnet/src/SyntaxCircus.Cmsify.Client/SyntaxCircus.Cmsify.Client.csproj:$(NoWarn);1591",
     "src/Cmsify.Api/Cmsify.Api.csproj:$(NoWarn);1591",
+    "src/Cmsify.Components/Cmsify.Components.csproj:$(NoWarn);1591",
     "src/Cmsify.Contracts/Cmsify.Contracts.csproj:$(NoWarn);1591",
   ]);
   for (const { attributes, filePath } of noWarnEntries) {

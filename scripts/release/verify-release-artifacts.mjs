@@ -23,6 +23,8 @@ const EXPECTED_NUGET = [
   "SyntaxCircus.Cmsify.Contracts",
   "SyntaxCircus.Cmsify.Client",
   "SyntaxCircus.Cmsify.Client.DistributedCaching",
+  "SyntaxCircus.Cmsify.Components",
+  "SyntaxCircus.Cmsify.Components.Theme",
 ];
 const EXPECTED_NPM_MEMBERS = new Set([
   "package/LICENSE",
