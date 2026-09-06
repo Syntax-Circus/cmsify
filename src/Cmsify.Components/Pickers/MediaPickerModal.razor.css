@@ -1,7 +1,7 @@
 .cmsify-picker-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--cmsify-color-overlay, rgba(0, 0, 0, 0.5));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -9,7 +9,7 @@
 }
 
 .cmsify-picker-dialog {
-    background: Canvas;
+    background: var(--cmsify-color-surface, Canvas);
     color: var(--cmsify-color-text, inherit);
     border-radius: var(--cmsify-radius, 0.375rem);
     width: min(720px, 90vw);
