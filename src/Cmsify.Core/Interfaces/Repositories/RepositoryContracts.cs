@@ -224,7 +224,7 @@ public sealed record ClaimedWebhookOutboxEventDto(
     Guid LeaseToken,
     bool WasReclaimed = false);
 
-public sealed record ScheduledContentClaimDto(Guid ContentItemId, string LeaseOwner, Guid LeaseToken, bool WasReclaimed = false);
+public sealed record ScheduledContentClaimDto(Guid ContentVersionId, string LeaseOwner, Guid LeaseToken, bool WasReclaimed = false);
 
 public sealed record WebhookRetentionCleanupResult(int ProcessedOutboxEventsDeleted, int DeliveredLogsDeleted);
 
