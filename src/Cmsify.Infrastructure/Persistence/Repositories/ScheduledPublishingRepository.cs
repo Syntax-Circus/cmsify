@@ -79,7 +79,9 @@ public sealed class ScheduledPublishingRepository(
 
         var publishResult = await publishingService.PublishAsync(version, actorUserId: null, ct);
         webhookOutbox.Enqueue(
-            "content.published",
+            // Same event type the API-triggered publish path emits, so subscribers see one event
+            // regardless of whether a publication was manual or scheduled.
+            "content.version_published",
             version.WorkspaceId,
             version.ContentItemId,
             JsonSerializer.SerializeToElement(new

@@ -424,7 +424,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             {
                 WebhookEndpointId = endpoint.Id,
                 WebhookEventId = eventId,
-                EventType = "content.published",
+                EventType = "content.version_published",
                 Payload = JsonSerializer.SerializeToElement(new { contentItemId = Guid.CreateVersion7() }),
                 AttemptCount = 10,
                 LastError = "upstream returned 503",
@@ -458,7 +458,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             name = "Revalidator",
             url = "https://8.8.8.8/revalidate",
             secret = "plain-secret",
-            events = new[] { "content.published" }
+            events = new[] { "content.version_published" }
         }, cancellationToken: TestContext.Current.CancellationToken);
         createResponse.EnsureSuccessStatusCode();
         var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
@@ -474,7 +474,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             dbContext.WebhookDeliveryLogs.Add(new WebhookDeliveryLog
             {
                 WebhookEndpointId = endpointId,
-                EventType = "content.published",
+                EventType = "content.version_published",
                 Payload = JsonSerializer.SerializeToElement(new { contentItemId = Guid.CreateVersion7() }),
                 AttemptCount = 3,
                 IsDelivered = false,
@@ -610,10 +610,47 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         {
             name = "Unsafe",
             url = "https://127.0.0.1/hooks",
-            events = new[] { "content.published" }
+            events = new[] { "content.version_published" }
         }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("content.version_created", true)]
+    [InlineData("content.version_updated", true)]
+    [InlineData("content.version_deleted", true)]
+    [InlineData("content.version_status_changed", true)]
+    [InlineData("content.version_published", true)]
+    [InlineData("content.version_template_upgraded", true)]
+    [InlineData("content.created", true)]
+    // Retired names that nothing emits any more, so nothing should be able to subscribe to them.
+    [InlineData("content.published", false)]
+    [InlineData("content.status_changed", false)]
+    [InlineData("content.archived", false)]
+    public async Task WebhookSubscriptions_AcceptExactlyTheEventTypesTheApiEmits(string eventType, bool expectAccepted)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var seed = await SeedApiClientAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+
+        var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/webhooks", new
+        {
+            name = $"Subscriber {eventType}",
+            url = "https://8.8.8.8/hooks",
+            secret = "plain-secret",
+            events = new[] { eventType }
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        if (expectAccepted)
+        {
+            Assert.True(response.IsSuccessStatusCode, $"Expected '{eventType}' to be subscribable but got {response.StatusCode}.");
+        }
+        else
+        {
+            Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        }
     }
 
     [Fact]
