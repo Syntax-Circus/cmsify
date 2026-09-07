@@ -18,28 +18,40 @@
             <div class="small text-muted">@string.Join(", ", contentItem.Tags)</div>
         </TitleTemplate>
         <StatusTemplate Context="contentItem">
-            <StatusBadge Status="@(contentItem.CurrentlyServingVersion?.Status ?? ContentStatus.Draft)" />
+            @if (contentItem.CurrentlyServingVersion is { } servingStatus)
+            {
+                <StatusBadge Status="@servingStatus.Status" />
+            }
+            else
+            {
+                <span class="text-muted" title="No currently-serving version — open the editor to see this item's exact status">—</span>
+            }
         </StatusTemplate>
         <UpdatedTemplate Context="contentItem">
             <LocalTimeDisplay Value="@contentItem.UpdatedAt" />
         </UpdatedTemplate>
         <RowActions Context="contentItem">
-            @{
-                var rowVersionStatus = contentItem.CurrentlyServingVersion?.Status ?? ContentStatus.Draft;
-                var rowVersionNumber = contentItem.CurrentlyServingVersion?.VersionNumber ?? 1;
+            @if (contentItem.CurrentlyServingVersion is { } serving)
+            {
+                var rowVersionStatus = serving.Status;
+                var rowVersionNumber = serving.VersionNumber;
                 var submitState = ContentWorkflowActions.SubmitState(rowVersionStatus);
                 var approveState = ContentWorkflowActions.ApproveState(rowVersionStatus);
                 var rejectState = ContentWorkflowActions.RejectState(rowVersionStatus, CurrentRole);
                 var publishState = ContentWorkflowActions.PublishState(rowVersionStatus, CurrentRole);
                 var archiveState = ContentWorkflowActions.ArchiveState(rowVersionStatus);
                 var restoreState = ContentWorkflowActions.RestoreState(rowVersionStatus, CurrentRole);
+                <button class="btn btn-outline-info btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, SubmitAction)">Submit</button>
+                <button class="btn btn-outline-success btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, ApproveAction)">Approve</button>
+                <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(contentItem.Id, rowVersionNumber)">Reject</button>
+                <button class="btn btn-success btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(contentItem, rowVersionNumber, rowVersionStatus)">Publish</button>
+                <button class="btn btn-outline-danger btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, ArchiveAction)">Archive</button>
+                <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, RestoreAction)">Restore</button>
             }
-            <button class="btn btn-outline-info btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, SubmitAction)">Submit</button>
-            <button class="btn btn-outline-success btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, ApproveAction)">Approve</button>
-            <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(contentItem.Id, rowVersionNumber)">Reject</button>
-            <button class="btn btn-success btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(contentItem, rowVersionNumber, rowVersionStatus)">Publish</button>
-            <button class="btn btn-outline-danger btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, ArchiveAction)">Archive</button>
-            <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, RestoreAction)">Restore</button>
+            else
+            {
+                <a class="btn btn-outline-secondary btn-sm" href="/workspaces/@WorkspaceId/content/@contentItem.Id">Open editor to manage</a>
+            }
         </RowActions>
     </ContentListPanel>
 </div>
