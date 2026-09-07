@@ -57,7 +57,7 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
                 .FromSql($"SELECT * FROM content_versions WHERE tags @> {tags}")
                 .AsNoTracking();
         candidates = candidates
-            .Where(version => version.WorkspaceId == workspaceId && version.Status == ContentVersionStatus.Published)
+            .Where(version => version.WorkspaceId == workspaceId && version.Status == ContentStatus.Published)
             .Where(version =>
                 (version.EffectiveStartAt == null && version.EffectiveEndAt == null)
                 || (version.EffectiveStartAt <= asOf && asOf < version.EffectiveEndAt))
@@ -164,7 +164,7 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
                 row.Version.LocaleCode,
                 row.Version.TranslationGroupId,
                 row.Version.Tags,
-                row.Version.PublishedAt))
+                row.Version.PublishedAt.GetValueOrDefault()))
             .ToListAsync(ct);
         var items = projections
             .Select(row => new ResolvedContentListRow(
