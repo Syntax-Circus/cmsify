@@ -136,6 +136,17 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     cfv.bool_value, cfv.media_asset_id, cfv.file_asset_id, cfv.child_content_item_id, cfv.json_value
                 FROM content_field_values cfv
                 JOIN backfill_version_map m ON m.content_item_id = cfv.content_item_id;
+
+                -- content_versions rows that already existed before this migration got created_at /
+                -- updated_at from the columns' DateTimeOffset.MinValue default (which Npgsql stores
+                -- as '-infinity'); the backfill INSERT above only sets them on rows it materialises.
+                -- Seed them from the row's own publication time where there is one, and from the
+                -- migration time otherwise. The <= comparison covers both '-infinity' and a literal
+                -- '0001-01-01' should the default ever be stored that way instead.
+                UPDATE content_versions
+                SET created_at = COALESCE(published_at, CURRENT_TIMESTAMP),
+                    updated_at = COALESCE(published_at, CURRENT_TIMESTAMP)
+                WHERE created_at <= TIMESTAMPTZ '0001-01-01 00:00:00+00';
                 """);
 
             migrationBuilder.DropTable(
