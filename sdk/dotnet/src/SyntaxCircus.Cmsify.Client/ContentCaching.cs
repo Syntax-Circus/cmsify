@@ -74,7 +74,7 @@ public interface ICachedCmsifyContentClient
     Task<PagedResponse<ContentItemSummaryResponse>?> ListAsync(Guid workspaceId, ContentListQuery? query = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default);
     IAsyncEnumerable<ContentItemSummaryResponse> ListAllAsync(Guid workspaceId, ContentListQuery? query = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default);
     Task<ContentItemDetailResponse?> GetAsync(Guid workspaceId, Guid id, bool resolve = false, DateTimeOffset? asOf = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default);
-    Task<ContentItemDetailResponse?> BySlugAsync(Guid workspaceId, string slug, DateTimeOffset? asOf = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default);
+    Task<ContentVersionDetailResponse?> BySlugAsync(Guid workspaceId, string slug, DateTimeOffset? asOf = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Backend contract implemented by the in-memory client package and distributed add-on package.</summary>
@@ -114,7 +114,7 @@ public sealed class CachedCmsifyContentClient(CmsifyClient client, ICmsifyConten
     public Task<ContentItemDetailResponse?> GetAsync(Guid workspaceId, Guid id, bool resolve = false, DateTimeOffset? asOf = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default) =>
         GetOrCreateAsync(CmsifyContentCacheKeys.Get(workspaceId, id, resolve, asOf), cacheOptions, ct => client.Content.GetAsync(workspaceId, id, resolve, asOf, ct), cancellationToken);
 
-    public Task<ContentItemDetailResponse?> BySlugAsync(Guid workspaceId, string slug, DateTimeOffset? asOf = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default) =>
+    public Task<ContentVersionDetailResponse?> BySlugAsync(Guid workspaceId, string slug, DateTimeOffset? asOf = null, CmsifyContentCacheEntryOptions? cacheOptions = null, CancellationToken cancellationToken = default) =>
         GetOrCreateAsync(CmsifyContentCacheKeys.BySlug(workspaceId, slug, asOf), cacheOptions, ct => client.Content.BySlugAsync(workspaceId, slug, asOf, ct), cancellationToken);
 
     public async Task RemoveAsync(CmsifyContentCacheKey key, CancellationToken cancellationToken = default)
