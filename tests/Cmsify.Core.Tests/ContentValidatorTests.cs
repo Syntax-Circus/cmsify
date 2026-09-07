@@ -20,9 +20,9 @@ public sealed class ContentValidatorTests
             PrimitiveType = PrimitiveType.Text
         });
 
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
 
-        var result = new ContentValidator().Validate(item, version);
+        var result = new ContentValidator().Validate(contentVersion, version);
 
         Assert.False(result.IsValid);
     }
@@ -40,11 +40,11 @@ public sealed class ContentValidatorTests
         };
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(field);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "Ada" });
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 1, ValueKind = ValueKind.Text, TextValue = "Grace" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "Ada" });
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 1, ValueKind = ValueKind.Text, TextValue = "Grace" });
 
-        var result = new ContentValidator().Validate(item, version);
+        var result = new ContentValidator().Validate(contentVersion, version);
 
         Assert.False(result.IsValid);
     }
@@ -63,10 +63,10 @@ public sealed class ContentValidatorTests
         };
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(field);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "Hello" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "Hello" });
 
-        var result = new ContentValidator().Validate(item, version);
+        var result = new ContentValidator().Validate(contentVersion, version);
 
         Assert.True(result.IsValid);
     }
@@ -83,10 +83,10 @@ public sealed class ContentValidatorTests
         };
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(field);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "true" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "true" });
 
-        var result = new ContentValidator().Validate(item, version);
+        var result = new ContentValidator().Validate(contentVersion, version);
 
         Assert.False(result.IsValid);
     }
@@ -104,10 +104,10 @@ public sealed class ContentValidatorTests
         };
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(field);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "{not json}" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "{not json}" });
 
-        var result = new ContentValidator().Validate(item, version);
+        var result = new ContentValidator().Validate(contentVersion, version);
 
         Assert.False(result.IsValid);
     }
@@ -125,10 +125,10 @@ public sealed class ContentValidatorTests
         };
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(field);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "{\"ok\":true}" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "{\"ok\":true}" });
 
-        var result = new ContentValidator().Validate(item, version);
+        var result = new ContentValidator().Validate(contentVersion, version);
 
         Assert.True(result.IsValid);
     }
@@ -146,10 +146,10 @@ public sealed class ContentValidatorTests
         };
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(field);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "not valid json" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Text, TextValue = "not valid json" });
 
-        var result = new ContentValidator().Validate(item, version);
+        var result = new ContentValidator().Validate(contentVersion, version);
 
         Assert.True(result.IsValid);
     }

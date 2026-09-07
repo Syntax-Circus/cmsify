@@ -19,32 +19,33 @@ public sealed class ScheduledPublishingRepository(
         ValidateClaimArguments(workerId, leaseDuration, limit);
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
         var ids = await dbContext.Database.SqlQuery<Guid>($"""
-            SELECT id AS "Value" FROM content_items
-            WHERE status = 'Approved' AND publish_at <= {now} AND NOT is_deleted
+            SELECT id AS "Value" FROM content_versions
+            WHERE status = 'Approved' AND publish_at <= {now}
+              AND EXISTS (SELECT 1 FROM content_items ci WHERE ci.id = content_versions.content_item_id AND NOT ci.is_deleted)
               AND (publish_lease_expires_at IS NULL OR publish_lease_expires_at <= {now})
             ORDER BY publish_at, id
             FOR UPDATE SKIP LOCKED
             LIMIT {limit}
             """).ToListAsync(ct);
-        var items = await dbContext.ContentItems.Where(item => ids.Contains(item.Id)).ToListAsync(ct);
+        var versions = await dbContext.ContentVersions.Where(version => ids.Contains(version.Id)).ToListAsync(ct);
 
         var reclaimed = new Dictionary<Guid, bool>();
-        foreach (var item in items)
+        foreach (var version in versions)
         {
-            reclaimed[item.Id] = item.PublishLeaseExpiresAt.HasValue;
-            item.PublishLeaseOwner = workerId;
-            item.PublishLeaseToken = Guid.CreateVersion7();
-            item.PublishLeaseExpiresAt = now.Add(leaseDuration);
+            reclaimed[version.Id] = version.PublishLeaseExpiresAt.HasValue;
+            version.PublishLeaseOwner = workerId;
+            version.PublishLeaseToken = Guid.CreateVersion7();
+            version.PublishLeaseExpiresAt = now.Add(leaseDuration);
         }
 
         await dbContext.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        var claims = items.Select(item => new ScheduledContentClaimDto(item.Id, item.PublishLeaseOwner!, item.PublishLeaseToken!.Value, reclaimed[item.Id])).ToArray();
+        var claims = versions.Select(version => new ScheduledContentClaimDto(version.Id, version.PublishLeaseOwner!, version.PublishLeaseToken!.Value, reclaimed[version.Id])).ToArray();
         foreach (var claim in claims)
         {
             CmsifyOperationalMetrics.RecordScheduledClaim(claim.WasReclaimed);
         }
-        CmsifyOperationalMetrics.ReportDueScheduledDepth(await dbContext.ContentItems.CountAsync(item => item.Status == ContentStatus.Approved && !item.IsDeleted && item.PublishAt <= now, ct));
+        CmsifyOperationalMetrics.ReportDueScheduledDepth(await dbContext.ContentVersions.CountAsync(version => version.Status == ContentStatus.Approved && version.PublishAt <= now, ct));
         return claims;
     }
 
@@ -52,8 +53,8 @@ public sealed class ScheduledPublishingRepository(
     {
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
         var claimedId = await dbContext.Database.SqlQuery<Guid>($"""
-            SELECT id AS "Value" FROM content_items
-            WHERE id = {claim.ContentItemId} AND status = 'Approved' AND publish_at <= {now} AND NOT is_deleted
+            SELECT id AS "Value" FROM content_versions
+            WHERE id = {claim.ContentVersionId} AND status = 'Approved' AND publish_at <= {now}
               AND publish_lease_owner = {claim.LeaseOwner} AND publish_lease_token = {claim.LeaseToken}
               AND publish_lease_expires_at > {now}
             FOR UPDATE
@@ -64,39 +65,33 @@ public sealed class ScheduledPublishingRepository(
             return false;
         }
 
-        var content = await dbContext.ContentItems
-            .Include(item => item.FieldValues)
-            .Include(item => item.Tags)
-            .FirstOrDefaultAsync(item => item.Id == claimedId, ct);
-        if (content is null)
+        var version = await dbContext.ContentVersions.FirstOrDefaultAsync(candidate => candidate.Id == claimedId, ct);
+        if (version is null)
         {
             await transaction.RollbackAsync(ct);
             return false;
         }
 
-        var range = new ContentEffectiveRange(content.PendingEffectiveStartAt, content.PendingEffectiveEndAt);
-        content.Status = ContentStatus.Published;
-        content.PublishedAt ??= now;
-        content.UpdatedAt = now;
-        content.PublishAt = null;
-        content.PendingEffectiveStartAt = null;
-        content.PendingEffectiveEndAt = null;
-        content.PublishLeaseOwner = null;
-        content.PublishLeaseToken = null;
-        content.PublishLeaseExpiresAt = null;
+        version.PublishAt = null;
+        version.PublishLeaseOwner = null;
+        version.PublishLeaseToken = null;
+        version.PublishLeaseExpiresAt = null;
 
-        var snapshot = await publishingService.PublishSnapshotAsync(content, range, actorUserId: null, ct: ct);
-        snapshot.Version.PublishedAt = now;
+        var publishResult = await publishingService.PublishAsync(version, actorUserId: null, ct);
         webhookOutbox.Enqueue(
-            "content.published",
-            content.WorkspaceId,
-            content.Id,
+            // Same event type the API-triggered publish path emits, so subscribers see one event
+            // regardless of whether a publication was manual or scheduled.
+            "content.version_published",
+            version.WorkspaceId,
+            version.ContentItemId,
             JsonSerializer.SerializeToElement(new
             {
-                contentItemId = content.Id,
-                workspaceId = content.WorkspaceId,
-                templateVersionId = content.TemplateVersionId,
-                publishedAt = content.PublishedAt
+                contentItemId = version.ContentItemId,
+                contentVersionId = version.Id,
+                versionNumber = version.VersionNumber,
+                workspaceId = version.WorkspaceId,
+                templateVersionId = version.TemplateVersionId,
+                publishedAt = publishResult.Version.PublishedAt
             }),
             now);
         await dbContext.SaveChangesAsync(ct);

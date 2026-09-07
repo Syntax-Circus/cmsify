@@ -231,10 +231,10 @@ public sealed class MediaController : ControllerBase
             return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
         }
 
-        var referencedBy = await dbContext.ContentFieldValues.AsNoTracking()
+        var referencedBy = await dbContext.ContentVersionFieldValues.AsNoTracking()
             .Where(value => value.MediaAssetId == id || value.FileAssetId == id)
-            .Where(value => dbContext.ContentItems.Any(content => content.Id == value.ContentItemId && !content.IsDeleted))
-            .Select(value => value.ContentItemId)
+            .Join(dbContext.ContentVersions.AsNoTracking(), value => value.ContentVersionId, version => version.Id, (value, version) => version.ContentItemId)
+            .Where(contentItemId => dbContext.ContentItems.Any(content => content.Id == contentItemId && !content.IsDeleted))
             .Distinct()
             .ToListAsync(ct);
         if (referencedBy.Count > 0)

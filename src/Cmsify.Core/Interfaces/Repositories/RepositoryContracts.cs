@@ -78,79 +78,6 @@ public sealed record TemplateFieldInput(
 
 public sealed record TemplateFieldAllowedTypeInput(PrimitiveType? PrimitiveType, Guid? AllowedTemplateId);
 
-public sealed record ContentItemDto(
-    Guid Id,
-    Guid WorkspaceId,
-    Guid TemplateVersionId,
-    ContentStatus Status,
-    string? Slug,
-    string? LocaleCode,
-    Guid? TranslationGroupId,
-    DateTimeOffset? PublishAt,
-    DateTimeOffset? PublishedAt,
-    DateTimeOffset? ArchivedAt,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
-
-public sealed record ContentFieldValueDto(
-    Guid Id,
-    Guid ContentItemId,
-    Guid FieldId,
-    int Order,
-    ValueKind ValueKind,
-    string? TextValue,
-    bool? BoolValue,
-    Guid? MediaAssetId,
-    Guid? FileAssetId,
-    Guid? ChildContentItemId,
-    JsonElement? JsonValue);
-
-public sealed record CreateContentItemCommand(
-    Guid WorkspaceId,
-    Guid TemplateVersionId,
-    string? Slug,
-    string? LocaleCode,
-    Guid? TranslationGroupId,
-    DateTimeOffset? PublishAt,
-    IReadOnlyList<ContentFieldValueInput> FieldValues,
-    IReadOnlyList<Guid> TagIds);
-
-public sealed record UpdateContentItemCommand(
-    Guid Id,
-    string? Slug,
-    string? LocaleCode,
-    Guid? TranslationGroupId,
-    DateTimeOffset? PublishAt,
-    IReadOnlyList<ContentFieldValueInput> FieldValues,
-    IReadOnlyList<Guid> TagIds);
-
-public sealed record ContentFieldValueInput(
-    Guid FieldId,
-    int Order,
-    ValueKind ValueKind,
-    string? TextValue,
-    bool? BoolValue,
-    Guid? MediaAssetId,
-    Guid? FileAssetId,
-    Guid? ChildContentItemId,
-    JsonElement? JsonValue);
-
-public sealed record ContentQuery(
-    Guid? WorkspaceId,
-    Guid? TemplateId,
-    ContentStatus? Status,
-    string? LocaleCode,
-    string? Slug,
-    IReadOnlyList<string> Tags,
-    DateTimeOffset? CreatedFrom,
-    DateTimeOffset? CreatedTo,
-    DateTimeOffset? PublishedFrom,
-    DateTimeOffset? PublishedTo,
-    string? Search,
-    string? SortBy,
-    bool SortDescending,
-    PageRequest Page);
-
 public sealed record MediaAssetDto(Guid Id, Guid WorkspaceId, string FileName, string MimeType, long SizeBytes, string StorageKey, string StorageProvider, string? AltText);
 
 public sealed record CreateMediaAssetCommand(Guid WorkspaceId, string FileName, string MimeType, long SizeBytes, string StorageKey, string StorageProvider, string? AltText);
@@ -224,7 +151,7 @@ public sealed record ClaimedWebhookOutboxEventDto(
     Guid LeaseToken,
     bool WasReclaimed = false);
 
-public sealed record ScheduledContentClaimDto(Guid ContentItemId, string LeaseOwner, Guid LeaseToken, bool WasReclaimed = false);
+public sealed record ScheduledContentClaimDto(Guid ContentVersionId, string LeaseOwner, Guid LeaseToken, bool WasReclaimed = false);
 
 public sealed record WebhookRetentionCleanupResult(int ProcessedOutboxEventsDeleted, int DeliveredLogsDeleted);
 

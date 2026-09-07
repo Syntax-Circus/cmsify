@@ -69,13 +69,6 @@ internal static class ContractMappings
         _ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
     };
 
-    public static SyntaxCircus.Cmsify.Contracts.ContentVersionStatus ToContract(this Cmsify.Core.Domain.Enums.ContentVersionStatus value) => value switch
-    {
-        Cmsify.Core.Domain.Enums.ContentVersionStatus.Published => SyntaxCircus.Cmsify.Contracts.ContentVersionStatus.Published,
-        Cmsify.Core.Domain.Enums.ContentVersionStatus.Retired => SyntaxCircus.Cmsify.Contracts.ContentVersionStatus.Retired,
-        _ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
-    };
-
     public static Cmsify.Core.Domain.Enums.AuditAction ToCore(this SyntaxCircus.Cmsify.Contracts.AuditAction value) => value switch
     {
         SyntaxCircus.Cmsify.Contracts.AuditAction.Created => Cmsify.Core.Domain.Enums.AuditAction.Created,

@@ -90,30 +90,6 @@ public sealed class SaveTemplateVersionStructureCommandValidator : AbstractValid
     }
 }
 
-public sealed class CreateContentItemCommandValidator : AbstractValidator<CreateContentItemCommand>
-{
-    public CreateContentItemCommandValidator()
-    {
-        RuleFor(command => command.WorkspaceId).NotEmpty();
-        RuleFor(command => command.TemplateVersionId).NotEmpty();
-        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage).When(command => command.Slug is not null);
-        RuleForEach(command => command.FieldValues).ChildRules(value =>
-        {
-            value.RuleFor(fieldValue => fieldValue.FieldId).NotEmpty();
-            value.RuleFor(fieldValue => fieldValue.Order).GreaterThanOrEqualTo(0);
-        });
-    }
-}
-
-public sealed class UpdateContentItemCommandValidator : AbstractValidator<UpdateContentItemCommand>
-{
-    public UpdateContentItemCommandValidator()
-    {
-        RuleFor(command => command.Id).NotEmpty();
-        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage).When(command => command.Slug is not null);
-    }
-}
-
 public sealed class CreateMediaAssetCommandValidator : AbstractValidator<CreateMediaAssetCommand>
 {
     public CreateMediaAssetCommandValidator()

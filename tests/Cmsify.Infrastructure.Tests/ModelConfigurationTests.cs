@@ -23,7 +23,8 @@ public sealed partial class ModelConfigurationTests
             typeof(TemplateField),
             typeof(TemplateFieldAllowedType),
             typeof(ContentItem),
-            typeof(ContentFieldValue),
+            typeof(ContentVersion),
+            typeof(ContentVersionFieldValue),
             typeof(MediaAsset),
             typeof(MediaDeletionIntent),
             typeof(MediaReconciliationCheckpoint),
@@ -111,6 +112,19 @@ public sealed partial class ModelConfigurationTests
     }
 
     [Fact]
+    public void ContentVersion_HasXminConcurrencyToken()
+    {
+        // ContentVersion is not soft-deletable (so it has no query filter), but it is a mutable
+        // aggregate edited directly by the version-level API, so it still needs optimistic concurrency.
+        var mappedEntity = GetEntityType(typeof(ContentVersion));
+
+        var xmin = mappedEntity.FindProperty("xmin");
+        Assert.NotNull(xmin);
+        Assert.True(xmin.IsConcurrencyToken);
+        Assert.Equal("xid", xmin.GetColumnType());
+    }
+
+    [Fact]
     public void Model_DoesNotWarnForRequiredFilteredNavigationsOnUserWorkspaceAccess()
     {
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
@@ -126,7 +140,7 @@ public sealed partial class ModelConfigurationTests
 
     [Theory]
     [InlineData(typeof(TemplateField), nameof(TemplateField.FieldConfig))]
-    [InlineData(typeof(ContentFieldValue), nameof(ContentFieldValue.JsonValue))]
+    [InlineData(typeof(ContentVersionFieldValue), nameof(ContentVersionFieldValue.JsonValue))]
     [InlineData(typeof(WebhookDeliveryLog), nameof(WebhookDeliveryLog.Payload))]
     [InlineData(typeof(AuditLog), nameof(AuditLog.ChangeDelta))]
     public void JsonBackedProperties_AreMappedAsJsonb(Type entityType, string propertyName)

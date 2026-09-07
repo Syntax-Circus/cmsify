@@ -7,25 +7,25 @@ namespace Cmsify.Core.Services;
 
 public sealed partial class ContentSearchVectorBuilder : IContentSearchVectorBuilder
 {
-    public string Build(ContentItem item, TemplateVersion version)
+    public string Build(ContentVersion version, TemplateVersion templateVersion)
     {
-        ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(templateVersion);
 
-        var searchableFieldIds = version.Fields
+        var searchableFieldIds = templateVersion.Fields
             .Where(field => field.PrimitiveType is PrimitiveType.Text or PrimitiveType.RichText or PrimitiveType.Markdown or PrimitiveType.PickList or PrimitiveType.Link or PrimitiveType.Quote)
             .Where(field => field.PrimitiveType != PrimitiveType.Text || TextFormatHints.IsSearchIndexable(TextFormatHints.GetEffectiveHint(field.FieldConfig)))
             .Select(field => field.Id)
             .ToHashSet();
 
-        var text = string.Join(' ', item.FieldValues
+        var text = string.Join(' ', version.FieldValues
             .Where(value => searchableFieldIds.Contains(value.FieldId) && !string.IsNullOrWhiteSpace(value.TextValue))
             .OrderBy(value => value.Order)
             .Select(value => value.TextValue));
 
-        if (!string.IsNullOrWhiteSpace(item.Slug))
+        if (!string.IsNullOrWhiteSpace(version.Slug))
         {
-            text = $"{item.Slug} {text}";
+            text = $"{version.Slug} {text}";
         }
 
         var terms = TokenRegex().Matches(text.ToLowerInvariant())

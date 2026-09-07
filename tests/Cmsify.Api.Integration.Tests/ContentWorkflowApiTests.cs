@@ -46,17 +46,17 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
-        var (workspaceId, contentId) = await SeedContentAsync(factory, startingStatus);
+        var (workspaceId, contentId, versionNumber) = await SeedContentAsync(factory, startingStatus);
 
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish",
+            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}/publish",
             new { overrideWorkflow = true },
             TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PublishContentResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PublishContentVersionResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(body);
-        Assert.Equal(SyntaxCircus.Cmsify.Contracts.ContentStatus.Published, body.Content.Status);
+        Assert.Equal(SyntaxCircus.Cmsify.Contracts.ContentStatus.Published, body.Version.Status);
     }
 
     [Fact]
@@ -64,13 +64,13 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
     {
         await using var factory = new WebApplicationFactory<Program>();
         using var client = factory.CreateClient();
-        var (workspaceId, contentId) = await SeedContentAsync(factory, ContentStatus.Draft);
+        var (workspaceId, contentId, versionNumber) = await SeedContentAsync(factory, ContentStatus.Draft);
         await SeedEditorUserAsync(factory, workspaceId);
         var login = await LoginAsync(client, "editor@example.test", "editor-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish",
+            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}/publish",
             new { overrideWorkflow = true },
             TestContext.Current.CancellationToken);
 
@@ -84,10 +84,10 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
-        var (workspaceId, contentId) = await SeedContentAsync(factory, ContentStatus.Draft);
+        var (workspaceId, contentId, versionNumber) = await SeedContentAsync(factory, ContentStatus.Draft);
 
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish",
+            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}/publish",
             new { },
             TestContext.Current.CancellationToken);
 
@@ -101,10 +101,10 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
-        var (workspaceId, contentId) = await SeedContentAsync(factory, ContentStatus.Draft);
+        var (workspaceId, contentId, versionNumber) = await SeedContentAsync(factory, ContentStatus.Draft);
 
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish",
+            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}/publish",
             new { overrideWorkflow = true, publishAt = "2026-12-01T00:00:00Z" },
             TestContext.Current.CancellationToken);
 
@@ -149,10 +149,10 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
-        var (workspaceId, contentId) = await SeedContentAsync(factory, ContentStatus.Archived);
+        var (workspaceId, contentId, versionNumber) = await SeedContentAsync(factory, ContentStatus.Archived);
 
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish",
+            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}/publish",
             new { overrideWorkflow = true },
             TestContext.Current.CancellationToken);
 
@@ -166,7 +166,7 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         return (await response.Content.ReadFromJsonAsync<LoginResponse>())!;
     }
 
-    private static async Task<(Guid WorkspaceId, Guid ContentId)> SeedContentAsync(WebApplicationFactory<Program> factory, ContentStatus status)
+    private static async Task<(Guid WorkspaceId, Guid ContentId, int VersionNumber)> SeedContentAsync(WebApplicationFactory<Program> factory, ContentStatus status)
     {
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
@@ -183,8 +183,16 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         {
             WorkspaceId = workspaceId,
             TemplateVersionId = templateVersion.Id,
-            Status = status,
             Slug = $"content-{Guid.NewGuid():N}"
+        };
+        var version = new ContentVersion
+        {
+            ContentItemId = content.Id,
+            WorkspaceId = workspaceId,
+            VersionNumber = 1,
+            Status = status,
+            TemplateVersionId = templateVersion.Id,
+            Slug = content.Slug
         };
 
         dbContext.Templates.Add(template);
@@ -192,8 +200,9 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         await dbContext.SaveChangesAsync();
         template.CurrentVersionId = templateVersion.Id;
         dbContext.ContentItems.Add(content);
+        dbContext.ContentVersions.Add(version);
         await dbContext.SaveChangesAsync();
-        return (workspaceId, content.Id);
+        return (workspaceId, content.Id, version.VersionNumber);
     }
 
     private static async Task SeedEditorUserAsync(WebApplicationFactory<Program> factory, Guid workspaceId)

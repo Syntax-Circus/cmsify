@@ -14,7 +14,7 @@ public interface ITemplateGraphValidator
 
 public interface IContentValidator
 {
-    ValidationResult Validate(ContentItem item, TemplateVersion version);
+    ValidationResult Validate(ContentVersion version, TemplateVersion templateVersion);
 }
 
 public interface IFieldConfigValidator
@@ -26,27 +26,20 @@ public interface IContentLifecycleService
 {
     bool CanTransition(ContentStatus from, ContentStatus to, bool allowOverride = false);
 
-    Task TransitionAsync(ContentItem item, ContentStatus to, Guid actorId, bool allowOverride = false);
+    Task TransitionAsync(ContentVersion version, ContentStatus to, Guid actorId, bool allowOverride = false);
 }
 
 public interface IContentSearchVectorBuilder
 {
-    string Build(ContentItem item, TemplateVersion version);
-}
-
-public sealed record ContentEffectiveRange(DateTimeOffset? StartAt, DateTimeOffset? EndAt)
-{
-    public bool IsDefault => !StartAt.HasValue && !EndAt.HasValue;
+    string Build(ContentVersion version, TemplateVersion templateVersion);
 }
 
 public sealed record ContentPublishResult(ContentVersion Version, IReadOnlyList<string> Warnings);
 
 public interface IContentPublishingService
 {
-    Task<ContentPublishResult> PublishSnapshotAsync(
-        ContentItem content,
-        ContentEffectiveRange effectiveRange,
-        int? rolledBackFromVersionNumber = null,
+    Task<ContentPublishResult> PublishAsync(
+        ContentVersion version,
         Guid? actorUserId = null,
         CancellationToken ct = default);
 }

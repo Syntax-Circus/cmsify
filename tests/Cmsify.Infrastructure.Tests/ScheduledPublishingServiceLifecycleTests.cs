@@ -51,7 +51,7 @@ public sealed class ScheduledPublishingServiceLifecycleTests
         await successfulDispatcher.Received(1).CompleteClaimAsync(second, now, Arg.Any<CancellationToken>());
         Assert.Single(logger.Messages);
         Assert.Equal("Scheduled publishing completion failed.", logger.Messages[0]);
-        Assert.DoesNotContain(first.ContentItemId.ToString(), logger.Messages[0], StringComparison.Ordinal);
+        Assert.DoesNotContain(first.ContentVersionId.ToString(), logger.Messages[0], StringComparison.Ordinal);
     }
 
     [Fact]

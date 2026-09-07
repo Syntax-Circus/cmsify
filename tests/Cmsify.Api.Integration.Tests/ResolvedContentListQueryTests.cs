@@ -479,17 +479,14 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             var itemId = StableGuid(0x60000010, itemIndex);
             var locale = itemIndex % 2 == 0 ? "en-US" : "fr-FR";
             var translationGroupId = StableGuid(0x60000020, itemIndex / 2);
-            var selectedPublishedAt = CapacityPublishedBase.AddMinutes(itemIndex).AddSeconds(5);
             var item = new ContentItem
             {
                 Id = itemId,
                 WorkspaceId = workspace.Id,
                 TemplateVersionId = templateVersion.Id,
-                Status = ContentStatus.Published,
                 Slug = CapacitySelectedSlug(itemIndex),
                 LocaleCode = locale,
                 TranslationGroupId = translationGroupId,
-                PublishedAt = selectedPublishedAt,
                 IsDeleted = isDeleted,
                 DeletedAt = isDeleted ? CapacityAsOf.AddDays(-1) : null
             };
@@ -540,7 +537,7 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             ContentItemId = item.Id,
             WorkspaceId = item.WorkspaceId,
             VersionNumber = versionNumber,
-            Status = ContentVersionStatus.Published,
+            Status = ContentStatus.Published,
             TemplateVersionId = templateVersionId,
             Slug = $"capacity-{itemIndex:D4}-{slugSuffix}",
             LocaleCode = locale,
@@ -598,7 +595,7 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
                 item.GetProperty("tags").EnumerateArray().Select(tag => tag.GetString()).ToArray());
             Assert.Equal(
                 CapacityPublishedBase.AddMinutes(itemIndex).AddSeconds(5),
-                item.GetProperty("publishedAt").GetDateTimeOffset());
+                item.GetProperty("createdAt").GetDateTimeOffset());
         }
 
         Assert.Equal(2, result.Commands.Count);
@@ -656,16 +653,14 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
         {
             WorkspaceId = workspaceId,
             TemplateVersionId = templateVersionId,
-            Status = ContentStatus.Published,
-            Slug = slug,
-            PublishedAt = publishedAt
+            Slug = slug
         };
         var version = new ContentVersion
         {
             ContentItemId = item.Id,
             WorkspaceId = workspaceId,
             VersionNumber = 1,
-            Status = ContentVersionStatus.Published,
+            Status = ContentStatus.Published,
             TemplateVersionId = templateVersionId,
             Slug = slug,
             Tags = tags ?? [],

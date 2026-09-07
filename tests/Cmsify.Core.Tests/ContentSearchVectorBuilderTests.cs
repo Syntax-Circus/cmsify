@@ -27,11 +27,11 @@ public sealed class ContentSearchVectorBuilderTests
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(textField);
         version.Fields.Add(booleanField);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id, Slug = "hello-world" };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = textField.Id, ValueKind = ValueKind.Text, TextValue = "Postgres performance" });
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = booleanField.Id, ValueKind = ValueKind.Boolean, BoolValue = true });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id, Slug = "hello-world" };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = textField.Id, ValueKind = ValueKind.Text, TextValue = "Postgres performance" });
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = booleanField.Id, ValueKind = ValueKind.Boolean, BoolValue = true });
 
-        var searchVector = new ContentSearchVectorBuilder().Build(item, version);
+        var searchVector = new ContentSearchVectorBuilder().Build(contentVersion, version);
 
         Assert.Contains("'hello'", searchVector);
         Assert.Contains("'world'", searchVector);
@@ -56,11 +56,11 @@ public sealed class ContentSearchVectorBuilderTests
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(plain);
         version.Fields.Add(json);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id, Slug = "doc" };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = plain.Id, ValueKind = ValueKind.Text, TextValue = "indexable headline" });
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = json.Id, ValueKind = ValueKind.Text, TextValue = "{\"secret\":\"shouldNotIndex\"}" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id, Slug = "doc" };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = plain.Id, ValueKind = ValueKind.Text, TextValue = "indexable headline" });
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = json.Id, ValueKind = ValueKind.Text, TextValue = "{\"secret\":\"shouldNotIndex\"}" });
 
-        var searchVector = new ContentSearchVectorBuilder().Build(item, version);
+        var searchVector = new ContentSearchVectorBuilder().Build(contentVersion, version);
 
         Assert.Contains("'indexable'", searchVector);
         Assert.Contains("'headline'", searchVector);
@@ -82,10 +82,10 @@ public sealed class ContentSearchVectorBuilderTests
         };
         var version = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
         version.Fields.Add(markdown);
-        var item = new ContentItem { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
-        item.FieldValues.Add(new ContentFieldValue { ContentItemId = item.Id, FieldId = markdown.Id, ValueKind = ValueKind.Text, TextValue = "markdown body content" });
+        var contentVersion = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = markdown.Id, ValueKind = ValueKind.Text, TextValue = "markdown body content" });
 
-        var searchVector = new ContentSearchVectorBuilder().Build(item, version);
+        var searchVector = new ContentSearchVectorBuilder().Build(contentVersion, version);
 
         Assert.Contains("'markdown'", searchVector);
         Assert.Contains("'body'", searchVector);

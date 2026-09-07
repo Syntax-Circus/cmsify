@@ -66,7 +66,7 @@ public sealed class QueryApiTests : IAsyncLifetime
         var bySlug = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content/by-slug/welcome-post", cancellationToken: TestContext.Current.CancellationToken);
         var translations = await client.GetFromJsonAsync<JsonElement>($"/api/v1/workspaces/{seed.WorkspaceId}/content/{seed.PublishedContentId}/translations", cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(seed.PublishedContentId, bySlug.GetProperty("id").GetGuid());
+        Assert.Equal(seed.PublishedContentId, bySlug.GetProperty("contentItemId").GetGuid());
         Assert.Equal(1, translations.GetProperty("page").GetInt32());
         Assert.Equal(20, translations.GetProperty("pageSize").GetInt32());
         Assert.Equal(2, translations.GetProperty("items").GetArrayLength());
@@ -236,8 +236,7 @@ public sealed class QueryApiTests : IAsyncLifetime
         Assert.Equal(seed.ArticleTemplateVersionId, filteredItem.GetProperty("templateVersionId").GetGuid());
         Assert.Equal("Article", filteredItem.GetProperty("templateName").GetString());
         Assert.Equal("filter-match", filteredItem.GetProperty("slug").GetString());
-        Assert.Equal(filteredItem.GetProperty("publishedAt").GetDateTimeOffset(), filteredItem.GetProperty("createdAt").GetDateTimeOffset());
-        Assert.Equal(filteredItem.GetProperty("publishedAt").GetDateTimeOffset(), filteredItem.GetProperty("updatedAt").GetDateTimeOffset());
+        Assert.Equal(filteredItem.GetProperty("createdAt").GetDateTimeOffset(), filteredItem.GetProperty("updatedAt").GetDateTimeOffset());
 
         Assert.Equal(1, searched.GetProperty("totalCount").GetInt32());
         Assert.Equal(seed.SearchMatchContentId, searched.GetProperty("items")[0].GetProperty("id").GetGuid());
@@ -377,15 +376,14 @@ public sealed class QueryApiTests : IAsyncLifetime
         var version = new TemplateVersion { TemplateId = template.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published };
         template.Versions.Add(version);
         var tag = new Tag { WorkspaceId = workspaceId, Name = "featured" };
+        var publishedAt = DateTimeOffset.UtcNow.AddDays(-1);
         var published = new ContentItem
         {
             WorkspaceId = workspaceId,
             TemplateVersionId = version.Id,
-            Status = ContentStatus.Published,
             Slug = "welcome-post",
             LocaleCode = "en",
             TranslationGroupId = translationGroupId,
-            PublishedAt = DateTimeOffset.UtcNow.AddDays(-1),
             SearchVector = "'welcome':1 'post':2"
         };
         published.Tags.Add(new ContentItemTag { ContentItemId = published.Id, TagId = tag.Id });
@@ -393,20 +391,18 @@ public sealed class QueryApiTests : IAsyncLifetime
         {
             WorkspaceId = workspaceId,
             TemplateVersionId = version.Id,
-            Status = ContentStatus.Draft,
             Slug = "draft-post",
             LocaleCode = "en",
             SearchVector = "'draft':1"
         };
+        var translatedPublishedAt = DateTimeOffset.UtcNow;
         var translated = new ContentItem
         {
             WorkspaceId = workspaceId,
             TemplateVersionId = version.Id,
-            Status = ContentStatus.Published,
             Slug = "bienvenue",
             LocaleCode = "fr",
-            TranslationGroupId = translationGroupId,
-            PublishedAt = DateTimeOffset.UtcNow
+            TranslationGroupId = translationGroupId
         };
 
         dbContext.Templates.Add(template);
@@ -420,26 +416,26 @@ public sealed class QueryApiTests : IAsyncLifetime
                 ContentItemId = published.Id,
                 WorkspaceId = workspaceId,
                 VersionNumber = 1,
-                Status = ContentVersionStatus.Published,
+                Status = ContentStatus.Published,
                 TemplateVersionId = version.Id,
                 Slug = published.Slug,
                 LocaleCode = published.LocaleCode,
                 TranslationGroupId = published.TranslationGroupId,
                 Tags = ["featured"],
-                PublishedAt = published.PublishedAt!.Value
+                PublishedAt = publishedAt
             },
             new ContentVersion
             {
                 ContentItemId = translated.Id,
                 WorkspaceId = workspaceId,
                 VersionNumber = 1,
-                Status = ContentVersionStatus.Published,
+                Status = ContentStatus.Published,
                 TemplateVersionId = version.Id,
                 Slug = translated.Slug,
                 LocaleCode = translated.LocaleCode,
                 TranslationGroupId = translated.TranslationGroupId,
                 Tags = [],
-                PublishedAt = translated.PublishedAt!.Value
+                PublishedAt = translatedPublishedAt
             });
         await dbContext.SaveChangesAsync();
         return new QuerySeed(workspaceId, template.Id, published.Id);
@@ -522,9 +518,7 @@ public sealed class QueryApiTests : IAsyncLifetime
             Id = Guid.Parse(id),
             WorkspaceId = workspaceId,
             TemplateVersionId = templateVersionId,
-            Status = ContentStatus.Published,
-            Slug = slug,
-            PublishedAt = DateTimeOffset.Parse("2026-06-01T00:00:00Z")
+            Slug = slug
         };
 
     private static ContentVersion ResolvedVersion(
@@ -543,7 +537,7 @@ public sealed class QueryApiTests : IAsyncLifetime
             ContentItemId = owner.Id,
             WorkspaceId = owner.WorkspaceId,
             VersionNumber = versionNumber,
-            Status = ContentVersionStatus.Published,
+            Status = ContentStatus.Published,
             TemplateVersionId = templateVersionId,
             Slug = slug,
             LocaleCode = localeCode,
