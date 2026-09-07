@@ -643,6 +643,12 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("workspace_id");
 
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id")
                         .HasName("pk_content_versions");
 

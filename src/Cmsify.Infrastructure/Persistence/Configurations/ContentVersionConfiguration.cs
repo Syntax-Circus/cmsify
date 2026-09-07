@@ -9,6 +9,10 @@ public sealed class ContentVersionConfiguration : IEntityTypeConfiguration<Conte
     public void Configure(EntityTypeBuilder<ContentVersion> builder)
     {
         builder.ConfigureEntityId();
+        // ContentVersion is now the mutable aggregate (fields and workflow state live here), so it
+        // needs the same optimistic-concurrency token every other editable aggregate carries -
+        // otherwise UpdateVersion's If-Match check is an unenforced read-then-compare.
+        builder.ConfigureXminConcurrency();
 
         builder.HasIndex(version => new { version.ContentItemId, version.VersionNumber }).IsUnique();
         builder.HasIndex(version => version.ContentItemId)
