@@ -118,6 +118,29 @@ public sealed class TemplateApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateField_OpenFieldWithPrimitiveTypeAllowedType_ReturnsValidationError()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var createResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates", new CreateTemplateRequest("Open Field Template", $"open-field-template-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
+        createResponse.EnsureSuccessStatusCode();
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(template);
+        Assert.NotNull(template.CurrentVersion);
+
+        var request = new TemplateFieldRequest(null, "openField", "Open Field", null, 0, false, 0, 1, true, CompositionMode.Inline, null, null,
+            [new TemplateFieldAllowedTypeRequest(PrimitiveType.Text, null)], null);
+
+        var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields", request, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
+    }
+
+    [Fact]
     public async Task ImportPackage_WithTemplateReferences_CreatesCurrentVersions()
     {
         await using var factory = new WebApplicationFactory<Program>();

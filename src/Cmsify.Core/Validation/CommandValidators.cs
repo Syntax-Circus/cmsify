@@ -75,6 +75,9 @@ public sealed class TemplateFieldInputValidator : AbstractValidator<TemplateFiel
         RuleFor(field => field)
             .Must(field => !field.IsOpen || (!field.PrimitiveType.HasValue && !field.TemplateId.HasValue && !field.ComponentId.HasValue))
             .WithMessage("Open fields cannot define PrimitiveType or TemplateId.");
+        RuleFor(field => field)
+            .Must(field => !field.IsOpen || field.AllowedTypes.All(allowedType => !allowedType.PrimitiveType.HasValue))
+            .WithMessage("Open fields' AllowedTypes entries cannot define a PrimitiveType.");
     }
 }
 
