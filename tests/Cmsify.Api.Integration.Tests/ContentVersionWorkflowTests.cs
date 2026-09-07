@@ -170,14 +170,143 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
         var publishResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draftVersionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken);
         publishResponse.EnsureSuccessStatusCode();
 
-        var deleteDraftResponse = await client.DeleteAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{secondVersion.VersionNumber}", TestContext.Current.CancellationToken);
+        // Read the persisted UpdatedAt back through the API: the create response carries the
+        // in-memory value, which has finer-than-microsecond tick precision than Postgres stores.
+        var persistedSecond = (await GetItemAsync(client, workspaceId, itemId)).Versions.Single(version => version.VersionNumber == secondVersion.VersionNumber);
+
+        var missingIfMatchResponse = await client.DeleteAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{secondVersion.VersionNumber}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, missingIfMatchResponse.StatusCode);
+
+        var staleIfMatchResponse = await DeleteVersionAsync(client, workspaceId, itemId, secondVersion.VersionNumber, persistedSecond.UpdatedAt.AddSeconds(-30));
+        Assert.Equal(HttpStatusCode.PreconditionFailed, staleIfMatchResponse.StatusCode);
+
+        var deleteDraftResponse = await DeleteVersionAsync(client, workspaceId, itemId, secondVersion.VersionNumber, persistedSecond.UpdatedAt);
         Assert.Equal(HttpStatusCode.NoContent, deleteDraftResponse.StatusCode);
 
         var item = await GetItemAsync(client, workspaceId, itemId);
-        Assert.Single(item.Versions);
+        var remaining = Assert.Single(item.Versions);
 
-        var deletePublishedResponse = await client.DeleteAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draftVersionNumber}", TestContext.Current.CancellationToken);
+        var deletePublishedResponse = await DeleteVersionAsync(client, workspaceId, itemId, draftVersionNumber, remaining.UpdatedAt);
         Assert.Equal(HttpStatusCode.Conflict, deletePublishedResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteVersion_RejectsDeletingTheItemsOnlyVersion()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId) = await SeedTemplateAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "only-version");
+        var only = Assert.Single((await GetItemAsync(client, workspaceId, itemId)).Versions);
+
+        // The single version is a Draft, so the status guard does not apply - only the
+        // last-version guard can reject this.
+        Assert.Equal(ContentStatus.Draft, only.Status);
+        var response = await DeleteVersionAsync(client, workspaceId, itemId, only.VersionNumber, only.UpdatedAt);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Single((await GetItemAsync(client, workspaceId, itemId)).Versions);
+    }
+
+    [Fact]
+    public async Task UpdateItem_RenamingSlug_RepointsExistingVersionsSoBySlugResolves()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId) = await SeedTemplateAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "before-rename");
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var beforeRename = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/before-rename", TestContext.Current.CancellationToken);
+        beforeRename.EnsureSuccessStatusCode();
+
+        var item = await GetItemAsync(client, workspaceId, itemId);
+        using var renameRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{workspaceId}/content/{itemId}")
+        {
+            Content = JsonContent.Create(new UpdateContentItemRequest("after-rename", "en-GB", null, []), options: ApiJsonOptions)
+        };
+        renameRequest.Headers.TryAddWithoutValidation("If-Match", $"\"{item.UpdatedAt.UtcTicks}\"");
+        var renameResponse = await client.SendAsync(renameRequest, TestContext.Current.CancellationToken);
+        Assert.True(renameResponse.IsSuccessStatusCode, $"Rename failed: {renameResponse.StatusCode} {await renameResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}");
+
+        var resolved = await client.GetFromJsonAsync<ContentVersionDetailResponse>($"/api/v1/workspaces/{workspaceId}/content/by-slug/after-rename", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(resolved);
+        Assert.Equal(itemId, resolved.ContentItemId);
+        Assert.Equal("after-rename", resolved.Slug);
+        Assert.Equal("en-GB", resolved.LocaleCode);
+
+        var oldSlug = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/before-rename", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, oldSlug.StatusCode);
+    }
+
+    [Fact]
+    public async Task LinkTranslation_PropagatesTranslationGroupToBothItemsVersions()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId) = await SeedTemplateAsync(factory);
+        var sourceId = await CreateItemAsync(client, workspaceId, templateVersionId, "translation-source");
+        var targetId = await CreateItemAsync(client, workspaceId, templateVersionId, "translation-target");
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{sourceId}/link-translation",
+            new LinkTranslationRequest(targetId),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var groupId = (await GetItemAsync(client, workspaceId, sourceId)).TranslationGroupId;
+        Assert.NotNull(groupId);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var versionGroups = await dbContext.ContentVersions.AsNoTracking()
+            .Where(version => version.ContentItemId == sourceId || version.ContentItemId == targetId)
+            .Select(version => version.TranslationGroupId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, versionGroups.Count);
+        Assert.All(versionGroups, value => Assert.Equal(groupId, value));
+    }
+
+    [Fact]
+    public async Task List_StatusFilter_ReturnsOnlyItemsWithAMatchingVersion()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId) = await SeedTemplateAsync(factory);
+        var draftOnlyId = await CreateItemAsync(client, workspaceId, templateVersionId, "status-filter-draft");
+        var publishedId = await CreateItemAsync(client, workspaceId, templateVersionId, "status-filter-published");
+        var publishedVersionNumber = (await GetItemAsync(client, workspaceId, publishedId)).Versions[0].VersionNumber;
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{publishedId}/versions/{publishedVersionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{publishedId}/versions/{publishedVersionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{publishedId}/versions/{publishedVersionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var published = await client.GetFromJsonAsync<PagedResponse<ContentItemSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/content?status=Published", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(published);
+        Assert.Contains(published.Items, item => item.Id == publishedId);
+        Assert.DoesNotContain(published.Items, item => item.Id == draftOnlyId);
+
+        var drafts = await client.GetFromJsonAsync<PagedResponse<ContentItemSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/content?status=Draft", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(drafts);
+        Assert.Contains(drafts.Items, item => item.Id == draftOnlyId);
+        Assert.DoesNotContain(drafts.Items, item => item.Id == publishedId);
+
+        // publishedBefore/publishedAfter narrow to items with a version published inside the window.
+        var publishedAfter = await client.GetFromJsonAsync<PagedResponse<ContentItemSummaryResponse>>($"/api/v1/workspaces/{workspaceId}/content?publishedAfter={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddHours(1).ToString("O"))}", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(publishedAfter);
+        Assert.DoesNotContain(publishedAfter.Items, item => item.Id == publishedId);
+    }
+
+    private static async Task<HttpResponseMessage> DeleteVersionAsync(HttpClient client, Guid workspaceId, Guid itemId, int versionNumber, DateTimeOffset ifMatch)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}");
+        request.Headers.TryAddWithoutValidation("If-Match", $"\"{ifMatch.UtcTicks}\"");
+        return await client.SendAsync(request, TestContext.Current.CancellationToken);
     }
 
     [Fact]

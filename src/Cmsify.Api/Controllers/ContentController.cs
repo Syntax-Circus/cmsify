@@ -85,6 +85,24 @@ public sealed class ContentController : ControllerBase
             items = items.Where(content => content.TranslationGroupId == query.TranslationGroupId.Value);
         }
 
+        // Status and publication windows live on versions, not items, so the item-level list
+        // interprets these filters as "this item has at least one version matching".
+        if (query.Status.HasValue)
+        {
+            var status = query.Status.Value.ToCore();
+            items = items.Where(content => dbContext.ContentVersions.Any(version => version.ContentItemId == content.Id && version.Status == status));
+        }
+
+        if (query.PublishedAfter.HasValue)
+        {
+            items = items.Where(content => dbContext.ContentVersions.Any(version => version.ContentItemId == content.Id && version.PublishedAt >= query.PublishedAfter.Value));
+        }
+
+        if (query.PublishedBefore.HasValue)
+        {
+            items = items.Where(content => dbContext.ContentVersions.Any(version => version.ContentItemId == content.Id && version.PublishedAt <= query.PublishedBefore.Value));
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Slug))
         {
             items = items.Where(content => content.Slug == query.Slug);
@@ -255,6 +273,10 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
         }
 
+        var identityChanged = content.Slug != request.Slug
+            || content.LocaleCode != request.LocaleCode
+            || content.TranslationGroupId != request.TranslationGroupId;
+
         content.Slug = request.Slug;
         content.LocaleCode = request.LocaleCode;
         content.TranslationGroupId = request.TranslationGroupId;
@@ -277,6 +299,11 @@ public sealed class ContentController : ControllerBase
         catch (DbUpdateConcurrencyException)
         {
             return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
+        }
+
+        if (identityChanged)
+        {
+            await PropagateItemIdentityToVersionsAsync(content, ct);
         }
 
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
@@ -330,6 +357,11 @@ public sealed class ContentController : ControllerBase
         source.TranslationGroupId = groupId;
         target.TranslationGroupId = groupId;
         await dbContext.SaveChangesAsync(ct);
+        // Versions carry a denormalized copy of the item's translation group; delivery-side
+        // translation filtering reads that copy, so it has to follow the item.
+        await dbContext.ContentVersions
+            .Where(version => version.ContentItemId == source.Id || version.ContentItemId == target.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(version => version.TranslationGroupId, groupId), ct);
         var translations = await BaseContentQuery(workspaceId).AsNoTracking()
             .Where(content => content.TranslationGroupId == groupId)
             .OrderBy(content => content.LocaleCode)
@@ -601,9 +633,23 @@ public sealed class ContentController : ControllerBase
             return NotFound();
         }
 
+        if (!this.IfMatchMatches(version.UpdatedAt))
+        {
+            return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
+        }
+
         if (version.Status != ContentStatus.Draft)
         {
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Only Draft versions can be deleted");
+        }
+
+        // An item must never be left with zero versions: every read path (Get, by-slug, the admin
+        // version list) assumes at least one exists, and a versionless item is unrecoverable through
+        // the API. Deleting the item itself is the supported way to remove the last version.
+        var otherVersions = await dbContext.ContentVersions.CountAsync(candidate => candidate.ContentItemId == id && candidate.Id != version.Id, ct);
+        if (otherVersions == 0)
+        {
+            return this.Error(StatusCodes.Status409Conflict, "conflict", "Cannot delete the content item's only version", "Delete the content item instead.");
         }
 
         var item = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);
@@ -824,6 +870,27 @@ public sealed class ContentController : ControllerBase
         return await BaseContentQuery(workspaceId)
             .Include(content => content.Tags)
             .FirstOrDefaultAsync(content => content.Id == id, ct);
+    }
+
+    /// <summary>
+    /// Pushes the item's identity fields down onto every one of its versions.
+    /// <see cref="ContentVersion"/> keeps denormalized copies of <c>Slug</c>, <c>LocaleCode</c> and
+    /// <c>TranslationGroupId</c>, and the delivery/query paths (by-slug resolution, translation-group
+    /// filtering) read the version's copy rather than the item's, so a rename that is not propagated
+    /// leaves the item resolvable only at its old slug. <c>Tags</c> is deliberately excluded: it is a
+    /// per-version snapshot of the tags at the time that version was created, not a live mirror.
+    /// </summary>
+    private Task<int> PropagateItemIdentityToVersionsAsync(ContentItem content, CancellationToken ct)
+    {
+        var slug = content.Slug;
+        var localeCode = content.LocaleCode;
+        var translationGroupId = content.TranslationGroupId;
+        return dbContext.ContentVersions
+            .Where(version => version.ContentItemId == content.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(version => version.Slug, slug)
+                .SetProperty(version => version.LocaleCode, localeCode)
+                .SetProperty(version => version.TranslationGroupId, translationGroupId), ct);
     }
 
     private async Task<ContentVersion?> LoadVersionForEditAsync(Guid workspaceId, Guid contentItemId, int versionNumber, CancellationToken ct)
