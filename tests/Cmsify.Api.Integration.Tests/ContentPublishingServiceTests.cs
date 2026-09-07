@@ -3,6 +3,7 @@ using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Testcontainers.PostgreSql;
 
 namespace Cmsify.Api.Integration.Tests;
@@ -22,6 +23,7 @@ public sealed class ContentPublishingServiceTests : IAsyncLifetime
         await postgres.StartAsync();
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
             .UseNpgsql(postgres.GetConnectionString())
+            .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options;
         dbContext = new CmsifyDbContext(options);
         await dbContext.Database.MigrateAsync();
