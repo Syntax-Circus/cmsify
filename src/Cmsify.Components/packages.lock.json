@@ -311,7 +311,7 @@
           "Microsoft.Extensions.Http": "[10.0.11, )",
           "Microsoft.Extensions.Options": "[10.0.11, )",
           "SyntaxCircus.Cmsify.Contracts": "[0.0.0-local, )",
-          "SyntaxCircus.Http.Resilience": "[0.2.0-cmsify.1, )"
+          "SyntaxCircus.Http.Resilience": "[0.2.1, )"
         }
       },
       "SyntaxCircus.Cmsify.Contracts": {
@@ -384,9 +384,9 @@
       },
       "SyntaxCircus.Http.Resilience": {
         "type": "CentralTransitive",
-        "requested": "[0.2.0-cmsify.1, )",
-        "resolved": "0.2.0-cmsify.1",
-        "contentHash": "NMTysZp25vAOrFJ67PkFUbWleijS54StWjT5GAXbRLWoxv+H69VBFgP6f+wR0YRTNvF/yMvlIallZu3ID7ue6w==",
+        "requested": "[0.2.1, )",
+        "resolved": "0.2.1",
+        "contentHash": "Dn1/TXSNCtfMFeEFykUS98wwUqyitvW0p0dRiAi6l+sAw+5FgOjmVhoEwyE8L3nJbiDOWzirLJfj+sjgB8RcvA==",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection": "10.0.0",
           "Microsoft.Extensions.Http": "10.0.0",

@@ -47,9 +47,9 @@
       },
       "SyntaxCircus.Http.Resilience": {
         "type": "Direct",
-        "requested": "[0.2.0-cmsify.1, )",
-        "resolved": "0.2.0-cmsify.1",
-        "contentHash": "NMTysZp25vAOrFJ67PkFUbWleijS54StWjT5GAXbRLWoxv+H69VBFgP6f+wR0YRTNvF/yMvlIallZu3ID7ue6w==",
+        "requested": "[0.2.1, )",
+        "resolved": "0.2.1",
+        "contentHash": "Dn1/TXSNCtfMFeEFykUS98wwUqyitvW0p0dRiAi6l+sAw+5FgOjmVhoEwyE8L3nJbiDOWzirLJfj+sjgB8RcvA==",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection": "10.0.0",
           "Microsoft.Extensions.Http": "10.0.0",
