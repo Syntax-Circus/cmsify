@@ -99,28 +99,30 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
 
         var create = await client.PostAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content", new { templateVersionId, slug = "mutation-content", tags = Array.Empty<string>(), fields = Array.Empty<object>() }, cancellationToken: TestContext.Current.CancellationToken);
         create.EnsureSuccessStatusCode();
-        var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken)).GetProperty("id").GetGuid();
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        var contentId = created.GetProperty("id").GetGuid();
+        var versionNumber = created.GetProperty("versions")[0].GetProperty("versionNumber").GetInt32();
         var current = await client.GetAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}", TestContext.Current.CancellationToken);
         current.EnsureSuccessStatusCode();
         using var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}")
         {
-            Content = JsonContent.Create(new { slug = "mutation-content-updated", tags = Array.Empty<string>(), fields = Array.Empty<object>() })
+            Content = JsonContent.Create(new { slug = "mutation-content-updated", tags = Array.Empty<string>() })
         };
         updateRequest.Headers.TryAddWithoutValidation("If-Match", current.Headers.ETag?.ToString());
         (await client.SendAsync(updateRequest, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/versions/{versionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/versions/{versionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/versions/{versionNumber}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
         var events = await verification.WebhookOutboxEvents.AsNoTracking().Where(item => item.EntityId == contentId).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(6, events.Count);
-        Assert.Equal(6, events.Select(item => item.Id).Distinct().Count());
+        Assert.Equal(5, events.Count);
+        Assert.Equal(5, events.Select(item => item.Id).Distinct().Count());
         Assert.Contains(events, item => item.EventType == "content.created");
         Assert.Contains(events, item => item.EventType == "content.updated");
-        Assert.Contains(events, item => item.EventType == "content.published");
-        Assert.Equal(3, events.Count(item => item.EventType == "content.status_changed"));
+        Assert.Contains(events, item => item.EventType == "content.version_published");
+        Assert.Equal(2, events.Count(item => item.EventType == "content.version_status_changed"));
         Assert.All(events, item => Assert.Equal(contentId, item.Payload.GetProperty("contentItemId").GetGuid()));
     }
 
@@ -159,13 +161,14 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             fields = new[] { new { fieldId, order = 0, valueKind = "Text", textValue = "Created" } }
         }, cancellationToken: TestContext.Current.CancellationToken);
         create.EnsureSuccessStatusCode();
-        var contentId = (await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken)).GetProperty("id").GetGuid();
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        var contentId = created.GetProperty("id").GetGuid();
+        var versionNumber = created.GetProperty("versions")[0].GetProperty("versionNumber").GetInt32();
         Assert.NotNull(create.Headers.ETag);
         var updateBody = new
         {
             slug = "create-etag-updated",
-            tags = Array.Empty<string>(),
-            fields = new[] { new { fieldId, order = 0, valueKind = "Text", textValue = "Updated" } }
+            tags = Array.Empty<string>()
         };
         var missing = await client.PutAsJsonAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}", updateBody, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.PreconditionFailed, missing.StatusCode);
@@ -188,9 +191,15 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         update.EnsureSuccessStatusCode();
         var updatedContent = await update.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("create-etag-updated", updatedContent.GetProperty("slug").GetString());
-        var updatedField = Assert.Single(updatedContent.GetProperty("fields").EnumerateArray());
-        Assert.Equal(fieldId, updatedField.GetProperty("fieldId").GetGuid());
-        Assert.Equal("Updated", updatedField.GetProperty("textValue").GetString());
+
+        // Fields now live on the version, not the item: confirm the originally-created field
+        // value is still reachable via the version endpoint after the item-level metadata edit.
+        var currentVersion = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/versions/{versionNumber}",
+            cancellationToken: TestContext.Current.CancellationToken);
+        var existingField = Assert.Single(currentVersion.GetProperty("fields").EnumerateArray());
+        Assert.Equal(fieldId, existingField.GetProperty("fieldId").GetGuid());
+        Assert.Equal("Created", existingField.GetProperty("textValue").GetString());
     }
 
     [Fact]
@@ -299,6 +308,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         var templateVersionId = await SeedPublishedTemplateVersionAsync(factory, seed.WorkspaceId, "manual-publish-lease");
         var leaseToken = Guid.CreateVersion7();
         Guid contentId;
+        int versionNumber;
         using (var setupScope = factory.Services.CreateScope())
         {
             var setup = setupScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
@@ -306,23 +316,33 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             {
                 WorkspaceId = seed.WorkspaceId,
                 TemplateVersionId = templateVersionId,
+                Slug = "manual-publish-lease"
+            };
+            var version = new ContentVersion
+            {
+                ContentItemId = content.Id,
+                WorkspaceId = seed.WorkspaceId,
+                VersionNumber = 1,
                 Status = ContentStatus.Approved,
-                Slug = "manual-publish-lease",
+                TemplateVersionId = templateVersionId,
+                Slug = content.Slug,
                 PublishAt = DateTimeOffset.Parse("2026-08-27T00:00:00Z"),
                 PublishLeaseOwner = "scheduled-worker",
                 PublishLeaseToken = leaseToken,
                 PublishLeaseExpiresAt = DateTimeOffset.Parse("2026-08-27T00:05:00Z")
             };
             setup.ContentItems.Add(content);
+            setup.ContentVersions.Add(version);
             await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
             contentId = content.Id;
+            versionNumber = version.VersionNumber;
         }
 
-        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{seed.WorkspaceId}/content/{contentId}/versions/{versionNumber}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
 
         using var verificationScope = factory.Services.CreateScope();
         var verification = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        var persisted = await verification.ContentItems.AsNoTracking().SingleAsync(item => item.Id == contentId, cancellationToken: TestContext.Current.CancellationToken);
+        var persisted = await verification.ContentVersions.AsNoTracking().SingleAsync(version => version.ContentItemId == contentId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ContentStatus.Published, persisted.Status);
         Assert.Null(persisted.PublishLeaseOwner);
         Assert.Null(persisted.PublishLeaseToken);
@@ -330,7 +350,7 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LinkTranslation_ClearsScheduledPublishLeasesForBothInputs()
+    public async Task LinkTranslation_PropagatesTranslationGroupIdToBothInputs()
     {
         await using var factory = CreateFactory();
         using var client = factory.CreateClient();
@@ -348,24 +368,14 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
                     Id = sourceId,
                     WorkspaceId = seed.WorkspaceId,
                     TemplateVersionId = templateVersionId,
-                    Status = ContentStatus.Approved,
-                    Slug = "translation-source",
-                    PublishAt = DateTimeOffset.Parse("2026-08-27T00:00:00Z"),
-                    PublishLeaseOwner = "scheduled-worker-a",
-                    PublishLeaseToken = Guid.CreateVersion7(),
-                    PublishLeaseExpiresAt = DateTimeOffset.Parse("2026-08-27T00:05:00Z")
+                    Slug = "translation-source"
                 },
                 new ContentItem
                 {
                     Id = targetId,
                     WorkspaceId = seed.WorkspaceId,
                     TemplateVersionId = templateVersionId,
-                    Status = ContentStatus.Approved,
-                    Slug = "translation-target",
-                    PublishAt = DateTimeOffset.Parse("2026-08-27T00:00:00Z"),
-                    PublishLeaseOwner = "scheduled-worker-b",
-                    PublishLeaseToken = Guid.CreateVersion7(),
-                    PublishLeaseExpiresAt = DateTimeOffset.Parse("2026-08-27T00:05:00Z")
+                    Slug = "translation-target"
                 });
             await setup.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -379,13 +389,8 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
             .OrderBy(item => item.Id)
             .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(2, persisted.Count);
-        Assert.All(persisted, item =>
-        {
-            Assert.NotNull(item.TranslationGroupId);
-            Assert.Null(item.PublishLeaseOwner);
-            Assert.Null(item.PublishLeaseToken);
-            Assert.Null(item.PublishLeaseExpiresAt);
-        });
+        Assert.All(persisted, item => Assert.NotNull(item.TranslationGroupId));
+        Assert.Equal(persisted[0].TranslationGroupId, persisted[1].TranslationGroupId);
     }
 
     [Fact]

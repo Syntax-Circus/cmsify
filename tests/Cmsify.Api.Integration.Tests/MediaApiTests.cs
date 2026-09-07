@@ -656,13 +656,15 @@ public sealed class MediaApiTests : IAsyncLifetime
             StorageProvider = "local",
             BlobState = MediaBlobState.Available
         };
-        var content = new ContentItem { WorkspaceId = workspaceId, TemplateVersionId = version.Id, Status = ContentStatus.Published };
-        content.FieldValues.Add(new ContentFieldValue { ContentItemId = content.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Media, MediaAssetId = asset.Id });
+        var content = new ContentItem { WorkspaceId = workspaceId, TemplateVersionId = version.Id };
+        var contentVersion = new ContentVersion { ContentItemId = content.Id, WorkspaceId = workspaceId, VersionNumber = 1, Status = ContentStatus.Published, TemplateVersionId = version.Id };
+        contentVersion.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = contentVersion.Id, FieldId = field.Id, Order = 0, ValueKind = ValueKind.Media, MediaAssetId = asset.Id });
         dbContext.Templates.Add(template);
         await dbContext.SaveChangesAsync();
         template.CurrentVersionId = version.Id;
         dbContext.MediaAssets.Add(asset);
         dbContext.ContentItems.Add(content);
+        dbContext.ContentVersions.Add(contentVersion);
         await dbContext.SaveChangesAsync();
         return asset.Id;
     }
