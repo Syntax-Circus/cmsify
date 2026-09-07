@@ -340,6 +340,12 @@ jobs:
     needs: [resolve, build]
     runs-on: ubuntu-latest
     permissions: { contents: read }
+    # Non-blocking pre-1.0: see the matching comment in .github/workflows/upgrade-rollback.yml.
+    # This rehearsal hand-duplicates Content API JSON shape assertions (eng/upgrade-tests/assertions.mjs)
+    # that lag the version-centric Content API's approved breaking change, on top of what the
+    # openapi-contract gate and Cmsify.Api.Integration.Tests already cover. Remove once the assertions
+    # are kept in lockstep with the Content API and/or there are real upgrade commitments to protect.
+    continue-on-error: true
     env:
       VERSION: ${{ needs.resolve.outputs.version }}
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}

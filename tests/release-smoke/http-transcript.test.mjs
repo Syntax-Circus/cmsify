@@ -132,23 +132,21 @@ test("scheduled publication and persistence transcripts prove lifecycle state ac
     if (url.pathname.endsWith("/templates") && input.method === "POST") return response({ status: 201, body: { id: templateId, currentVersion: { id: versionId } } });
     if (url.pathname.endsWith(`/templates/${templateId}/versions/1/publish`)) return response({ body: { status: "Published" } });
     if (url.pathname.endsWith("/content") && input.method === "POST") return response({ status: 201, body: { id: contentId } });
-    if (url.pathname.endsWith(`/content/${contentId}/submit`) || url.pathname.endsWith(`/content/${contentId}/approve`)) return response({ body: { id: contentId } });
-    if (url.pathname.endsWith(`/content/${contentId}/publish`)) {
+    if (url.pathname.endsWith(`/content/${contentId}/versions/1/submit`) || url.pathname.endsWith(`/content/${contentId}/versions/1/approve`)) return response({ body: { id: versionId } });
+    if (url.pathname.endsWith(`/content/${contentId}/versions/1/publish`)) {
       const payload = JSON.parse(input.body);
-      assert.equal(payload.effectiveStartAt, null);
-      assert.equal(payload.effectiveEndAt, null);
       assert.equal(payload.publishAt, "2026-08-29T12:00:01.500Z");
-      return response({ body: { id: contentId, status: "Approved" } });
+      return response({ body: { id: versionId, status: "Approved" } });
     }
-    if (url.pathname.endsWith(`/content/${contentId}`)) {
+    if (url.pathname.endsWith(`/content/${contentId}/versions/1`)) {
       statusReads += 1;
-      return response({ body: { id: contentId, status: "Published" } });
+      return response({ body: { id: versionId, status: "Published" } });
     }
     if (url.pathname === "/api/v1/auth/login") {
       assert.equal(JSON.parse(input.body).password, "changed-password");
       return response({ body: { token: "persistence-token".padEnd(40, "x") } });
     }
-    if (url.pathname.endsWith("/content/by-slug/release-smoke-persisted")) return response({ body: { id: contentId, status: "Published" } });
+    if (url.pathname.endsWith("/content/by-slug/release-smoke-persisted")) return response({ body: { id: versionId, contentItemId: contentId, status: "Published" } });
     if (url.pathname.endsWith(`/media/${mediaId}/file`)) return response({ bytes: mediaBytes });
     throw new Error(`Unexpected schedule/persistence request ${input.method} ${input.url}`);
   };

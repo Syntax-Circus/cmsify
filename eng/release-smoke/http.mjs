@@ -576,14 +576,15 @@ export function createReleaseHttpAdapter({
       method: "POST", headers: bearer(token), expectedStatuses: [201],
       body: { templateVersionId: template.currentVersion.id, slug: "release-smoke-persisted", localeCode: null, translationGroupId: null, tags: ["scheduled", "persisted"], fields: [] },
     })).json(), "Scheduled content creation");
-    await json(context.runtime.apiBase, `${contentBase}/${content.id}/submit`, { method: "POST", headers: bearer(token), body: null });
-    await json(context.runtime.apiBase, `${contentBase}/${content.id}/approve`, { method: "POST", headers: bearer(token), body: null });
+    const versionBase = `${contentBase}/${content.id}/versions/1`;
+    await json(context.runtime.apiBase, `${versionBase}/submit`, { method: "POST", headers: bearer(token), body: null });
+    await json(context.runtime.apiBase, `${versionBase}/approve`, { method: "POST", headers: bearer(token), body: null });
     const publishAt = new Date(now().getTime() + 1_500).toISOString();
-    await json(context.runtime.apiBase, `${contentBase}/${content.id}/publish`, {
-      method: "POST", headers: bearer(token), body: { publishAt, effectiveStartAt: null, effectiveEndAt: null },
+    await json(context.runtime.apiBase, `${versionBase}/publish`, {
+      method: "POST", headers: bearer(token), body: { publishAt },
     });
     await retryBounded(async () => {
-      const value = requireObject((await json(context.runtime.apiBase, `${contentBase}/${content.id}`, { headers: bearer(token) })).json(), "Scheduled content status");
+      const value = requireObject((await json(context.runtime.apiBase, versionBase, { headers: bearer(token) })).json(), "Scheduled content status");
       assert(value.status === "Published", "Scheduled content is not published yet.");
     }, { maxAttempts: 30, delayMs: 1_000, sleep, signal: context.signal ?? signal });
     return { persistentTemplateId: template.id, persistentContentId: content.id, persistentSlug: "release-smoke-persisted" };
@@ -601,7 +602,7 @@ export function createReleaseHttpAdapter({
     const content = requireObject((await json(context.runtime.apiBase, `/api/v1/workspaces/${context.runtime.workspaceId}/content/by-slug/${context.artifacts.persistentSlug}`, {
       headers: bearer(login.token),
     })).json(), "Persisted content");
-    assert(content.id === context.artifacts.persistentContentId && content.status === "Published", "Published content did not persist.");
+    assert(content.contentItemId === context.artifacts.persistentContentId && content.status === "Published", "Published content did not persist.");
     const media = await call(context.runtime.apiBase, `/api/v1/workspaces/${context.runtime.workspaceId}/media/${context.artifacts.mediaId}/file`, {
       headers: bearer(login.token), maxBytes: 2 * 1024 * 1024,
     });
