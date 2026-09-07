@@ -135,12 +135,20 @@
             ?? 1;
         var candidateVersion = loadedItem.Versions.FirstOrDefault(v => v.VersionNumber == candidateVersionNumber);
 
-        if (candidateVersion is { Status: ContentStatus.Published or ContentStatus.Archived })
+        if (candidateVersion is { Status: ContentStatus.Published or ContentStatus.Archived } && CurrentRole >= UserRole.Editor)
         {
-            var draft = await Content.CreateVersionAsync(WorkspaceId, ContentId.Value, new CreateContentVersionRequest(null, null, candidateVersionNumber, null));
-            editableVersionNumber = draft?.VersionNumber ?? candidateVersionNumber;
-            Toasts.Success($"Version {candidateVersionNumber} is {candidateVersion.Status}; opened a new Draft (version {editableVersionNumber}) to edit.");
-            item = await Content.GetAsync(WorkspaceId, ContentId.Value);
+            try
+            {
+                var draft = await Content.CreateVersionAsync(WorkspaceId, ContentId.Value, new CreateContentVersionRequest(null, null, candidateVersionNumber, null));
+                editableVersionNumber = draft?.VersionNumber ?? candidateVersionNumber;
+                Toasts.Success($"Version {candidateVersionNumber} is {candidateVersion.Status}; opened a new Draft (version {editableVersionNumber}) to edit.");
+                item = await Content.GetAsync(WorkspaceId, ContentId.Value);
+            }
+            catch (CmsifyApiException ex)
+            {
+                editableVersionNumber = candidateVersionNumber;
+                Toasts.Danger($"Could not open a new Draft to edit: {ex.Message}");
+            }
         }
         else
         {
