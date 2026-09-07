@@ -470,6 +470,7 @@ public sealed class ContentController : ControllerBase
         dbContext.ContentVersions.Add(version);
         EnqueueContentEvent("content.version_created", content, version);
         await dbContext.SaveChangesAsync(ct);
+        Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
         return CreatedAtAction(nameof(GetVersion), new { workspaceId, id, versionNumber = version.VersionNumber }, await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, ct: ct));
     }
 
@@ -522,6 +523,7 @@ public sealed class ContentController : ControllerBase
             return NotFound();
         }
 
+        Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
         return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, ct: ct));
     }
 
@@ -563,11 +565,18 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", fieldError);
         }
 
+        // Editing the version invalidates any scheduled publish: clear it so the pre-edit content
+        // can't auto-publish later without going back through review.
+        version.PublishAt = null;
+        version.PublishLeaseOwner = null;
+        version.PublishLeaseToken = null;
+        version.PublishLeaseExpiresAt = null;
         version.UpdatedAt = DateTimeOffset.UtcNow;
         version.UpdatedByUserId = currentActor.UserId;
         var item = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);
         item.SearchVector = searchVectorBuilder.Build(version, templateVersion);
         item.UpdatedAt = DateTimeOffset.UtcNow;
+        EnqueueContentEvent("content.version_updated", item, version);
 
         try
         {
@@ -578,6 +587,7 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
         }
 
+        Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
         return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, ct: ct));
     }
 
@@ -596,7 +606,9 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Only Draft versions can be deleted");
         }
 
+        var item = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);
         dbContext.ContentVersions.Remove(version);
+        EnqueueContentEvent("content.version_deleted", item, version);
         await dbContext.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -729,9 +741,16 @@ public sealed class ContentController : ControllerBase
 
         var item = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);
         item.SearchVector = searchVectorBuilder.Build(version, target);
+        // Bumping the template version invalidates any scheduled publish, same reasoning as UpdateVersion.
+        version.PublishAt = null;
+        version.PublishLeaseOwner = null;
+        version.PublishLeaseToken = null;
+        version.PublishLeaseExpiresAt = null;
         version.UpdatedAt = DateTimeOffset.UtcNow;
         version.UpdatedByUserId = currentActor.UserId;
+        EnqueueContentEvent("content.version_template_upgraded", item, version);
         await dbContext.SaveChangesAsync(ct);
+        Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
         return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, ct: ct));
     }
 
@@ -842,7 +861,15 @@ public sealed class ContentController : ControllerBase
 
     private async Task<string?> ApplyVersionFieldValuesAsync(ContentVersion version, TemplateVersion templateVersion, IReadOnlyList<ContentFieldValueRequest> fields, CancellationToken ct)
     {
-        version.FieldValues.Clear();
+        // Explicit removal (rather than relying on cascade-delete orphan detection from .Clear()
+        // alone) mirrors UpgradeTemplateVersion's pattern below and is required for correctness once
+        // this method is called against an already-tracked version (UpdateVersion): without it, the
+        // old rows are left behind as stale duplicates alongside the newly-added ones.
+        if (version.FieldValues.Count > 0)
+        {
+            dbContext.ContentVersionFieldValues.RemoveRange(version.FieldValues);
+            version.FieldValues.Clear();
+        }
 
         var fieldPickLists = templateVersion.Fields
             .Where(field => field.PrimitiveType == PrimitiveType.PickList)
@@ -864,7 +891,7 @@ public sealed class ContentController : ControllerBase
                 ? (binding.RevisionId.HasValue && revisionLabels.TryGetValue(binding.RevisionId.Value, out var versionedOptions) ? versionedOptions : currentLabels.GetValueOrDefault(binding.PickListId!.Value))?.GetValueOrDefault(input.TextValue)
                 : null;
 
-            version.FieldValues.Add(new ContentVersionFieldValue
+            var fieldValue = new ContentVersionFieldValue
             {
                 ContentVersionId = version.Id,
                 FieldId = input.FieldId,
@@ -877,7 +904,24 @@ public sealed class ContentController : ControllerBase
                 FileAssetId = input.FileAssetId,
                 ChildContentItemId = input.ChildContentItemId,
                 JsonValue = input.JsonValue?.Clone()
-            });
+            };
+            // Explicitly track as Added: version may already be tracked (e.g. on UpdateVersion, where
+            // the parent ContentVersion was loaded, not newly constructed), and both this entity's PK
+            // and the store default are set client-side (EntityBase.Id), so EF's graph painter cannot
+            // infer "Added" from navigation-collection membership alone - without this, it treats the
+            // child as "Modified" and issues an UPDATE against a row that doesn't exist yet, which
+            // fails with 0 rows affected (DbUpdateConcurrencyException).
+            //
+            // When version is already tracked, DbSet.Add below performs automatic relationship fixup
+            // and appends fieldValue to version.FieldValues itself (matching ContentVersionId to the
+            // tracked parent); when version is not yet tracked (Create/CreateVersion, where it's added
+            // to the context later), no such fixup happens and the explicit Add is required to build
+            // the graph. Guard against double-adding into the navigation collection in the former case.
+            dbContext.ContentVersionFieldValues.Add(fieldValue);
+            if (!version.FieldValues.Contains(fieldValue))
+            {
+                version.FieldValues.Add(fieldValue);
+            }
         }
 
         var validation = contentValidator.Validate(version, templateVersion);

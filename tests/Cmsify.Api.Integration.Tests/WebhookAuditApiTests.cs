@@ -349,6 +349,11 @@ public sealed class WebhookAuditApiTests : IAsyncLifetime
         Assert.Null(persisted.PublishLeaseExpiresAt);
     }
 
+    // Renamed from LinkTranslation_ClearsScheduledPublishLeasesForBothInputs: scheduled-publish lease
+    // state (PublishAt/PublishLeaseOwner/Token/ExpiresAt) moved from ContentItem onto ContentVersion
+    // in the version-centric model, and LinkTranslation only ever touches ContentItem.TranslationGroupId
+    // - it doesn't touch any specific ContentVersion - so there is no lease state left in scope here for
+    // it to clear. The old assertions on lease fields were removed rather than reimplemented.
     [Fact]
     public async Task LinkTranslation_PropagatesTranslationGroupIdToBothInputs()
     {

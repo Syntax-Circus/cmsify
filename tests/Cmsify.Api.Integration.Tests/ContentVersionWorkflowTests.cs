@@ -119,14 +119,7 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
         Assert.Equal(versionNumber, item.CurrentlyServingVersion.VersionNumber);
     }
 
-    [Fact(Skip = "Known bug: UpdateVersion throws a spurious DbUpdateConcurrencyException (surfaced as 412) " +
-        "when replacing field values on a version that already has field values, even with a correct If-Match " +
-        "header. Confirmed the failure is not an If-Match mismatch (server-side logging showed identical values) " +
-        "and not the sibling ContentItem xmin update (splitting into two SaveChangesAsync calls still fails on the " +
-        "version-only save). Suspected cause: EF Core's change-tracking for clearing/re-populating an " +
-        "already-tracked ContentVersion.FieldValues collection interacting with cascade-delete orphan handling for " +
-        "ContentVersionFieldValue rows. Needs dedicated debugging before UpdateVersion's field-replacement path can " +
-        "be trusted in production. See task-11-report.md for the full investigation.")]
+    [Fact]
     public async Task UpdateVersion_ReplacesFieldValues_WithCorrectIfMatch()
     {
         await using var factory = new WebApplicationFactory<Program>();
