@@ -21,6 +21,7 @@ const CANDIDATE_MIGRATIONS = [
   "20260826135220_AddWebhookOutbox",
   "20260826215147_ExpandWebhookSecretCiphertext",
   "20260827135736_AddMediaLifecycleReconciliation",
+  "20260906230030_UnifyContentVersionLifecycle",
 ];
 const LEGACY_KEY = "Q21zaWZ5IGZpeHR1cmUgbGVnYWN5IGtleSAwLjEuMyE=";
 const LEGACY_CIPHERTEXT = "v1.AAECAwQFBgcICQoL.BFBpi/UrF42vy+zL9I8lnA==.0pqpkko3sHX/wlWOkRiRGAJYDcLrmg==";
