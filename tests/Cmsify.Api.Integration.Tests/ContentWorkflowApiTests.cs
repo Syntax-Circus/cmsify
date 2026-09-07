@@ -118,28 +118,24 @@ public sealed class ContentWorkflowApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
-        var (workspaceId, contentId) = await SeedContentAsync(factory, ContentStatus.Approved);
+        var (workspaceId, contentId, versionNumber) = await SeedContentAsync(factory, ContentStatus.Approved);
 
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/publish",
-            new { publishAt = "2026-12-01T00:00:00Z", effectiveStartAt = "2026-12-01T00:00:00Z", effectiveEndAt = "2026-12-26T00:00:00Z" },
+            $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}/publish",
+            new { publishAt = "2026-12-01T00:00:00Z" },
             TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PublishContentResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.PublishContentVersionResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(body);
-        Assert.Equal(SyntaxCircus.Cmsify.Contracts.ContentStatus.Approved, body.Content.Status);
-        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), body.Content.PublishAt);
-        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), body.Content.PendingEffectiveStartAt);
-        Assert.Equal(DateTimeOffset.Parse("2026-12-26T00:00:00Z"), body.Content.PendingEffectiveEndAt);
+        Assert.Equal(SyntaxCircus.Cmsify.Contracts.ContentStatus.Approved, body.Version.Status);
+        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), body.Version.PublishAt);
 
-        var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/{contentId}", TestContext.Current.CancellationToken);
+        var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/{versionNumber}", TestContext.Current.CancellationToken);
         getResponse.EnsureSuccessStatusCode();
-        var getBody = await getResponse.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.ContentItemDetailResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        var getBody = await getResponse.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.ContentVersionDetailResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(getBody);
         Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), getBody.PublishAt);
-        Assert.Equal(DateTimeOffset.Parse("2026-12-01T00:00:00Z"), getBody.PendingEffectiveStartAt);
-        Assert.Equal(DateTimeOffset.Parse("2026-12-26T00:00:00Z"), getBody.PendingEffectiveEndAt);
     }
 
     [Fact]
