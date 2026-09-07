@@ -328,6 +328,11 @@
                     ?? throw new InvalidOperationException("Cmsify API returned no payload while updating the content version.");
                 version = updatedVersion;
 
+                // Saving a version bumps the parent item's UpdatedAt server-side (search vector, list sort),
+                // which invalidates the item ETag captured at page load. Refresh it before the item PUT below,
+                // otherwise that PUT's If-Match always fails against its own prior write.
+                item = await Client.Content.GetAsync(WorkspaceId, ContentId.Value) ?? item;
+
                 var updatedItem = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
                     new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, tagList))
                     ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
