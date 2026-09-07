@@ -32,10 +32,11 @@
                     }
                 </select>
             }
-            @if (ContentId.HasValue || selectedTemplateId.HasValue)
+            @if (selectedTemplateId.HasValue || (ContentId.HasValue && editableVersionNumber.HasValue))
             {
-                <ContentEditPanel @key="@(ContentId ?? selectedTemplateId)" Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId"
+                <ContentEditPanel @key="@((ContentId, editableVersionNumber))" Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId"
                                   TemplateId="@(ContentId.HasValue ? null : selectedTemplateId)"
+                                  VersionNumber="@editableVersionNumber"
                                   SlugHelpText="@($"Optional. If supplied: {SlugRules.ValidationMessage}")"
                                   ItemChanged="@(i => item = i)" Saved="OnSavedAsync" Created="OnCreatedAsync" />
             }
@@ -44,15 +45,15 @@
     <div class="col-lg-4">
         <div class="cms-card">
             <h2 class="h6">Lifecycle</h2>
-            @if (item is not null)
+            @if (item is not null && EditingVersion is not null)
             {
-                <StatusBadge Status="@item.Status" />
-                var submitState = ContentWorkflowActions.SubmitState(item.Status);
-                var approveState = ContentWorkflowActions.ApproveState(item.Status);
-                var rejectState = ContentWorkflowActions.RejectState(item.Status, CurrentRole);
-                var publishState = ContentWorkflowActions.PublishState(item.Status, CurrentRole);
-                var archiveState = ContentWorkflowActions.ArchiveState(item.Status);
-                var restoreState = ContentWorkflowActions.RestoreState(item.Status, CurrentRole);
+                <StatusBadge Status="@EditingVersion.Status" />
+                var submitState = ContentWorkflowActions.SubmitState(EditingVersion.Status);
+                var approveState = ContentWorkflowActions.ApproveState(EditingVersion.Status);
+                var rejectState = ContentWorkflowActions.RejectState(EditingVersion.Status, CurrentRole);
+                var publishState = ContentWorkflowActions.PublishState(EditingVersion.Status, CurrentRole);
+                var archiveState = ContentWorkflowActions.ArchiveState(EditingVersion.Status);
+                var restoreState = ContentWorkflowActions.RestoreState(EditingVersion.Status, CurrentRole);
                 <div class="d-flex flex-wrap gap-1 mt-2">
                     <button class="btn btn-outline-secondary btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(SubmitAction)">Submit</button>
                     <button class="btn btn-outline-secondary btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(ApproveAction)">Approve</button>
@@ -61,19 +62,10 @@
                     <button class="btn btn-outline-secondary btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(ArchiveAction)">Archive</button>
                     <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(RestoreAction)">Restore</button>
                 </div>
-                @if (item.PublishAt.HasValue)
+                @if (EditingVersion.PublishAt.HasValue)
                 {
                     <div class="small text-muted mt-2">
-                        Scheduled to publish: <LocalTimeDisplay Value="@item.PublishAt.Value" />
-                        @if (item.PendingEffectiveStartAt.HasValue || item.PendingEffectiveEndAt.HasValue)
-                        {
-                            <div>
-                                Effective window:
-                                @if (item.PendingEffectiveStartAt.HasValue) { <LocalTimeDisplay Value="@item.PendingEffectiveStartAt.Value" /> } else { <text>(open start)</text> }
-                                –
-                                @if (item.PendingEffectiveEndAt.HasValue) { <LocalTimeDisplay Value="@item.PendingEffectiveEndAt.Value" /> } else { <text>(open end)</text> }
-                            </div>
-                        }
+                        Scheduled to publish: <LocalTimeDisplay Value="@EditingVersion.PublishAt.Value" />
                     </div>
                 }
             }
@@ -86,7 +78,7 @@
 
 @if (item is not null)
 {
-    <PublishContentDialog WorkspaceId="@WorkspaceId" ContentId="@publishContentId" ContentStatus="@item.Status"
+    <PublishContentDialog WorkspaceId="@WorkspaceId" ContentId="@publishContentId" VersionNumber="@editableVersionNumber" VersionStatus="@(EditingVersion?.Status ?? ContentStatus.Draft)"
                           CanOverrideWorkflow="@(CurrentRole >= UserRole.Admin)" Cmsify="@Cmsify"
                           OnClosed="ClosePublishDialog" OnPublished="OnPublishedAsync" />
 }
@@ -109,29 +101,86 @@
     private ContentItemDetailResponse? item;
     private Guid? selectedTemplateId;
     private string? translationTarget;
+    private int? editableVersionNumber;
+    private Guid? resolvedForContentId;
+
+    private ContentVersionSummaryResponse? EditingVersion =>
+        item?.Versions.FirstOrDefault(v => v.VersionNumber == editableVersionNumber);
 
     protected override async Task OnParametersSetAsync()
     {
         if (!ContentId.HasValue)
         {
             templates = ApiResponse.ItemsOrEmpty(await Templates.ListAsync(WorkspaceId));
+            return;
+        }
+
+        if (resolvedForContentId == ContentId)
+        {
+            return;
+        }
+
+        resolvedForContentId = ContentId;
+
+        var loadedItem = await Content.GetAsync(WorkspaceId, ContentId.Value);
+        if (loadedItem is null)
+        {
+            return;
+        }
+
+        item = loadedItem;
+
+        var candidateVersionNumber = loadedItem.CurrentlyServingVersion?.VersionNumber
+            ?? loadedItem.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()?.VersionNumber
+            ?? 1;
+        var candidateVersion = loadedItem.Versions.FirstOrDefault(v => v.VersionNumber == candidateVersionNumber);
+
+        if (candidateVersion is { Status: ContentStatus.Published or ContentStatus.Archived })
+        {
+            var draft = await Content.CreateVersionAsync(WorkspaceId, ContentId.Value, new CreateContentVersionRequest(null, null, candidateVersionNumber, null));
+            editableVersionNumber = draft?.VersionNumber ?? candidateVersionNumber;
+            Toasts.Success($"Version {candidateVersionNumber} is {candidateVersion.Status}; opened a new Draft (version {editableVersionNumber}) to edit.");
+            item = await Content.GetAsync(WorkspaceId, ContentId.Value);
+        }
+        else
+        {
+            editableVersionNumber = candidateVersionNumber;
         }
     }
 
     private void OnTemplateSelected(ChangeEventArgs e) =>
         selectedTemplateId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
 
+    private async Task RefreshItemAsync()
+    {
+        if (ContentId.HasValue)
+        {
+            item = await Content.GetAsync(WorkspaceId, ContentId.Value);
+        }
+    }
+
     private async Task RunTransitionAsync(string action)
     {
-        if (!ContentId.HasValue)
+        if (!ContentId.HasValue || editableVersionNumber is not { } versionNumber)
         {
             return;
         }
 
         try
         {
-            item = await Content.TransitionAsync(WorkspaceId, ContentId.Value, action);
-            Toasts.Success("Content updated.");
+            var updated = action switch
+            {
+                SubmitAction => await Content.SubmitVersionAsync(WorkspaceId, ContentId.Value, versionNumber),
+                ApproveAction => await Content.ApproveVersionAsync(WorkspaceId, ContentId.Value, versionNumber),
+                ArchiveAction => await Content.ArchiveVersionAsync(WorkspaceId, ContentId.Value, versionNumber),
+                RestoreAction => await Content.RestoreVersionAsync(WorkspaceId, ContentId.Value, versionNumber),
+                _ => null
+            };
+            if (updated is not null)
+            {
+                await RefreshItemAsync();
+                Toasts.Success("Content updated.");
+            }
         }
         catch (Exception ex)
         {
@@ -141,14 +190,15 @@
 
     private async Task RunRejectAsync()
     {
-        if (!ContentId.HasValue)
+        if (!ContentId.HasValue || editableVersionNumber is not { } versionNumber)
         {
             return;
         }
 
         try
         {
-            item = await Content.RejectAsync(WorkspaceId, ContentId.Value, new RejectContentRequest("Rejected from content editor"));
+            await Content.RejectVersionAsync(WorkspaceId, ContentId.Value, versionNumber, new RejectContentRequest("Rejected from content editor"));
+            await RefreshItemAsync();
             Toasts.Success("Content updated.");
         }
         catch (Exception ex)
@@ -161,11 +211,10 @@
 
     private void ClosePublishDialog() => publishContentId = null;
 
-    private Task OnPublishedAsync(PublishContentResponse response)
+    private async Task OnPublishedAsync(PublishContentVersionResponse response)
     {
-        item = response.Content;
+        await RefreshItemAsync();
         Toasts.Success(response.Warnings.Count == 0 ? "Content published." : "Content published with warnings.");
-        return Task.CompletedTask;
     }
 
     private Task OnSavedAsync(ContentItemDetailResponse saved)
@@ -183,14 +232,20 @@
 
     private async Task DuplicateAsync()
     {
-        if (item is null)
+        if (item is null || editableVersionNumber is not { } versionNumber)
         {
             return;
         }
 
         try
         {
-            var fields = item.Fields
+            var sourceVersion = await Content.GetVersionAsync(WorkspaceId, item.Id, versionNumber);
+            if (sourceVersion is null)
+            {
+                return;
+            }
+
+            var fields = sourceVersion.Fields
                 .Select(f => new ContentFieldValueRequest(f.FieldId, f.Order, f.ValueKind, f.TextValue, f.BoolValue, f.MediaAssetId, f.FileAssetId, f.ChildContentItemId, f.JsonValue))
                 .ToList();
             var created = await Content.CreateAsync(WorkspaceId, new CreateContentItemRequest(item.TemplateVersionId, null, item.LocaleCode, null, item.Tags, fields));

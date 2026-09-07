@@ -18,31 +18,33 @@
             <div class="small text-muted">@string.Join(", ", contentItem.Tags)</div>
         </TitleTemplate>
         <StatusTemplate Context="contentItem">
-            <StatusBadge Status="@contentItem.Status" />
+            <StatusBadge Status="@(contentItem.CurrentlyServingVersion?.Status ?? ContentStatus.Draft)" />
         </StatusTemplate>
         <UpdatedTemplate Context="contentItem">
             <LocalTimeDisplay Value="@contentItem.UpdatedAt" />
         </UpdatedTemplate>
         <RowActions Context="contentItem">
             @{
-                var submitState = ContentWorkflowActions.SubmitState(contentItem.Status);
-                var approveState = ContentWorkflowActions.ApproveState(contentItem.Status);
-                var rejectState = ContentWorkflowActions.RejectState(contentItem.Status, CurrentRole);
-                var publishState = ContentWorkflowActions.PublishState(contentItem.Status, CurrentRole);
-                var archiveState = ContentWorkflowActions.ArchiveState(contentItem.Status);
-                var restoreState = ContentWorkflowActions.RestoreState(contentItem.Status, CurrentRole);
+                var rowVersionStatus = contentItem.CurrentlyServingVersion?.Status ?? ContentStatus.Draft;
+                var rowVersionNumber = contentItem.CurrentlyServingVersion?.VersionNumber ?? 1;
+                var submitState = ContentWorkflowActions.SubmitState(rowVersionStatus);
+                var approveState = ContentWorkflowActions.ApproveState(rowVersionStatus);
+                var rejectState = ContentWorkflowActions.RejectState(rowVersionStatus, CurrentRole);
+                var publishState = ContentWorkflowActions.PublishState(rowVersionStatus, CurrentRole);
+                var archiveState = ContentWorkflowActions.ArchiveState(rowVersionStatus);
+                var restoreState = ContentWorkflowActions.RestoreState(rowVersionStatus, CurrentRole);
             }
-            <button class="btn btn-outline-info btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, SubmitAction)">Submit</button>
-            <button class="btn btn-outline-success btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ApproveAction)">Approve</button>
-            <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(contentItem.Id)">Reject</button>
-            <button class="btn btn-success btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(contentItem)">Publish</button>
-            <button class="btn btn-outline-danger btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, ArchiveAction)">Archive</button>
-            <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, RestoreAction)">Restore</button>
+            <button class="btn btn-outline-info btn-sm" disabled="@(!submitState.Enabled)" title="@submitState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, SubmitAction)">Submit</button>
+            <button class="btn btn-outline-success btn-sm" disabled="@(!approveState.Enabled)" title="@approveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, ApproveAction)">Approve</button>
+            <button class="btn btn-outline-warning btn-sm" disabled="@(!rejectState.Enabled)" title="@rejectState.DisabledReason" @onclick="() => RunRejectAsync(contentItem.Id, rowVersionNumber)">Reject</button>
+            <button class="btn btn-success btn-sm" disabled="@(!publishState.Enabled)" title="@publishState.DisabledReason" @onclick="() => OpenPublishDialog(contentItem, rowVersionNumber, rowVersionStatus)">Publish</button>
+            <button class="btn btn-outline-danger btn-sm" disabled="@(!archiveState.Enabled)" title="@archiveState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, ArchiveAction)">Archive</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled="@(!restoreState.Enabled)" title="@restoreState.DisabledReason" @onclick="() => RunTransitionAsync(contentItem.Id, rowVersionNumber, RestoreAction)">Restore</button>
         </RowActions>
     </ContentListPanel>
 </div>
 
-<PublishContentDialog WorkspaceId="@WorkspaceId" ContentId="@publishContentId" ContentStatus="@publishContentStatus"
+<PublishContentDialog WorkspaceId="@WorkspaceId" ContentId="@publishContentId" VersionNumber="@publishVersionNumber" VersionStatus="@publishVersionStatus"
                       CanOverrideWorkflow="@(CurrentRole >= UserRole.Admin)" Cmsify="@Cmsify"
                       OnClosed="ClosePublishDialog" OnPublished="OnPublishedAsync" />
 
@@ -55,7 +57,8 @@
     private const string ArchiveAction = "archive";
     private const string RestoreAction = "restore";
     private Guid? publishContentId;
-    private ContentStatus publishContentStatus;
+    private int? publishVersionNumber;
+    private ContentStatus publishVersionStatus;
 
     private UserRole CurrentRole => Enum.TryParse<UserRole>(Auth.User?.Role, ignoreCase: true, out var role) ? role : UserRole.Reader;
 
@@ -63,11 +66,25 @@
 
     private void EditContent(ContentItemSummaryResponse item) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
 
-    private async Task RunTransitionAsync(Guid id, string action)
+    private async Task RunTransitionAsync(Guid id, int versionNumber, string action)
     {
         try
         {
-            await Content.TransitionAsync(WorkspaceId, id, action);
+            switch (action)
+            {
+                case SubmitAction:
+                    await Content.SubmitVersionAsync(WorkspaceId, id, versionNumber);
+                    break;
+                case ApproveAction:
+                    await Content.ApproveVersionAsync(WorkspaceId, id, versionNumber);
+                    break;
+                case ArchiveAction:
+                    await Content.ArchiveVersionAsync(WorkspaceId, id, versionNumber);
+                    break;
+                case RestoreAction:
+                    await Content.RestoreVersionAsync(WorkspaceId, id, versionNumber);
+                    break;
+            }
             Toasts.Success("Content updated.");
         }
         catch (Exception ex)
@@ -80,11 +97,11 @@
         }
     }
 
-    private async Task RunRejectAsync(Guid id)
+    private async Task RunRejectAsync(Guid id, int versionNumber)
     {
         try
         {
-            await Content.RejectAsync(WorkspaceId, id, new RejectContentRequest("Rejected from content list"));
+            await Content.RejectVersionAsync(WorkspaceId, id, versionNumber, new RejectContentRequest("Rejected from content list"));
             Toasts.Success("Content updated.");
         }
         catch (Exception ex)
@@ -97,15 +114,16 @@
         }
     }
 
-    private void OpenPublishDialog(ContentItemSummaryResponse item)
+    private void OpenPublishDialog(ContentItemSummaryResponse item, int versionNumber, ContentStatus versionStatus)
     {
         publishContentId = item.Id;
-        publishContentStatus = item.Status;
+        publishVersionNumber = versionNumber;
+        publishVersionStatus = versionStatus;
     }
 
     private void ClosePublishDialog() => publishContentId = null;
 
-    private async Task OnPublishedAsync(PublishContentResponse response)
+    private async Task OnPublishedAsync(PublishContentVersionResponse response)
     {
         Toasts.Success(response.Warnings.Count == 0 ? "Content published." : "Content published with warnings.");
         await ReloadListAsync();
