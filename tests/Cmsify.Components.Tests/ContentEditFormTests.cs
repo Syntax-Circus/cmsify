@@ -69,8 +69,8 @@ public sealed class ContentEditFormTests : BunitContext
         var templateVersion = CreateTemplateVersion(field);
         var options = new List<ContentItemSummaryResponse>
         {
-            new(currentContentId, Guid.NewGuid(), "Template", ContentStatus.Draft, "self-slug", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null),
-            new(otherOptionId, Guid.NewGuid(), "Template", ContentStatus.Draft, "other-slug", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null),
+            new(currentContentId, Guid.NewGuid(), "Template", "self-slug", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1, null),
+            new(otherOptionId, Guid.NewGuid(), "Template", "other-slug", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1, null),
         };
 
         var cut = Render<ContentEditForm>(parameters => parameters

@@ -4,7 +4,7 @@
     <option value="">@(IsRequired ? "Select referenced content" : "None")</option>
     @foreach (var option in Options)
     {
-        <option value="@option.Id">@(option.Slug ?? option.Id.ToString()) (@option.Status)</option>
+        <option value="@option.Id">@(option.Slug ?? option.Id.ToString()) (@(option.CurrentlyServingVersion?.Status.ToString() ?? "—"))</option>
     }
 </select>
 

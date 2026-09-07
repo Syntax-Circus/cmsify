@@ -8,7 +8,7 @@ namespace SyntaxCircus.Cmsify.Components.Tests;
 public sealed class ContentListViewTests : BunitContext
 {
     private static ContentItemSummaryResponse CreateItem(string slug) => new(
-        Guid.NewGuid(), Guid.NewGuid(), "Article", ContentStatus.Draft, slug, null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null);
+        Guid.NewGuid(), Guid.NewGuid(), "Article", slug, null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1, null);
 
     [Fact]
     public void RendersOneRowPerItem()

@@ -46,8 +46,9 @@ public sealed class ContentEditPanelTests : BunitContext
                 capturedCreateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
                 return FakeHttpMessageHandler.Json($$"""
                     { "id": "{{newContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
-                      "status": "Draft", "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
-                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z", "publishedAt": null, "fields": [] }
+                      "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
                     """);
             }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
@@ -82,7 +83,8 @@ public sealed class ContentEditPanelTests : BunitContext
         var templateVersionId = Guid.NewGuid();
         var contentId = Guid.NewGuid();
         var fieldId = Guid.NewGuid();
-        string? capturedUpdateBody = null;
+        string? capturedVersionUpdateBody = null;
+        string? capturedItemUpdateBody = null;
 
         var client = TestCmsifyClientFactory.Create(request =>
         {
@@ -91,14 +93,25 @@ public sealed class ContentEditPanelTests : BunitContext
             {
                 return FakeHttpMessageHandler.Json($$"""
                     { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
-                      "status": "Draft", "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
-                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z", "publishedAt": null,
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
                       "fields": [
                         { "fieldId": "{{fieldId}}", "key": "title", "label": "Title", "order": 0, "valueKind": "Text",
                           "textValue": "Existing", "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
                           "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null }
-                      ]
-                    }
+                      ] }
                     """);
             }
             if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
@@ -126,13 +139,26 @@ public sealed class ContentEditPanelTests : BunitContext
                     }
                     """);
             }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                capturedVersionUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
             if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
             {
-                capturedUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                capturedItemUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
                 return FakeHttpMessageHandler.Json($$"""
                     { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
-                      "status": "Draft", "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
-                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "publishedAt": null, "fields": [] }
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
                     """);
             }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
@@ -152,11 +178,12 @@ public sealed class ContentEditPanelTests : BunitContext
         cut.Find("input").Input("Updated");
         cut.Find(".cmsify-form-save-button").Click();
 
-        cut.WaitForState(() => capturedUpdateBody is not null);
+        cut.WaitForState(() => capturedVersionUpdateBody is not null);
+        cut.WaitForState(() => capturedItemUpdateBody is not null);
         cut.WaitForState(() => saved is not null);
 
-        capturedUpdateBody.ShouldNotBeNull();
-        capturedUpdateBody.ShouldContain("Updated");
+        capturedVersionUpdateBody.ShouldNotBeNull();
+        capturedVersionUpdateBody.ShouldContain("Updated");
         saved.ShouldNotBeNull();
         saved!.Id.ShouldBe(contentId);
     }
@@ -166,15 +193,28 @@ public sealed class ContentEditPanelTests : BunitContext
     {
         var workspaceId = Guid.NewGuid();
         var contentId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
         var client = TestCmsifyClientFactory.Create(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
             {
                 return FakeHttpMessageHandler.Json($$"""
-                    { "id": "{{contentId}}", "templateVersionId": "{{Guid.NewGuid()}}", "templateName": "Article",
-                      "status": "Draft", "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
-                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z", "publishedAt": null, "fields": [] }
+                    { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z", "fields": [] }
                     """);
             }
             if (path == $"/api/v1/workspaces/{workspaceId}/templates")
@@ -195,7 +235,6 @@ public sealed class ContentEditPanelTests : BunitContext
 
         changed.ShouldNotBeNull();
         changed!.Id.ShouldBe(contentId);
-        changed.Status.ShouldBe(ContentStatus.Draft);
     }
 
     [Fact]
@@ -306,7 +345,8 @@ public sealed class ContentEditPanelTests : BunitContext
         var contentId = Guid.NewGuid();
         var fieldId = Guid.NewGuid();
         var mediaAssetId = Guid.NewGuid();
-        string? capturedUpdateBody = null;
+        string? capturedVersionUpdateBody = null;
+        string? capturedItemUpdateBody = null;
 
         var client = TestCmsifyClientFactory.Create(request =>
         {
@@ -315,14 +355,25 @@ public sealed class ContentEditPanelTests : BunitContext
             {
                 return FakeHttpMessageHandler.Json($$"""
                     { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
-                      "status": "Draft", "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
-                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z", "publishedAt": null,
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
                       "fields": [
                         { "fieldId": "{{fieldId}}", "key": "cover", "label": "Cover", "order": 0, "valueKind": "Media",
                           "textValue": null, "boolValue": null, "mediaAssetId": "{{mediaAssetId}}", "fileAssetId": null,
                           "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null }
-                      ]
-                    }
+                      ] }
                     """);
             }
             if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/media/{mediaAssetId}")
@@ -354,13 +405,26 @@ public sealed class ContentEditPanelTests : BunitContext
                     }
                     """);
             }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                capturedVersionUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
             if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
             {
-                capturedUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                capturedItemUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
                 return FakeHttpMessageHandler.Json($$"""
                     { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
-                      "status": "Draft", "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
-                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "publishedAt": null, "fields": [] }
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
                     """);
             }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
@@ -377,11 +441,12 @@ public sealed class ContentEditPanelTests : BunitContext
 
         cut.Find(".cmsify-form-save-button").Click();
 
-        cut.WaitForState(() => capturedUpdateBody is not null);
+        cut.WaitForState(() => capturedVersionUpdateBody is not null);
+        cut.WaitForState(() => capturedItemUpdateBody is not null);
         cut.WaitForState(() => saved is not null);
 
-        capturedUpdateBody.ShouldNotBeNull();
-        capturedUpdateBody.ShouldContain(mediaAssetId.ToString());
+        capturedVersionUpdateBody.ShouldNotBeNull();
+        capturedVersionUpdateBody.ShouldContain(mediaAssetId.ToString());
         saved.ShouldNotBeNull();
         saved!.Id.ShouldBe(contentId);
     }

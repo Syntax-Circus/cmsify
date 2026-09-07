@@ -46,7 +46,7 @@
                         }
                         else
                         {
-                            @contentItem.Status
+                            @(contentItem.CurrentlyServingVersion?.Status.ToString() ?? "—")
                         }
                     </td>
                     <td>@contentItem.LocaleCode</td>
