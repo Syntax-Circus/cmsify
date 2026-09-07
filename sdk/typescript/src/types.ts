@@ -22,6 +22,7 @@ export interface PagedResult<T> {
 
 export type Workspace = components["schemas"]["WorkspaceDto"];
 export type ContentItem = components["schemas"]["ContentItemDetailResponse"];
+export type ContentVersion = components["schemas"]["ContentVersionDetailResponse"];
 export type ContentListItem = components["schemas"]["ContentItemSummaryResponse"];
 export type Template = components["schemas"]["TemplateResponse"];
 export type TemplateListItem = components["schemas"]["TemplateSummaryResponse"];

@@ -20,12 +20,18 @@ public sealed class WebhooksController : ControllerBase
 {
     private static readonly IReadOnlySet<string> KnownEventTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
+        // Item-level lifecycle (ContentController Create/Update/Delete).
         "content.created",
         "content.updated",
-        "content.status_changed",
-        "content.published",
-        "content.archived",
         "content.deleted",
+        // Version-level lifecycle (ContentController version actions, plus the scheduled-publish
+        // worker, which emits content.version_published for automatic publications).
+        "content.version_created",
+        "content.version_updated",
+        "content.version_deleted",
+        "content.version_status_changed",
+        "content.version_published",
+        "content.version_template_upgraded",
         "template.version_published",
         "workspace.updated"
     };

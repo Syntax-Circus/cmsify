@@ -35,6 +35,7 @@ export const CANDIDATE_MIGRATIONS = Object.freeze([
   "20260826135220_AddWebhookOutbox",
   "20260826215147_ExpandWebhookSecretCiphertext",
   "20260827135736_AddMediaLifecycleReconciliation",
+  "20260906230030_UnifyContentVersionLifecycle",
 ]);
 
 const EXPECTED_KEYS = ["schemaVersion", "fixtureClock", "ids", "relatedIds", "migrations", "authentication", "media", "content", "provenance", "timestamps", "candidate", "scenarios"];
@@ -202,7 +203,7 @@ export function validateExpectedData(value, manifest, fixtureDirectory) {
   for (const key of TIMESTAMP_KEYS) assertTimestamp(value.timestamps[key], `timestamps.${key}`);
 
   assertExactKeys(value.candidate, CANDIDATE_KEYS, "candidate");
-  assertExactStringArray(value.candidate.migrations, CANDIDATE_MIGRATIONS, "candidate.migrations exact 14-migration boundary");
+  assertExactStringArray(value.candidate.migrations, CANDIDATE_MIGRATIONS, "candidate.migrations exact 15-migration boundary");
   assert(value.candidate.storageProvider === "s3", "candidate.storageProvider must be canonical s3.");
   let legacyKey;
   try {

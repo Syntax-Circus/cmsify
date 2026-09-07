@@ -8,7 +8,7 @@ namespace SyntaxCircus.Cmsify.Components.Tests.FieldEditors;
 public sealed class ReferenceFieldEditorTests : BunitContext
 {
     private static ContentItemSummaryResponse CreateOption(string slug) => new(
-        Guid.NewGuid(), Guid.NewGuid(), "Article", ContentStatus.Draft, slug, null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null);
+        Guid.NewGuid(), Guid.NewGuid(), "Article", slug, null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1, null);
 
     [Fact]
     public void ListsOptionsAndRaisesValueChangedOnSelection()

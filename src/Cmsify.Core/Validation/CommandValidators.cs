@@ -75,6 +75,9 @@ public sealed class TemplateFieldInputValidator : AbstractValidator<TemplateFiel
         RuleFor(field => field)
             .Must(field => !field.IsOpen || (!field.PrimitiveType.HasValue && !field.TemplateId.HasValue && !field.ComponentId.HasValue))
             .WithMessage("Open fields cannot define PrimitiveType or TemplateId.");
+        RuleFor(field => field)
+            .Must(field => !field.IsOpen || field.AllowedTypes.All(allowedType => !allowedType.PrimitiveType.HasValue))
+            .WithMessage("Open fields' AllowedTypes entries cannot define a PrimitiveType.");
     }
 }
 
@@ -87,30 +90,6 @@ public sealed class SaveTemplateVersionStructureCommandValidator : AbstractValid
         RuleFor(command => command.Fields)
             .Must(fields => fields.Select(field => field.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count() == fields.Count)
             .WithMessage("Template field keys must be unique within a template version.");
-    }
-}
-
-public sealed class CreateContentItemCommandValidator : AbstractValidator<CreateContentItemCommand>
-{
-    public CreateContentItemCommandValidator()
-    {
-        RuleFor(command => command.WorkspaceId).NotEmpty();
-        RuleFor(command => command.TemplateVersionId).NotEmpty();
-        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage).When(command => command.Slug is not null);
-        RuleForEach(command => command.FieldValues).ChildRules(value =>
-        {
-            value.RuleFor(fieldValue => fieldValue.FieldId).NotEmpty();
-            value.RuleFor(fieldValue => fieldValue.Order).GreaterThanOrEqualTo(0);
-        });
-    }
-}
-
-public sealed class UpdateContentItemCommandValidator : AbstractValidator<UpdateContentItemCommand>
-{
-    public UpdateContentItemCommandValidator()
-    {
-        RuleFor(command => command.Id).NotEmpty();
-        RuleFor(command => command.Slug).Must(SlugRules.IsValid).WithMessage(SlugRules.ValidationMessage).When(command => command.Slug is not null);
     }
 }
 

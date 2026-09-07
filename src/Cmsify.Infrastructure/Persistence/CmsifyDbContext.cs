@@ -28,8 +28,6 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
 
-    public DbSet<ContentFieldValue> ContentFieldValues => Set<ContentFieldValue>();
-
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
 
     public DbSet<MediaDeletionIntent> MediaDeletionIntents => Set<MediaDeletionIntent>();

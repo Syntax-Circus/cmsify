@@ -151,7 +151,7 @@ public sealed class ContentCachingTests
 
     private static void ConfigureCache(CmsifyContentCacheOptions options) => options.CachePartitionProvider = _ => ValueTask.FromResult("test-reader");
 
-    private static ContentItemDetailResponse Content(int call) => new(Guid.NewGuid(), Guid.NewGuid(), "post", ContentStatus.Published, $"post-{call}", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, []);
+    private static ContentItemDetailResponse Content(int call) => new(Guid.NewGuid(), Guid.NewGuid(), "post", $"post-{call}", null, null, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, []);
 
     private static HttpResponseMessage Json(object value) => new(HttpStatusCode.OK)
     {

@@ -18,7 +18,7 @@
 
 @if (versions.Count == 0)
 {
-    <EmptyState Title="No versions yet" Message="A version snapshot is created each time this content item is published." />
+    <EmptyState Title="No versions yet" Body="A version snapshot is created each time this content item is published." />
 }
 else
 {
@@ -44,11 +44,20 @@ else
                         </td>
                         <td><StatusBadge Status="@version.Status" /></td>
                         <td>@RangeDisplay(version.EffectiveStartAt, version.EffectiveEndAt)</td>
-                        <td><LocalTimeDisplay Value="@version.PublishedAt" /></td>
                         <td>
-                            @if (version.RetiredAt.HasValue)
+                            @if (version.PublishedAt.HasValue)
                             {
-                                <LocalTimeDisplay Value="@version.RetiredAt.Value" />
+                                <LocalTimeDisplay Value="@version.PublishedAt.Value" />
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td>
+                            @if (version.ArchivedAt.HasValue)
+                            {
+                                <LocalTimeDisplay Value="@version.ArchivedAt.Value" />
                             }
                             else
                             {
@@ -62,7 +71,7 @@ else
                             }
                         </td>
                         <td class="text-end">
-                            @if (version.Status != ContentVersionStatus.Published)
+                            @if (version.Status != ContentStatus.Published)
                             {
                                 <button class="btn btn-outline-secondary btn-sm" type="button" @onclick="() => PromptRollback(version.VersionNumber)">Roll back to this version</button>
                             }
@@ -100,11 +109,20 @@ else
                         <dt class="col-sm-3">Effective range</dt>
                         <dd class="col-sm-9">@RangeDisplay(inspected.EffectiveStartAt, inspected.EffectiveEndAt)</dd>
                         <dt class="col-sm-3">Published</dt>
-                        <dd class="col-sm-9"><LocalTimeDisplay Value="@inspected.PublishedAt" /></dd>
-                        @if (inspected.RetiredAt.HasValue)
+                        <dd class="col-sm-9">
+                            @if (inspected.PublishedAt.HasValue)
+                            {
+                                <LocalTimeDisplay Value="@inspected.PublishedAt.Value" />
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </dd>
+                        @if (inspected.ArchivedAt.HasValue)
                         {
                             <dt class="col-sm-3">Retired</dt>
-                            <dd class="col-sm-9"><LocalTimeDisplay Value="@inspected.RetiredAt.Value" /></dd>
+                            <dd class="col-sm-9"><LocalTimeDisplay Value="@inspected.ArchivedAt.Value" /></dd>
                         }
                     </dl>
                     <h6>Field values</h6>
@@ -123,7 +141,7 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline-secondary" type="button" @onclick="() => inspected = null">Close</button>
-                    @if (inspected.Status != ContentVersionStatus.Published)
+                    @if (inspected.Status != ContentStatus.Published)
                     {
                         <button class="btn btn-primary" type="button" @onclick="() => PromptRollback(inspected.VersionNumber)">Roll back to this version</button>
                     }
@@ -136,7 +154,7 @@ else
 
 <ConfirmDialog Visible="@confirmVersion.HasValue"
                Title="Roll back content"
-               Message="@($"Replace the currently-active content with version {confirmVersion} and retire the active version? This creates a new published snapshot.")"
+               Message="@($"Create a new Draft version cloned from version {confirmVersion}? You can review and publish it from the editor.")"
                ConfirmText="Roll back"
                ButtonClass="btn-primary"
                OnCancel="() => confirmVersion = null"
@@ -195,8 +213,11 @@ else
         confirmVersion = null;
         try
         {
-            await Content.RollbackAsync(WorkspaceId, ContentId, target);
-            await ReloadAsync();
+            var created = await Content.CreateVersionAsync(WorkspaceId, ContentId, new CreateContentVersionRequest(null, null, target, null));
+            if (created is not null)
+            {
+                Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{ContentId}");
+            }
         }
         catch (CmsifyApiException ex)
         {

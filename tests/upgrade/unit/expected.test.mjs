@@ -12,7 +12,7 @@ test("accepts the exact expected-data contract and manifest binding", () => {
 
   assert.equal(expected.content.currentEffectiveStartAt, "2026-08-19T12:00:00.000000Z");
   assert.equal(expected.media.image.lifecycle.candidateBlobState, "DeletePending");
-  assert.equal(expected.candidate.migrations.length, 14);
+  assert.equal(expected.candidate.migrations.length, 15);
   assert.equal(expected.timestamps.webhookDeliveryLastAttemptAt, "2026-08-20T12:15:00.000000Z");
   assert.equal(Object.isFrozen(expected.media.image.lifecycle), true);
 });
@@ -73,7 +73,7 @@ test("rejects an incomplete candidate migration boundary", () => {
 
   assert.throws(
     () => validateExpectedData(expected, validManifestDocument(), fixtureDirectory),
-    /candidate\.migrations.*exact.*14/i,
+    /candidate\.migrations.*exact.*15/i,
   );
 });
 

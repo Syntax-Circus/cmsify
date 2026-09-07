@@ -36,31 +36,31 @@ public sealed class ContentLifecycleServiceTests
     public async Task TransitionAsync_UpdatesStatusAndActor_ForAllowedTransition()
     {
         var actorId = Guid.CreateVersion7();
-        var item = new ContentItem
+        var version = new ContentVersion
         {
             WorkspaceId = Guid.CreateVersion7(),
             TemplateVersionId = Guid.CreateVersion7(),
             Status = ContentStatus.Approved
         };
 
-        await new ContentLifecycleService().TransitionAsync(item, ContentStatus.Published, actorId);
+        await new ContentLifecycleService().TransitionAsync(version, ContentStatus.Published, actorId);
 
-        Assert.Equal(ContentStatus.Published, item.Status);
-        Assert.Equal(actorId, item.UpdatedByUserId);
-        Assert.NotNull(item.PublishedAt);
+        Assert.Equal(ContentStatus.Published, version.Status);
+        Assert.Equal(actorId, version.UpdatedByUserId);
+        Assert.NotNull(version.PublishedAt);
     }
 
     [Fact]
     public async Task TransitionAsync_Throws_ForInvalidTransition()
     {
-        var item = new ContentItem
+        var version = new ContentVersion
         {
             WorkspaceId = Guid.CreateVersion7(),
             TemplateVersionId = Guid.CreateVersion7(),
             Status = ContentStatus.Draft
         };
 
-        await Assert.ThrowsAsync<DomainException>(() => new ContentLifecycleService().TransitionAsync(item, ContentStatus.Published, Guid.CreateVersion7()));
+        await Assert.ThrowsAsync<DomainException>(() => new ContentLifecycleService().TransitionAsync(version, ContentStatus.Published, Guid.CreateVersion7()));
     }
 
     [Theory]
@@ -95,17 +95,34 @@ public sealed class ContentLifecycleServiceTests
     public async Task TransitionAsync_UpdatesStatus_ForOverrideTransition_WhenAllowed()
     {
         var actorId = Guid.CreateVersion7();
-        var item = new ContentItem
+        var version = new ContentVersion
         {
             WorkspaceId = Guid.CreateVersion7(),
             TemplateVersionId = Guid.CreateVersion7(),
             Status = ContentStatus.Draft
         };
 
-        await new ContentLifecycleService().TransitionAsync(item, ContentStatus.Published, actorId, allowOverride: true);
+        await new ContentLifecycleService().TransitionAsync(version, ContentStatus.Published, actorId, allowOverride: true);
 
-        Assert.Equal(ContentStatus.Published, item.Status);
-        Assert.Equal(actorId, item.UpdatedByUserId);
-        Assert.NotNull(item.PublishedAt);
+        Assert.Equal(ContentStatus.Published, version.Status);
+        Assert.Equal(actorId, version.UpdatedByUserId);
+        Assert.NotNull(version.PublishedAt);
+    }
+
+    [Fact]
+    public async Task TransitionAsync_SetsArchivedAt_ForPublishedToArchived()
+    {
+        var version = new ContentVersion
+        {
+            WorkspaceId = Guid.CreateVersion7(),
+            TemplateVersionId = Guid.CreateVersion7(),
+            Status = ContentStatus.Published,
+            PublishedAt = DateTimeOffset.UtcNow.AddDays(-1)
+        };
+
+        await new ContentLifecycleService().TransitionAsync(version, ContentStatus.Archived, Guid.CreateVersion7());
+
+        Assert.Equal(ContentStatus.Archived, version.Status);
+        Assert.NotNull(version.ArchivedAt);
     }
 }

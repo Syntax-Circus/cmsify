@@ -48,7 +48,7 @@
         templateCount = (await Templates.ListAsync(WorkspaceId))?.TotalCount ?? 0;
         var content = await Content.ListAsync(WorkspaceId, null, null, null, null, null);
         contentCount = content?.TotalCount ?? 0;
-        publishedCount = ApiResponse.ItemsOrEmpty(content).Count(item => item.Status == ContentStatus.Published);
+        publishedCount = ApiResponse.ItemsOrEmpty(content).Count(item => item.CurrentlyServingVersion?.Status == ContentStatus.Published);
         mediaCount = (await Media.ListAsync(WorkspaceId, null, null))?.TotalCount ?? 0;
     }
 }

@@ -1,5 +1,4 @@
 using Cmsify.Core.Domain.Entities;
-using Cmsify.Core.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -10,6 +9,10 @@ public sealed class ContentVersionConfiguration : IEntityTypeConfiguration<Conte
     public void Configure(EntityTypeBuilder<ContentVersion> builder)
     {
         builder.ConfigureEntityId();
+        // ContentVersion is now the mutable aggregate (fields and workflow state live here), so it
+        // needs the same optimistic-concurrency token every other editable aggregate carries -
+        // otherwise UpdateVersion's If-Match check is an unenforced read-then-compare.
+        builder.ConfigureXminConcurrency();
 
         builder.HasIndex(version => new { version.ContentItemId, version.VersionNumber }).IsUnique();
         builder.HasIndex(version => version.ContentItemId)
@@ -17,6 +20,8 @@ public sealed class ContentVersionConfiguration : IEntityTypeConfiguration<Conte
             .HasFilter("status = 'Published' AND effective_start_at IS NULL AND effective_end_at IS NULL");
         builder.HasIndex(version => version.WorkspaceId);
         builder.HasIndex(version => new { version.ContentItemId, version.Status, version.EffectiveStartAt, version.EffectiveEndAt });
+        builder.HasIndex(version => new { version.Status, version.PublishAt });
+        builder.HasIndex(version => new { version.Status, version.PublishAt, version.PublishLeaseExpiresAt });
 
         builder.HasOne<ContentItem>()
             .WithMany()
@@ -36,6 +41,7 @@ public sealed class ContentVersionConfiguration : IEntityTypeConfiguration<Conte
         builder.Property(version => version.Status).HasConversion<string>().HasMaxLength(50);
         builder.Property(version => version.Slug).HasMaxLength(200);
         builder.Property(version => version.LocaleCode).HasMaxLength(20);
+        builder.Property(version => version.PublishLeaseOwner).HasMaxLength(200);
         builder.ToTable(table => table.HasCheckConstraint(
             "ck_content_versions_effective_range",
             "(effective_start_at IS NULL AND effective_end_at IS NULL) OR (effective_start_at IS NOT NULL AND effective_end_at IS NOT NULL AND effective_start_at < effective_end_at)"));

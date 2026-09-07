@@ -2,7 +2,7 @@ import { ETagStore } from "./etag";
 import { CmsifyApiError, CmsifyTimeoutError, isProblemDetails } from "./errors";
 import { listAll, type PageResult } from "./pagination";
 import type { components } from "./generated/schema";
-import type { ContentItem, ContentListItem, MediaAsset, PagedResult, Template, TemplateListItem } from "./types";
+import type { ContentItem, ContentListItem, ContentVersion, MediaAsset, PagedResult, Template, TemplateListItem } from "./types";
 
 export type Delay = (milliseconds: number, signal: AbortSignal) => Promise<void>;
 
@@ -59,7 +59,7 @@ export class CmsifyClient {
     list: (options: ContentListOptions = {}) => this.request<PageResult<ContentListItem>>(this.workspacePath("/content", contentQuery(options, true))),
     listAll: (options: ContentListOptions = {}) => listAll((page) => this.content.list({ ...options, page })),
     get: (id: string, options: Pick<ContentListOptions, "asOf"> = {}) => this.request<ContentItem>(this.workspacePath(`/content/${encodeURIComponent(id)}`, detailQuery(options))),
-    bySlug: (slug: string, options: Pick<ContentListOptions, "asOf"> = {}) => this.request<ContentItem>(this.workspacePath(`/content/by-slug/${encodeURIComponent(slug)}`, detailQuery(options, false))),
+    bySlug: (slug: string, options: Pick<ContentListOptions, "asOf"> = {}) => this.request<ContentVersion>(this.workspacePath(`/content/by-slug/${encodeURIComponent(slug)}`, detailQuery(options, false))),
     translations: (id: string, options: PageOptions = {}) => this.request<PagedResult<ContentListItem>>(this.workspacePath(`/content/${encodeURIComponent(id)}/translations`, pageQuery(options))),
   };
 

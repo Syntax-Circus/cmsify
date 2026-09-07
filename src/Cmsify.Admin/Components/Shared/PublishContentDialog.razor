@@ -1,4 +1,4 @@
-@if (ContentId.HasValue)
+@if (ContentId.HasValue && VersionNumber.HasValue)
 {
     <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
         <div class="modal-dialog">
@@ -24,7 +24,7 @@
                     @if (NeedsOverrideConfirmation)
                     {
                         <div class="alert alert-warning">
-                            <div>This will publish directly from <strong>@ContentStatus</strong>, skipping Submit/Approve.</div>
+                            <div>This will publish directly from <strong>@VersionStatus</strong>, skipping Submit/Approve.</div>
                             <div class="form-check mt-2">
                                 <input id="overrideConfirmed" class="form-check-input" type="checkbox" @bind="overrideConfirmed" />
                                 <label class="form-check-label" for="overrideConfirmed">I understand, publish anyway</label>
@@ -37,21 +37,6 @@
                             <label class="form-label">Schedule publish at (UTC, optional)</label>
                             <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="publishAtInput" />
                         </div>
-                        <div class="form-check mb-3">
-                            <input id="boundedOverride" class="form-check-input" type="checkbox" @bind="boundedOverride" />
-                            <label class="form-check-label" for="boundedOverride">Publish as bounded override instead of default</label>
-                        </div>
-                        @if (boundedOverride)
-                        {
-                            <div class="mb-3">
-                                <label class="form-label">Effective start (UTC)</label>
-                                <input class="form-control" placeholder="2026-12-01T00:00:00Z" @bind="effectiveStartInput" />
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Effective end (UTC, exclusive)</label>
-                                <input class="form-control" placeholder="2026-12-26T00:00:00Z" @bind="effectiveEndInput" />
-                            </div>
-                        }
                     }
                 </div>
                 <div class="modal-footer">
@@ -67,22 +52,20 @@
 @code {
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public Guid? ContentId { get; set; }
-    [Parameter] public ContentStatus ContentStatus { get; set; }
+    [Parameter] public int? VersionNumber { get; set; }
+    [Parameter] public ContentStatus VersionStatus { get; set; }
     [Parameter] public bool CanOverrideWorkflow { get; set; }
     [Parameter, EditorRequired] public CmsifyClient Cmsify { get; set; } = default!;
     [Parameter] public EventCallback OnClosed { get; set; }
-    [Parameter] public EventCallback<PublishContentResponse> OnPublished { get; set; }
+    [Parameter] public EventCallback<PublishContentVersionResponse> OnPublished { get; set; }
 
     private Guid? lastContentId;
-    private bool boundedOverride;
     private string? publishAtInput;
-    private string? effectiveStartInput;
-    private string? effectiveEndInput;
     private string? publishError;
     private IReadOnlyList<string> publishWarnings = [];
     private bool overrideConfirmed;
 
-    private bool NeedsOverrideConfirmation => CanOverrideWorkflow && ContentStatus is ContentStatus.Draft or ContentStatus.Review;
+    private bool NeedsOverrideConfirmation => CanOverrideWorkflow && VersionStatus is ContentStatus.Draft or ContentStatus.Review;
 
     protected override void OnParametersSet()
     {
@@ -92,10 +75,7 @@
         }
 
         lastContentId = ContentId;
-        boundedOverride = false;
         publishAtInput = null;
-        effectiveStartInput = null;
-        effectiveEndInput = null;
         publishError = null;
         publishWarnings = [];
         overrideConfirmed = false;
@@ -105,20 +85,18 @@
 
     private async Task PublishAsync()
     {
-        if (!ContentId.HasValue)
+        if (!ContentId.HasValue || !VersionNumber.HasValue)
         {
             return;
         }
 
         try
         {
-            var request = new PublishContentRequest(
+            var request = new PublishContentVersionRequest(
                 NeedsOverrideConfirmation ? null : ParseUtcDateTimeOffset(publishAtInput),
-                !NeedsOverrideConfirmation && boundedOverride ? ParseUtcDateTimeOffset(effectiveStartInput) : null,
-                !NeedsOverrideConfirmation && boundedOverride ? ParseUtcDateTimeOffset(effectiveEndInput) : null,
                 NeedsOverrideConfirmation && overrideConfirmed);
             var response = ApiResponse.Required(
-                await Cmsify.Content.PublishAsync(WorkspaceId, ContentId.Value, request),
+                await Cmsify.Content.PublishVersionAsync(WorkspaceId, ContentId.Value, VersionNumber.Value, request),
                 "publishing content");
             publishWarnings = response.Warnings;
             await OnPublished.InvokeAsync(response);

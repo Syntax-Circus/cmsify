@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
-using ContentItemDetailResponse = SyntaxCircus.Cmsify.Contracts.ContentItemDetailResponse;
+using ContentVersionDetailResponse = SyntaxCircus.Cmsify.Contracts.ContentVersionDetailResponse;
 
 namespace Cmsify.Api.Integration.Tests;
 
@@ -61,9 +61,9 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
         var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/content/by-slug/seasonal?asOf=2026-12-24T12:00:00Z", TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ContentItemDetailResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(body);
-        Assert.Equal(contentId, body.Id);
+        Assert.Equal(contentId, body.ContentItemId);
         Assert.Equal("seasonal", body.Slug);
         Assert.Equal("holiday-short", body.Tags.Single());
     }
@@ -92,9 +92,7 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
         {
             WorkspaceId = workspaceId,
             TemplateVersionId = templateVersion.Id,
-            Status = ContentStatus.Published,
-            Slug = "seasonal",
-            PublishedAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z")
+            Slug = "seasonal"
         };
 
         dbContext.Templates.Add(template);
@@ -108,7 +106,7 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
                 ContentItemId = content.Id,
                 WorkspaceId = workspaceId,
                 VersionNumber = 1,
-                Status = ContentVersionStatus.Published,
+                Status = ContentStatus.Published,
                 TemplateVersionId = templateVersion.Id,
                 Slug = "seasonal",
                 Tags = ["default"],
@@ -119,7 +117,7 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
                 ContentItemId = content.Id,
                 WorkspaceId = workspaceId,
                 VersionNumber = 2,
-                Status = ContentVersionStatus.Published,
+                Status = ContentStatus.Published,
                 TemplateVersionId = templateVersion.Id,
                 Slug = "seasonal",
                 Tags = ["holiday-long"],
@@ -132,7 +130,7 @@ public sealed class ContentPublishRangeTests : IAsyncLifetime
                 ContentItemId = content.Id,
                 WorkspaceId = workspaceId,
                 VersionNumber = 3,
-                Status = ContentVersionStatus.Published,
+                Status = ContentStatus.Published,
                 TemplateVersionId = templateVersion.Id,
                 Slug = "seasonal",
                 Tags = ["holiday-short"],

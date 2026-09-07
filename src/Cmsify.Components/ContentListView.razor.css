@@ -56,11 +56,23 @@
     text-align: left;
 }
 
-.cmsify-list-filter-button, .cmsify-list-edit-button {
+.cmsify-list-filter-button {
     padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
     border: 1px solid var(--cmsify-color-border, #ced4da);
     border-radius: var(--cmsify-radius, 0.375rem);
     background: transparent;
     color: var(--cmsify-color-text, inherit);
     cursor: pointer;
+}
+
+.cmsify-list-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cmsify-spacing-sm, 0.375rem);
+}
+
+:where(.cmsify-list-edit-button) {
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    background: transparent;
+    color: var(--cmsify-color-text, inherit);
 }

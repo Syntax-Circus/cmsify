@@ -21,9 +21,11 @@
     [Parameter] public EventCallback<ContentItemDetailResponse?> ItemChanged { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public string? SlugHelpText { get; set; }
+    [Parameter] public int? VersionNumber { get; set; }
 
     private TemplateVersionResponse templateVersion = new(Guid.Empty, Guid.Empty, 0, TemplateVersionStatus.Draft, null, null, [], []);
     private ContentItemDetailResponse? item;
+    private ContentVersionDetailResponse? version;
     private readonly Dictionary<Guid, ContentFieldEditorValue> fieldValues = [];
     private readonly Dictionary<Guid, PickListResponse> pickListsByRevisionId = [];
     private readonly Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = [];
@@ -65,15 +67,20 @@
         locale = loadedItem.LocaleCode;
         tags = string.Join(",", loadedItem.Tags);
 
+        var versionNumber = VersionNumber ?? loadedItem.CurrentlyServingVersion?.VersionNumber ?? 1;
+        var loadedVersion = await Client.Content.GetVersionAsync(WorkspaceId, ContentId!.Value, versionNumber)
+            ?? throw new InvalidOperationException("Cmsify API returned no payload while loading a content version.");
+        version = loadedVersion;
+
         var templates = (await Client.Templates.ListAsync(WorkspaceId))?.Items ?? [];
-        var template = templates.FirstOrDefault(t => t.CurrentVersionId == loadedItem.TemplateVersionId);
+        var template = templates.FirstOrDefault(t => t.CurrentVersionId == loadedVersion.TemplateVersionId);
         if (template is not null)
         {
             await LoadTemplateVersionAsync(template.Id);
         }
 
         fieldValues.Clear();
-        foreach (var value in loadedItem.Fields)
+        foreach (var value in loadedVersion.Fields)
         {
             var editorValue = GetOrAddValue(value.FieldId);
             editorValue.TextValue = value.TextValue;
@@ -315,12 +322,24 @@
             error = null;
             if (ContentId.HasValue)
             {
-                var updated = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
-                    new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, null, tagList, values))
+                var versionNumber = VersionNumber ?? version?.VersionNumber ?? 1;
+                var updatedVersion = await Client.Content.UpdateVersionAsync(WorkspaceId, ContentId.Value, versionNumber,
+                    new UpdateContentVersionRequest(version?.EffectiveStartAt, version?.EffectiveEndAt, values))
+                    ?? throw new InvalidOperationException("Cmsify API returned no payload while updating the content version.");
+                version = updatedVersion;
+
+                // Saving a version bumps the parent item's UpdatedAt server-side (search vector, list sort),
+                // which invalidates the item ETag captured at page load. Refresh it before the item PUT below,
+                // otherwise that PUT's If-Match always fails against its own prior write.
+                item = await Client.Content.GetAsync(WorkspaceId, ContentId.Value) ?? item;
+
+                var updatedItem = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
+                    new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, tagList))
                     ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
-                item = updated;
+                item = updatedItem;
+
                 await ItemChanged.InvokeAsync(item);
-                await Saved.InvokeAsync(updated);
+                await Saved.InvokeAsync(item);
             }
             else
             {

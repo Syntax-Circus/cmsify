@@ -41,23 +41,6 @@ public interface ITemplateVersionRepository
     Task<TemplateVersionDto> PublishAsync(Guid id, Guid actorUserId, CancellationToken ct = default);
 }
 
-public interface IContentItemRepository
-{
-    Task<ContentItemDto?> GetAsync(Guid id, CancellationToken ct = default);
-
-    Task<PagedResult<ContentItemDto>> QueryAsync(ContentQuery query, CancellationToken ct = default);
-
-    Task<ContentItemDto> CreateAsync(CreateContentItemCommand command, CancellationToken ct = default);
-
-    Task<ContentItemDto> UpdateAsync(UpdateContentItemCommand command, CancellationToken ct = default);
-
-    Task<ContentItemDto> SetStatusAsync(Guid id, ContentStatus status, Guid actorUserId, CancellationToken ct = default);
-
-    Task<IReadOnlyList<ContentItemDto>> GetPendingScheduledPublishAsync(DateTimeOffset now, int limit = 100, CancellationToken ct = default);
-
-    Task SoftDeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default);
-}
-
 public interface IMediaAssetRepository
 {
     Task<MediaAssetDto?> GetAsync(Guid id, CancellationToken ct = default);

@@ -593,6 +593,11 @@ public sealed class TemplatesController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid field type", "Open fields cannot define primitiveType or templateId.");
         }
 
+        if (request.IsOpen && request.AllowedTypes.Any(allowedType => allowedType.PrimitiveType.HasValue))
+        {
+            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid field type", "Open fields' allowedTypes entries cannot define a primitiveType.");
+        }
+
         if (request.ComponentId.HasValue && !dbContext.Components.Any(component =>
                 component.Id == request.ComponentId.Value
                 && !component.IsDeleted

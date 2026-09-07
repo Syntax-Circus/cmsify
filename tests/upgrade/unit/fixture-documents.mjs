@@ -193,6 +193,7 @@ export function validExpectedDocument() {
         "20260826135220_AddWebhookOutbox",
         "20260826215147_ExpandWebhookSecretCiphertext",
         "20260827135736_AddMediaLifecycleReconciliation",
+        "20260906230030_UnifyContentVersionLifecycle",
       ],
       storageProvider: "s3",
       legacyWebhookKeyBase64: "Q21zaWZ5IGZpeHR1cmUgbGVnYWN5IGtleSAwLjEuMyE=",
