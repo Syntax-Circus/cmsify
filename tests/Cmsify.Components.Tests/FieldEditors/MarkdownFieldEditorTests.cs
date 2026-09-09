@@ -22,4 +22,15 @@ public sealed class MarkdownFieldEditorTests : BunitContext
 
         changed.ShouldBe("## Updated");
     }
+
+    [Fact]
+    public void HidesEditableTextareaAndShowsOnlyPreviewWhenReadOnly()
+    {
+        var cut = Render<MarkdownFieldEditor>(parameters => parameters
+            .Add(p => p.Value, "# Heading")
+            .Add(p => p.ReadOnly, true));
+
+        cut.FindAll("textarea").ShouldBeEmpty();
+        cut.Find("pre.cmsify-field-markdown-preview").TextContent.ShouldBe("# Heading");
+    }
 }

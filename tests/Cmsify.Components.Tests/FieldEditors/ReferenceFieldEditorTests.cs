@@ -51,4 +51,12 @@ public sealed class ReferenceFieldEditorTests : BunitContext
 
         changed.ShouldBeNull();
     }
+
+    [Fact]
+    public void DisablesSelectWhenReadOnly()
+    {
+        var cut = Render<ReferenceFieldEditor>(parameters => parameters.Add(p => p.ReadOnly, true));
+
+        cut.Find("select").HasAttribute("disabled").ShouldBeTrue();
+    }
 }

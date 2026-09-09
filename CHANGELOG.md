@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-09
+
+### Added
+
+- A "View" action in the Admin content list and a new read-only content viewer (`/workspaces/{workspaceId}/content/{id}/view`, optionally `/view/{versionNumber}`) for inspecting a content item's currently-published (or any specific) version without creating a Draft. Previously, opening "Edit" on a Published or Archived item always minted a new Draft via `CreateVersionAsync`, even when the user only wanted to look at the content — there was no way to see it otherwise short of the crude raw-table "Inspect" modal on the Versions page. The viewer reuses the existing `SyntaxCircus.Cmsify.Components` field editors via a new non-interactive `ReadOnly` mode (added to `FieldEditor`, `FieldEditorRenderContext`, `ContentEditForm`, `ContentEditPanel`, `ContentListView`/`ContentListPanel`, and every field-type editor) instead of a second renderer, so formatting, resolved pick-list labels, and asset names render exactly as they do when editing. Reader-role users clicking "Edit" are now redirected into this read-only view instead of landing on a form they can't successfully save.
+
 ## [0.4.0] - 2026-09-07
 
 ### Added

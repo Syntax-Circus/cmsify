@@ -29,4 +29,16 @@ public sealed class MediaFieldEditorTests : BunitContext
 
         cut.Find("button").TextContent.ShouldBe("logo.png");
     }
+
+    [Fact]
+    public void RendersFileNameAsPlainTextWhenReadOnly()
+    {
+        var asset = new MediaAssetResponse(Guid.NewGuid(), "logo.png", "image/png", 1024, null, "/media/logo.png", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var cut = Render<MediaFieldEditor>(parameters => parameters
+            .Add(p => p.SelectedAsset, asset)
+            .Add(p => p.ReadOnly, true));
+
+        cut.FindAll("button").ShouldBeEmpty();
+        cut.Find(".cmsify-field-picker-value").TextContent.ShouldBe("logo.png");
+    }
 }

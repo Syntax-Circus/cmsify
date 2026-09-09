@@ -3,6 +3,7 @@
 <ContentListView Items="@items" Templates="@templates" SearchText="@searchText" SearchTextChanged="@(v => searchText = v)"
                  Status="@status" StatusChanged="@(v => status = v)" TemplateId="@templateId" TemplateIdChanged="@(v => templateId = v)"
                  Locale="@locale" LocaleChanged="@(v => locale = v)" OnFilter="LoadAsync" OnEdit="@(item => OnEdit.InvokeAsync(item))"
+                 OnView="@(item => OnView.InvokeAsync(item))"
                  EditButtonClass="@EditButtonClass"
                  RowActions="@RowActions" TitleTemplate="@TitleTemplate" StatusTemplate="@StatusTemplate" UpdatedTemplate="@UpdatedTemplate" />
 
@@ -10,6 +11,7 @@
     [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
     [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
     [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
+    [Parameter] public EventCallback<ContentItemSummaryResponse> OnView { get; set; }
     [Parameter] public string EditButtonClass { get; set; } = "btn btn-sm";
     [Parameter] public RenderFragment<ContentItemSummaryResponse>? RowActions { get; set; }
     [Parameter] public RenderFragment<ContentItemSummaryResponse>? TitleTemplate { get; set; }

@@ -6,9 +6,10 @@
     <textarea class="cmsify-field-textarea cmsify-field-textarea--code" rows="8"
               placeholder='{ "fieldKey": "value" }'
               value="@DisplayValues[valueIndex]"
+              readonly="@ReadOnly"
               @oninput="e => OnItemChanged(valueIndex, e)"></textarea>
 }
-@if (!MaxOccurrences.HasValue || DisplayValues.Count < MaxOccurrences.Value)
+@if (!ReadOnly && (!MaxOccurrences.HasValue || DisplayValues.Count < MaxOccurrences.Value))
 {
     <button type="button" class="cmsify-field-add-button" @onclick="AddValue">Add component</button>
 }
@@ -17,6 +18,7 @@
     [Parameter] public IReadOnlyList<string> Values { get; set; } = [];
     [Parameter] public EventCallback<IReadOnlyList<string>> ValuesChanged { get; set; }
     [Parameter] public int? MaxOccurrences { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
 
     private IReadOnlyList<string> DisplayValues => Values.Count == 0 ? ["{}"] : Values;
 

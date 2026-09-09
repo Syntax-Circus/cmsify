@@ -1,0 +1,67 @@
+@page "/workspaces/{WorkspaceId:guid}/content/{ContentId:guid}/view"
+@page "/workspaces/{WorkspaceId:guid}/content/{ContentId:guid}/view/{VersionNumber:int}"
+@rendermode InteractiveServer
+@using SyntaxCircus.Cmsify.Components.Client
+@inject CmsifyClient Cmsify
+@inject NavigationManager Navigation
+@inject AuthState Auth
+
+<div class="cms-page-head">
+    <div><h1>View Content</h1><div class="lead">Read-only snapshot of this version. Nothing is saved and no draft is created.</div></div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="/workspaces/@WorkspaceId/content/@ContentId/versions">Versions</a>
+        @if (CurrentRole >= UserRole.Editor)
+        {
+            <a class="btn btn-outline-primary" href="/workspaces/@WorkspaceId/content/@ContentId">Edit</a>
+        }
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="cms-card">
+            <ContentEditPanel @key="@((ContentId, VersionNumber))" Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId"
+                              VersionNumber="@VersionNumber" ReadOnly="true" ItemChanged="@(i => item = i)" />
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="cms-card">
+            <h2 class="h6">Version</h2>
+            @if (ViewedVersion is not null)
+            {
+                <StatusBadge Status="@ViewedVersion.Status" />
+            }
+            @if (item is { Versions.Count: > 0 })
+            {
+                <label class="form-label mt-3">Viewing version</label>
+                <select class="form-select" value="@(VersionNumber ?? item.CurrentlyServingVersion?.VersionNumber)" @onchange="OnVersionSelected">
+                    @foreach (var v in item.Versions.OrderByDescending(v => v.VersionNumber))
+                    {
+                        <option value="@v.VersionNumber">v@(v.VersionNumber) &mdash; @v.Status</option>
+                    }
+                </select>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public Guid ContentId { get; set; }
+    [Parameter] public int? VersionNumber { get; set; }
+
+    private ContentItemDetailResponse? item;
+
+    private UserRole CurrentRole => Enum.TryParse<UserRole>(Auth.User?.Role, ignoreCase: true, out var role) ? role : UserRole.Reader;
+
+    private ContentVersionSummaryResponse? ViewedVersion =>
+        item?.Versions.FirstOrDefault(v => v.VersionNumber == (VersionNumber ?? item.CurrentlyServingVersion?.VersionNumber));
+
+    private void OnVersionSelected(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var selected))
+        {
+            Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{ContentId}/view/{selected}");
+        }
+    }
+}

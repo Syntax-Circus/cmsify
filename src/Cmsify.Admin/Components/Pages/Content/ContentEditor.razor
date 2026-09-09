@@ -120,6 +120,12 @@
             return;
         }
 
+        if (CurrentRole < UserRole.Editor)
+        {
+            Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{ContentId}/view", replace: true);
+            return;
+        }
+
         resolvedForContentId = ContentId;
 
         try

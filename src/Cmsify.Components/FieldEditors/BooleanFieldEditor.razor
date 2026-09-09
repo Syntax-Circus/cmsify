@@ -1,10 +1,11 @@
 @namespace SyntaxCircus.Cmsify.Components
 
-<input type="checkbox" class="cmsify-field-checkbox" checked="@Value" @onchange="OnChange" />
+<input type="checkbox" class="cmsify-field-checkbox" checked="@Value" disabled="@ReadOnly" @onchange="OnChange" />
 
 @code {
     [Parameter] public bool Value { get; set; }
     [Parameter] public EventCallback<bool> ValueChanged { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
 
     private Task OnChange(ChangeEventArgs e) => ValueChanged.InvokeAsync((bool?)e.Value ?? false);
 }

@@ -23,4 +23,12 @@ public sealed class QuoteFieldEditorTests : BunitContext
 
         changed.ShouldBe("an updated quote");
     }
+
+    [Fact]
+    public void MarksTextareaReadOnlyWhenReadOnly()
+    {
+        var cut = Render<QuoteFieldEditor>(parameters => parameters.Add(p => p.ReadOnly, true));
+
+        cut.Find("textarea").HasAttribute("readonly").ShouldBeTrue();
+    }
 }

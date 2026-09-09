@@ -6,7 +6,8 @@
                  Slug="@slug" SlugChanged="@(v => slug = v)" Locale="@locale" LocaleChanged="@(v => locale = v)"
                  Tags="@tags" TagsChanged="@(v => tags = v)" Error="@error" OnSave="SaveAsync"
                  OnMediaPickRequested="OpenMediaPickerAsync" OnFilePickRequested="OpenFilePickerAsync"
-                 FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText" />
+                 FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText"
+                 ReadOnly="@ReadOnly" />
 
 <MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix"
                    Selected="OnAssetSelectedAsync" Closed="() => pickerVisible = false" />
@@ -22,6 +23,7 @@
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public string? SlugHelpText { get; set; }
     [Parameter] public int? VersionNumber { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
 
     private TemplateVersionResponse templateVersion = new(Guid.Empty, Guid.Empty, 0, TemplateVersionStatus.Draft, null, null, [], []);
     private ContentItemDetailResponse? item;
@@ -235,6 +237,11 @@
 
     private async Task SaveAsync()
     {
+        if (ReadOnly)
+        {
+            return;
+        }
+
         var values = new List<ContentFieldValueRequest>();
         foreach (var field in templateVersion.Fields.OrderBy(f => f.Order))
         {

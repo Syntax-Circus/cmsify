@@ -29,4 +29,16 @@ public sealed class FileFieldEditorTests : BunitContext
 
         cut.Find("button").TextContent.ShouldBe("report.pdf");
     }
+
+    [Fact]
+    public void RendersFileNameAsPlainTextWhenReadOnly()
+    {
+        var asset = new MediaAssetResponse(Guid.NewGuid(), "report.pdf", "application/pdf", 2048, null, "/media/report.pdf", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var cut = Render<FileFieldEditor>(parameters => parameters
+            .Add(p => p.SelectedAsset, asset)
+            .Add(p => p.ReadOnly, true));
+
+        cut.FindAll("button").ShouldBeEmpty();
+        cut.Find(".cmsify-field-picker-value").TextContent.ShouldBe("report.pdf");
+    }
 }

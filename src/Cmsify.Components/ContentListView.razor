@@ -62,6 +62,7 @@
                     </td>
                     <td>
                         <div class="cmsify-list-row-actions">
+                            <button type="button" class="@($"{EditButtonClass} cmsify-list-view-button")" @onclick="() => OnView.InvokeAsync(contentItem)">View</button>
                             <button type="button" class="@($"{EditButtonClass} cmsify-list-edit-button")" @onclick="() => OnEdit.InvokeAsync(contentItem)">Edit</button>
                             @if (RowActions is not null)
                             {
@@ -88,6 +89,7 @@
     [Parameter] public EventCallback<string?> LocaleChanged { get; set; }
     [Parameter] public EventCallback OnFilter { get; set; }
     [Parameter] public EventCallback<ContentItemSummaryResponse> OnEdit { get; set; }
+    [Parameter] public EventCallback<ContentItemSummaryResponse> OnView { get; set; }
     [Parameter] public string EditButtonClass { get; set; } = "btn btn-sm";
     [Parameter] public RenderFragment<ContentItemSummaryResponse>? RowActions { get; set; }
     [Parameter] public RenderFragment<ContentItemSummaryResponse>? TitleTemplate { get; set; }

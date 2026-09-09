@@ -23,4 +23,14 @@ public sealed class BooleanFieldEditorTests : BunitContext
 
         changed.ShouldBe(true);
     }
+
+    [Fact]
+    public void DisablesCheckboxWhenReadOnly()
+    {
+        var cut = Render<BooleanFieldEditor>(parameters => parameters
+            .Add(p => p.Value, true)
+            .Add(p => p.ReadOnly, true));
+
+        cut.Find("input").HasAttribute("disabled").ShouldBeTrue();
+    }
 }

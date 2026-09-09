@@ -21,4 +21,12 @@ public sealed class TextFieldEditorTests : BunitContext
 
         changed.ShouldBe("updated");
     }
+
+    [Fact]
+    public void MarksInputReadOnlyWhenReadOnly()
+    {
+        var cut = Render<TextFieldEditor>(parameters => parameters.Add(p => p.ReadOnly, true));
+
+        cut.Find("input").HasAttribute("readonly").ShouldBeTrue();
+    }
 }

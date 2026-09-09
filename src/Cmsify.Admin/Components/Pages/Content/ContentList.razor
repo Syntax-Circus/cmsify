@@ -12,7 +12,7 @@
 </div>
 
 <div class="cms-card p-0">
-    <ContentListPanel @ref="listPanel" Client="@Cmsify" WorkspaceId="@WorkspaceId" OnEdit="EditContent" EditButtonClass="btn btn-outline-primary btn-sm">
+    <ContentListPanel @ref="listPanel" Client="@Cmsify" WorkspaceId="@WorkspaceId" OnEdit="EditContent" OnView="ViewContent" EditButtonClass="btn btn-outline-primary btn-sm">
         <TitleTemplate Context="contentItem">
             <strong>@(contentItem.Slug ?? contentItem.Id.ToString())</strong>
             <div class="small text-muted">@string.Join(", ", contentItem.Tags)</div>
@@ -77,6 +77,8 @@
     private void NewContent() => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/new");
 
     private void EditContent(ContentItemSummaryResponse item) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}");
+
+    private void ViewContent(ContentItemSummaryResponse item) => Navigation.NavigateTo($"/workspaces/{WorkspaceId}/content/{item.Id}/view");
 
     private async Task RunTransitionAsync(Guid id, int versionNumber, string action)
     {

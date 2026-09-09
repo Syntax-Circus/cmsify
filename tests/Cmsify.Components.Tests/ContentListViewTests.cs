@@ -35,6 +35,20 @@ public sealed class ContentListViewTests : BunitContext
     }
 
     [Fact]
+    public void RaisesOnViewWhenViewButtonClicked()
+    {
+        var item = CreateItem("first");
+        ContentItemSummaryResponse? viewed = null;
+        var cut = Render<ContentListView>(parameters => parameters
+            .Add(p => p.Items, new[] { item })
+            .Add(p => p.OnView, EventCallback.Factory.Create<ContentItemSummaryResponse>(this, i => viewed = i)));
+
+        cut.Find(".cmsify-list-view-button").Click();
+
+        viewed.ShouldBe(item);
+    }
+
+    [Fact]
     public void RaisesOnFilterFromFilterButton()
     {
         var filtered = false;
