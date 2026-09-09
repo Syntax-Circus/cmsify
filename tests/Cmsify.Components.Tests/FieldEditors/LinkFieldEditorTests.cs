@@ -24,4 +24,12 @@ public sealed class LinkFieldEditorTests : BunitContext
 
         changed.ShouldBe("https://updated.example.com");
     }
+
+    [Fact]
+    public void MarksInputReadOnlyWhenReadOnly()
+    {
+        var cut = Render<LinkFieldEditor>(parameters => parameters.Add(p => p.ReadOnly, true));
+
+        cut.Find("input").HasAttribute("readonly").ShouldBeTrue();
+    }
 }

@@ -94,4 +94,21 @@ public sealed class ContentEditFormTests : BunitContext
 
         cut.Find(".cmsify-form-error").TextContent.ShouldBe("Something went wrong");
     }
+
+    [Fact]
+    public void HidesSaveButtonAndMarksMetadataInputsReadOnlyWhenReadOnly()
+    {
+        var field = TestFieldFactory.Create(primitiveType: PrimitiveType.Text);
+        var templateVersion = CreateTemplateVersion(field);
+
+        var cut = Render<ContentEditForm>(parameters => parameters
+            .Add(p => p.TemplateVersion, templateVersion)
+            .Add(p => p.FieldValues, new Dictionary<Guid, ContentFieldEditorValue>())
+            .Add(p => p.Slug, "example")
+            .Add(p => p.ReadOnly, true));
+
+        cut.FindAll(".cmsify-form-save-button").ShouldBeEmpty();
+        cut.FindComponent<TextFieldEditor>().Instance.ReadOnly.ShouldBeTrue();
+        cut.FindAll("input").ShouldAllBe(input => input.HasAttribute("readonly"));
+    }
 }

@@ -50,4 +50,15 @@ public sealed class ComponentFieldEditorTests : BunitContext
 
         cut.FindAll("button").ShouldBeEmpty();
     }
+
+    [Fact]
+    public void MarksTextareasReadOnlyAndHidesAddButtonWhenReadOnly()
+    {
+        var cut = Render<ComponentFieldEditor>(parameters => parameters
+            .Add(p => p.Values, new[] { "{}" })
+            .Add(p => p.ReadOnly, true));
+
+        cut.Find("textarea").HasAttribute("readonly").ShouldBeTrue();
+        cut.FindAll("button").ShouldBeEmpty();
+    }
 }

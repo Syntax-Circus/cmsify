@@ -31,4 +31,12 @@ public sealed class RichTextFieldEditorTests : BunitContext
 
         cut.Find("textarea").GetAttribute("rows").ShouldBe("3");
     }
+
+    [Fact]
+    public void MarksTextareaReadOnlyWhenReadOnly()
+    {
+        var cut = Render<RichTextFieldEditor>(parameters => parameters.Add(p => p.ReadOnly, true));
+
+        cut.Find("textarea").HasAttribute("readonly").ShouldBeTrue();
+    }
 }

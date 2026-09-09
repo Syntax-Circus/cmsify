@@ -102,4 +102,42 @@ public sealed class FieldEditorTests : BunitContext
         cut.Find("span.custom").TextContent.ShouldBe("overridden");
         cut.FindComponents<TextFieldEditor>().ShouldBeEmpty();
     }
+
+    [Fact]
+    public void ForwardsReadOnlyToChildFieldEditor()
+    {
+        var field = TestFieldFactory.Create(primitiveType: PrimitiveType.Boolean);
+        var value = new ContentFieldEditorValue { BoolValue = true };
+
+        var cut = Render<FieldEditor>(parameters => parameters
+            .Add(p => p.Field, field)
+            .Add(p => p.Value, value)
+            .Add(p => p.ReadOnly, true));
+
+        cut.FindComponent<BooleanFieldEditor>().Instance.ReadOnly.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void IncludesReadOnlyInOverrideRenderContext()
+    {
+        var field = TestFieldFactory.Create(primitiveType: PrimitiveType.Text);
+        FieldEditorRenderContext? captured = null;
+        var overrides = new Dictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>
+        {
+            [PrimitiveType.Text] = context =>
+            {
+                captured = context;
+                return builder => builder.AddMarkupContent(0, "<span></span>");
+            }
+        };
+
+        Render<FieldEditor>(parameters => parameters
+            .Add(p => p.Field, field)
+            .Add(p => p.Value, new ContentFieldEditorValue())
+            .Add(p => p.FieldTemplateOverrides, overrides)
+            .Add(p => p.ReadOnly, true));
+
+        captured.ShouldNotBeNull();
+        captured!.ReadOnly.ShouldBeTrue();
+    }
 }

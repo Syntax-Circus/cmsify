@@ -6,14 +6,14 @@
 }
 else if (Field.ComponentId.HasValue)
 {
-    <ComponentFieldEditor Values="@Value.ComponentValues" MaxOccurrences="@Field.MaxOccurrences"
+    <ComponentFieldEditor Values="@Value.ComponentValues" MaxOccurrences="@Field.MaxOccurrences" ReadOnly="@ReadOnly"
                           ValuesChanged="@(values => UpdateAsync(v => v.ComponentValues = values))" />
 }
 else if (IsCompositionField)
 {
     @if (Field.CompositionMode == CompositionMode.Reference)
     {
-        <ReferenceFieldEditor Options="@ReferenceOptions" Value="@Value.ChildContentItemId" IsRequired="@Field.IsRequired"
+        <ReferenceFieldEditor Options="@ReferenceOptions" Value="@Value.ChildContentItemId" IsRequired="@Field.IsRequired" ReadOnly="@ReadOnly"
                               ValueChanged="@(id => UpdateAsync(v => v.ChildContentItemId = id))" />
     }
     else
@@ -26,36 +26,36 @@ else
     switch (Field.PrimitiveType)
     {
         case PrimitiveType.Boolean:
-            <BooleanFieldEditor Value="@Value.BoolValue" ValueChanged="@(v => UpdateAsync(x => x.BoolValue = v))" />
+            <BooleanFieldEditor Value="@Value.BoolValue" ValueChanged="@(v => UpdateAsync(x => x.BoolValue = v))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.Markdown:
-            <MarkdownFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            <MarkdownFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.RichText:
-            <RichTextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            <RichTextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.Media:
-            <MediaFieldEditor SelectedAsset="@Value.SelectedMediaAsset" OnPickRequested="OnMediaPickRequested" />
+            <MediaFieldEditor SelectedAsset="@Value.SelectedMediaAsset" OnPickRequested="OnMediaPickRequested" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.File:
-            <FileFieldEditor SelectedAsset="@Value.SelectedFileAsset" OnPickRequested="OnFilePickRequested" />
+            <FileFieldEditor SelectedAsset="@Value.SelectedFileAsset" OnPickRequested="OnFilePickRequested" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.PickList:
-            <PickListFieldEditor PickList="@ResolvedPickList" Multiple="@PickListBinding.Multiple" IsRequired="@Field.IsRequired"
+            <PickListFieldEditor PickList="@ResolvedPickList" Multiple="@PickListBinding.Multiple" IsRequired="@Field.IsRequired" ReadOnly="@ReadOnly"
                                   Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))"
                                   SelectedValues="@Value.MultiValues" SelectedValuesChanged="@(v => UpdateAsync(x => x.MultiValues = v))" />
             break;
         case PrimitiveType.Link:
-            <LinkFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            <LinkFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.Quote:
-            <QuoteFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            <QuoteFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.Separator:
             <SeparatorFieldEditor />
             break;
         default:
-            <TextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" />
+            <TextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" ReadOnly="@ReadOnly" />
             break;
     }
 }
@@ -69,13 +69,14 @@ else
     [Parameter] public EventCallback OnMediaPickRequested { get; set; }
     [Parameter] public EventCallback OnFilePickRequested { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
 
     private bool IsCompositionField =>
         Field.TemplateId.HasValue || Field.IsOpen || Field.AllowedTypes.Any(allowed => allowed.AllowedTemplateId.HasValue);
 
     private PickListFieldBinding PickListBinding => PickListFieldBinding.FromFieldConfig(Field.FieldConfig);
 
-    private FieldEditorRenderContext RenderContext => new(Field, Value, ValueChanged);
+    private FieldEditorRenderContext RenderContext => new(Field, Value, ValueChanged, ReadOnly);
 
     private bool TryGetOverride(out RenderFragment<FieldEditorRenderContext> fragment)
     {

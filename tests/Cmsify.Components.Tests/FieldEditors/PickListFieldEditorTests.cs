@@ -62,4 +62,15 @@ public sealed class PickListFieldEditorTests : BunitContext
         changed.ShouldNotBeNull();
         changed.ShouldBe(new[] { "red", "blue" });
     }
+
+    [Fact]
+    public void DisablesSelectWhenReadOnly()
+    {
+        var cut = Render<PickListFieldEditor>(parameters => parameters
+            .Add(p => p.PickList, CreatePickList())
+            .Add(p => p.Value, "red")
+            .Add(p => p.ReadOnly, true));
+
+        cut.Find("select").HasAttribute("disabled").ShouldBeTrue();
+    }
 }

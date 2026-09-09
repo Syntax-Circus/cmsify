@@ -19,7 +19,8 @@
                              ReferenceOptions="@referenceOptions"
                              OnMediaPickRequested="@(() => OnMediaPickRequested.InvokeAsync(field))"
                              OnFilePickRequested="@(() => OnFilePickRequested.InvokeAsync(field))"
-                             FieldTemplateOverrides="@FieldTemplateOverrides" />
+                             FieldTemplateOverrides="@FieldTemplateOverrides"
+                             ReadOnly="@ReadOnly" />
                 @if (!string.IsNullOrWhiteSpace(field.HelpText))
                 {
                     <div class="cmsify-form-help">@field.HelpText</div>
@@ -31,17 +32,21 @@
         <label class="cmsify-form-label">Slug</label>
         <input class="cmsify-field-input" id="cmsify-slug-input" value="@Slug"
                aria-describedby="@(string.IsNullOrWhiteSpace(SlugHelpText) ? null : "cmsify-slug-help")"
+               readonly="@ReadOnly"
                @oninput="e => SlugChanged.InvokeAsync(e.Value?.ToString())" />
         @if (!string.IsNullOrWhiteSpace(SlugHelpText))
         {
             <div id="cmsify-slug-help" class="cmsify-form-help">@SlugHelpText</div>
         }
         <label class="cmsify-form-label">Locale</label>
-        <input class="cmsify-field-input" value="@Locale" @oninput="e => LocaleChanged.InvokeAsync(e.Value?.ToString())" />
+        <input class="cmsify-field-input" value="@Locale" readonly="@ReadOnly" @oninput="e => LocaleChanged.InvokeAsync(e.Value?.ToString())" />
         <label class="cmsify-form-label">Tags</label>
-        <input class="cmsify-field-input" value="@Tags" @oninput="e => TagsChanged.InvokeAsync(e.Value?.ToString())" />
+        <input class="cmsify-field-input" value="@Tags" readonly="@ReadOnly" @oninput="e => TagsChanged.InvokeAsync(e.Value?.ToString())" />
     </div>
-    <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()">Save</button>
+    @if (!ReadOnly)
+    {
+        <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()">Save</button>
+    }
 </div>
 
 @code {
@@ -63,6 +68,7 @@
     [Parameter] public EventCallback<TemplateFieldResponse> OnFilePickRequested { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public Guid? CurrentContentId { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
 
     private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
         FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();

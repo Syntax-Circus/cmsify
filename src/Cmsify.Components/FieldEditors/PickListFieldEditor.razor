@@ -6,7 +6,7 @@
 }
 else if (Multiple)
 {
-    <select class="cmsify-field-select" multiple @onchange="OnMultiChange">
+    <select class="cmsify-field-select" multiple disabled="@ReadOnly" @onchange="OnMultiChange">
         @foreach (var option in PickList.Options.OrderBy(o => o.Order))
         {
             <option value="@option.Value" selected="@SelectedValues.Contains(option.Value)">@option.Label</option>
@@ -15,7 +15,7 @@ else if (Multiple)
 }
 else
 {
-    <select class="cmsify-field-select" value="@Value" @onchange="OnSingleChange">
+    <select class="cmsify-field-select" value="@Value" disabled="@ReadOnly" @onchange="OnSingleChange">
         <option value="">@(IsRequired ? "Select an option" : "None")</option>
         @foreach (var option in PickList.Options.OrderBy(o => o.Order))
         {
@@ -32,6 +32,7 @@ else
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
     [Parameter] public IReadOnlyList<string> SelectedValues { get; set; } = [];
     [Parameter] public EventCallback<IReadOnlyList<string>> SelectedValuesChanged { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
 
     private Task OnSingleChange(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString());
 

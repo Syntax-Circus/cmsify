@@ -1,6 +1,6 @@
 @namespace SyntaxCircus.Cmsify.Components
 
-<select class="cmsify-field-select" value="@Value?.ToString()" @onchange="OnChange">
+<select class="cmsify-field-select" value="@Value?.ToString()" disabled="@ReadOnly" @onchange="OnChange">
     <option value="">@(IsRequired ? "Select referenced content" : "None")</option>
     @foreach (var option in Options)
     {
@@ -13,6 +13,7 @@
     [Parameter] public Guid? Value { get; set; }
     [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
     [Parameter] public bool IsRequired { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
 
     private Task OnChange(ChangeEventArgs e) =>
         ValueChanged.InvokeAsync(Guid.TryParse(e.Value?.ToString(), out var selected) ? selected : null);

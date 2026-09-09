@@ -36,7 +36,7 @@ Add this to your app's `<head>` (in `App.razor` or equivalent). This is easy to 
 IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides
 ```
 
-This lets a host application override how a single primitive type is rendered — for example, to swap in a rich WYSIWYG editor for `PrimitiveType.RichText` — without forking the package or reimplementing the rest of the form. Any primitive type not present in the dictionary keeps rendering with the package's built-in editor. `FieldEditorRenderContext` carries the `Field`, current `Value`, and a `ValueChanged` callback so your override fragment can read and update the field like any built-in editor.
+This lets a host application override how a single primitive type is rendered — for example, to swap in a rich WYSIWYG editor for `PrimitiveType.RichText` — without forking the package or reimplementing the rest of the form. Any primitive type not present in the dictionary keeps rendering with the package's built-in editor. `FieldEditorRenderContext` carries the `Field`, current `Value`, a `ValueChanged` callback, and a `ReadOnly` flag (set when the containing form was given `ReadOnly="true"`) so your override fragment can read and update the field like any built-in editor, and can render a non-interactive view when `ReadOnly` is set.
 
 ```razor
 <ContentEditPanel Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId"
