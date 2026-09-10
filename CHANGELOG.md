@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-10
+
+### Fixed
+
+- Release pipeline: `quay.io/skopeo/stable`'s tag digest was being rotated and garbage-collected by quay.io on a roughly 1-3 day cadence, breaking the pinned Skopeo helper used by `artifact-smoke`, `candidate-accessibility`, and `upgrade-rollback` (this exact failure recurred six times). The helper is now pinned against `ghcr.io/syntax-circus/skopeo`, a mirror this org controls.
+- `upgrade-rollback`'s assertions (`eng/upgrade-tests/assertions.mjs`) were never updated for 0.4.0's version-centric Content API breaking change, so the job carried `continue-on-error: true` to mask real, permanent failures - which itself broke the release-contract governance test suite on every PR. The assertions are fixed against the current API contract and `continue-on-error` is removed from both `publish-cmsify.yml` and `upgrade-rollback.yml`; the release gate fails closed again.
+- v0.4.1's release could not complete due to the Skopeo failure above; this release carries no functional changes beyond it and the previous fix.
+
 ## [0.4.1] - 2026-09-09
 
 ### Added
