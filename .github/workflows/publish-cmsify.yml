@@ -76,6 +76,7 @@ jobs:
           docker network create cmsify-smoke
           docker run -d --network cmsify-smoke --name cmsify-smoke-postgres -e POSTGRES_DB=cmsify -e POSTGRES_USER=cmsify -e POSTGRES_PASSWORD=cmsify-smoke postgres:17
           for _i in $(seq 1 30); do docker exec cmsify-smoke-postgres pg_isready -U cmsify -d cmsify > /dev/null 2>&1 && break; sleep 2; done
+          SMOKE_KEY="$(openssl rand -base64 32)"
           docker run -d --network cmsify-smoke --name cmsify-smoke-api -p 18080:8080 \
             -e ASPNETCORE_URLS=http://+:8080 \
             -e ConnectionStrings__Cmsify="Host=cmsify-smoke-postgres;Port=5432;Database=cmsify;Username=cmsify;Password=cmsify-smoke" \
@@ -83,11 +84,15 @@ jobs:
             -e Seed__Admin__Email=smoke@example.com \
             -e Seed__Admin__DisplayName="Smoke Admin" \
             -e Seed__Admin__Password="Cmsify-smoke-test-only-1!" \
+            -e Secrets__ActiveKeyId=smoke \
+            -e "Secrets__EncryptionKeys__smoke=$SMOKE_KEY" \
+            -e TrustedProxy__RequireTrustedProxiesInProduction=false \
             "docker.io/syntaxcircus/cmsify-api:$VERSION"
           curl --fail --retry 20 --retry-delay 3 --retry-connrefused http://127.0.0.1:18080/health/ready
           docker run -d --network cmsify-smoke --name cmsify-smoke-admin -p 18081:8080 \
             -e ASPNETCORE_URLS=http://+:8080 \
             -e Admin__ApiBaseUrl=http://cmsify-smoke-api:8080 \
+            -e TrustedProxy__RequireTrustedProxiesInProduction=false \
             "docker.io/syntaxcircus/cmsify-admin:$VERSION"
           curl --fail --retry 20 --retry-delay 3 --retry-connrefused http://127.0.0.1:18081/login
       - name: Tear down smoke containers
