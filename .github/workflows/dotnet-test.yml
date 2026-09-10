@@ -13,42 +13,11 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      - name: Restore public-independent PR dependencies
-        if: github.event_name == 'pull_request'
-        run: |
-          dotnet restore tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj --locked-mode
-          dotnet restore tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --locked-mode
-          dotnet restore tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --locked-mode
-      - name: Build public-independent PR binaries
-        if: github.event_name == 'pull_request'
-        run: |
-          dotnet build tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj --configuration Release --no-restore --no-incremental
-          dotnet build tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-restore --no-incremental
-          dotnet build tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-restore --no-incremental
-      - name: Run public-independent PR tests
-        if: github.event_name == 'pull_request'
-        run: |
-          dotnet test tests/Cmsify.Core.Tests/Cmsify.Core.Tests.csproj --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
-          dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
-          dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
-      - name: Report deferred package-dependent PR coverage
-        if: github.event_name == 'pull_request'
-        run: |
-          {
-            echo "## Package-dependent PR coverage"
-            echo
-            echo "Admin and .NET client checks are deferred until SyntaxCircus.Http.Resilience 0.2.0-cmsify.1 passes the public-package gate."
-            echo "Core, Infrastructure, and API tests ran above; the full locked solution remains required on main and release workflows."
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Public restore remains gated on publication/replacement of SyntaxCircus.Http.Resilience 0.2.0-cmsify.1.
       - name: Restore locked dependencies
-        if: github.event_name != 'pull_request'
         run: dotnet restore Cmsify.slnx --locked-mode
       - name: Build Release binaries
-        if: github.event_name != 'pull_request'
         run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
       - name: Run full test suite
-        if: github.event_name != 'pull_request'
         run: dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
       - name: Collect raw coverage
         if: github.event_name != 'pull_request'

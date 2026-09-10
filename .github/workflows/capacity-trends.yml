@@ -18,7 +18,6 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      # Public restore remains gated on publication/replacement of SyntaxCircus.Http.Resilience 0.2.0-cmsify.1.
       - name: Restore locked dependencies
         run: dotnet restore Cmsify.slnx --locked-mode
       - name: Build Release binaries
