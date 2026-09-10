@@ -7,6 +7,7 @@ This runbook describes how a maintainer ships a Cmsify release by pushing a vali
 Before tagging, from the exact commit you intend to release:
 
 ```powershell
+dotnet restore Cmsify.slnx --locked-mode
 dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental --verbosity minimal
 dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```

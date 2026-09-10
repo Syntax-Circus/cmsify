@@ -98,9 +98,15 @@ jobs:
       - name: Tear down smoke containers
         if: always()
         run: |
+          for c in cmsify-smoke-postgres cmsify-smoke-api cmsify-smoke-admin; do
+            echo "::group::$c"
+            docker logs --tail 200 "$c" 2>&1 | head -c 262144 || true
+            echo "::endgroup::"
+          done
           docker rm -f cmsify-smoke-postgres cmsify-smoke-api cmsify-smoke-admin 2>/dev/null || true
           docker network rm cmsify-smoke 2>/dev/null || true
       - name: Save both smoke-tested images for the gated promote job
+        shell: bash
         run: |
           mkdir -p artifacts/images
           docker save "docker.io/syntaxcircus/cmsify-api:$VERSION" | gzip > artifacts/images/cmsify-api.tar.gz
@@ -154,7 +160,23 @@ jobs:
         run: |
           npm_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 20 --max-time 60 "https://registry.npmjs.org/@syntaxcircus%2Fcmsify-client/$VERSION")" || exit 1
           case "$npm_status" in 404) ;; *) echo "npm version must be absent; registry returned HTTP $npm_status"; exit 1 ;; esac
+      - id: nuget_login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Use supported npm OIDC trusted publishing
+        run: npm install --global npm@11.11.0 && test "$(npm --version)" = 11.11.0
+      - name: Reject existing Docker Hub tags before promotion
+        shell: bash
+        run: |
+          for image in syntaxcircus/cmsify-api syntaxcircus/cmsify-admin; do
+            if docker manifest inspect "docker.io/$image:$VERSION" > /dev/null 2>&1; then
+              echo "Docker tag must be absent: $image:$VERSION"
+              exit 1
+            fi
+          done
       - name: Load the smoke-tested images
+        shell: bash
         run: |
           gunzip -c artifacts/images/cmsify-api.tar.gz | docker load
           gunzip -c artifacts/images/cmsify-admin.tar.gz | docker load
@@ -189,13 +211,7 @@ jobs:
           mkdir -p artifacts/sbom
           ${{ steps.syft.outputs.cmd }} "registry:docker.io/syntaxcircus/cmsify-api@${{ steps.push.outputs.api_digest }}" -o spdx-json=artifacts/sbom/cmsify-api.spdx.json
           ${{ steps.syft.outputs.cmd }} "registry:docker.io/syntaxcircus/cmsify-admin@${{ steps.push.outputs.admin_digest }}" -o spdx-json=artifacts/sbom/cmsify-admin.spdx.json
-      - id: nuget_login
-        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
-        with:
-          user: ${{ secrets.NUGET_USER }}
       - run: dotnet nuget push artifacts/nuget/*.nupkg --api-key "${{ steps.nuget_login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
-      - name: Use supported npm OIDC trusted publishing
-        run: npm install --global npm@11.11.0 && test "$(npm --version)" = 11.11.0
       - run: npm publish artifacts/npm/*.tgz --access public --provenance --tag "$NPM_CHANNEL"
       - name: Create the GitHub Release
         env:

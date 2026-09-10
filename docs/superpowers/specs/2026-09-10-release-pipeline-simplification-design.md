@@ -42,6 +42,7 @@ Triggered on `push: tags: ["v*"]`, same as today.
 - The `dotnet-consumer` and `node-consumer` jobs and their supporting steps in `publish-cmsify.yml`.
 - The `candidate-accessibility` job in `publish-cmsify.yml`. Accessibility scanning of the Admin UI continues to run on every PR via the pre-existing, independent `admin-accessibility.yml` workflow - this only removes it as a release-blocking gate, it does not remove accessibility testing from the project.
 - `docs/evidence/task-12-local-verification.json` (and the `docs/evidence/` directory, if this was its only file) - fed only the deleted governance verifier.
+- The `certify` job's use of `actions/attest-build-provenance` (GitHub/SLSA build-provenance attestation for the NuGet packages) - a direct consequence of dropping the SHA256SUMS-based artifact shape that job produced attestations over. Cosign image signatures and `npm publish --provenance` still provide equivalent signals for what they cover, so this is within the already-approved tradeoff; it just wasn't explicitly named at the time.
 
 ### What is kept, unchanged
 

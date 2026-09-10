@@ -1,6 +1,6 @@
 # Operating Cmsify
 
-Release operators must follow the [release runbook](release-runbook.md) and use the [rollback runbook](rollback-runbook.md) when an abort criterion is met. These runbooks retain the required immutable-digest, backup, protected-approval, and no-rebuild evidence boundaries.
+Release operators must follow the [release runbook](release-runbook.md) and use the [rollback runbook](rollback-runbook.md) when an abort criterion is met. Promoted images remain pinned by immutable digest, backups are taken before each upgrade, and promotion requires manual approval, as described throughout this doc.
 
 ## Configuration
 

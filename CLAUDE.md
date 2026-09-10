@@ -62,7 +62,7 @@ Admin UI on `:5001`, API on `:5000` (`/swagger`, `/health/live`, `/health/ready`
 - `sdk/typescript` — first-party TS client + checked-in OpenAPI-generated types (`src/generated` — never hand-edit, regenerate instead).
 - `sdk/dotnet` — first-party .NET client, optional distributed content cache, client tests.
 - `examples` — server-side integration examples (Next.js, Astro, SvelteKit).
-- `tests` — unit and HTTP/integration test projects, one per `src` area plus release-contract/release-smoke/upgrade suites.
+- `tests` — unit and HTTP/integration test projects, one per `src` area.
 
 ## Key invariants (see AGENTS.md for full detail)
 

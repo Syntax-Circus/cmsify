@@ -5,7 +5,7 @@ Use this when a deployed Cmsify version needs to be rolled back.
 ## Rolling back a deployment
 
 1. Identify the last known-good version tag (the one running before the problematic deploy).
-2. Update `CMSIFY_VERSION` in your `.env`/`.env.prod` to that prior version.
+2. Update `CMSIFY_VERSION` and the matching literal API/Admin manifest digests in `docker-compose.prod.yml` to that prior version — `docker-compose.prod.yml` pins both images by `name:tag@digest`, so Docker resolves the reference by digest and updating `CMSIFY_VERSION` alone in `.env`/`.env.prod` will not change which image runs.
 3. Pull and restart: `docker compose --env-file .env.prod -f docker-compose.prod.yml pull && docker compose --env-file .env.prod -f docker-compose.prod.yml up -d`.
 4. Verify `/health/live`, `/health/ready`, Admin sign-in, and a representative content read before considering the rollback complete.
 
