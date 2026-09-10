@@ -116,9 +116,9 @@
       },
       "SyntaxCircus.Storage": {
         "type": "Direct",
-        "requested": "[0.2.0, )",
-        "resolved": "0.2.0",
-        "contentHash": "LGXsEvX69OstMNffB6UGTPfPG3GLF33qZ7g3q9NZVpcnoCrIOruGCxg7nv8KzwnhaBix9pVetr6WG1xiaxvL/A==",
+        "requested": "[0.2.1, )",
+        "resolved": "0.2.1",
+        "contentHash": "RdsJX3UMerlrxUiXIZdTGsfYqTzeft1tewN/TgUdJOfaEzX/Q6V8nCL71i86fXfhKa2yJYjSSlAcBsnwmwjWug==",
         "dependencies": {
           "AWSSDK.S3": "4.0.102.2",
           "Microsoft.Extensions.Configuration": "10.0.0",
