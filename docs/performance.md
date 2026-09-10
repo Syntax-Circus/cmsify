@@ -35,7 +35,6 @@ git status --short
 dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --force-evaluate
 git diff -- ':(glob)**/packages.lock.json'
 dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --locked-mode
-node --test tests/release-contract/quality-policy.test.mjs
 ```
 
 Review the exact changed lock graphs, package versions, and content hashes. Keep one lock beside each of the twelve `Cmsify.slnx` projects, restore unrelated line-ending churn, and never hand-edit a lock or add a tracked `NuGet.Config` for `artifacts/local-nuget`.
@@ -83,10 +82,9 @@ Collect open Cobertura reports for all five .NET test projects and aggregate the
 ```powershell
 dotnet test Cmsify.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage --verbosity minimal
 node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md
-node --test tests/release-contract/coverage-summary.test.mjs
 ```
 
-Raw reports and summaries remain ignored under `artifacts/coverage`. The exact report fields, capacity fields, four budget names/thresholds, representative dataset constants, command identities, and committed local evidence tuple are machine-readable in the [checked Task 11 evidence manifest](evidence/task-11-local-verification.json); release contracts generate report shapes from the summarizer/merger and read the C# fixture constants before accepting that manifest. The JSON schema is `cmsify.coverage.v1` with top-level `schema`, full lowercase `sourceSha`, and ordinal `assemblies`. Each assembly entry contains `assembly`, plus `lines` and `branches`, each with integer `valid`, integer `covered`, and `percentage`. Coverage percentages are trend data: the schema has no threshold or pass/fail field, and no release-critical behavior is waived by a percentage.
+Raw reports and summaries remain ignored under `artifacts/coverage`. The exact report fields, capacity fields, four budget names/thresholds, representative dataset constants, command identities, and committed local evidence tuple are machine-readable in the [checked Task 11 evidence manifest](evidence/task-11-local-verification.json); the summarizer/merger (`scripts/quality/summarize-coverage.mjs`) generates the report shape, matching the same fixture constants used in the schema described below. The JSON schema is `cmsify.coverage.v1` with top-level `schema`, full lowercase `sourceSha`, and ordinal `assemblies`. Each assembly entry contains `assembly`, plus `lines` and `branches`, each with integer `valid`, integer `covered`, and `percentage`. Coverage percentages are trend data: the schema has no threshold or pass/fail field, and no release-critical behavior is waived by a percentage.
 
 ## Scheduled capacity trends
 
@@ -94,7 +92,6 @@ After a Release build, the opt-in runner executes the same API, Infrastructure, 
 
 ```powershell
 node scripts/quality/run-capacity.mjs
-node --test tests/release-contract/capacity-report.test.mjs
 ```
 
 The scheduled/manual workflow is [`.github/workflows/capacity-trends.yml`](../.github/workflows/capacity-trends.yml). It uploads `artifacts/capacity/capacity-report.json`. A missed latency budget produces a visible warning and `passed: false`, but exits successfully only when every blocking invariant remains true.

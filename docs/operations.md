@@ -1,6 +1,6 @@
 # Operating Cmsify
 
-Release operators must follow the [release runbook](release-runbook.md) and use the [rollback runbook](rollback-runbook.md) when an abort criterion is met. These runbooks retain the required immutable-digest, backup, protected-approval, and no-rebuild evidence boundaries.
+Release operators must follow the [release runbook](release-runbook.md) and use the [rollback runbook](rollback-runbook.md) when an abort criterion is met. Promoted images remain pinned by immutable digest, backups are taken before each upgrade, and promotion requires manual approval, as described throughout this doc.
 
 ## Configuration
 
@@ -43,31 +43,9 @@ Use this checklist before each production upgrade:
 
 To restore, stop application traffic, restore the database and its matching media snapshot, restore Data Protection keys when retaining sessions matters, then start the stack and wait for readiness. Do not restore only one of the database and media snapshots: content can otherwise point at missing or mismatched files. If the upgraded stack does not become ready, return to the prior image tag and restore the matched backup before accepting traffic.
 
-### v0.1.x to v1 upgrade and rollback
+### Upgrading across major versions
 
-The supported v1 path starts from the baseline recorded in the [upgrade fixture manifest](../tests/upgrade/fixtures/v0.1.3/manifest.json). The fixture [checksum inventory](../tests/upgrade/fixtures/v0.1.3/SHA256SUMS), [harness runbook](../tests/upgrade/README.md), and [upgrade workflow](../.github/workflows/upgrade-rollback.yml) define the repeatable certification contract. An installation older than the recorded baseline is not a direct v1 upgrade source.
-
-Prepare and deploy in this order:
-
-1. Identify the deployed API image by immutable digest and confirm `/health/ready`. Verify the checked-in fixture and its exact baseline API, PostgreSQL, and MinIO digests with `node eng/upgrade-tests/cli.mjs verify-fixture --fixture tests/upgrade/fixtures/v0.1.3`. Release certification must also run `verify-release-baseline` so a newly published stable `0.1.x` cannot leave the fixture stale.
-2. Quiesce writes long enough to take one matched PostgreSQL/media backup generation. Record its creation time, source image digest, database checksum, every media object/key checksum, and any storage snapshot/version identifiers in one manifest. Verify every checksum before resuming writes or continuing. Back up Admin Data Protection keys separately when retaining Admin sessions matters; they are not a substitute for either matched data member.
-3. Build or load the exact candidate once, record its immutable image ID/digest and source SHA, and run the [full rehearsal](../tests/upgrade/README.md#build-and-rehearse-an-exact-candidate) from the verified fixture. Require all eleven phases, both clean passes, matched-backup rollback, exact media validation, and an empty ownership-label cleanup audit.
-4. Deploy that exact rehearsed candidate while retaining the verified matched backup and exact prior image digest. Do not overwrite, age out, or detach either backup member during the rollback window. Validate `/health/live`, `/health/ready`, Admin sign-in, representative authenticated content reads, and byte-for-byte representative media downloads before restoring traffic.
-
-When a rehearsal fails, inspect its run-owned `artifacts/upgrade-tests/<run-id>/report.json`. The bounded atomic `cmsify.upgrade-diagnostics.v1` report records the fixture/baseline source and exact candidate identity, the first `failedStage` with allow-listed `failureEvidence`, and the separate `cleanup` outcome. A successful cleanup never replaces rollback failure evidence. If the report reaches its size bound, the harness deterministically replaces lower-priority successful-phase evidence with `truncated: true` plus safe readiness/assertion counts; it always retains the required source/candidate identity, first failed stage, failure evidence, and cleanup outcome. The report excludes raw exceptions, environment values, request headers, connection strings, tokens, and secrets.
-
-If the v1 deployment fails, do not merely change the image tag against the upgraded volumes:
-
-1. Stop traffic and all API/Admin/worker processes. Preserve candidate diagnostics and record the failure time, candidate identity, migration/readiness state, and correlation IDs without copying secrets or response bodies.
-2. Re-verify the retained matched-backup manifest and both backup members. If verification fails, rollback is unproved; do not destroy the only remaining state while investigating.
-3. Discard the database and media state written by v1. Create clean database storage and clean media storage; restoring over candidate-written state is unsupported.
-4. Restore PostgreSQL and media from the same pre-upgrade backup generation. Never mix a database dump with an older/newer media snapshot.
-5. Start the exact prior image by immutable digest. **Never run `0.1.3` (or another pre-v1 binary) against v1-written database or media state.**
-6. Before accepting traffic, require `/health/ready`, authenticated representative content and version reads, expected authorization behavior, and exact representative media bytes. Confirm candidate-only canary/writes are absent when the incident procedure created them.
-
-For installations older than the manifest's `0.1.3` baseline, first follow the historical supported path to exactly `0.1.3`. Verify live/readiness health, sign-in, representative content, and media. Then quiesce writes, create and checksum a new matched PostgreSQL/media backup at `0.1.3`, and only then begin the v1 sequence above. When the moving fixture advances to a later published stable `0.1.x`, that newly recorded version replaces `0.1.3` in this rule.
-
-Treat each rehearsal report as evidence only for its exact candidate image ID and source SHA. A successful harness implementation or an older run does not certify a rebuilt image, a different architecture, a changed source revision, or a production backup procedure that was not itself verified.
+There is no longer an automated upgrade rehearsal harness. Before upgrading across a version with breaking changes noted in `CHANGELOG.md` (search for "Breaking" under the target version's section), read those breaking-change notes carefully, take a full backup per the checklist above, and validate the new version against a copy of production data in a non-production environment first if the breaking change touches data migration.
 
 ## Network and TLS
 
