@@ -17,7 +17,8 @@ import { pathToFileURL } from "node:url";
 
 import { runProcess } from "../../eng/upgrade-tests/process.mjs";
 
-export const SKOPEO_IMAGE = "quay.io/skopeo/stable:v1.22.2@sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c";
+export const SKOPEO_IMAGE = "ghcr.io/syntax-circus/skopeo:v1.22.2@sha256:b9ca6a549aa71990d50ab390a8bddf606a6689379026aa24e7f4f70b5a43fbcd";
+export const SKOPEO_IMAGE_POLICY = /^ghcr\.io\/syntax-circus\/skopeo:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}@sha256:[0-9a-f]{64}$/;
 export const LOADER_CONTRACT = Object.freeze({
   schema: "cmsify.oci-loader.v1",
   skopeoImage: SKOPEO_IMAGE,

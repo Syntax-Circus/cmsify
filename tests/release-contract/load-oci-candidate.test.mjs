@@ -15,10 +15,10 @@ import {
   readOciFixtureEvidence,
   removeCandidate,
 } from "./release-candidate-fixture.mjs";
+import { SKOPEO_IMAGE as skopeoImage } from "../../scripts/release/load-oci-candidate.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const loaderUrl = pathToFileURL(resolve(repositoryRoot, "scripts", "release", "load-oci-candidate.mjs")).href;
-const skopeoImage = "quay.io/skopeo/stable:v1.22.2@sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c";
 const RUN_ID = "cmsify-oci-loader-test123";
 
 async function loaderModule() {

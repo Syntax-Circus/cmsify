@@ -256,10 +256,17 @@ test("rejects an unpinned release action", () => expectInvalid((root) => mutateW
 test("rejects a mutable OCI loader helper image", () => expectInvalid((root) => {
   const path = resolve(root, "scripts/release/load-oci-candidate.mjs");
   writeFileSync(path, readFileSync(path, "utf8").replace(
-    /quay\.io\/skopeo\/stable:v1\.22\.2@sha256:[0-9a-f]{64}/,
-    "quay.io/skopeo/stable:v1.22.2",
+    /ghcr\.io\/syntax-circus\/skopeo:v1\.22\.2@sha256:[0-9a-f]{64}/,
+    "ghcr.io/syntax-circus/skopeo:v1.22.2",
   ));
-}, /OCI loader.*Skopeo.*immutable|versioned.*digest/i));
+}, /OCI loader.*Skopeo.*org-controlled.*mirror/i));
+test("rejects an OCI loader helper image sourced from an external registry", () => expectInvalid((root) => {
+  const path = resolve(root, "scripts/release/load-oci-candidate.mjs");
+  writeFileSync(path, readFileSync(path, "utf8").replace(
+    /ghcr\.io\/syntax-circus\/skopeo:v1\.22\.2@sha256:([0-9a-f]{64})/,
+    "quay.io/skopeo/stable:v1.22.2@sha256:$1",
+  ));
+}, /OCI loader.*Skopeo.*org-controlled.*mirror/i));
 for (const [name, mutate, diagnostic] of [
   ["Skopeo network access", (source) => source.replace('"--network", "none"', '"--network", importerNetworkName'), /Skopeo.*without network access/i],
   ["registry relay", (source) => source.replace('"image", "load"', '"image", "pull"'), /Docker.*load.*scratch Docker archive|registry relay|execute operations/i],

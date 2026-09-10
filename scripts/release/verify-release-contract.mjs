@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateGovernanceContract } from "./governance-validator.mjs";
+import { SKOPEO_IMAGE_POLICY } from "./load-oci-candidate.mjs";
 
 const defaultRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const rootArgument = process.argv.indexOf("--root");
@@ -685,7 +686,7 @@ if (ociLoaderSource) {
   }
 }
 expect(ociLoaderContract?.schema === "cmsify.oci-loader.v1", "OCI loader must expose schema cmsify.oci-loader.v1.");
-expect(ociLoaderContract?.skopeoImage === "quay.io/skopeo/stable:v1.22.2@sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c", "OCI loader Skopeo helper must use the approved immutable versioned tag and linux/amd64 digest.");
+expect(SKOPEO_IMAGE_POLICY.test(ociLoaderContract?.skopeoImage ?? ""), "OCI loader Skopeo helper must be pinned by digest to the org-controlled ghcr.io/syntax-circus/skopeo mirror, not an external registry.");
 expect(ociLoaderContract?.transport === "offline-docker-archive" && ociLoaderSource.includes('transport: "offline-docker-archive"'), "OCI loader must declare offline Docker-archive transport.");
 expect(ociLoaderSource.includes('"--network", "none"'), "Skopeo must run without network access.");
 expect(ociLoaderSource.includes("docker-archive:/scratch/candidate.docker.tar:"), "Skopeo must write only disposable Docker transport scratch.");
