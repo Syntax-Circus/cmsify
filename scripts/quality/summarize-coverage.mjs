@@ -14,7 +14,8 @@ import {
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const reportFileName = "coverage.cobertura.xml";
+const reportFileName = "*.cobertura.xml";
+const reportFileSuffix = ".cobertura.xml";
 const nameStart = /[A-Za-z_:]/;
 const nameCharacter = /[A-Za-z0-9_.:-]/;
 
@@ -67,7 +68,7 @@ function findReports(directory) {
       const entryPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
         visit(entryPath);
-      } else if (entry.isFile() && entry.name === reportFileName) {
+      } else if (entry.isFile() && entry.name.endsWith(reportFileSuffix)) {
         reports.push(entryPath);
       }
     }

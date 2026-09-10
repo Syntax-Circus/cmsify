@@ -80,7 +80,7 @@ The blocking contract is:
 Collect open Cobertura reports for all five .NET test projects and aggregate them:
 
 ```powershell
-dotnet test Cmsify.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage --verbosity minimal
+dotnet test Cmsify.slnx --configuration Release --no-build --coverage --coverage-output-format cobertura --results-directory artifacts/coverage --verbosity minimal
 node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md
 ```
 
