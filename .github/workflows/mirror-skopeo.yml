@@ -1,0 +1,88 @@
+name: Mirror Skopeo image to GHCR
+
+# quay.io/skopeo/stable is a mutable tag: quay.io republishes it under a new
+# manifest digest on a short cadence and garbage-collects the superseded one,
+# so pinning scripts/release/load-oci-candidate.mjs directly at a quay.io
+# digest breaks every few days (see the release runbook). This workflow
+# mirrors an upstream reference into ghcr.io/syntax-circus/skopeo, a registry
+# this org controls, once per deliberate version adoption. It never runs
+# automatically and never writes the resulting pin back into the repo -
+# paste the reported value into load-oci-candidate.mjs in a reviewed commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Upstream reference to mirror, ideally digest-qualified: quay.io/skopeo/stable:v1.22.2@sha256:<digest>"
+        required: true
+        type: string
+      mirror_tag:
+        description: "Tag to publish under ghcr.io/syntax-circus/skopeo (defaults to the upstream tag)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UPSTREAM_REF: ${{ inputs.upstream_ref }}
+      MIRROR_TAG_INPUT: ${{ inputs.mirror_tag }}
+    steps:
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with: { driver: docker-container }
+
+      - name: Validate inputs and derive the mirror tag
+        id: derive
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$UPSTREAM_REF" =~ ^quay\.io/skopeo/stable:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}(@sha256:[0-9a-f]{64})?$ ]]; then
+            echo "upstream_ref must be quay.io/skopeo/stable:<tag>[@sha256:<64 hex>], got: $UPSTREAM_REF" >&2
+            exit 1
+          fi
+          TAG="${MIRROR_TAG_INPUT:-}"
+          if [[ -z "$TAG" ]]; then
+            TAG="${UPSTREAM_REF#quay.io/skopeo/stable:}"
+            TAG="${TAG%%@*}"
+          fi
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Resolved mirror tag is not a valid Docker tag: $TAG" >&2
+            exit 1
+          fi
+          printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ghcr.io
+        shell: bash
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Mirror the manifest into ghcr.io/syntax-circus/skopeo
+        shell: bash
+        env:
+          MIRROR_TAG: ${{ steps.derive.outputs.tag }}
+        run: docker buildx imagetools create --tag "ghcr.io/syntax-circus/skopeo:${MIRROR_TAG}" "$UPSTREAM_REF"
+
+      - name: Report the mirrored digest
+        shell: bash
+        env:
+          MIRROR_TAG: ${{ steps.derive.outputs.tag }}
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "ghcr.io/syntax-circus/skopeo:${MIRROR_TAG}" --format '{{json .Manifest}}' | jq -er '.digest')"
+          {
+            echo "### Mirrored ghcr.io/syntax-circus/skopeo:${MIRROR_TAG}"
+            echo ""
+            echo "Upstream: \`$UPSTREAM_REF\`"
+            echo ""
+            echo "Paste this into \`scripts/release/load-oci-candidate.mjs\`:"
+            echo ""
+            echo '```js'
+            echo "export const SKOPEO_IMAGE = \"ghcr.io/syntax-circus/skopeo:${MIRROR_TAG}@${DIGEST}\";"
+            echo '```'
+            echo ""
+            echo "If this is the package's first push, an admin must flip its GHCR visibility to public (Package settings -> Change visibility) before release jobs can pull it anonymously."
+          } >> "$GITHUB_STEP_SUMMARY"
