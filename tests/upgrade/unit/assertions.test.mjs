@@ -213,7 +213,7 @@ test("historical unpaged reusable-model collections remain observable", async ()
       if (path.endsWith(`/components/${ids.component}/versions/1`)) {
         return { status: 200, headers: new Headers(), body: { fields: [{ nestedComponentId: null }, { nestedComponentId: null }] } };
       }
-      if (path.endsWith(`/content/${ids.publishedContent}`)) {
+      if (path.endsWith(`/content/${ids.publishedContent}/versions/1`)) {
         return { status: 200, headers: new Headers(), body: { fields: [{ fieldId: ids.componentField, jsonValue: { summary: "Inline published", accent: "alpha" } }] } };
       }
       if (path.endsWith("/picklists")) {
@@ -675,10 +675,12 @@ test("candidate canary rejects a create response without an ETag", async () => {
 
 test("candidate canary exercises ETag concurrency and preserves immutable history", async () => {
   const canaryId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const canaryVersionId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   const createEtag = '"canary-create-etag"';
   const updateEtag = '"canary-update-etag"';
   const requests = [];
   let updatedFields = [];
+  let getCount = 0;
   const fakeHttp = {
     async requestJson(request) {
       requests.push(request);
@@ -688,9 +690,11 @@ test("candidate canary exercises ETag concurrency and preserves immutable histor
       if (request.method === "PUT" && request.headers["if-match"] === '"stale-canary-etag"') return { status: 412, body: { title: "Concurrency mismatch" }, headers: new Headers() };
       if (request.method === "PUT") {
         updatedFields = request.body.fields;
-        return { status: 200, body: { id: canaryId, slug: request.body.slug, fields: updatedFields }, headers: new Headers({ etag: updateEtag }) };
+        return { status: 200, body: { id: canaryVersionId, contentItemId: canaryId, slug: requests[1].body.slug, fields: updatedFields }, headers: new Headers({ etag: updateEtag }) };
       }
-      return { status: 200, body: { id: canaryId, slug: requests[1].body.slug, fields: updatedFields }, headers: new Headers({ etag: updateEtag }) };
+      getCount += 1;
+      if (getCount === 1) return { status: 200, body: { id: canaryVersionId, contentItemId: canaryId, slug: requests[1].body.slug, fields: requests[1].body.fields }, headers: new Headers({ etag: createEtag }) };
+      return { status: 200, body: { id: canaryVersionId, contentItemId: canaryId, slug: requests[1].body.slug, fields: updatedFields }, headers: new Headers({ etag: updateEtag }) };
     },
   };
   const immutableSnapshot = {
@@ -718,17 +722,18 @@ test("candidate canary exercises ETag concurrency and preserves immutable histor
   }));
 
   assert.equal(result.detail, `canaryId=${canaryId}`);
-  assert.deepEqual(requests.map((request) => request.method), ["POST", "POST", "PUT", "PUT", "PUT", "GET"]);
+  assert.deepEqual(requests.map((request) => request.method), ["POST", "POST", "GET", "PUT", "PUT", "PUT", "GET"]);
   assert.equal(requests[0].token, undefined);
   assert.equal(requests[1].token, "session-token");
   assert.match(requests[1].body.slug, /^upgrade-canary-unit-run-001$/);
-  assert.equal(requests[2].headers, undefined);
-  assert.equal(requests[3].headers["if-match"], '"stale-canary-etag"');
-  assert.equal(requests[4].headers["if-match"], createEtag);
-  assert.equal(requests[5].token, expected.authentication.readerToken);
-  assert.equal(requests[5].body, undefined);
-  assert.equal(requests[5].method, "GET");
-  assert.equal(requests[4].body.fields[0].textValue, "Upgrade canary updated unit-run-001");
+  assert.equal(requests[2].token, expected.authentication.readerToken);
+  assert.equal(requests[3].headers, undefined);
+  assert.equal(requests[4].headers["if-match"], '"stale-canary-etag"');
+  assert.equal(requests[5].headers["if-match"], createEtag);
+  assert.equal(requests[6].token, expected.authentication.readerToken);
+  assert.equal(requests[6].body, undefined);
+  assert.equal(requests[6].method, "GET");
+  assert.equal(requests[5].body.fields[0].textValue, "Upgrade canary updated unit-run-001");
   assert.equal(sqlCalls.length, 2);
   assert.deepEqual(sqlCalls[0].parameters, sqlCalls[1].parameters);
 });

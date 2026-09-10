@@ -20,6 +20,16 @@ function historicallyUnpagedItems(context, body, name) {
   return asItems(body, name);
 }
 
+function itemCurrentStatus(context, body) {
+  return context.phase === "candidate" ? body?.versions?.[0]?.status : body?.status;
+}
+
+function resolvedMatchesPublished(context, body, contentId, versionId) {
+  return context.phase === "candidate"
+    ? body?.id === versionId && body?.contentItemId === contentId
+    : body?.id === contentId;
+}
+
 function itemById(items, id, name) {
   const item = items.find((candidate) => candidate?.id === id);
   ensure(item, `${name} omitted expected id ${id}`);
@@ -251,8 +261,8 @@ async function assertEditorGrant(context) {
 
 async function assertReaderPrimaryResolve(context) {
   const ids = idsOf(context);
-  const response = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.publishedContent}?resolve=true&asOf=${encodeURIComponent(context.expected.fixtureClock)}`);
-  ensure(response.body?.id === ids.publishedContent, "reader could not resolve primary published content");
+  const response = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/by-slug/fixture-published?asOf=${encodeURIComponent(context.expected.fixtureClock)}`);
+  ensure(resolvedMatchesPublished(context, response.body, ids.publishedContent, ids.publishedVersion), "reader could not resolve primary published content");
 }
 
 async function assertReaderRestrictedHidden(context) {
@@ -305,7 +315,7 @@ async function assertComponentSnapshot(context) {
   const version = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/components/${ids.component}/versions/1`);
   const fields = version.body?.fields;
   ensure(Array.isArray(fields) && fields.length === 2 && fields.every((field) => field.nestedComponentId === null), "component graph is no longer acyclic");
-  const content = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.publishedContent}?resolve=true&asOf=${encodeURIComponent(context.expected.fixtureClock)}`);
+  const content = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.publishedContent}/versions/1`);
   const snapshot = content.body?.fields?.find((field) => field.fieldId === ids.componentField)?.jsonValue;
   ensure(snapshot?.summary === "Inline published" && snapshot?.accent === "alpha", "inline component snapshot JSON changed");
   await expectSqlCount(context, "SELECT count(*) FROM components WHERE id = :'component_id' AND created_at = :'created_at'::timestamptz AND updated_at = :'updated_at'::timestamptz;", {
@@ -360,8 +370,8 @@ async function assertContentVersions(context) {
     httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content?page=1&pageSize=50`),
     httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.publishedContent}/versions?page=1&pageSize=50`),
   ]);
-  ensure(draft.body?.id === ids.draftContent && draft.body?.status === "Draft", "draft content changed");
-  ensure(published.body?.id === ids.publishedContent && published.body?.status === "Published", "published content changed");
+  ensure(draft.body?.id === ids.draftContent && itemCurrentStatus(context, draft.body) === "Draft", "draft content changed");
+  ensure(published.body?.id === ids.publishedContent && itemCurrentStatus(context, published.body) === "Published", "published content changed");
   itemById(asItems(list.body, "content list"), ids.draftContent, "content list");
   itemById(asItems(list.body, "content list"), ids.publishedContent, "content list");
   itemById(historicallyUnpagedItems(context, versions.body, "content version list"), ids.publishedVersion, "content version list");
@@ -379,8 +389,20 @@ async function assertContentVersions(context) {
 async function assertFuturePublishAt(context) {
   const ids = idsOf(context);
   const detail = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.scheduledContent}`);
-  ensure(detail.body?.id === ids.scheduledContent && detail.body?.status === "Approved", "scheduled content state changed");
-  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.scheduledContent}?resolve=true&asOf=${encodeURIComponent(context.expected.fixtureClock)}`, { expectedStatuses: [404] });
+  ensure(detail.body?.id === ids.scheduledContent && itemCurrentStatus(context, detail.body) === "Approved", "scheduled content state changed");
+  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/by-slug/fixture-scheduled?asOf=${encodeURIComponent(context.expected.fixtureClock)}`, { expectedStatuses: [404] });
+  if (context.phase === "candidate") {
+    await expectSqlCount(context, "SELECT count(*) FROM content_items WHERE id = :'scheduled_content_id' AND created_at = :'created_at'::timestamptz AND updated_at = :'updated_at'::timestamptz;", {
+      scheduled_content_id: ids.scheduledContent,
+      created_at: context.expected.timestamps.scheduledContentCreatedAt,
+      updated_at: context.expected.timestamps.scheduledContentUpdatedAt,
+    }, 1, "scheduled content's fixed timestamps must remain intact");
+    await expectSqlCount(context, "SELECT count(*) FROM content_versions WHERE content_item_id = :'scheduled_content_id' AND status = 'Approved' AND publish_at = :'publish_at'::timestamptz;", {
+      scheduled_content_id: ids.scheduledContent,
+      publish_at: context.expected.content.scheduledPublishAt,
+    }, 1, "future PublishAt must remain intact");
+    return;
+  }
   await expectSqlCount(context, "SELECT count(*) FROM content_items WHERE id = :'scheduled_content_id' AND status = 'Approved' AND publish_at = :'publish_at'::timestamptz AND created_at = :'created_at'::timestamptz AND updated_at = :'updated_at'::timestamptz;", {
     scheduled_content_id: ids.scheduledContent,
     publish_at: context.expected.content.scheduledPublishAt,
@@ -391,8 +413,8 @@ async function assertFuturePublishAt(context) {
 
 async function assertBoundedCurrent(context) {
   const ids = idsOf(context);
-  const response = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.publishedContent}?resolve=true&asOf=${encodeURIComponent(context.expected.fixtureClock)}`);
-  ensure(response.body?.id === ids.publishedContent, "bounded current content did not resolve");
+  const response = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/by-slug/fixture-published?asOf=${encodeURIComponent(context.expected.fixtureClock)}`);
+  ensure(resolvedMatchesPublished(context, response.body, ids.publishedContent, ids.publishedVersion), "bounded current content did not resolve");
   await expectSqlCount(context, "SELECT count(*) FROM content_versions WHERE id = :'published_version_id' AND effective_start_at = :'effective_start_at'::timestamptz AND effective_end_at = :'effective_end_at'::timestamptz;", {
     published_version_id: ids.publishedVersion,
     effective_start_at: context.expected.content.currentEffectiveStartAt,
@@ -420,7 +442,7 @@ async function assertExpiredRange(context) {
 
 async function assertExpiredHidden(context) {
   const ids = idsOf(context);
-  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${ids.expiredContent}?resolve=true&asOf=${encodeURIComponent(context.expected.fixtureClock)}`, { expectedStatuses: [404] });
+  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/by-slug/fixture-expired?asOf=${encodeURIComponent(context.expected.fixtureClock)}`, { expectedStatuses: [404] });
 }
 
 async function assertAvailableMedia(context) {
@@ -665,22 +687,23 @@ async function assertCanaryWriteRead(context) {
   const canaryId = created.body?.id;
   ensure(typeof canaryId === "string" && /^[0-9a-f-]{36}$/i.test(canaryId), "candidate canary create did not return an ID");
   ensure(created.body?.slug === slug, "candidate canary create returned the wrong slug");
-  const createEtag = requiredEtag(created, "create");
+  const createdVersion = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}/versions/1`);
+  const createEtag = requiredEtag(createdVersion, "create");
   const updatedFields = canaryFields(context, `Upgrade canary updated ${context.runId ?? "rehearsal"}`);
-  const updateBody = { slug, localeCode: "en-US", translationGroupId: null, publishAt: null, tags: [], fields: updatedFields };
-  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}`, {
+  const updateBody = { effectiveStartAt: null, effectiveEndAt: null, fields: updatedFields };
+  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}/versions/1`, {
     method: "PUT", token, body: updateBody, expectedStatuses: [412],
   });
-  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}`, {
+  await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}/versions/1`, {
     method: "PUT", token, headers: { "if-match": '"stale-canary-etag"' }, body: updateBody, expectedStatuses: [412],
   });
-  const updated = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}`, {
+  const updated = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}/versions/1`, {
     method: "PUT", token, headers: { "if-match": createEtag }, body: updateBody,
   });
   const updateEtag = requiredEtag(updated, "conditional update");
   ensure(updateEtag !== createEtag, "candidate canary conditional update did not advance the ETag");
-  const read = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}`);
-  ensure(read.body?.id === canaryId && read.body?.slug === slug, "candidate canary could not be read back through the public API");
+  const read = await httpJson(context, `/api/v1/workspaces/${ids.primaryWorkspace}/content/${canaryId}/versions/1`);
+  ensure(read.body?.contentItemId === canaryId && read.body?.slug === slug, "candidate canary could not be read back through the public API");
   ensure(read.body?.fields?.some((field) => field.fieldId === ids.titleField && field.textValue === `Upgrade canary updated ${context.runId ?? "rehearsal"}`), "candidate canary read-back did not contain the conditional update");
   ensure(requiredEtag(read, "read-back") === updateEtag, "candidate canary read-back ETag did not match the conditional update");
   const immutableAfter = await immutableHistorySnapshot(context);
