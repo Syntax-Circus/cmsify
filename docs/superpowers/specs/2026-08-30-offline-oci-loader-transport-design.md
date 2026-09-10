@@ -20,6 +20,8 @@ The original OCI archive remains the certified release artifact and the only pro
 
 Pinned Skopeo converts the selected image from the immutable OCI archive into a temporary Docker-archive representation. Docker loads that temporary representation. The loader proves runtime identity through the OCI config digest and root-filesystem DiffIDs rather than claiming that Docker's representation exposes the original OCI distribution-manifest digest.
 
+The Skopeo image itself is pinned against `ghcr.io/syntax-circus/skopeo`, a mirror this org controls, rather than against `quay.io/skopeo/stable` directly. quay.io repeatedly republished that tag under a new manifest digest and garbage-collected the superseded one, breaking the pin every few days regardless of which digest was chosen. `mirror-skopeo.yml` (`workflow_dispatch`) refreshes the mirror when a new Skopeo version is deliberately adopted; it is never run automatically and never rewrites the pin itself.
+
 This distinction is explicit:
 
 - artifact identity is the original OCI archive and its certified OCI descriptor digest;
