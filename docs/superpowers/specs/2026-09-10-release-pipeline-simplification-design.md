@@ -17,29 +17,31 @@ The user made an explicit, informed call: this project doesn't currently need th
 
 ## Decision
 
-Replace `publish-cmsify.yml` with a four-job pipeline of roughly 80-100 lines, and delete everything that exists solely to support the machinery being removed.
+Replace `publish-cmsify.yml` with a three-job pipeline of roughly 250 lines, and delete everything that exists solely to support the machinery being removed.
 
 ### New pipeline shape
 
 Triggered on `push: tags: ["v*"]`, same as today.
 
 1. **`resolve`** - validate the tag (`scripts/release/validate-release-tag.mjs`, kept as-is - it's a small, self-contained SemVer/changelog check, not a source of brittleness), emit `version`/`source_sha` outputs. Unchanged from the current job in shape and size.
-2. **`build-test-publish-images`** - checkout at `source_sha`, restore/build/test the .NET solution, pack the five NuGet packages and the npm SDK package (unchanged steps, copied from the current `build` job), then `docker buildx build --push` both images (API, Admin) tagged `docker.io/syntaxcircus/cmsify-{api,admin}:$VERSION` directly to Docker Hub - no OCI-archive artifact, no offline loader, no Skopeo. Immediately after each push, smoke-test by running the pushed image directly (`docker run -d --pull always <image>`) and polling `/health/live` and `/health/ready` with `curl --retry`. If either image fails its smoke test, the job fails and nothing downstream runs.
-3. **`sign-and-attest`** (needs `build-test-publish-images`) - `cosign sign --yes` both images by digest (keeps the existing OIDC keyless-signing setup), `syft` an SBOM for each image, upload both SBOMs as workflow artifacts for the next job to attach to the release.
-4. **`promote`** (needs `sign-and-attest`, `environment: release` - same manual approval gate as today) - `dotnet nuget push` the five packages and `npm publish` the SDK package (unchanged trusted-publishing/OIDC steps, copied from the current `promote` job), `gh release create` attaching the SBOMs, using the existing changelog-excerpt-into-release-notes logic.
+2. **`build-test-and-package`** - checkout at `source_sha`, restore/build/test the .NET solution, pack the five NuGet packages and the npm SDK package (unchanged steps, copied from the current `build` job), `docker buildx build --load` both images (API, Admin) locally (not pushed), smoke-test them together against a real PostgreSQL container with plain `docker run`/`curl` (`/health/ready` for the API, `/login` for Admin), then `docker save` both smoke-tested images to gzipped tarballs and upload them alongside the packed packages as one artifact. Nothing is pushed, signed, or published in this job.
+3. **`promote`** (needs `build-test-and-package`, `environment: release` - same manual approval gate as today) - download the artifact, `docker load` both images, push both to Docker Hub (plus `:latest` for a stable release) and capture their digests, `cosign sign --yes` each by digest (keeps the existing OIDC keyless-signing setup), generate an SBOM for each with `syft` against the pushed digest, `dotnet nuget push` the five packages and `npm publish` the SDK package (unchanged trusted-publishing/OIDC steps), `gh release create` attaching the SBOMs.
 
-No OCI-layout artifact is produced or downloaded between jobs; `build-test-publish-images` pushes directly to the registry it already needs to push to, and downstream jobs reference images by the digest that job outputs.
+**Correction from the original 4-job draft of this decision:** signing and registry pushes can only happen against artifacts already in a registry, so they cannot be split into a job upstream of the human approval gate without pushing (and thereby publishing) before that gate fires. Collapsing "push, sign, attest, publish" into the single gated `promote` job is both simpler than the original 4-job split and is what actually preserves the property the user asked to keep: nothing touches a registry, gets signed, or gets published without a human clicking approve first. No OCI-layout artifact, Skopeo, or byte-level identity proof is used anywhere in this flow - `docker save`/`docker load` (a single standard command pair) carries the already-smoke-tested images between jobs.
 
 ### What is deleted entirely
 
 - `scripts/release/load-oci-candidate.mjs` and its test `tests/release-contract/load-oci-candidate.test.mjs` (879 lines) - the offline OCI-loader transport this replaces.
+- `scripts/release/finalize-spdx.mjs`, `scripts/release/verify-release-artifacts.mjs`, `scripts/release/verify-task-12-external-gate.ps1` - bespoke post-processing/validation for the OCI-archive-plus-SHA256SUMS artifact shape the old `build` job produced; nothing in the new design produces that shape, so these have no remaining caller.
+- `eng/release-smoke/` and `tests/release-smoke/` - the harness behind the old `artifact-smoke` job (spins up Postgres/MinIO/Node fixtures to certify a loaded OCI candidate); replaced by the plain `docker run`/`curl` smoke test in `build-test-and-package`.
 - `.github/workflows/mirror-skopeo.yml` - existed only to keep the OCI loader's Skopeo pin off quay.io; nothing needs Skopeo once the loader is gone.
 - `.github/workflows/upgrade-rollback.yml`, `eng/upgrade-tests/` (rehearsal.mjs, assertions.mjs, fixture.mjs, docker.mjs, http.mjs, cli.mjs, release-baseline.mjs, process.mjs, expected.mjs, manifest.mjs), `tests/upgrade/` (fixtures, compose files, the v0.1.3 database dump, media fixtures, README) - the entire upgrade/rollback rehearsal.
 - `.github/workflows/record-release-soak.yml` - soak recording for a job (`upgrade-rollback`) that no longer exists.
-- `scripts/release/verify-release-contract.mjs`, `scripts/release/governance-validator.mjs`, and everything under `tests/release-contract/` (quality-policy, capacity-report, task-12-external-gates, coverage-summary, quality-evidence-manifest, quality-documentation, governance-policy, verify-release-artifacts - roughly 7,000 lines) - the governance verifier and its own test suite.
+- `scripts/release/verify-release-contract.mjs`, `scripts/release/governance-validator.mjs`, and everything under `tests/release-contract/` (quality-policy, capacity-report, task-12-external-gates, coverage-summary, quality-evidence-manifest, quality-documentation, governance-policy - roughly 7,000 lines) - the governance verifier and its own test suite.
+- The `release-contract` job in `.github/workflows/dotnet-test.yml` (a separate, PR-time workflow) - it directly invokes `node --test tests/release-contract/*.test.mjs`, `eng/upgrade-tests/cli.mjs verify-fixture`, and `scripts/release/verify-release-contract.mjs`, all deleted above. Left in place, this job would fail on every future PR with "file not found." This is the one necessary edit to a file outside the release pipeline proper.
 - The `dotnet-consumer` and `node-consumer` jobs and their supporting steps in `publish-cmsify.yml`.
 - The `candidate-accessibility` job in `publish-cmsify.yml`. Accessibility scanning of the Admin UI continues to run on every PR via the pre-existing, independent `admin-accessibility.yml` workflow - this only removes it as a release-blocking gate, it does not remove accessibility testing from the project.
-- `docs/evidence/task-12-local-verification.json` and any other generated evidence files that only existed to feed the deleted governance verifier.
+- `docs/evidence/task-12-local-verification.json` (and the `docs/evidence/` directory, if this was its only file) - fed only the deleted governance verifier.
 
 ### What is kept, unchanged
 
@@ -51,8 +53,10 @@ No OCI-layout artifact is produced or downloaded between jobs; `build-test-publi
 
 ### Documentation
 
-- `docs/release-runbook.md` and `docs/rollback-runbook.md` are rewritten to describe the four-job flow above in a few paragraphs, replacing their current content (which describes the offline loader, governance verifier evidence ledger, and soak recording procedures - all being deleted).
-- `AGENTS.md`/`CLAUDE.md` are checked for references to deleted scripts/workflows and updated.
+- `docs/release-runbook.md` and `docs/rollback-runbook.md` are rewritten to describe the three-job flow above in a few paragraphs, replacing their current content (which describes the offline loader, governance verifier evidence ledger, and soak recording procedures - all being deleted).
+- `docs/operations.md`'s "v0.1.x to v1 upgrade and rollback" subsection, which describes the deleted eleven-phase rehearsal in detail, is replaced with a short paragraph pointing at `CHANGELOG.md`'s breaking-change notes instead.
+- `docs/performance.md` has three now-dead `node --test tests/release-contract/*.test.mjs` verification-command lines removed (the files they reference no longer exist).
+- `AGENTS.md`/`CLAUDE.md` were checked during this spec's writing for references to anything being deleted - none found, no changes needed there.
 - Historical design docs under `docs/superpowers/specs/` (including `2026-08-30-offline-oci-loader-transport-design.md`) are left as-is - they are dated records of a past decision, not live documentation, and this spec supersedes that decision rather than erasing its history.
 
 ## Verification
