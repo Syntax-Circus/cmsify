@@ -1,0 +1,130 @@
+{
+  "schema": "cmsify.task11-local-verification.v1",
+  "evidenceSourceSha": "e72b4681158cf687f0462bb2aa29f9ed47771e49",
+  "sdkVersion": "10.0.400",
+  "tests": {
+    "projects": {
+      "core": 66,
+      "dotnetClient": 71,
+      "admin": 35,
+      "infrastructure": 303,
+      "api": 112
+    },
+    "fullTotal": 587,
+    "coverageTotal": 587,
+    "coverageReportCount": 5
+  },
+  "commands": {
+    "sdkVersion": "dotnet --version",
+    "approvedLocalRestore": "dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --locked-mode",
+    "publicLockedRestore": "dotnet restore Cmsify.slnx --locked-mode",
+    "releaseBuild": "dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental --verbosity minimal",
+    "fullTest": "dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal",
+    "coverageTest": "dotnet test Cmsify.slnx --configuration Release --no-build --collect:\"XPlat Code Coverage\" --results-directory artifacts/coverage --verbosity minimal",
+    "coverageSummary": "node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md",
+    "capacityRunner": "node scripts/quality/run-capacity.mjs",
+    "singleMsbuildNodeTest": "dotnet test Cmsify.slnx --configuration Release --no-restore --verbosity minimal -m:1"
+  },
+  "reportContracts": {
+    "coverage": {
+      "schema": "cmsify.coverage.v1",
+      "topLevelFields": [
+        "schema",
+        "sourceSha",
+        "assemblies"
+      ],
+      "assemblyFields": [
+        "assembly",
+        "lines",
+        "branches"
+      ],
+      "metricFields": [
+        "valid",
+        "covered",
+        "percentage"
+      ]
+    },
+    "capacity": {
+      "schema": "cmsify.capacity.v1",
+      "topLevelFields": [
+        "schema",
+        "sourceSha",
+        "sdkVersion",
+        "databaseVersion",
+        "generatedAtUtc",
+        "datasets",
+        "measurements",
+        "diagnosticBudgets",
+        "blockingInvariantsPassed"
+      ],
+      "datasetFields": {
+        "mediaStreaming": [
+          "bytes"
+        ],
+        "resolvedContent": [
+          "contentItems",
+          "publishedVersions",
+          "eligibleItems",
+          "filteredEligibleItems",
+          "deletedOwners",
+          "templates",
+          "locales",
+          "tags"
+        ],
+        "webhookClaim": [
+          "eligibleRows",
+          "batchSize"
+        ]
+      },
+      "measurementFields": {
+        "mediaStreaming": [
+          "sampleCount",
+          "timeToFirstByteMilliseconds",
+          "totalDurationMilliseconds",
+          "maximumObservedReadRequestBytes",
+          "maximumObservedWriteRequestBytes"
+        ],
+        "resolvedContent": [
+          "sampleCount",
+          "queryCounts",
+          "elapsedMilliseconds",
+          "p50Milliseconds",
+          "p95Milliseconds",
+          "p99Milliseconds"
+        ],
+        "webhookClaim": [
+          "sampleCount",
+          "commandCount",
+          "samplesMilliseconds",
+          "p50Milliseconds",
+          "p95Milliseconds",
+          "p99Milliseconds",
+          "duplicateCount",
+          "overclaimCount"
+        ]
+      },
+      "diagnosticBudgetNames": [
+        "mediaStreamingTimeToFirstByte",
+        "resolvedContentP95",
+        "resolvedContentP99",
+        "webhookClaimP95"
+      ],
+      "diagnosticBudgetFields": [
+        "actualMilliseconds",
+        "thresholdMilliseconds",
+        "passed"
+      ],
+      "thresholdsMilliseconds": {
+        "mediaStreamingTimeToFirstByte": 500,
+        "resolvedContentP95": 250,
+        "resolvedContentP99": 500,
+        "webhookClaimP95": 250
+      }
+    }
+  },
+  "datasets": {
+    "resolvedContentItems": 520,
+    "resolvedPublishedVersions": 2600,
+    "webhookEligibleRows": 251
+  }
+}
