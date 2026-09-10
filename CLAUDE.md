@@ -18,7 +18,7 @@ dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental -
 dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```
 
-Ordinary public locked restore is currently blocked by an unpublished `SyntaxCircus.Http.Resilience` package — see AGENTS.md for the maintainer-only local-feed restore command and the release handoff this depends on. Don't try to work around this yourself.
+`SyntaxCircus.Http.Resilience` publishes from its trusted default-branch workflow; Cmsify depends on the public `0.2.1` release, and ordinary public locked restore works directly — see AGENTS.md for the full release-handoff history.
 
 Single-project focused tests:
 

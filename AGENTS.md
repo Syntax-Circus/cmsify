@@ -27,13 +27,7 @@ dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental -
 dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 ```
 
-`dotnet --version` must report `10.0.400`. Ordinary public locked restore is still gated by the unpublished `SyntaxCircus.Http.Resilience` `0.2.0-cmsify.1` package. The current ignored package was built from sibling feature-branch source and is local evidence only; do not publish it. Follow the [post-merge release handoff](docs/superpowers/plans/2026-08-30-post-merge-release-handoff.md): merge the sibling work, pack and approve the candidate from its default branch, reconcile any changed identity/locks into Cmsify, and publish only through the trusted default-branch/release workflow. Until that sequence completes or the user separately approves an identity-reviewed replacement, maintainers with the approved ignored feed use:
-
-```powershell
-dotnet restore Cmsify.slnx --configfile artifacts/local-nuget/NuGet.Config --packages artifacts/local-nuget/packages --locked-mode
-```
-
-While that public package gate is open, hosted pull-request validation restores and tests the public-independent Core, Infrastructure, and API projects and runs the complete OpenAPI and TypeScript checks from the API project graph. Package-dependent Admin/.NET-client and Admin accessibility checks are reported as deferred on pull requests. Pushes to `main` and release workflows retain the full public locked-solution restore and must not treat the partial pull-request result as public-package evidence.
+`dotnet --version` must report `10.0.400`. The [post-merge release handoff](docs/superpowers/plans/2026-08-30-post-merge-release-handoff.md) completed 2026-09-02: `SyntaxCircus.Http.Resilience` was published from its trusted default-branch workflow, and Cmsify now depends on the public `0.2.1` release. Ordinary public locked restore works directly from the public feed; the `artifacts/local-nuget` ignored local feed and its restore override are no longer needed for this package.
 
 Never track that feed configuration, package bytes, or package cache. Use [`docs/performance.md`](docs/performance.md) for safe `--force-evaluate` lock regeneration, focused capacity filters, XPlat coverage aggregation, the scheduled timing runner, and the single-MSBuild-node final command. Latency and coverage are trends; query counts, database paging, batch/lease bounds, upload rejection, and streaming/ownership assertions are blocking.
 
