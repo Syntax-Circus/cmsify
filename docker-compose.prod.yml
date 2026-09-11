@@ -115,6 +115,7 @@ services:
         condition: service_healthy
     volumes:
       - media_data:/var/cmsify/media
+      - api_logs:/app/.local/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
@@ -161,3 +162,4 @@ volumes:
   postgres_data:
   media_data:
   admin_data_protection_keys:
+  api_logs:
