@@ -23,11 +23,15 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      AllowedHosts: ${AllowedHosts:-*}
       ConnectionStrings__Cmsify: Host=postgres;Port=5432;Database=${POSTGRES_DB:-cmsify};Username=${POSTGRES_USER:-cmsify};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
       Seed__Admin__Email: ${SEED_ADMIN_EMAIL:-admin@example.com}
       Seed__Admin__DisplayName: ${SEED_ADMIN_DISPLAY_NAME:-Cmsify Admin}
       Seed__Admin__Password: ${Seed__Admin__Password:?Seed__Admin__Password is required}
+      Seed__Admin__PasswordHash: ${Seed__Admin__PasswordHash:-}
+      Seed__DefaultWorkspace__Name: ${Seed__DefaultWorkspace__Name:-Default}
+      Seed__DefaultWorkspace__Slug: ${Seed__DefaultWorkspace__Slug:-default}
       Secrets__Rotation__Enabled: ${Secrets__Rotation__Enabled:-false}
       Secrets__Rotation__BatchSize: ${Secrets__Rotation__BatchSize:-100}
       Secrets__Rotation__DelaySeconds: ${Secrets__Rotation__DelaySeconds:-5}
@@ -39,6 +43,9 @@ services:
       Storage__S3__AccessKey: ${Storage__S3__AccessKey:-}
       Storage__S3__SecretKey: ${Storage__S3__SecretKey:-}
       Storage__S3__ServiceUrl: ${Storage__S3__ServiceUrl:-}
+      Storage__S3__ForcePathStyle: ${Storage__S3__ForcePathStyle:-false}
+      Media__MaxFileSizeMb: ${Media__MaxFileSizeMb:-50}
+      Media__AllowedMimeTypes: ${Media__AllowedMimeTypes:-image/,audio/,video/,application/pdf,text/plain,application/json,application/msword,application/vnd.openxmlformats-officedocument}
       Media__Operations__ReconciliationIntervalSeconds: ${Media__Operations__ReconciliationIntervalSeconds:-300}
       Media__Operations__LeaseDurationSeconds: ${Media__Operations__LeaseDurationSeconds:-300}
       Media__Operations__BatchSize: ${Media__Operations__BatchSize:-100}
@@ -50,7 +57,44 @@ services:
       Media__Operations__ManagedPrefixes__0: cmsify/media/
       Media__Operations__ManagedPrefixes__1: default/
       Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
+      Api__HealthDashboardEnabled: ${Api__HealthDashboardEnabled:-false}
+      Serilog__MinimumLevel__Default: ${Serilog__MinimumLevel__Default:-Information}
+      Serilog__MinimumLevel__Override__Microsoft.AspNetCore: ${SERILOG_OVERRIDE_MICROSOFT_ASPNETCORE:-Warning}
+      Serilog__File__Enabled: ${Serilog__File__Enabled:-true}
+      Serilog__File__Path: ${Serilog__File__Path:-.local/logs/cmsify-.log}
+      Serilog__File__RetainedFileCountLimit: ${Serilog__File__RetainedFileCountLimit:-14}
+      SecurityHeaders__PathOverrides__0__PathPrefix: ${SecurityHeaders__PathOverrides__0__PathPrefix:-/swagger}
+      SecurityHeaders__PathOverrides__0__ReferrerPolicy: ${SecurityHeaders__PathOverrides__0__ReferrerPolicy:-no-referrer}
       TrustedProxy__RequireTrustedProxiesInProduction: ${TrustedProxy__RequireTrustedProxiesInProduction:-false}
+      TrustedProxy__TrustedProxies__0: ${TrustedProxy__TrustedProxies__0:-}
+      TrustedProxy__TrustedNetworks__0: ${TrustedProxy__TrustedNetworks__0:-}
+      RateLimit__PerActor__PermitPerMinute: ${RateLimit__PerActor__PermitPerMinute:-600}
+      RateLimit__PerIp__PermitPerMinute: ${RateLimit__PerIp__PermitPerMinute:-60}
+      Auth__BcryptCost: ${Auth__BcryptCost:-12}
+      Auth__SessionAbsoluteExpiryHours: ${Auth__SessionAbsoluteExpiryHours:-8}
+      Auth__SessionSlidingExpiryMinutes: ${Auth__SessionSlidingExpiryMinutes:-480}
+      Auth__SessionTouchIntervalSeconds: ${Auth__SessionTouchIntervalSeconds:-300}
+      Auth__ApiClientTouchIntervalSeconds: ${Auth__ApiClientTouchIntervalSeconds:-300}
+      Auth__Oidc__Enabled: ${Auth__Oidc__Enabled:-false}
+      Auth__Oidc__Authority: ${Auth__Oidc__Authority:-}
+      Auth__Oidc__Audience: ${Auth__Oidc__Audience:-cmsify}
+      Auth__Oidc__ClaimsMapping__Role: ${Auth__Oidc__ClaimsMapping__Role:-cmsify_role}
+      Auth__Oidc__ClaimsMapping__WorkspaceId: ${Auth__Oidc__ClaimsMapping__WorkspaceId:-cmsify_workspace}
+      Webhook__OutboxPollIntervalSeconds: ${Webhook__OutboxPollIntervalSeconds:-30}
+      Webhook__OutboxLeaseDurationSeconds: ${Webhook__OutboxLeaseDurationSeconds:-300}
+      Webhook__OutboxBatchSize: ${Webhook__OutboxBatchSize:-100}
+      Webhook__RetryIntervalSeconds: ${Webhook__RetryIntervalSeconds:-30}
+      Webhook__DeliveryLeaseDurationSeconds: ${Webhook__DeliveryLeaseDurationSeconds:-300}
+      Webhook__DeliveryBatchSize: ${Webhook__DeliveryBatchSize:-100}
+      Webhook__MaxAttempts: ${Webhook__MaxAttempts:-10}
+      Webhook__RequestTimeoutSeconds: ${Webhook__RequestTimeoutSeconds:-15}
+      Webhook__AllowHttp: ${Webhook__AllowHttp:-false}
+      Webhook__RetentionDays: ${Webhook__RetentionDays:-30}
+      Webhook__CleanupBatchSize: ${Webhook__CleanupBatchSize:-100}
+      Webhook__CleanupIntervalSeconds: ${Webhook__CleanupIntervalSeconds:-3600}
+      Scheduler__PublishingIntervalSeconds: ${Scheduler__PublishingIntervalSeconds:-60}
+      Scheduler__PublishingLeaseDurationSeconds: ${Scheduler__PublishingLeaseDurationSeconds:-300}
+      Scheduler__PublishingBatchSize: ${Scheduler__PublishingBatchSize:-100}
       OpenTelemetry__Enabled: ${API_OPENTELEMETRY__ENABLED:-false}
       OpenTelemetry__OtlpEndpoint: ${API_OPENTELEMETRY__OTLPENDPOINT:-}
       OpenTelemetry__OtlpProtocol: ${API_OPENTELEMETRY__OTLPPROTOCOL:-grpc}
@@ -85,7 +129,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      AllowedHosts: ${AllowedHosts:-*}
       Admin__ApiBaseUrl: http://api:8080
+      Admin__OidcProviderName: ${Admin__OidcProviderName:-Authentik}
+      Admin__Auth__Session__SlidingWindowMinutes: ${Admin__Auth__Session__SlidingWindowMinutes:-60}
+      Admin__Auth__Session__MaxLifetimeHours: ${Admin__Auth__Session__MaxLifetimeHours:-24}
       Admin__DataProtection__KeysPath: /var/cmsify/admin-keys
       OpenTelemetry__Enabled: ${ADMIN_OPENTELEMETRY__ENABLED:-false}
       OpenTelemetry__OtlpEndpoint: ${ADMIN_OPENTELEMETRY__OTLPENDPOINT:-}
