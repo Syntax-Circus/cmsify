@@ -15,6 +15,8 @@ using SyntaxCircus.Http.Resilience;
 using SyntaxCircus.AspNetCore.Serilog;
 using SyntaxCircus.Observability;
 using Sentry.AspNetCore;
+using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,7 +27,13 @@ if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
 }
 
 var telemetry = builder.AddSyntaxCircusObservability("cmsify-admin");
-builder.AddStandardSerilog(configureEnrichment: telemetry.ConfigureSerilog);
+builder.AddStandardSerilog(fileLoggingOptions =>
+{
+    fileLoggingOptions.Enabled = builder.Configuration.GetValue("Serilog:File:Enabled", false);
+    fileLoggingOptions.Path = builder.Configuration["Serilog:File:Path"];
+    fileLoggingOptions.RollingInterval = RollingInterval.Day;
+    fileLoggingOptions.RetainedFileCountLimit = builder.Configuration.GetValue<int?>("Serilog:File:RetainedFileCountLimit", 14);
+}, configureEnrichment: telemetry.ConfigureSerilog);
 if (telemetry.Options.Sentry.IsEnabled)
 {
     builder.WebHost.UseSentry(sentry => telemetry.ConfigureSentry(sentry));

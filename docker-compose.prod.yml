@@ -136,6 +136,9 @@ services:
       Admin__Auth__Session__SlidingWindowMinutes: ${Admin__Auth__Session__SlidingWindowMinutes:-60}
       Admin__Auth__Session__MaxLifetimeHours: ${Admin__Auth__Session__MaxLifetimeHours:-24}
       Admin__DataProtection__KeysPath: /var/cmsify/admin-keys
+      Serilog__File__Enabled: ${Serilog__File__Enabled:-true}
+      Serilog__File__Path: ${Serilog__File__Path:-.local/logs/cmsify-.log}
+      Serilog__File__RetainedFileCountLimit: ${Serilog__File__RetainedFileCountLimit:-14}
       OpenTelemetry__Enabled: ${ADMIN_OPENTELEMETRY__ENABLED:-false}
       OpenTelemetry__OtlpEndpoint: ${ADMIN_OPENTELEMETRY__OTLPENDPOINT:-}
       OpenTelemetry__OtlpProtocol: ${ADMIN_OPENTELEMETRY__OTLPPROTOCOL:-grpc}
@@ -156,6 +159,7 @@ services:
         condition: service_healthy
     volumes:
       - admin_data_protection_keys:/var/cmsify/admin-keys
+      - admin_logs:/app/.local/logs
     restart: unless-stopped
 
 volumes:
@@ -163,3 +167,4 @@ volumes:
   media_data:
   admin_data_protection_keys:
   api_logs:
+  admin_logs:
