@@ -947,7 +947,7 @@
           "Serilog.Sinks.File": "[7.0.0, )",
           "Swashbuckle.AspNetCore": "[10.2.3, )",
           "SyntaxCircus.AspNetCore.Authentication": "[0.1.4, )",
-          "SyntaxCircus.AspNetCore.Common": "[0.1.11, )",
+          "SyntaxCircus.AspNetCore.Common": "[0.1.13, )",
           "SyntaxCircus.AspNetCore.Serilog": "[0.1.3, )",
           "SyntaxCircus.Cmsify.Contracts": "[0.0.0-local, )",
           "SyntaxCircus.DotEnv": "[0.1.3, )",
@@ -1191,9 +1191,9 @@
       },
       "SyntaxCircus.AspNetCore.Common": {
         "type": "CentralTransitive",
-        "requested": "[0.1.11, )",
-        "resolved": "0.1.11",
-        "contentHash": "bJlYO8FfSX3v7rvllGSZjsobCcOVy7GGmLxOexJqUPaAQfjj5FfhCsyqRfhtkCDaAnjxTHy57BCUhrAHl6jVwQ==",
+        "requested": "[0.1.13, )",
+        "resolved": "0.1.13",
+        "contentHash": "/JWFQWxbb9J+ZG/OPTaZz/6NIH14B2qyNTVHsgtMP36/gBCwLcV7VkFlwThAX4dN+Qm0csR7sOMQjVMkUkg2Zg==",
         "dependencies": {
           "SyntaxCircus.Common": "[0.1.3]"
         }

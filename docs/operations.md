@@ -53,6 +53,33 @@ Place the API and admin UI behind a trusted reverse proxy that terminates TLS an
 
 API clients use `Authorization: Bearer cmsify_...`. Keep those tokens server-side, assign an expiry where possible, and rotate or revoke them when a service changes ownership. A rotated token is returned once and cannot be recovered later.
 
+The API auto-bans an IP after `IpBan__RejectionThreshold` (default 20) rate-limit rejections within `IpBan__WindowMinutes` (default 5), for `IpBan__BanDurationHours` (default 24). A banned IP gets a bare, unlogged 403 before rate limiting, authentication, or any endpoint logic runs. Banned IPs are recorded in the Admin UI at Settings → IP Bans (`GET /api/v1/security/ip-bans`, Admin role required). Ban state is in-memory per instance — not shared across a horizontally scaled deployment.
+
+### Exempting internal services
+
+An internal service that legitimately calls Cmsify at high volume shouldn't be mistaken for abuse. List its IP or CIDR range in `IpAllowList__Ips__0`/`IpAllowList__Networks__0` (see `docker-compose.prod.env.example`) to exempt it from both IP-ban tracking and rate limiting.
+
+How this actually shows up depends on how the internal caller reaches Cmsify:
+
+- **A shared internal Docker network, no reverse proxy in between.** Each `docker compose` project gets its own isolated network by default — two separate projects aren't on the same network unless you put them there. Create a shared **external** network and attach it in both compose files:
+
+  ```yaml
+  # In both the internal service's compose file and cmsify's:
+  services:
+    api: # (or the internal service)
+      networks:
+        - cmsify-internal
+  networks:
+    cmsify-internal:
+      external: true
+  ```
+
+  Create it once with `docker network create cmsify-internal`. Cmsify then sees the calling container's real IP on that network — allowlist the network's **subnet** (`IpAllowList__Networks__0=172.28.0.0/24`) rather than a single container IP, since a container's IP on a Docker bridge isn't guaranteed stable across recreates unless pinned with `ipv4_address` in the compose file (in which case a precise `IpAllowList__Ips__0` entry works too).
+
+  Do not reach Cmsify through a **published host port** (`localhost:5000` / `host.docker.internal`) for this purpose: the apparent source IP there is Docker's NAT/bridge gateway, shared by everything routing through it — allowlisting it would exempt far more than the one internal service.
+
+- **Through the production reverse proxy** (the pattern above — API/Admin ports bound to `127.0.0.1`, TLS terminated by a host proxy). `IpAllowList` is consulted only after `X-Forwarded-For` resolves the real client IP, which requires the proxy to already be trusted via `TrustedProxy__TrustedProxies`/`TrustedNetworks` and to actually forward the original caller's IP (most reverse proxies do this by default). **Never put the reverse proxy's own IP in `IpAllowList`**: every request, including external/public traffic if that proxy also fronts public ingress, arrives from the proxy's IP — allowlisting it would exempt everything routed through it, not just one internal caller. Only the recovered original internal-service IP or subnet belongs in the allowlist.
+
 ## Health and diagnostics
 
 - `GET /health/live` confirms that the process is running.

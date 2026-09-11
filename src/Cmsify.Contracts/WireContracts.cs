@@ -152,6 +152,8 @@ public sealed record AuditActorResponse(string Type, Guid Id, string? DisplayNam
 
 public sealed record AuditLogResponse(Guid Id, string EntityType, Guid EntityId, AuditAction Action, AuditActorResponse? Actor, DateTimeOffset Timestamp, Guid? WorkspaceId, JsonElement? ChangeDelta);
 
+public sealed record IpBanEventResponse(Guid Id, string IpAddress, int RejectionCount, DateTimeOffset BannedAt, DateTimeOffset BannedUntil, string? RequestPath);
+
 public sealed record StorageConfigResponse(string Provider, bool IsConfigured);
 
 public sealed record StorageTestResponse(string Provider, bool Success, string Message);
@@ -222,3 +224,7 @@ public sealed record AuditQueryRequest(string? EntityType, Guid? EntityId, Audit
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) => PaginationValidation.Validate(Page, PageSize);
 }
 public sealed record UserWorkspaceAccessRequest(Guid WorkspaceId, WorkspaceAccessLevel AccessLevel);
+public sealed record IpBanEventQueryRequest(string? IpAddress, int Page = 1, int PageSize = 50) : IValidatableObject
+{
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) => PaginationValidation.Validate(Page, PageSize);
+}

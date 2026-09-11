@@ -58,6 +58,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWebhookRepository, WebhookRepository>();
         services.AddScoped<IScheduledPublishingRepository, ScheduledPublishingRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddScoped<IIpBanEventRepository, IpBanEventRepository>();
         services.AddStorageProvider(configuration);
         services.AddOptions<MediaOperationalOptions>()
             .Bind(configuration.GetSection(MediaOperationalOptions.SectionName))

@@ -2,6 +2,7 @@ using Cmsify.Api;
 using Cmsify.Api.Auth;
 using Cmsify.Api.HealthChecks;
 using Cmsify.Api.Queries;
+using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
 using Cmsify.Infrastructure.BackgroundServices;
@@ -12,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Serilog;
 using Serilog.Events;
 using SyntaxCircus.AspNetCore.Common;
@@ -52,6 +54,7 @@ builder.Services.AddControllers()
 builder.Services.AddCorrelationId(options => options.HeaderName = CorrelationHeaderName);
 builder.Services.AddSecurityHeaders(builder.Configuration);
 builder.Services.AddTrustedProxyForwardedHeaders(builder.Configuration);
+builder.Services.AddIpBanTracking(builder.Configuration);
 builder.Services.AddProblemDetailsExceptionHandling(options =>
 {
     options.BaseTypeUri = CmsifyError.BaseUri;
@@ -109,13 +112,29 @@ builder.Services.AddRateLimiter(options =>
             },
             permitLimit: builder.Configuration.GetValue("RateLimit:PerActor:PermitPerMinute", 600),
             window: TimeSpan.FromMinutes(1),
-            isExempt: context => IsRateLimitExempt(context.Request.Path)),
+            isExempt: IsRequestExempt),
         SyntaxCircus.AspNetCore.Common.RateLimiterOptionsExtensions.CreateFixedWindowTier(
             context => context.Connection.RemoteIpAddress?.ToString(),
             permitLimit: builder.Configuration.GetValue("RateLimit:PerIp:PermitPerMinute", 60),
             window: TimeSpan.FromMinutes(1),
-            isExempt: context => IsRateLimitExempt(context.Request.Path)));
+            isExempt: IsRequestExempt));
     options.UseProblemDetailsRejection(CmsifyError.RateLimitExceeded);
+    var writeRejectionResponse = options.OnRejected!;
+    options.OnRejected = async (context, ct) =>
+    {
+        var ip = context.HttpContext.Connection.RemoteIpAddress;
+        var tracker = context.HttpContext.RequestServices.GetRequiredService<IpBanTracker>();
+        var banOptions = context.HttpContext.RequestServices.GetRequiredService<IOptions<IpBanOptions>>().Value;
+        var now = TimeProvider.System.GetUtcNow();
+        if (ip is not null && tracker.RecordRejection(ip, now, out var rejectionCount))
+        {
+            var bannedUntil = now.AddHours(banOptions.BanDurationHours);
+            tracker.Ban(ip, bannedUntil);
+            var repository = context.HttpContext.RequestServices.GetRequiredService<IIpBanEventRepository>();
+            await repository.AppendAsync(new IpBanEventDto(Guid.Empty, ip.ToString(), rejectionCount, now, bannedUntil, context.HttpContext.Request.Path), ct);
+        }
+        await writeRejectionResponse(context, ct);
+    };
 });
 builder.Services.AddCmsifySwagger();
 builder.Services.AddAuthentication(CmsifyOpaqueBearerAuthenticationHandler.SchemeName)
@@ -198,6 +217,7 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue("Api:Swagg
 }
 
 app.UseForwardedHeaders();
+app.UseIpBanTracking();
 app.UseHttpsRedirection();
 app.UseCors();
 app.UseAuthentication();
@@ -242,7 +262,11 @@ static string[] ReadConfiguredList(IConfiguration configuration, string key)
         : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
 
-static bool IsRateLimitExempt(PathString path) =>
+static bool IsRequestExempt(HttpContext context) =>
+    IsExemptPath(context.Request.Path)
+    || context.RequestServices.GetRequiredService<IpAllowList>().Contains(context.Connection.RemoteIpAddress);
+
+static bool IsExemptPath(PathString path) =>
     path.StartsWithSegments("/health/live")
     || path.StartsWithSegments("/health/ready")
     || path.StartsWithSegments("/swagger")

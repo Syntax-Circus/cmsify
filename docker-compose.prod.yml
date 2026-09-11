@@ -70,6 +70,11 @@ services:
       TrustedProxy__TrustedNetworks__0: ${TrustedProxy__TrustedNetworks__0:-}
       RateLimit__PerActor__PermitPerMinute: ${RateLimit__PerActor__PermitPerMinute:-600}
       RateLimit__PerIp__PermitPerMinute: ${RateLimit__PerIp__PermitPerMinute:-60}
+      IpBan__RejectionThreshold: ${IpBan__RejectionThreshold:-20}
+      IpBan__WindowMinutes: ${IpBan__WindowMinutes:-5}
+      IpBan__BanDurationHours: ${IpBan__BanDurationHours:-24}
+      IpAllowList__Ips__0: ${IpAllowList__Ips__0:-}
+      IpAllowList__Networks__0: ${IpAllowList__Networks__0:-}
       Auth__BcryptCost: ${Auth__BcryptCost:-12}
       Auth__SessionAbsoluteExpiryHours: ${Auth__SessionAbsoluteExpiryHours:-8}
       Auth__SessionSlidingExpiryMinutes: ${Auth__SessionSlidingExpiryMinutes:-480}

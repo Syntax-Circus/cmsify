@@ -228,6 +228,12 @@ public sealed class AuditClient(CmsifyClient client)
         new(entityType, null, Enum.TryParse<AuditAction>(action, true, out var parsed) ? parsed : null, null, null, null, null);
 }
 
+public sealed class IpBanClient(CmsifyClient client)
+{
+    public Task<PagedResponse<IpBanEventResponse>?> QueryAsync(IpBanEventQueryRequest? query = null, CancellationToken ct = default) => client.GetAsync<PagedResponse<IpBanEventResponse>>($"/api/v1/security/ip-bans{Query.IpBan(query)}", ct);
+    public Task<PagedResponse<IpBanEventResponse>?> QueryAsync(string? ipAddress, CancellationToken ct = default) => QueryAsync(new IpBanEventQueryRequest(ipAddress), ct);
+}
+
 public sealed class UserClient(CmsifyClient client)
 {
     public Task<PagedResponse<UserDto>?> ListAsync(int page = 1, int pageSize = 50, CancellationToken ct = default) => client.GetAsync<PagedResponse<UserDto>>($"/api/v1/users?page={page}&pageSize={pageSize}", ct);
@@ -300,4 +306,5 @@ internal static class Query
     public static string ContentDetail(bool resolve, DateTimeOffset? asOf) => !resolve && asOf is null ? string.Empty : $"?resolve={resolve}{Optional("asOf", asOf)}";
     public static string Content(ContentListQuery? q) => q is null ? "?resolve=true" : $"?q={Uri.EscapeDataString(q.Q ?? string.Empty)}&page={q.Page}&pageSize={q.PageSize}&resolve={q.Resolve}{Optional("templateVersionId", q.TemplateVersionId)}{Optional("templateId", q.TemplateId)}{Optional("status", q.Status)}{Optional("localeCode", q.LocaleCode)}{Optional("translationGroupId", q.TranslationGroupId)}{Optional("slug", q.Slug)}{Optional("tags", q.Tags)}{Optional("createdAfter", q.CreatedAfter)}{Optional("createdBefore", q.CreatedBefore)}{Optional("publishedAfter", q.PublishedAfter)}{Optional("publishedBefore", q.PublishedBefore)}{Optional("asOf", q.AsOf)}{Optional("sortBy", q.SortBy)}&sortDesc={q.SortDesc}";
     public static string Audit(AuditQueryRequest? q) => q is null ? "?page=1&pageSize=50" : $"?page={q.Page}&pageSize={q.PageSize}{Optional("entityType", q.EntityType)}{Optional("entityId", q.EntityId)}{Optional("action", q.Action)}{Optional("actorUserId", q.ActorUserId)}{Optional("actorApiClientId", q.ActorApiClientId)}{Optional("after", q.After)}{Optional("before", q.Before)}";
+    public static string IpBan(IpBanEventQueryRequest? q) => q is null ? "?page=1&pageSize=50" : $"?page={q.Page}&pageSize={q.PageSize}{Optional("ipAddress", q.IpAddress)}";
 }

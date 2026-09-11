@@ -1558,6 +1558,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/ip-bans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    IpAddress?: string;
+                    Page?: number;
+                    PageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["IpBanEventResponsePagedResponse"];
+                        "application/json": components["schemas"]["IpBanEventResponsePagedResponse"];
+                        "text/json": components["schemas"]["IpBanEventResponsePagedResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspaceId}/media": {
         parameters: {
             query?: never;
@@ -4089,6 +4130,29 @@ export interface components {
         CreateWebhookEndpointResponse: {
             endpoint: components["schemas"]["WebhookEndpointResponse"];
             secret: string;
+        };
+        IpBanEventResponse: {
+            /** Format: uuid */
+            id: string;
+            ipAddress: string;
+            /** Format: int32 */
+            rejectionCount: number;
+            /** Format: date-time */
+            bannedAt: string;
+            /** Format: date-time */
+            bannedUntil: string;
+            requestPath?: string | null;
+        };
+        IpBanEventResponsePagedResponse: {
+            items: components["schemas"]["IpBanEventResponse"][];
+            /** Format: int32 */
+            totalCount: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            readonly totalPages: number;
         };
         LinkTranslationRequest: {
             /** Format: uuid */

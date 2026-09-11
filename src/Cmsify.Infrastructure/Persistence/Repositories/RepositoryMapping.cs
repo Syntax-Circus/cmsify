@@ -48,4 +48,7 @@ internal static class RepositoryMapping
 
     public static AuditLogDto ToDto(this AuditLog entity) =>
         new(entity.Id, entity.EntityType, entity.EntityId, entity.Action, entity.ActorUserId, entity.ActorApiClientId, entity.Timestamp, entity.ChangeDelta, entity.WorkspaceId);
+
+    public static IpBanEventDto ToDto(this IpBanEvent entity) =>
+        new(entity.Id, entity.IpAddress, entity.RejectionCount, entity.BannedAt, entity.BannedUntil, entity.RequestPath);
 }

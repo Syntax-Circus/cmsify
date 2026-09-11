@@ -2384,6 +2384,60 @@
         }
       }
     },
+    "/api/v1/security/ip-bans": {
+      "get": {
+        "tags": [
+          "IpBan"
+        ],
+        "parameters": [
+          {
+            "name": "IpAddress",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "PageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpBanEventResponsePagedResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpBanEventResponsePagedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpBanEventResponsePagedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/media": {
       "post": {
         "tags": [
@@ -6743,6 +6797,78 @@
         },
         "additionalProperties": false
       },
+      "IpBanEventResponse": {
+        "required": [
+          "bannedAt",
+          "bannedUntil",
+          "id",
+          "ipAddress",
+          "rejectionCount"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ipAddress": {
+            "type": "string"
+          },
+          "rejectionCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bannedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bannedUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestPath": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "IpBanEventResponsePagedResponse": {
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "totalCount",
+          "totalPages"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpBanEventResponse"
+            }
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
       "LinkTranslationRequest": {
         "required": [
           "targetContentItemId"
@@ -8917,6 +9043,9 @@
     },
     {
       "name": "Content"
+    },
+    {
+      "name": "IpBan"
     },
     {
       "name": "Media"

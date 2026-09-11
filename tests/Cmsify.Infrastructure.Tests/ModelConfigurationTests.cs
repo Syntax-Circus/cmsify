@@ -37,7 +37,8 @@ public sealed partial class ModelConfigurationTests
             typeof(WebhookEndpoint),
             typeof(WebhookSubscription),
             typeof(WebhookDeliveryLog),
-            typeof(AuditLog)
+            typeof(AuditLog),
+            typeof(IpBanEvent)
         };
 
         foreach (var mappedType in mappedTypes)

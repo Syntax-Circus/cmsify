@@ -127,6 +127,13 @@ public interface IAuditLogRepository
     Task AppendAsync(AuditLogDto log, CancellationToken ct = default);
 }
 
+public interface IIpBanEventRepository
+{
+    Task<PagedResult<IpBanEventDto>> QueryAsync(IpBanEventQuery query, CancellationToken ct = default);
+
+    Task AppendAsync(IpBanEventDto banEvent, CancellationToken ct = default);
+}
+
 public interface IScheduledPublishingRepository
 {
     Task<IReadOnlyList<ScheduledContentClaimDto>> ClaimDueContentAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default);

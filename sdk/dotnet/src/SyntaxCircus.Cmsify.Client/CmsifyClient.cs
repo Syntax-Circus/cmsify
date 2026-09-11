@@ -56,6 +56,7 @@ public sealed class CmsifyClient
         Tags = new TagClient(this);
         Webhooks = new WebhookClient(this);
         Audit = new AuditClient(this);
+        IpBans = new IpBanClient(this);
         Users = new UserClient(this);
         ApiClients = new ApiClientManagementClient(this);
         Settings = new SettingsClient(this);
@@ -73,6 +74,7 @@ public sealed class CmsifyClient
     public TagClient Tags { get; }
     public WebhookClient Webhooks { get; }
     public AuditClient Audit { get; }
+    public IpBanClient IpBans { get; }
     public UserClient Users { get; }
     public ApiClientManagementClient ApiClients { get; }
     public SettingsClient Settings { get; }

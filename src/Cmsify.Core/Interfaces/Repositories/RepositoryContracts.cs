@@ -167,3 +167,7 @@ public sealed record AuditLogDto(
     Guid? WorkspaceId);
 
 public sealed record AuditLogQuery(Guid? WorkspaceId, string? EntityType, Guid? EntityId, Guid? ActorUserId, Guid? ActorApiClientId, PageRequest Page);
+
+public sealed record IpBanEventDto(Guid Id, string IpAddress, int RejectionCount, DateTimeOffset BannedAt, DateTimeOffset BannedUntil, string? RequestPath);
+
+public sealed record IpBanEventQuery(string? IpAddress, PageRequest Page);

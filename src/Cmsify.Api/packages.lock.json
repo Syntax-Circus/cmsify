@@ -91,9 +91,9 @@
       },
       "SyntaxCircus.AspNetCore.Common": {
         "type": "Direct",
-        "requested": "[0.1.11, )",
-        "resolved": "0.1.11",
-        "contentHash": "bJlYO8FfSX3v7rvllGSZjsobCcOVy7GGmLxOexJqUPaAQfjj5FfhCsyqRfhtkCDaAnjxTHy57BCUhrAHl6jVwQ==",
+        "requested": "[0.1.13, )",
+        "resolved": "0.1.13",
+        "contentHash": "/JWFQWxbb9J+ZG/OPTaZz/6NIH14B2qyNTVHsgtMP36/gBCwLcV7VkFlwThAX4dN+Qm0csR7sOMQjVMkUkg2Zg==",
         "dependencies": {
           "SyntaxCircus.Common": "[0.1.3]"
         }

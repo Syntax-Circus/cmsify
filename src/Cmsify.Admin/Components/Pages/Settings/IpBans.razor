@@ -1,0 +1,18 @@
+@page "/settings/ip-bans"
+@rendermode InteractiveServer
+@inject CmsifyClient Cmsify
+
+<div class="cms-page-head"><div><h1>IP Bans</h1><div class="lead">IPs auto-banned after repeated rate-limit rejections.</div></div></div>
+
+<div class="cms-card mb-3"><div class="row g-2"><div class="col-md-4"><input class="form-control" placeholder="IP address" @bind="ipAddress" /></div><div class="col-md-2"><button class="btn btn-outline-secondary" @onclick="LoadAsync">Filter</button></div></div></div>
+
+<div class="cms-card p-0"><table class="cms-table"><thead><tr><th>IP address</th><th>Rejections</th><th>Banned at</th><th>Banned until</th><th>Request path</th></tr></thead><tbody>@foreach (var banEvent in events) { <tr><td>@banEvent.IpAddress</td><td>@banEvent.RejectionCount</td><td><LocalTimeDisplay Value="@banEvent.BannedAt" /></td><td><LocalTimeDisplay Value="@banEvent.BannedUntil" /></td><td>@banEvent.RequestPath</td></tr> }</tbody></table></div>
+
+@code {
+    private IpBanClient Client => Cmsify.IpBans;
+    private List<IpBanEventResponse> events = [];
+    private string? ipAddress;
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() =>
+        events = ApiResponse.ItemsOrEmpty(await Client.QueryAsync(ipAddress)).ToList();
+}
