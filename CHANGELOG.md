@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-11
+
+### Fixed
+
+- Package import: importing a package that both introduced a brand-new component and required an explicit "replace" resolution for an already-installed component (e.g. adding a field to an existing component) failed with an opaque 500 (`DbUpdateConcurrencyException`) instead of succeeding. `PackagesController.CreateComponentVersion` only attached the replacement `ComponentVersion` via its parent's `Versions` navigation collection; since `Entity.Id` is assigned client-side at construction (`Guid.CreateVersion7()`), EF Core's change detection saw a non-default key reached only through an already-tracked (unchanged/modified) parent and inferred the row already existed, issuing an `UPDATE` whose optimistic-concurrency check then never matched instead of an `INSERT`. The equivalent PickList "replace" path (`AddRevision`) already explicitly added its new revision to the `DbContext`; `CreateComponentVersion` now does the same.
+
 ## [0.4.2] - 2026-09-10
 
 ### Fixed
