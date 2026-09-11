@@ -429,6 +429,79 @@ public sealed class TemplateApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ImportPackage_NewComponentReferencedByTemplate_AlongsideReplacedExistingComponent_Succeeds()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        // Seed an existing component with one field, published via a first import - mirrors a
+        // real schema-as-code repo's "v1" package.
+        var seedManifest = new CtpPackageManifest(
+            "1.1", "test", "note-pack", "1.0.0", "Note Pack", null, null, null, null,
+            [],
+            null,
+            [
+                new CtpComponent("note", "Note", null,
+                [
+                    new CtpComponentField("body", "Body", null, 0, true, 1, 1, PrimitiveType.Text, null, null)
+                ])
+            ]);
+        using (var seedResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", seedManifest, cancellationToken: TestContext.Current.CancellationToken))
+        {
+            Assert.True(seedResponse.IsSuccessStatusCode, await seedResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        }
+
+        // "v2": the existing "note" component gains a field (a genuine conflict needing an
+        // explicit "replace" resolution) in the SAME request that introduces a brand-new "link"
+        // component, which a template references via componentRef.
+        var manifest = new CtpPackageManifest(
+            "1.1", "test", "note-pack", "1.1.0", "Note Pack", null, null, null, null,
+            [
+                new CtpTemplate("page", "Page", null, [],
+                [
+                    new CtpField("link", "Link", null, 0, false, 0, null, false, CompositionMode.Inline, null, null, null, "link")
+                ])
+            ],
+            null,
+            [
+                new CtpComponent("note", "Note", null,
+                [
+                    new CtpComponentField("body", "Body", null, 0, true, 1, 1, PrimitiveType.Text, null, null),
+                    new CtpComponentField("tag", "Tag", null, 1, false, 0, 1, PrimitiveType.Text, null, null)
+                ]),
+                new CtpComponent("link", "Link", null,
+                [
+                    new CtpComponentField("url", "Url", null, 0, true, 1, 1, PrimitiveType.Link, null, null)
+                ])
+            ]);
+
+        var envelope = new
+        {
+            manifest,
+            resolutions = new { components = new Dictionary<string, string> { ["note"] = "replace" } }
+        };
+        using var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/packages/import", envelope, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        var body = await response.Content.ReadFromJsonAsync<PackageImportResponse>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.NotNull(body!.Components);
+        Assert.Equal(2, body.Components!.Count);
+        Assert.Contains(body.Components, item => item.Slug == "link" && item.Action == "imported");
+        Assert.Contains(body.Components, item => item.Slug == "note" && item.Action == "replaced");
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        Assert.True(await dbContext.Components.AnyAsync(item => item.WorkspaceId == workspaceId && item.Slug == "link" && !item.IsDeleted, cancellationToken: TestContext.Current.CancellationToken));
+        var linkFieldOnTemplate = await dbContext.TemplateFields.AsNoTracking()
+            .SingleAsync(field => field.Key == "link", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(linkFieldOnTemplate.ComponentId);
+    }
+
+    [Fact]
     public async Task ExportPackage_WithPickListField_EmitsPickListAndRefSlug()
     {
         await using var factory = new WebApplicationFactory<Program>();
