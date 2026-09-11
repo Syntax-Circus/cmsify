@@ -860,7 +860,7 @@ public sealed class PackagesController : ControllerBase
         return definition;
     }
 
-    private static ComponentVersion CreateComponentVersion(ComponentDefinition component, CtpComponent packageComponent, IReadOnlyDictionary<string, Guid> componentIdBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug, IReadOnlyDictionary<string, Guid> picklistRevisionIdBySlug, CtpPackageManifest manifest, int versionNumber = 1)
+    private ComponentVersion CreateComponentVersion(ComponentDefinition component, CtpComponent packageComponent, IReadOnlyDictionary<string, Guid> componentIdBySlug, IReadOnlyDictionary<string, Guid> picklistIdBySlug, IReadOnlyDictionary<string, Guid> picklistRevisionIdBySlug, CtpPackageManifest manifest, int versionNumber = 1)
     {
         var version = new ComponentVersion
         {
@@ -870,6 +870,14 @@ public sealed class PackagesController : ControllerBase
             PublishedAt = DateTimeOffset.UtcNow,
             Notes = $"Imported from {manifest.PackageNamespace}/{manifest.Id}@{manifest.Version}"
         };
+        // Entity.Id is assigned client-side at construction (Guid.CreateVersion7()), so when this
+        // version is attached only via the already-tracked parent's Versions collection (the
+        // "replace an existing component" path - a brand-new ComponentDefinition's whole graph
+        // cascades to Added on its own explicit Add), EF's change detection sees a non-default key
+        // reached through a modified/unchanged parent and infers the row already exists, issuing an
+        // UPDATE instead of an INSERT. Explicitly adding it to the DbContext forces Added state,
+        // exactly like AddRevision does for the equivalent PickListRevision replace path below.
+        dbContext.ComponentVersions.Add(version);
         foreach (var field in packageComponent.Fields.OrderBy(field => field.Order))
         {
             version.Fields.Add(new ComponentField
