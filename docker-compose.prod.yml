@@ -59,7 +59,9 @@ services:
       Api__SwaggerEnabled: ${Api__SwaggerEnabled:-false}
       Api__HealthDashboardEnabled: ${Api__HealthDashboardEnabled:-false}
       Serilog__MinimumLevel__Default: ${Serilog__MinimumLevel__Default:-Information}
+      Serilog__MinimumLevel__Override__Microsoft: ${SERILOG_OVERRIDE_MICROSOFT:-Warning}
       Serilog__MinimumLevel__Override__Microsoft.AspNetCore: ${SERILOG_OVERRIDE_MICROSOFT_ASPNETCORE:-Warning}
+      Serilog__MinimumLevel__Override__System: ${SERILOG_OVERRIDE_SYSTEM:-Warning}
       Serilog__File__Enabled: ${Serilog__File__Enabled:-true}
       Serilog__File__Path: ${Serilog__File__Path:-.local/logs/cmsify-.log}
       Serilog__File__RetainedFileCountLimit: ${Serilog__File__RetainedFileCountLimit:-14}
@@ -141,6 +143,10 @@ services:
       Admin__Auth__Session__SlidingWindowMinutes: ${Admin__Auth__Session__SlidingWindowMinutes:-60}
       Admin__Auth__Session__MaxLifetimeHours: ${Admin__Auth__Session__MaxLifetimeHours:-24}
       Admin__DataProtection__KeysPath: /var/cmsify/admin-keys
+      Serilog__MinimumLevel__Default: ${Serilog__MinimumLevel__Default:-Information}
+      Serilog__MinimumLevel__Override__Microsoft: ${SERILOG_OVERRIDE_MICROSOFT:-Warning}
+      Serilog__MinimumLevel__Override__Microsoft.AspNetCore: ${SERILOG_OVERRIDE_MICROSOFT_ASPNETCORE:-Warning}
+      Serilog__MinimumLevel__Override__System: ${SERILOG_OVERRIDE_SYSTEM:-Warning}
       Serilog__File__Enabled: ${Serilog__File__Enabled:-true}
       Serilog__File__Path: ${Serilog__File__Path:-.local/logs/cmsify-.log}
       Serilog__File__RetainedFileCountLimit: ${Serilog__File__RetainedFileCountLimit:-14}
