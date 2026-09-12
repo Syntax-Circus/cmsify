@@ -9,7 +9,8 @@ public sealed class DesignTimeCmsifyDbContextFactory : IDesignTimeDbContextFacto
     public CmsifyDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
-            .UseNpgsql("Host=localhost;Port=5432;Database=cmsify;Username=cmsify;******")
+            .UseNpgsql("Host=localhost;Port=5432;Database=cmsify;Username=cmsify;******", npgsqlOptions =>
+                npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
             .UseSyntaxCircusSnakeCaseNamingConvention()
             .Options;
 
