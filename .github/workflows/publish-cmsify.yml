@@ -88,13 +88,13 @@ jobs:
             -e "Secrets__EncryptionKeys__smoke=$SMOKE_KEY" \
             -e TrustedProxy__RequireTrustedProxiesInProduction=false \
             "docker.io/syntaxcircus/cmsify-api:$VERSION"
-          curl --fail --retry 20 --retry-delay 3 --retry-connrefused http://127.0.0.1:18080/health/ready
+          curl --fail --retry 20 --retry-delay 3 --retry-all-errors http://127.0.0.1:18080/health/ready
           docker run -d --network cmsify-smoke --name cmsify-smoke-admin -p 18081:8080 \
             -e ASPNETCORE_URLS=http://+:8080 \
             -e Admin__ApiBaseUrl=http://cmsify-smoke-api:8080 \
             -e TrustedProxy__RequireTrustedProxiesInProduction=false \
             "docker.io/syntaxcircus/cmsify-admin:$VERSION"
-          curl --fail --retry 20 --retry-delay 3 --retry-connrefused http://127.0.0.1:18081/login
+          curl --fail --retry 20 --retry-delay 3 --retry-all-errors http://127.0.0.1:18081/login
       - name: Tear down smoke containers
         if: always()
         run: |
