@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-09-12
+
 ### Fixed
 
 - `POST .../content/{id}/versions/{versionNumber}/upgrade-template-version` wiped every field value on upgrade, not just genuinely removed ones - it matched a version's existing values against the target template version's fields by field *Id*, but a package re-import always mints brand-new `TemplateField` rows for every field on every template version, even one whose key never changed. In practice this meant upgrading any content onto a newer template version always emptied every field, then immediately failed its own post-upgrade validation the moment any field was required. Values are now remapped onto the target field with the same *key*; only a value whose key genuinely no longer exists in the target is dropped.
+- Suppressed chatty `Microsoft`/`System` Serilog categories so `Microsoft.EntityFrameworkCore.Database.Command` stops flooding the OTel collector at Information level.
 
 ## [0.4.3] - 2026-09-11
 
