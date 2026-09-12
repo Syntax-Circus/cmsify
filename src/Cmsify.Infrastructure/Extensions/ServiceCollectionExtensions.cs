@@ -30,7 +30,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<AuditInterceptor>();
         services.AddDbContext<CmsifyDbContext>((serviceProvider, options) =>
         {
-            options.UseNpgsql(connectionString)
+            options.UseNpgsql(connectionString, npgsqlOptions =>
+                    npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
                 .UseSyntaxCircusSnakeCaseNamingConvention();
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditInterceptor>());
         });
