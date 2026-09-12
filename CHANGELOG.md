@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-09-12
+
 ### Fixed
 
 - EF Core logged a `MultipleCollectionIncludeWarning` (visible in OTel) for any query that loaded more than one collection navigation without an explicit `QuerySplittingBehavior`, e.g. `ContentController.CreateVersion`/`UpgradeTemplateVersion` loading a template version's fields together with each field's allowed types, and the equivalent patterns in `TemplateVersionRepository`, `TemplatesController`, `PackagesController`, and `ComponentsController`. `QuerySplittingBehavior.SplitQuery` is now the default for the Npgsql provider, which both silences the warning and avoids the cartesian-product row explosion `SingleQuery` produces when joining multiple sibling collections.
