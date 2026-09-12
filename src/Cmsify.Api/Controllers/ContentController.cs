@@ -755,7 +755,9 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Only Draft, Review, or Approved versions can be upgraded");
         }
 
-        var currentTemplateVersion = await dbContext.TemplateVersions.AsNoTracking().FirstAsync(tv => tv.Id == version.TemplateVersionId, ct);
+        var currentTemplateVersion = await dbContext.TemplateVersions.AsNoTracking()
+            .Include(tv => tv.Fields)
+            .FirstAsync(tv => tv.Id == version.TemplateVersionId, ct);
         var target = await dbContext.TemplateVersions
             .Include(tv => tv.Fields).ThenInclude(field => field.AllowedTypes)
             .Where(tv => tv.TemplateId == currentTemplateVersion.TemplateId && tv.Status == TemplateVersionStatus.Published && !tv.IsDeleted)
@@ -767,8 +769,29 @@ public sealed class ContentController : ControllerBase
         }
 
         version.TemplateVersionId = target.Id;
-        var targetFieldIds = target.Fields.Select(field => field.Id).ToHashSet();
-        var stale = version.FieldValues.Where(value => !targetFieldIds.Contains(value.FieldId)).ToList();
+
+        // A package re-import always mints brand-new TemplateField rows for every field in a
+        // template version - even one whose key didn't change at all - so field identity across
+        // versions lives in the key, not the row's own Id (see PackagesController.ToField, which
+        // never reuses a prior field's Id). Remap each value onto the target field with the same
+        // key instead of matching by Id, so upgrading doesn't wipe every value the instant the
+        // schema changes at all; only a value whose key genuinely no longer exists is dropped.
+        var oldFieldKeyById = currentTemplateVersion.Fields.ToDictionary(field => field.Id, field => field.Key);
+        var targetFieldIdByKey = target.Fields
+            .GroupBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
+        var stale = new List<ContentVersionFieldValue>();
+        foreach (var value in version.FieldValues)
+        {
+            if (oldFieldKeyById.TryGetValue(value.FieldId, out var key) && targetFieldIdByKey.TryGetValue(key, out var newFieldId))
+            {
+                value.FieldId = newFieldId;
+            }
+            else
+            {
+                stale.Add(value);
+            }
+        }
         dbContext.ContentVersionFieldValues.RemoveRange(stale);
         foreach (var value in stale)
         {

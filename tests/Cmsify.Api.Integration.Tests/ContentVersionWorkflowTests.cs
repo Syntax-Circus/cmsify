@@ -363,6 +363,35 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
         Assert.Empty(upgraded.Fields);
     }
 
+    [Fact]
+    public async Task UpgradeTemplateVersion_PreservesValueForFieldWithSameKeyInNewTemplateVersion()
+    {
+        // A package re-import always mints brand-new TemplateField rows (fresh GUIDs) for every
+        // template version, even for a field whose key never changed - PackagesController never
+        // reuses field IDs across versions. This is the realistic "schema gained a field" case
+        // (unlike UpgradeTemplateVersion_MovesVersionToLatestPublishedTemplateVersion_AndDropsRemovedFields's
+        // "field disappeared entirely" case above), and it's the common one: a required field's
+        // existing value must survive, matched by key, not by the now-guaranteed-different field ID.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "upgrade-preserve", [new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        var (newTemplateVersionId, newFieldId) = await PublishNewTemplateVersionWithSameFieldKeyAsync(factory, templateId, "title");
+        Assert.NotEqual(fieldId, newFieldId);
+
+        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version", null, TestContext.Current.CancellationToken);
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var upgraded = await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(upgraded);
+        Assert.Equal(newTemplateVersionId, upgraded.TemplateVersionId);
+        var field = Assert.Single(upgraded.Fields);
+        Assert.Equal(newFieldId, field.FieldId);
+        Assert.Equal("hello", field.TextValue);
+    }
+
     private static async Task<HttpClient> AuthenticatedClientAsync(WebApplicationFactory<Program> factory)
     {
         var client = factory.CreateClient();
@@ -441,6 +470,37 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
         template.CurrentVersionId = newVersion.Id;
         await dbContext.SaveChangesAsync();
         return newVersion.Id;
+    }
+
+    private static async Task<(Guid TemplateVersionId, Guid FieldId)> PublishNewTemplateVersionWithSameFieldKeyAsync(WebApplicationFactory<Program> factory, Guid templateId, string key)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var newVersion = new Cmsify.Core.Domain.Entities.TemplateVersion
+        {
+            TemplateId = templateId,
+            VersionNumber = 2,
+            Status = Cmsify.Core.Domain.Enums.TemplateVersionStatus.Published,
+            PublishedAt = DateTimeOffset.UtcNow
+        };
+        // A brand-new TemplateField row with a fresh GUID, exactly as a real package re-import
+        // always produces (PackagesController never reuses field IDs across versions) - only the
+        // key matches the old field, not the ID.
+        var field = new Cmsify.Core.Domain.Entities.TemplateField
+        {
+            TemplateVersionId = newVersion.Id,
+            Key = key,
+            Label = "Title",
+            PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType.Text,
+            Order = 0
+        };
+        dbContext.TemplateVersions.Add(newVersion);
+        dbContext.TemplateFields.Add(field);
+        await dbContext.SaveChangesAsync();
+        var template = await dbContext.Templates.FirstAsync(t => t.Id == templateId);
+        template.CurrentVersionId = newVersion.Id;
+        await dbContext.SaveChangesAsync();
+        return (newVersion.Id, field.Id);
     }
 
     private static async Task<Guid> CreateItemAsync(HttpClient client, Guid workspaceId, Guid templateVersionId, string slug, IReadOnlyList<ContentFieldValueRequest>? fields = null)
