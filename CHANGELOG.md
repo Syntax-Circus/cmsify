@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-09-13
+
+### Fixed
+
+- Release pipeline: `Cmsify.Components` and `Cmsify.Components.Theme` shipped zero static web assets in every previously-published version (no `wwwroot`/scoped-CSS content at all, only the compiled DLL), despite both projects genuinely having real content (`Cmsify.Components`' 14 scoped `.razor.css` files, `Cmsify.Components.Theme`'s `wwwroot/cmsify-theme.css`) — a consuming app referencing `_content/SyntaxCircus.Cmsify.Components.Theme/cmsify-theme.css` or expecting `Cmsify.Components`' scoped styles to bundle into its own isolation CSS got a 404/empty response instead. `IsPackable` is gated off by default (`Directory.Build.props`) unless `CmsifyReleaseBuild=true`; the release workflow's one real `dotnet build` step never set that, so it ran with `IsPackable=false`, and the later `dotnet pack --no-build -p:CmsifyReleaseBuild=true` couldn't retroactively compute the Razor SDK's static-web-asset-to-package items — those are only wired up when `Build` itself runs with `IsPackable=true`, and `--no-build` skips re-running it. `CmsifyReleaseBuild=true` is now also passed to the `dotnet build` step.
+
 ## [0.4.5] - 2026-09-12
 
 ### Fixed
