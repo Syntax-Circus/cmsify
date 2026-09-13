@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `ContentEditPanel` gained an optional `OnError` parameter (`EventCallback<Exception>`), invoked whenever `SaveAsync` catches an exception (from the save itself or from a `Saved`/`Created`/`ItemChanged` consumer callback), alongside the existing inline `error` message it already renders. Lets consumers hook additional behavior — logging, telemetry, a toast — off of save failures without scraping the rendered error text. A `OnError` handler that itself throws cannot escape `SaveAsync`; it's swallowed rather than risking the circuit-crash bug below.
+
+### Fixed
+
+- `ContentEditPanel.SaveAsync` only caught `CmsifyApiException` around invoking its `Saved`/`Created` callbacks, so any other exception thrown by a consumer's callback (e.g. a host app's own post-save side effect) propagated straight out of the Blazor event handler and terminated the whole hosting circuit, with nothing shown to the user beyond a silent, frozen form. A `catch (Exception ex)` now sets `error` for any non-`CmsifyApiException` failure from that invocation too, so a misbehaving consumer callback surfaces a message instead of taking down the host's circuit.
+
 ## [0.4.6] - 2026-09-13
 
 ### Fixed
