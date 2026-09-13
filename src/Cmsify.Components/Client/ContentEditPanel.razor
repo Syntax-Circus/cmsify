@@ -50,13 +50,24 @@
         }
 
         loaded = true;
-        if (ContentId.HasValue)
+        try
         {
-            await LoadContentAsync();
+            if (ContentId.HasValue)
+            {
+                await LoadContentAsync();
+            }
+            else if (TemplateId.HasValue)
+            {
+                await LoadTemplateVersionAsync(TemplateId.Value);
+            }
         }
-        else if (TemplateId.HasValue)
+        catch (Exception ex)
         {
-            await LoadTemplateVersionAsync(TemplateId.Value);
+            // A failure here (network error, expired/invalid token, template deleted mid-flight, etc.)
+            // used to propagate straight out of OnParametersSetAsync and crash the whole host circuit
+            // before the form ever rendered anything. Surface it the same way SaveAsync does instead.
+            error = ex.Message;
+            await InvokeOnErrorAsync(ex);
         }
     }
 

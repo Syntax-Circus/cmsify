@@ -197,6 +197,35 @@ public sealed class ContentEditPanelTests : BunitContext
     }
 
     [Fact]
+    public void FailingToLoadTheTemplateSurfacesErrorAndOnErrorInsteadOfCrashing()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        Exception? observedError = null;
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId)
+            .Add(p => p.OnError, EventCallback.Factory.Create<Exception>(this, ex => observedError = ex)));
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
+        cut.Find(".cmsify-form-error").TextContent.ShouldContain("Unauthorized");
+        observedError.ShouldNotBeNull();
+        observedError.ShouldBeOfType<CmsifyApiException>();
+    }
+
+    [Fact]
     public void OnErrorHandlerThatThrowsDoesNotPropagateOutOfSaveAsync()
     {
         var workspaceId = Guid.NewGuid();
