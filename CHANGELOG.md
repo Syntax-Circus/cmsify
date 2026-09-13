@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-09-13
+
 ### Fixed
 
 - `ContentEditPanel.OnParametersSetAsync` had no exception handling around `LoadContentAsync`/`LoadTemplateVersionAsync`, so any failure loading the initial content or template (an expired/invalid API token, a deleted template, a network error, etc.) propagated straight out of component initialization and crashed the whole hosting circuit before the form ever rendered — the same class of bug 0.4.7 fixed for `SaveAsync`, just on the load path instead. It now sets `error` and invokes `OnError` (if bound) the same way `SaveAsync` does, so the form still renders (empty) with the failure surfaced instead of taking the circuit down.
