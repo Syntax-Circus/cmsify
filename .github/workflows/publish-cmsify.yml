@@ -51,7 +51,12 @@ jobs:
       - name: Build, test, and pack the .NET packages
         run: |
           dotnet restore Cmsify.slnx --locked-mode
-          dotnet build Cmsify.slnx --configuration Release --no-restore -p:Version="$VERSION" -p:InformationalVersion="$VERSION+$SOURCE_SHA"
+          # CmsifyReleaseBuild=true here (not just on the later `pack` calls) matters: IsPackable is
+          # gated off by default (Directory.Build.props), and --no-build pack can't retroactively
+          # compute the Razor SDK's static-web-asset-to-package items for Cmsify.Components/.Theme -
+          # those are only wired up when Build itself runs with IsPackable=true. Without this, every
+          # published version of those two packages silently ships zero wwwroot/scoped-css content.
+          dotnet build Cmsify.slnx --configuration Release --no-restore -p:Version="$VERSION" -p:InformationalVersion="$VERSION+$SOURCE_SHA" -p:CmsifyReleaseBuild=true
           dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
           mkdir -p artifacts/nuget
           dotnet pack src/Cmsify.Contracts/Cmsify.Contracts.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
