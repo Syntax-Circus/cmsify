@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-09-13
+
 ### Added
 
 - `ContentEditPanel` gained an optional `OnError` parameter (`EventCallback<Exception>`), invoked whenever `SaveAsync` catches an exception (from the save itself or from a `Saved`/`Created`/`ItemChanged` consumer callback), alongside the existing inline `error` message it already renders. Lets consumers hook additional behavior — logging, telemetry, a toast — off of save failures without scraping the rendered error text. A `OnError` handler that itself throws cannot escape `SaveAsync`; it's swallowed rather than risking the circuit-crash bug below.
