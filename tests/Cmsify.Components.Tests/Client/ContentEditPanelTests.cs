@@ -76,6 +76,188 @@ public sealed class ContentEditPanelTests : BunitContext
     }
 
     [Fact]
+    public void CreatedCallbackThrowingNonApiExceptionSurfacesErrorInsteadOfPropagating()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var newContentId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{newContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
+                      "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId)
+            .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, _ =>
+                throw new InvalidOperationException("host callback failed"))));
+
+        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+
+        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
+        cut.Find(".cmsify-form-error").TextContent.ShouldContain("host callback failed");
+    }
+
+    [Fact]
+    public void OnErrorFiresWithTheExceptionWhenACreatedCallbackThrows()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var newContentId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{newContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
+                      "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        Exception? observedError = null;
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId)
+            .Add(p => p.OnError, EventCallback.Factory.Create<Exception>(this, ex => observedError = ex))
+            .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, _ =>
+                throw new InvalidOperationException("host callback failed"))));
+
+        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+
+        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => observedError is not null);
+        observedError.ShouldBeOfType<InvalidOperationException>();
+        observedError!.Message.ShouldBe("host callback failed");
+    }
+
+    [Fact]
+    public void OnErrorHandlerThatThrowsDoesNotPropagateOutOfSaveAsync()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var newContentId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{newContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
+                      "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId)
+            .Add(p => p.OnError, EventCallback.Factory.Create<Exception>(this, _ =>
+                throw new InvalidOperationException("OnError handler itself failed")))
+            .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, _ =>
+                throw new InvalidOperationException("host callback failed"))));
+
+        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+
+        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
+        cut.Find(".cmsify-form-error").TextContent.ShouldContain("host callback failed");
+    }
+
+    [Fact]
     public void EditingExistingContentLoadsCurrentValuesAndSavesUpdates()
     {
         var workspaceId = Guid.NewGuid();

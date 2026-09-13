@@ -20,6 +20,7 @@
     [Parameter] public EventCallback<ContentItemDetailResponse> Saved { get; set; }
     [Parameter] public EventCallback<ContentItemDetailResponse> Created { get; set; }
     [Parameter] public EventCallback<ContentItemDetailResponse?> ItemChanged { get; set; }
+    [Parameter] public EventCallback<Exception> OnError { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public string? SlugHelpText { get; set; }
     [Parameter] public int? VersionNumber { get; set; }
@@ -366,6 +367,33 @@
                 await LoadContentAsync();
                 error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
             }
+            await InvokeOnErrorAsync(ex);
+        }
+        catch (Exception ex)
+        {
+            // A Saved/Created/ItemChanged consumer callback can throw arbitrary exceptions.
+            // Surface them here instead of letting them propagate into the host's render tree,
+            // where an unhandled exception would terminate the whole Blazor circuit.
+            error = ex.Message;
+            await InvokeOnErrorAsync(ex);
+        }
+    }
+
+    private async Task InvokeOnErrorAsync(Exception exception)
+    {
+        if (!OnError.HasDelegate)
+        {
+            return;
+        }
+
+        try
+        {
+            await OnError.InvokeAsync(exception);
+        }
+        catch
+        {
+            // OnError is a diagnostic hook; a failure inside it must not resurrect the very
+            // circuit-crash bug the surrounding catch blocks exist to prevent.
         }
     }
 }
