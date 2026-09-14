@@ -122,8 +122,13 @@ public sealed class ContentEditPanelTests : BunitContext
 
         cut.WaitForState(() => cut.FindAll("input").Count > 0);
 
-        cut.Find("input").Input("My Title");
-        cut.Find(".cmsify-form-save-button").Click();
+        // cut.InvokeAsync wraps Find+Input/Click atomically - a plain Find().Click() can race a
+        // pending render and either silently miss (leaving SaveAsync never invoked, which is what
+        // made this test intermittently time out waiting for .cmsify-form-error) or throw bUnit's
+        // UnknownEventHandlerIdException. Same fix already applied to the inline-child-removal tests
+        // in this file.
+        cut.InvokeAsync(() => cut.Find("input").Input("My Title"));
+        cut.InvokeAsync(() => cut.Find(".cmsify-form-save-button").Click());
 
         cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0, TimeSpan.FromSeconds(10));
 

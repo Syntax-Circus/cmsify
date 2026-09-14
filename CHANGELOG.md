@@ -6,11 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [0.5.3] - 2026-09-14
+## [0.5.4] - 2026-09-14
 
 ### Fixed
 
 - `ContentEditPanel.SaveAsync`'s pre-flight Inline-child validation, `InlineChildValidation`'s nested-field recursion, and `ContentEditSupport.SaveInlineFieldAsync`'s per-child-field loop all treated `CompositionMode == Inline` alone as "this field embeds a child ContentItem." A `.ctp` schema's `CompositionMode` is a required property on every field, and many schemas (including production schemas that predate Inline child-content support) set it to `Inline` uniformly as a default rather than reserving it for genuine template-reference fields. Any such schema's ordinary required Text/Markdown/component field failed to save: pre-flight validation checked its (always-empty, since it's not a composition field) `ChildInstances` count against `MinOccurrences` and rejected the save with e.g. `'Title' requires at least 1 entry` — even though the field's actual value was fully populated and correctly displayed. The request never reached the server. All three call sites now share a new `ContentEditSupport.IsInlineChildField` helper, matching the `TemplateId`/`IsOpen`/`AllowedTypes` composition check `ContentEditPanel.SaveAsync`'s main save loop already used correctly.
+- `ContentEditPanelTests.RequireSlugBlocksSavingWithBlankSlugAndIssuesNoRequest` used a plain unguarded `Find().Click()` on the save button, which could race a pending render under CI's coverage-instrumentation overhead - the same symptom already fixed for two other tests in 0.4.10/0.5.2's changelogs. This one was missed and intermittently failed the `main` CI workflow (including blocking this release's own `v0.5.3` tag, which published nothing and is abandoned). Wrapped the same interaction in `cut.InvokeAsync(...)`, matching the established pattern.
+
+## [0.5.3] - 2026-09-14
+
+Tag pushed but `dotnet test` failed in CI before packaging (a flaky test, fixed in 0.5.4 above) - no packages were ever published under this version. Left here for the historical record; treat 0.5.4 as the direct successor to 0.5.2.
 
 ## [0.5.2] - 2026-09-14
 
