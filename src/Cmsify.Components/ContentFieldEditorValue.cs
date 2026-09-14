@@ -10,5 +10,5 @@ public sealed class ContentFieldEditorValue
     public Guid? FallbackMediaAssetId { get; set; }
     public Guid? FallbackFileAssetId { get; set; }
     public IReadOnlyList<string> MultiValues { get; set; } = [];
-    public IReadOnlyList<string> ComponentValues { get; set; } = [];
+    public IReadOnlyList<ComponentInstanceValue> ComponentValues { get; set; } = [];
 }

@@ -37,4 +37,32 @@ public sealed record PickListFieldBinding(Guid? PickListId, Guid? RevisionId, bo
 
         return new PickListFieldBinding(pickListId, revisionId, multiple);
     }
+
+    public static PickListResponse? Resolve(TemplateFieldResponse field, IReadOnlyDictionary<Guid, PickListResponse> pickListsByRevisionId)
+    {
+        var binding = FromFieldConfig(field.FieldConfig);
+        return binding.RevisionId.HasValue && pickListsByRevisionId.TryGetValue(binding.RevisionId.Value, out var pickList) ? pickList : null;
+    }
+
+    public static IReadOnlyList<ContentItemSummaryResponse> ResolveReferenceOptions(
+        TemplateFieldResponse field,
+        IReadOnlyDictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId,
+        Guid? currentContentId)
+    {
+        var templateIds = new List<Guid>();
+        if (field.TemplateId.HasValue)
+        {
+            templateIds.Add(field.TemplateId.Value);
+        }
+
+        templateIds.AddRange(field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value));
+
+        return templateIds
+            .SelectMany(id => referenceOptionsByTemplateId.TryGetValue(id, out var options) ? options : [])
+            .Where(option => option.Id != currentContentId)
+            .GroupBy(option => option.Id)
+            .Select(group => group.First())
+            .OrderBy(option => option.Slug ?? option.Id.ToString())
+            .ToList();
+    }
 }

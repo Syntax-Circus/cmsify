@@ -63,4 +63,27 @@ public static class ContentEditSupport
             into[templateId] = task.Result?.Items ?? [];
         }
     }
+
+    // Walks a decoded ComponentInstanceValue tree (recursing into each field's own nested
+    // ComponentValues, at any depth) collecting every leaf ContentFieldEditorValue that decoded a
+    // Media/File asset id - so the caller can resolve them with the same concurrent-fetch,
+    // CmsifyApiException-tolerant code already used for top-level Media/File fields.
+    public static IEnumerable<ContentFieldEditorValue> CollectValuesWithFallbackAssets(ComponentInstanceValue instance)
+    {
+        foreach (var value in instance.FieldValues.Values)
+        {
+            if (value.FallbackMediaAssetId.HasValue || value.FallbackFileAssetId.HasValue)
+            {
+                yield return value;
+            }
+
+            foreach (var nested in value.ComponentValues)
+            {
+                foreach (var found in CollectValuesWithFallbackAssets(nested))
+                {
+                    yield return found;
+                }
+            }
+        }
+    }
 }

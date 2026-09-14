@@ -1,38 +1,95 @@
 @namespace SyntaxCircus.Cmsify.Components
 
-@for (var index = 0; index < DisplayValues.Count; index++)
+@if (!ComponentSchemas.TryGetValue(ComponentId, out var schema) || schema.CurrentVersion is null)
 {
-    var valueIndex = index;
-    <textarea class="cmsify-field-textarea cmsify-field-textarea--code" rows="8"
-              placeholder='{ "fieldKey": "value" }'
-              value="@DisplayValues[valueIndex]"
-              readonly="@ReadOnly"
-              @oninput="e => OnItemChanged(valueIndex, e)"></textarea>
+    <div class="cmsify-field-warning">Component schema unavailable.</div>
 }
-@if (!ReadOnly && (!MaxOccurrences.HasValue || DisplayValues.Count < MaxOccurrences.Value))
+else
 {
-    <button type="button" class="cmsify-field-add-button" @onclick="AddValue">Add component</button>
+    var fields = schema.CurrentVersion.Fields.OrderBy(f => f.Order).ToList();
+    <div class="cmsify-component-group">
+        @for (var index = 0; index < DisplayValues.Count; index++)
+        {
+            var instanceIndex = index;
+            var instance = DisplayValues[instanceIndex];
+            <div class="cmsify-component-instance">
+                <div class="cmsify-component-instance-header">
+                    @if (!ReadOnly && Values.Count > 0 && Values.Count > MinOccurrences)
+                    {
+                        <button type="button" class="cmsify-component-remove-button" @onclick="() => RemoveAt(instanceIndex)">Remove</button>
+                    }
+                </div>
+                @foreach (var field in fields)
+                {
+                    var componentField = field;
+                    var templateField = ComponentFieldAdapter.ToTemplateField(componentField);
+                    <div class="cmsify-form-field">
+                        <FieldEditor Field="@templateField"
+                                     Value="@instance.GetOrCreate(componentField.Id)"
+                                     ValueChanged="@(v => OnNestedFieldChanged(instanceIndex, componentField.Id, v))"
+                                     ResolvedPickList="@PickListFieldBinding.Resolve(templateField, PickListsByRevisionId)"
+                                     ReferenceOptions="@PickListFieldBinding.ResolveReferenceOptions(templateField, ReferenceOptionsByTemplateId, CurrentContentId)"
+                                     ComponentSchemas="@ComponentSchemas"
+                                     PickListsByRevisionId="@PickListsByRevisionId"
+                                     ReferenceOptionsByTemplateId="@ReferenceOptionsByTemplateId"
+                                     CurrentContentId="@CurrentContentId"
+                                     FieldTemplateOverrides="@FieldTemplateOverrides"
+                                     OnMediaPickRequested="@(() => OnMediaPickRequested.InvokeAsync(instance.GetOrCreate(componentField.Id)))"
+                                     OnFilePickRequested="@(() => OnFilePickRequested.InvokeAsync(instance.GetOrCreate(componentField.Id)))"
+                                     ReadOnly="@ReadOnly" />
+                    </div>
+                }
+            </div>
+        }
+        @if (!ReadOnly && (!MaxOccurrences.HasValue || Values.Count < MaxOccurrences.Value))
+        {
+            <button type="button" class="cmsify-field-add-button" @onclick="AddInstance">Add component</button>
+        }
+    </div>
 }
 
 @code {
-    [Parameter] public IReadOnlyList<string> Values { get; set; } = [];
-    [Parameter] public EventCallback<IReadOnlyList<string>> ValuesChanged { get; set; }
+    [Parameter, EditorRequired] public Guid ComponentId { get; set; }
+    [Parameter] public IReadOnlyList<ComponentInstanceValue> Values { get; set; } = [];
+    [Parameter] public EventCallback<IReadOnlyList<ComponentInstanceValue>> ValuesChanged { get; set; }
+    [Parameter] public int MinOccurrences { get; set; }
     [Parameter] public int? MaxOccurrences { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public IReadOnlyDictionary<Guid, ComponentResponse> ComponentSchemas { get; set; } = new Dictionary<Guid, ComponentResponse>();
+    [Parameter] public IReadOnlyDictionary<Guid, PickListResponse> PickListsByRevisionId { get; set; } = new Dictionary<Guid, PickListResponse>();
+    [Parameter] public IReadOnlyDictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> ReferenceOptionsByTemplateId { get; set; } = new Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>>();
+    [Parameter] public Guid? CurrentContentId { get; set; }
+    [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnMediaPickRequested { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnFilePickRequested { get; set; }
 
-    private IReadOnlyList<string> DisplayValues => Values.Count == 0 ? ["{}"] : Values;
+    // Padded to at least one synthetic empty instance (or MinOccurrences of them, whichever is
+    // larger) when no real Values exist yet - mirrors the old textarea editor's single "{}" seed
+    // row, just as a structured object. These synthetic instances are never real until an edit
+    // (or Add/Remove) round-trips them through ValuesChanged into the real Values parameter.
+    private IReadOnlyList<ComponentInstanceValue> DisplayValues =>
+        Values.Count == 0
+            ? [.. Enumerable.Range(0, Math.Max(1, MinOccurrences)).Select(_ => new ComponentInstanceValue())]
+            : Values;
 
-    private Task OnItemChanged(int index, ChangeEventArgs e)
+    private Task OnNestedFieldChanged(int index, Guid fieldId, ContentFieldEditorValue value)
     {
         var updated = DisplayValues.ToList();
-        updated[index] = e.Value?.ToString() ?? "{}";
+        updated[index].FieldValues[fieldId] = value;
         return ValuesChanged.InvokeAsync(updated);
     }
 
-    private Task AddValue()
+    private Task RemoveAt(int index)
     {
         var updated = DisplayValues.ToList();
-        updated.Add("{}");
+        updated.RemoveAt(index);
+        return ValuesChanged.InvokeAsync(updated);
+    }
+
+    private Task AddInstance()
+    {
+        var updated = DisplayValues.ToList();
+        updated.Add(new ComponentInstanceValue());
         return ValuesChanged.InvokeAsync(updated);
     }
 }

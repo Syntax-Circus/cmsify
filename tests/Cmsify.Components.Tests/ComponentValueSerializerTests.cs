@@ -81,10 +81,9 @@ public sealed class ComponentValueSerializerTests
 
         var nestedInstance = new ComponentInstanceValue();
         nestedInstance.GetOrCreate(labelField.Id).TextValue = "Hello";
-        var nestedJson = ComponentValueSerializer.Serialize(nestedInstance, nestedComponent.Id, schemas).GetRawText();
 
         var parentInstance = new ComponentInstanceValue();
-        parentInstance.GetOrCreate(childField.Id).ComponentValues = [nestedJson];
+        parentInstance.GetOrCreate(childField.Id).ComponentValues = [nestedInstance];
 
         var json = ComponentValueSerializer.Serialize(parentInstance, parentComponent.Id, schemas);
 
@@ -103,15 +102,15 @@ public sealed class ComponentValueSerializerTests
 
         var schemas = new Dictionary<Guid, ComponentResponse> { [parentComponent.Id] = parentComponent, [nestedComponent.Id] = nestedComponent };
 
-        string BuildNestedJson(string label)
+        ComponentInstanceValue BuildNestedInstance(string label)
         {
             var nestedInstance = new ComponentInstanceValue();
             nestedInstance.GetOrCreate(labelField.Id).TextValue = label;
-            return ComponentValueSerializer.Serialize(nestedInstance, nestedComponent.Id, schemas).GetRawText();
+            return nestedInstance;
         }
 
         var parentInstance = new ComponentInstanceValue();
-        parentInstance.GetOrCreate(childField.Id).ComponentValues = [BuildNestedJson("A"), BuildNestedJson("B")];
+        parentInstance.GetOrCreate(childField.Id).ComponentValues = [BuildNestedInstance("A"), BuildNestedInstance("B")];
 
         var json = ComponentValueSerializer.Serialize(parentInstance, parentComponent.Id, schemas);
 
@@ -136,8 +135,7 @@ public sealed class ComponentValueSerializerTests
 
         var childValue = instance.FieldValues[childField.Id];
         childValue.ComponentValues.Count.ShouldBe(1);
-        var nested = ComponentValueSerializer.Deserialize(JsonDocument.Parse(childValue.ComponentValues[0]).RootElement, nestedComponent.Id, schemas);
-        nested.FieldValues[labelField.Id].TextValue.ShouldBe("Hello");
+        childValue.ComponentValues[0].FieldValues[labelField.Id].TextValue.ShouldBe("Hello");
     }
 
     [Fact]
@@ -158,7 +156,7 @@ public sealed class ComponentValueSerializerTests
         var childValue = instance.FieldValues[childField.Id];
         childValue.ComponentValues.Count.ShouldBe(2);
         childValue.ComponentValues
-            .Select(text => ComponentValueSerializer.Deserialize(JsonDocument.Parse(text).RootElement, nestedComponent.Id, schemas).FieldValues[labelField.Id].TextValue)
+            .Select(nested => nested.FieldValues[labelField.Id].TextValue)
             .ShouldBe(["A", "B"]);
     }
 

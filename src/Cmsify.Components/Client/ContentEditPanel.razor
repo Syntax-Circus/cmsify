@@ -1,8 +1,8 @@
 @namespace SyntaxCircus.Cmsify.Components.Client
-@using System.Text.Json
 
 <ContentEditForm TemplateVersion="@templateVersion" FieldValues="@fieldValues" FieldValueChanged="OnFieldValueChangedAsync"
                  PickListsByRevisionId="@pickListsByRevisionId" ReferenceOptionsByTemplateId="@referenceOptionsByTemplateId"
+                 ComponentSchemas="@componentSchemas"
                  Slug="@slug" SlugChanged="@(v => slug = v)" Locale="@locale" LocaleChanged="@(v => locale = v)"
                  Tags="@tags" TagsChanged="@(v => tags = v)" Error="@error" OnSave="SaveAsync"
                  OnMediaPickRequested="OpenMediaPickerAsync" OnFilePickRequested="OpenFilePickerAsync"
@@ -34,13 +34,14 @@
     private readonly Dictionary<Guid, ContentFieldEditorValue> fieldValues = [];
     private readonly Dictionary<Guid, PickListResponse> pickListsByRevisionId = [];
     private readonly Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = [];
+    private Dictionary<Guid, ComponentResponse> componentSchemas = [];
     private string? slug;
     private string? locale;
     private string? tags;
     private string? error;
     private bool pickerVisible;
     private string? pickerMimePrefix;
-    private Guid pickerFieldId;
+    private ContentFieldEditorValue? pickerTargetValue;
     private bool pickerIsFileField;
     private bool loaded;
     private bool busy;
@@ -97,6 +98,7 @@
         }
 
         fieldValues.Clear();
+        var fieldsById = templateVersion.Fields.ToDictionary(f => f.Id);
         var mediaLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
         var fileLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
         foreach (var value in loadedVersion.Fields)
@@ -109,9 +111,26 @@
             {
                 editorValue.MultiValues = [.. editorValue.MultiValues, value.TextValue];
             }
-            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue)
+            var field = fieldsById.GetValueOrDefault(value.FieldId);
+            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue && field?.ComponentId is { } componentId)
             {
-                editorValue.ComponentValues = [.. editorValue.ComponentValues, value.JsonValue.Value.GetRawText()];
+                var instance = ComponentValueSerializer.Deserialize(value.JsonValue.Value, componentId, componentSchemas);
+                editorValue.ComponentValues = [.. editorValue.ComponentValues, instance];
+
+                // Media/File fields nested anywhere inside the component instance need the same
+                // asset resolution as top-level fields - fold them into the same concurrent-fetch
+                // lists below instead of resolving them separately.
+                foreach (var nestedValue in ContentEditSupport.CollectValuesWithFallbackAssets(instance))
+                {
+                    if (nestedValue.FallbackMediaAssetId is { } nestedMediaId)
+                    {
+                        mediaLookups.Add((nestedValue, nestedMediaId, Client.Media.GetAsync(WorkspaceId, nestedMediaId)));
+                    }
+                    if (nestedValue.FallbackFileAssetId is { } nestedFileId)
+                    {
+                        fileLookups.Add((nestedValue, nestedFileId, Client.Media.GetAsync(WorkspaceId, nestedFileId)));
+                    }
+                }
             }
             if (value.MediaAssetId.HasValue)
             {
@@ -180,6 +199,21 @@
 
         await LoadPickListsAsync();
         await LoadReferenceOptionsAsync();
+
+        // Component schemas must be resolved before the second pick-list/reference-option pass
+        // below, which extends the same two dictionaries with bindings found nested inside every
+        // resolved component schema (the resolver has already flattened the full nested tree, so
+        // no further recursion is needed here).
+        await LoadComponentSchemasAsync();
+        var componentFields = ComponentSchemaTemplateFields();
+        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, componentFields, pickListsByRevisionId);
+        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, componentFields, referenceOptionsByTemplateId);
+    }
+
+    private async Task LoadComponentSchemasAsync()
+    {
+        var rootIds = templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value);
+        componentSchemas = await ComponentSchemaResolver.ResolveAsync(Client, WorkspaceId, rootIds);
     }
 
     private async Task LoadPickListsAsync()
@@ -192,24 +226,32 @@
         await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, templateVersion.Fields, referenceOptionsByTemplateId);
     }
 
+    // componentSchemas is already the fully-flattened (recursively resolved) set of every nested
+    // component schema reachable from the template - no further recursion needed here.
+    private IEnumerable<TemplateFieldResponse> ComponentSchemaTemplateFields() =>
+        componentSchemas.Values
+            .Where(c => c.CurrentVersion is not null)
+            .SelectMany(c => c.CurrentVersion!.Fields)
+            .Select(ComponentFieldAdapter.ToTemplateField);
+
     private Task OnFieldValueChangedAsync((TemplateFieldResponse Field, ContentFieldEditorValue Value) change)
     {
         fieldValues[change.Field.Id] = change.Value;
         return Task.CompletedTask;
     }
 
-    private Task OpenMediaPickerAsync(TemplateFieldResponse field)
+    private Task OpenMediaPickerAsync(ContentFieldEditorValue value)
     {
-        pickerFieldId = field.Id;
+        pickerTargetValue = value;
         pickerIsFileField = false;
         pickerMimePrefix = "image/";
         pickerVisible = true;
         return Task.CompletedTask;
     }
 
-    private Task OpenFilePickerAsync(TemplateFieldResponse field)
+    private Task OpenFilePickerAsync(ContentFieldEditorValue value)
     {
-        pickerFieldId = field.Id;
+        pickerTargetValue = value;
         pickerIsFileField = true;
         pickerMimePrefix = null;
         pickerVisible = true;
@@ -218,14 +260,18 @@
 
     private Task OnAssetSelectedAsync(MediaAssetResponse asset)
     {
-        var value = GetOrAddValue(pickerFieldId);
-        if (pickerIsFileField)
+        // A reference type, so this works uniformly no matter how deeply the field is nested
+        // inside a component instance - there is no flat field-id to look it back up by.
+        if (pickerTargetValue is { } value)
         {
-            value.SelectedFileAsset = asset;
-        }
-        else
-        {
-            value.SelectedMediaAsset = asset;
+            if (pickerIsFileField)
+            {
+                value.SelectedFileAsset = asset;
+            }
+            else
+            {
+                value.SelectedMediaAsset = asset;
+            }
         }
 
         pickerVisible = false;
@@ -252,23 +298,16 @@
 
             if (field.ComponentId.HasValue)
             {
-                foreach (var raw in value.ComponentValues)
+                if (!componentSchemas.TryGetValue(field.ComponentId.Value, out var componentSchema) || componentSchema.CurrentVersion is null)
                 {
-                    try
-                    {
-                        using var document = JsonDocument.Parse(raw);
-                        if (document.RootElement.ValueKind != JsonValueKind.Object)
-                        {
-                            error = $"Component field '{field.Label}' must contain JSON objects.";
-                            return;
-                        }
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
-                    }
-                    catch (JsonException)
-                    {
-                        error = $"Component field '{field.Label}' contains invalid JSON.";
-                        return;
-                    }
+                    error = $"Component field '{field.Label}' schema could not be resolved.";
+                    return;
+                }
+
+                foreach (var instance in value.ComponentValues)
+                {
+                    var serialized = ComponentValueSerializer.Serialize(instance, field.ComponentId.Value, componentSchemas);
+                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, serialized));
                 }
                 continue;
             }

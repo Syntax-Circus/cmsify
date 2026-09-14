@@ -50,14 +50,33 @@ public sealed class FieldEditorTests : BunitContext
     [Fact]
     public void RendersComponentFieldEditorWhenComponentIdIsSet()
     {
-        var field = TestFieldFactory.Create(componentId: Guid.NewGuid());
-        var value = new ContentFieldEditorValue { ComponentValues = ["{\"a\":1}"] };
+        var titleField = TestComponentFactory.CreateField(key: "title", primitiveType: PrimitiveType.Text);
+        var component = TestComponentFactory.Create(currentVersion: TestComponentFactory.CreateVersion(fields: [titleField]));
+        var componentSchemas = new Dictionary<Guid, ComponentResponse> { [component.Id] = component };
+
+        var field = TestFieldFactory.Create(componentId: component.Id);
+        var instance = new ComponentInstanceValue();
+        instance.GetOrCreate(titleField.Id).TextValue = "Hello";
+        var value = new ContentFieldEditorValue { ComponentValues = [instance] };
 
         var cut = Render<FieldEditor>(parameters => parameters
             .Add(p => p.Field, field)
-            .Add(p => p.Value, value));
+            .Add(p => p.Value, value)
+            .Add(p => p.ComponentSchemas, componentSchemas));
 
-        cut.FindComponent<ComponentFieldEditor>().Instance.Values.ShouldBe(new[] { "{\"a\":1}" });
+        cut.FindComponent<ComponentFieldEditor>().Instance.Values.ShouldBe(new[] { instance });
+    }
+
+    [Fact]
+    public void RendersFallbackWarningWhenComponentSchemaIsUnresolved()
+    {
+        var field = TestFieldFactory.Create(componentId: Guid.NewGuid());
+
+        var cut = Render<FieldEditor>(parameters => parameters
+            .Add(p => p.Field, field)
+            .Add(p => p.Value, new ContentFieldEditorValue()));
+
+        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("Component schema unavailable.");
     }
 
     [Fact]

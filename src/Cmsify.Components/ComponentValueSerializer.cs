@@ -39,11 +39,9 @@ public static class ComponentValueSerializer
                     ? property.EnumerateArray().ToArray()
                     : [property];
 
-                // Recurse to decode each nested occurrence, then immediately re-encode it against
-                // the current schema so what we cache in ComponentValues is always normalized (drops
-                // any nested keys that no longer exist in the current schema, same as the top level).
-                target.ComponentValues = [.. occurrences.Select(occurrence =>
-                    Serialize(Deserialize(occurrence, nestedComponentId, schemas), nestedComponentId, schemas).GetRawText())];
+                // Decode each nested occurrence directly into a real ComponentInstanceValue object
+                // graph - no intermediate JSON-text round trip, at any nesting depth.
+                target.ComponentValues = [.. occurrences.Select(occurrence => Deserialize(occurrence, nestedComponentId, schemas))];
             }
             else
             {
@@ -66,7 +64,7 @@ public static class ComponentValueSerializer
         {
             var value = instance.FieldValues.TryGetValue(field.Id, out var existing) ? existing : new ContentFieldEditorValue();
             var node = field.NestedComponentId.HasValue
-                ? SerializeNestedProperty(value, field)
+                ? SerializeNestedProperty(value, field, schemas)
                 : PrimitiveValueCodec.ToJson(value, field.PrimitiveType, field.FieldConfig);
 
             // Media/File (and any other primitive with no value) omit the property entirely rather
@@ -80,9 +78,10 @@ public static class ComponentValueSerializer
         return ToClonedElement(obj);
     }
 
-    private static JsonNode SerializeNestedProperty(ContentFieldEditorValue value, ComponentFieldResponse field)
+    private static JsonNode SerializeNestedProperty(ContentFieldEditorValue value, ComponentFieldResponse field, IReadOnlyDictionary<Guid, ComponentResponse> schemas)
     {
-        var occurrenceElements = value.ComponentValues.Select(ParseOrEmptyObject).ToArray();
+        var nestedComponentId = field.NestedComponentId!.Value;
+        var occurrenceElements = value.ComponentValues.Select(nested => Serialize(nested, nestedComponentId, schemas)).ToArray();
 
         // A bare object when the field allows only a single occurrence, a JSON array otherwise -
         // matches ContentController.ValidateComponentPickListValuesAsync's tolerant array-or-scalar read.
@@ -99,18 +98,6 @@ public static class ComponentValueSerializer
         }
 
         return array;
-    }
-
-    private static JsonElement ParseOrEmptyObject(string json)
-    {
-        try
-        {
-            return ParseElement(json);
-        }
-        catch (JsonException)
-        {
-            return EmptyObject;
-        }
     }
 
     private static JsonElement ParseElement(string json)
