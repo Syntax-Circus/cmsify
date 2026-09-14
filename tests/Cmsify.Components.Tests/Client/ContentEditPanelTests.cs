@@ -1992,10 +1992,12 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.Saved, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => saved = c)));
 
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(10));
-        cut.Find(".cmsify-component-remove-button").Click();
+        // cut.InvokeAsync wraps Find+Click atomically - see the identical comment on
+        // DeletingAnInlineChildWhoseLoadMintedADraftUsesARefreshedNotStaleETagOnDelete below.
+        cut.InvokeAsync(() => cut.Find(".cmsify-component-remove-button").Click());
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card--pending-delete").Count > 0, TimeSpan.FromSeconds(5));
 
-        cut.Find(".cmsify-form-save-button").Click();
+        cut.InvokeAsync(() => cut.Find(".cmsify-form-save-button").Click());
 
         cut.WaitForState(() => saved is not null, TimeSpan.FromSeconds(10));
 
@@ -2901,10 +2903,12 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.Saved, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => saved = c)));
 
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(10));
-        cut.Find(".cmsify-component-remove-button").Click();
+        // cut.InvokeAsync wraps Find+Click atomically - see the identical comment on
+        // DeletingAnInlineChildWhoseLoadMintedADraftUsesARefreshedNotStaleETagOnDelete below.
+        cut.InvokeAsync(() => cut.Find(".cmsify-component-remove-button").Click());
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card--pending-delete").Count > 0, TimeSpan.FromSeconds(5));
 
-        cut.Find(".cmsify-form-save-button").Click();
+        cut.InvokeAsync(() => cut.Find(".cmsify-form-save-button").Click());
 
         cut.WaitForState(() => saved is not null, TimeSpan.FromSeconds(10));
 

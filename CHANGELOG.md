@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `InlineChildContentEditorTests`' removal test asserted on `EventCallback`-captured state immediately after clicking the remove button, without waiting for the render to settle first - unlike every other assertion of this shape in the suite. Under coverage instrumentation's added scheduling overhead this raced and intermittently failed the `.NET tests` workflow on `main`. It now waits for the callback to fire before asserting, matching the pattern used elsewhere.
+- A Dependabot NuGet group bump left `Microsoft.Extensions.Hosting.Abstractions` centrally pinned below the version `Microsoft.AspNetCore.Mvc.Testing` now transitively requires, leaving every `packages.lock.json` inconsistent with the project graph and locked restore failing. Bumped the pin to match and regenerated the lock files.
+
+### Changed
+
+- Updated dependencies via Dependabot: GitHub Actions (`actions/checkout`, `actions/setup-node`, `actions/setup-python`, `actions/deploy-pages`, `actions/download-artifact`), NuGet packages (bunit, `Microsoft.AspNetCore.Authentication.JwtBearer`, `Microsoft.AspNetCore.Http.Abstractions`, `Microsoft.AspNetCore.Mvc.Testing`, `Microsoft.Testing.Extensions.CodeCoverage`, several `Microsoft.Extensions.*` packages, `Microsoft.NET.Test.Sdk`, `StackExchange.Redis`, `xunit.v3`), and `@types/node` in `sdk/typescript`.
+
 ## [0.5.1] - 2026-09-14
 
 ### Fixed

@@ -241,6 +241,7 @@ public sealed class InlineChildContentEditorTests : BunitContext
         cut.WaitForState(() => cut.FindAll(".cmsify-component-remove-button").Count > 0);
         cut.Find(".cmsify-component-remove-button").Click();
 
+        cut.WaitForState(() => changed is not null);
         changed.ShouldNotBeNull();
         changed!.ShouldBeEmpty();
 
@@ -249,6 +250,7 @@ public sealed class InlineChildContentEditorTests : BunitContext
         cut.WaitForState(() => cut.FindAll(".cmsify-component-remove-button").Count > 0);
         cut.Find(".cmsify-component-remove-button").Click();
 
+        cut.WaitForState(() => persisted.MarkedForDeletion);
         persisted.MarkedForDeletion.ShouldBeTrue();
         changed.ShouldContain(persisted);
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card--pending-delete").Count > 0);
