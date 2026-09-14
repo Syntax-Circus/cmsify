@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-14
+
 ### Fixed
 
 - `InlineChildContentEditorTests`' removal test asserted on `EventCallback`-captured state immediately after clicking the remove button, without waiting for the render to settle first - unlike every other assertion of this shape in the suite. Under coverage instrumentation's added scheduling overhead this raced and intermittently failed the `.NET tests` workflow on `main`. It now waits for the callback to fire before asserting, matching the pattern used elsewhere.
+- Two `ContentEditPanelTests` inline-child-removal tests plain `Find().Click()`'d the remove/save buttons, which can race a pending render and throw bUnit's `UnknownEventHandlerIdException` - exposed by the bunit 2.9.0 → 2.11.3 bump below. Wrapped the same interaction in `cut.InvokeAsync(...)`, matching a sibling test in the same file that already guards against this.
 - A Dependabot NuGet group bump left `Microsoft.Extensions.Hosting.Abstractions` centrally pinned below the version `Microsoft.AspNetCore.Mvc.Testing` now transitively requires, leaving every `packages.lock.json` inconsistent with the project graph and locked restore failing. Bumped the pin to match and regenerated the lock files.
 
 ### Changed
