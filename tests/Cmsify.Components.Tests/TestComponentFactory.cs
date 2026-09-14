@@ -7,6 +7,7 @@ internal static class TestComponentFactory
     public static ComponentFieldResponse CreateField(
         string key = "field-key",
         string label = "Field Label",
+        string? helpText = null,
         PrimitiveType? primitiveType = null,
         Guid? nestedComponentId = null,
         bool isRequired = false,
@@ -17,7 +18,7 @@ internal static class TestComponentFactory
             Guid.NewGuid(),
             key,
             label,
-            null,
+            helpText,
             0,
             isRequired,
             minOccurrences,

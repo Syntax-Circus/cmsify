@@ -24,6 +24,7 @@ else
                     var componentField = field;
                     var templateField = ComponentFieldAdapter.ToTemplateField(componentField);
                     <div class="cmsify-form-field">
+                        <label class="cmsify-form-label">@templateField.Label @(templateField.IsRequired ? "*" : "")</label>
                         <FieldEditor Field="@templateField"
                                      Value="@instance.GetOrCreate(componentField.Id)"
                                      ValueChanged="@(v => OnNestedFieldChanged(instanceIndex, componentField.Id, v))"
@@ -37,6 +38,10 @@ else
                                      OnMediaPickRequested="@(() => OnMediaPickRequested.InvokeAsync(instance.GetOrCreate(componentField.Id)))"
                                      OnFilePickRequested="@(() => OnFilePickRequested.InvokeAsync(instance.GetOrCreate(componentField.Id)))"
                                      ReadOnly="@ReadOnly" />
+                        @if (!string.IsNullOrWhiteSpace(templateField.HelpText))
+                        {
+                            <div class="cmsify-form-help">@templateField.HelpText</div>
+                        }
                     </div>
                 }
             </div>

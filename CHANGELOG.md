@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-14
+
+### Fixed
+
+- `ComponentFieldEditor` (the structured editor for `componentRef` fields added in 0.5.0) rendered each nested field's input with no `<label>` at all, unlike `ContentEditForm`'s top-level fields - a user editing e.g. a "titled-copy" component's eyebrow/title/body saw three unlabeled boxes. The field's `Label`/`HelpText` already survived `ComponentFieldAdapter`'s conversion correctly; only the markup was missing. Nested fields now render the same `cmsify-form-label`/`cmsify-form-help` markup as top-level fields.
+
 ## [0.5.0] - 2026-09-14
 
 ### Added

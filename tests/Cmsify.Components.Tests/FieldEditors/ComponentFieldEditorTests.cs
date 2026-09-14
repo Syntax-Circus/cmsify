@@ -23,6 +23,41 @@ public sealed class ComponentFieldEditorTests : BunitContext
     }
 
     [Fact]
+    public void RendersALabelForEachNestedField()
+    {
+        // Regression: ComponentFieldEditor used to render each nested field's input with no
+        // <label> at all (unlike ContentEditForm, which labels its top-level fields) - the field's
+        // Label survives the ComponentFieldAdapter conversion just fine, it just never made it into
+        // markup. A user editing e.g. a "titled-copy" component's eyebrow/title/body saw three
+        // unlabeled boxes.
+        var requiredField = TestComponentFactory.CreateField(key: "title", label: "Title", isRequired: true, primitiveType: PrimitiveType.Text);
+        var component = TestComponentFactory.Create(currentVersion: TestComponentFactory.CreateVersion(fields: [requiredField]));
+        var schemas = new Dictionary<Guid, ComponentResponse> { [component.Id] = component };
+
+        var cut = Render<ComponentFieldEditor>(parameters => parameters
+            .Add(p => p.ComponentId, component.Id)
+            .Add(p => p.ComponentSchemas, schemas)
+            .Add(p => p.Values, new[] { new ComponentInstanceValue() }));
+
+        cut.Find(".cmsify-form-label").TextContent.Trim().ShouldBe("Title *");
+    }
+
+    [Fact]
+    public void RendersHelpTextForANestedFieldWhenPresent()
+    {
+        var field = TestComponentFactory.CreateField(key: "title", label: "Title", helpText: "Keep it short.", primitiveType: PrimitiveType.Text);
+        var component = TestComponentFactory.Create(currentVersion: TestComponentFactory.CreateVersion(fields: [field]));
+        var schemas = new Dictionary<Guid, ComponentResponse> { [component.Id] = component };
+
+        var cut = Render<ComponentFieldEditor>(parameters => parameters
+            .Add(p => p.ComponentId, component.Id)
+            .Add(p => p.ComponentSchemas, schemas)
+            .Add(p => p.Values, new[] { new ComponentInstanceValue() }));
+
+        cut.Find(".cmsify-form-help").TextContent.ShouldBe("Keep it short.");
+    }
+
+    [Fact]
     public void RendersFieldsOrderedByOrder()
     {
         var first = TestComponentFactory.CreateField(key: "first", primitiveType: PrimitiveType.Text) with { Order = 0 };
