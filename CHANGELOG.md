@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-09-14
+
+### Fixed
+
+- `ContentEditPanel.SaveAsync`'s pre-flight Inline-child validation, `InlineChildValidation`'s nested-field recursion, and `ContentEditSupport.SaveInlineFieldAsync`'s per-child-field loop all treated `CompositionMode == Inline` alone as "this field embeds a child ContentItem." A `.ctp` schema's `CompositionMode` is a required property on every field, and many schemas (including production schemas that predate Inline child-content support) set it to `Inline` uniformly as a default rather than reserving it for genuine template-reference fields. Any such schema's ordinary required Text/Markdown/component field failed to save: pre-flight validation checked its (always-empty, since it's not a composition field) `ChildInstances` count against `MinOccurrences` and rejected the save with e.g. `'Title' requires at least 1 entry` — even though the field's actual value was fully populated and correctly displayed. The request never reached the server. All three call sites now share a new `ContentEditSupport.IsInlineChildField` helper, matching the `TemplateId`/`IsOpen`/`AllowedTypes` composition check `ContentEditPanel.SaveAsync`'s main save loop already used correctly.
+
 ## [0.5.2] - 2026-09-14
 
 ### Fixed

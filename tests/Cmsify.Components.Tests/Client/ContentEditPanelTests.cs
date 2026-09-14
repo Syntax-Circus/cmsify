@@ -3046,4 +3046,170 @@ public sealed class ContentEditPanelTests : BunitContext
         writeRequestIssued.ShouldBeFalse();
         cut.FindAll(".cmsify-form-error").ShouldBeEmpty();
     }
+
+    [Fact]
+    public void SavingContentWherePlainFieldsSetCompositionModeInlineDoesNotFalselyReportThemAsMissing()
+    {
+        // Regression: a .ctp schema's CompositionMode is a required property on every field, and
+        // many schemas (including real production schemas that predate Inline child-content support)
+        // set it to "Inline" uniformly as a default rather than reserving it for genuine
+        // template-reference fields. SaveAsync's pre-flight Inline validation used to filter solely on
+        // CompositionMode == Inline, so it ran InlineChildValidation against ordinary required Text
+        // fields too - and since ChildInstances is never populated for a non-composition field, that
+        // validation always saw 0 instances and reported the field as missing, even though its
+        // TextValue was fully populated and correctly rendered on screen. This is exactly what a user
+        // saw as "'Title' requires at least 1 entry" on a Title field they could visibly see was filled
+        // in - the save request never even reached the server.
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+        var componentId = Guid.NewGuid();
+
+        var titleFieldId = Guid.NewGuid();
+        var sectionsFieldId = Guid.NewGuid();
+        var seoTitleFieldId = Guid.NewGuid();
+        var seoDescriptionFieldId = Guid.NewGuid();
+
+        var eyebrowCompFieldId = Guid.NewGuid();
+        var titleCompFieldId = Guid.NewGuid();
+        var bodyCompFieldId = Guid.NewGuid();
+
+        string? capturedVersionUpdateBody = null;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Project Child Page",
+                      "slug": "epic-torch-privacy", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Project Child Page", "slug": "epic-torch-privacy",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{titleFieldId}}", "key": "title", "label": "Title", "order": 0, "valueKind": "Text",
+                          "textValue": "Privacy", "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null },
+                        { "fieldId": "{{sectionsFieldId}}", "key": "sections", "label": "Sections", "order": 1, "valueKind": "Component",
+                          "textValue": null, "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": null, "child": null,
+                          "jsonValue": { "eyebrow": "", "title": "Overview", "body": "We take your privacy seriously." },
+                          "displayLabel": null },
+                        { "fieldId": "{{seoTitleFieldId}}", "key": "seoTitle", "label": "SEO title", "order": 2, "valueKind": "Text",
+                          "textValue": "Epic Torch - Privacy Policy", "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null },
+                        { "fieldId": "{{seoDescriptionFieldId}}", "key": "seoDescription", "label": "SEO description", "order": 3, "valueKind": "Text",
+                          "textValue": "Epic Torch - Privacy Policy", "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "items": [{ "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Project Child Page", "slug": "project-child-page", "description": null, "currentVersionId": "{{templateVersionId}}" }], "totalCount": 1, "page": 1, "pageSize": 20 }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Project Child Page", "slug": "project-child-page",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{titleFieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": true, "minOccurrences": 1, "maxOccurrences": 1, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null },
+                          { "id": "{{sectionsFieldId}}", "sectionId": null, "key": "sections", "label": "Sections", "helpText": null,
+                            "order": 1, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": null, "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": "{{componentId}}" },
+                          { "id": "{{seoTitleFieldId}}", "sectionId": null, "key": "seoTitle", "label": "SEO title", "helpText": null,
+                            "order": 2, "isRequired": true, "minOccurrences": 1, "maxOccurrences": 1, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null },
+                          { "id": "{{seoDescriptionFieldId}}", "sectionId": null, "key": "seoDescription", "label": "SEO description", "helpText": null,
+                            "order": 3, "isRequired": true, "minOccurrences": 1, "maxOccurrences": 1, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/components/{componentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{componentId}}", "workspaceId": "{{workspaceId}}", "name": "Titled Copy", "slug": "titled-copy", "description": null,
+                      "currentVersion": {
+                        "id": "{{Guid.NewGuid()}}", "componentId": "{{componentId}}", "versionNumber": 1, "status": "Published",
+                        "publishedAt": null, "notes": null,
+                        "fields": [
+                          { "id": "{{eyebrowCompFieldId}}", "key": "eyebrow", "label": "Eyebrow", "helpText": null, "order": 0,
+                            "isRequired": false, "minOccurrences": 0, "maxOccurrences": 1, "primitiveType": "Text", "nestedComponentId": null, "fieldConfig": null },
+                          { "id": "{{titleCompFieldId}}", "key": "title", "label": "Title", "helpText": null, "order": 1,
+                            "isRequired": true, "minOccurrences": 1, "maxOccurrences": 1, "primitiveType": "Text", "nestedComponentId": null, "fieldConfig": null },
+                          { "id": "{{bodyCompFieldId}}", "key": "body", "label": "Body", "helpText": null, "order": 2,
+                            "isRequired": true, "minOccurrences": 1, "maxOccurrences": 1, "primitiveType": "Markdown", "nestedComponentId": null, "fieldConfig": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                capturedVersionUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Project Child Page", "slug": "epic-torch-privacy",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Project Child Page",
+                      "slug": "epic-torch-privacy", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, contentId));
+
+        cut.WaitForState(() => cut.FindAll("input").Any(i => i.GetAttribute("value") == "Privacy"), TimeSpan.FromSeconds(10));
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => capturedVersionUpdateBody is not null, TimeSpan.FromSeconds(10));
+
+        capturedVersionUpdateBody.ShouldNotBeNull();
+        capturedVersionUpdateBody.ShouldContain("Privacy");
+        capturedVersionUpdateBody.ShouldContain("Epic Torch - Privacy Policy");
+        cut.FindAll(".cmsify-form-error").ShouldBeEmpty();
+    }
 }

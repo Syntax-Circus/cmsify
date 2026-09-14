@@ -16,6 +16,21 @@ public static class ContentEditSupport
     public static IReadOnlySet<Guid> WithAncestor(IReadOnlySet<Guid> ancestors, Guid templateId) =>
         (ancestors as ImmutableHashSet<Guid> ?? ImmutableHashSet.CreateRange(ancestors)).Add(templateId);
 
+    // CompositionMode.Inline alone does NOT mean "this field embeds a child ContentItem" - a .ctp
+    // schema's CompositionMode is a required property on every field, including plain scalar and
+    // component fields that have nothing to do with child content, and many schemas (this SDK's own
+    // integration schema included) set it to Inline uniformly as a default rather than reserving it
+    // for genuine template-reference fields. A field only actually represents Inline child content
+    // when it ALSO carries a TemplateId/IsOpen/AllowedTemplateId - the same signal FieldEditor and
+    // ContentEditPanel.SaveAsync's main save loop already use to detect a composition field at all.
+    // Callers that branched on CompositionMode == Inline alone (this bug's original shape) validated
+    // or saved ordinary required Text/Markdown/component fields as if they were empty child-instance
+    // lists, since ChildInstances is never populated for a non-composition field - producing a
+    // "'Title' requires at least 1 entry" failure for a field whose TextValue was fully populated.
+    public static bool IsInlineChildField(TemplateFieldResponse field) =>
+        field.CompositionMode == CompositionMode.Inline &&
+        (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue));
+
     public static async Task LoadPickListsAsync(CmsifyClient client, Guid workspaceId, IEnumerable<TemplateFieldResponse> fields, Dictionary<Guid, PickListResponse> into)
     {
         var bindings = fields
@@ -413,27 +428,31 @@ public static class ContentEditSupport
                     continue;
                 }
 
-                if (childField.CompositionMode == CompositionMode.Inline)
-                {
-                    // Children before parents: this recursive call fully saves (or throws for) this
-                    // instance's own Inline children before the instance itself is saved below.
-                    var nestedRequests = await SaveInlineFieldAsync(client, workspaceId, childField, childValue.ChildInstances, childAncestors, depth + 1, ct);
-                    childValues.AddRange(nestedRequests);
-
-                    // A grandchild-level MarkedForDeletion instance is deleted only after THIS
-                    // instance's own create/update below succeeds - never before, for the same reason
-                    // the top-level caller waits for its own save (see DeleteMarkedInlineChildrenAsync).
-                    foreach (var toDelete in childValue.ChildInstances.Where(i => i.MarkedForDeletion && i.ContentItemId.HasValue).ToList())
-                    {
-                        pendingDeletions.Add((childValue.ChildInstances, toDelete));
-                    }
-                    continue;
-                }
-
+                // CompositionMode == Inline alone does not mean this field embeds a child ContentItem
+                // - see ContentEditSupport.IsInlineChildField. Check isChildComposition FIRST so a
+                // plain required Text/Markdown field that merely carries CompositionMode: Inline (many
+                // .ctp schemas set it uniformly, since it's a required property on every field) falls
+                // through to the ordinary primitive-value branch below instead of being treated as an
+                // empty child-instance list.
                 var isChildComposition = childField.TemplateId.HasValue || childField.IsOpen || childField.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue);
                 if (isChildComposition)
                 {
-                    if (childValue.ChildContentItemId is { } referencedId)
+                    if (childField.CompositionMode == CompositionMode.Inline)
+                    {
+                        // Children before parents: this recursive call fully saves (or throws for) this
+                        // instance's own Inline children before the instance itself is saved below.
+                        var nestedRequests = await SaveInlineFieldAsync(client, workspaceId, childField, childValue.ChildInstances, childAncestors, depth + 1, ct);
+                        childValues.AddRange(nestedRequests);
+
+                        // A grandchild-level MarkedForDeletion instance is deleted only after THIS
+                        // instance's own create/update below succeeds - never before, for the same reason
+                        // the top-level caller waits for its own save (see DeleteMarkedInlineChildrenAsync).
+                        foreach (var toDelete in childValue.ChildInstances.Where(i => i.MarkedForDeletion && i.ContentItemId.HasValue).ToList())
+                        {
+                            pendingDeletions.Add((childValue.ChildInstances, toDelete));
+                        }
+                    }
+                    else if (childValue.ChildContentItemId is { } referencedId)
                     {
                         childValues.Add(new ContentFieldValueRequest(childField.Id, childField.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
                     }

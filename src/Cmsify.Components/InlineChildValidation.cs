@@ -61,7 +61,7 @@ public static class InlineChildValidation
                 continue;
             }
 
-            var nestedInlineFields = template?.CurrentVersion?.Fields.Where(f => f.CompositionMode == CompositionMode.Inline) ?? [];
+            var nestedInlineFields = template?.CurrentVersion?.Fields.Where(ContentEditSupport.IsInlineChildField) ?? [];
             foreach (var nestedField in nestedInlineFields)
             {
                 var nestedInstances = instance.FieldValues.TryGetValue(nestedField.Id, out var value) ? value.ChildInstances : [];

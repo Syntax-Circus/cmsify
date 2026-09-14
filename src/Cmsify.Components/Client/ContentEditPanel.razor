@@ -357,7 +357,7 @@
             // the per-field save calls below, so a deep validation failure in (say) field 2 is caught
             // before field 1's children have already been created/updated.
             var validationErrors = new List<string>();
-            foreach (var inlineField in templateVersion.Fields.Where(f => f.CompositionMode == CompositionMode.Inline))
+            foreach (var inlineField in templateVersion.Fields.Where(ContentEditSupport.IsInlineChildField))
             {
                 var inlineValue = GetOrAddValue(inlineField.Id);
                 validationErrors.AddRange(await InlineChildValidation.ValidateAsync(Client, WorkspaceId, inlineField, inlineValue.ChildInstances));
