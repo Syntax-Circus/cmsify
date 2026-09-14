@@ -44,6 +44,47 @@ public sealed class ComponentFieldEditorTests : BunitContext
     }
 
     [Fact]
+    public void MediaPickRequestedFromASyntheticSeedInstanceSurvivesARerenderBeforeTheAssetIsPicked()
+    {
+        // Regression for the component-field-path sibling of the C1 bug: when Values is empty,
+        // DisplayValues fabricates a synthetic "seed" ComponentInstanceValue to render. Clicking
+        // "Choose" on a Media field inside that seed instance raises OnMediaPickRequested with a
+        // ContentFieldEditorValue nested inside it, but the actual selection lands later and
+        // asynchronously (ContentEditPanel.OnAssetSelectedAsync mutates it directly - no
+        // ValuesChanged round-trip). Opening the picker modal itself causes a re-render in between.
+        // If DisplayValues fabricated a BRAND NEW seed instance on that re-render (the bug), the
+        // object the picker captured would be orphaned and the eventual mutation silently lost.
+        var mediaField = TestComponentFactory.CreateField(key: "hero", primitiveType: PrimitiveType.Media);
+        var component = TestComponentFactory.Create(currentVersion: TestComponentFactory.CreateVersion(fields: [mediaField]));
+        var schemas = new Dictionary<Guid, ComponentResponse> { [component.Id] = component };
+        ContentFieldEditorValue? requestedValue = null;
+
+        var cut = Render<ComponentFieldEditor>(parameters => parameters
+            .Add(p => p.ComponentId, component.Id)
+            .Add(p => p.ComponentSchemas, schemas)
+            .Add(p => p.Values, [])
+            .Add(p => p.OnMediaPickRequested, EventCallback.Factory.Create<ContentFieldEditorValue>(this, v => requestedValue = v)));
+
+        cut.Find("button.cmsify-field-picker-button").Click();
+        requestedValue.ShouldNotBeNull();
+
+        // Simulate the re-render that opening the picker modal causes (Values is still empty at
+        // this point - nothing has committed the seed instance yet).
+        cut.Render(ParameterView.Empty);
+
+        // Simulate the eventual asset pick, exactly as ContentEditPanel.OnAssetSelectedAsync does:
+        // mutate the captured instance directly, with no ValuesChanged round-trip.
+        var asset = new MediaAssetResponse(Guid.NewGuid(), "hero.png", "image/png", 2048, null, "/media/hero.png", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        requestedValue!.SelectedMediaAsset = asset;
+
+        // Re-render again (as the picker closing would) and confirm the selection is actually
+        // reflected in the rendered editor - not silently discarded onto an orphaned object.
+        cut.Render(ParameterView.Empty);
+
+        cut.Find("button.cmsify-field-picker-button").TextContent.ShouldBe("hero.png");
+    }
+
+    [Fact]
     public void MinOccurrencesSeedsThatManyEmptyInstancesWhenValuesIsEmpty()
     {
         var (component, schemas, _) = CreateSingleTextFieldComponent();

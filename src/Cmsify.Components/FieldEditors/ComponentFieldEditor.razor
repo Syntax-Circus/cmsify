@@ -67,10 +67,42 @@ else
     // larger) when no real Values exist yet - mirrors the old textarea editor's single "{}" seed
     // row, just as a structured object. These synthetic instances are never real until an edit
     // (or Add/Remove) round-trips them through ValuesChanged into the real Values parameter.
-    private IReadOnlyList<ComponentInstanceValue> DisplayValues =>
-        Values.Count == 0
-            ? [.. Enumerable.Range(0, Math.Max(1, MinOccurrences)).Select(_ => new ComponentInstanceValue())]
-            : Values;
+    //
+    // The seed instances themselves must stay object-identical across renders for as long as
+    // Values.Count == 0: a Media/File field's pick-request callback captures a reference to a
+    // ContentFieldEditorValue nested inside the seed instance, but the actual asset selection
+    // happens later and asynchronously (via ContentEditPanel.OnAssetSelectedAsync mutating it
+    // directly, without a ValuesChanged round-trip - by design, since ContentFieldEditorValue is a
+    // reference type). Opening the picker modal itself triggers a Blazor re-render in between,
+    // which - if DisplayValues fabricated brand-new instances on every evaluation, as it used to -
+    // would orphan the captured instance before the user ever picks anything, silently discarding
+    // the selection. Caching here keeps the same instances alive (and thus reachable/rendered)
+    // until they're genuinely committed into Values, mirroring ComponentInstanceValue.GetOrCreate's
+    // own storing behavior for the same reason.
+    private List<ComponentInstanceValue>? seedInstances;
+
+    private IReadOnlyList<ComponentInstanceValue> DisplayValues
+    {
+        get
+        {
+            if (Values.Count > 0)
+            {
+                // Real instances exist now; drop any stale seed so that if the user later removes
+                // every instance, a fresh blank seed is built instead of resurrecting objects that
+                // still carry a removed instance's field values.
+                seedInstances = null;
+                return Values;
+            }
+
+            var neededCount = Math.Max(1, MinOccurrences);
+            if (seedInstances is null || seedInstances.Count != neededCount)
+            {
+                seedInstances = [.. Enumerable.Range(0, neededCount).Select(_ => new ComponentInstanceValue())];
+            }
+
+            return seedInstances;
+        }
+    }
 
     private Task OnNestedFieldChanged(int index, Guid fieldId, ContentFieldEditorValue value)
     {
