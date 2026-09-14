@@ -108,6 +108,18 @@ public sealed class ContentEditSupportTests
                 deleteOrder.Add(id);
                 return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
             }
+            if (request.Method == HttpMethod.Get)
+            {
+                // I2: DeleteInlineInstanceRecursivelyAsync now refreshes each instance's item ETag via
+                // a GET immediately before deleting it, to avoid reusing a stale cached ETag.
+                var id = Guid.Parse(request.RequestUri!.AbsolutePath.Split('/').Last());
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{id}}", "templateVersionId": "{{Guid.NewGuid()}}", "templateName": "Child",
+                      "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
         });
 

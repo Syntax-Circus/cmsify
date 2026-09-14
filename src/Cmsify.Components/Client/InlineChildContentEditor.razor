@@ -47,7 +47,9 @@ else
                                      CurrentContentId="@instance.ContentItemId"
                                      AncestorTemplateIds="@(instance.TemplateId is { } tid ? ContentEditSupport.WithAncestor(AncestorTemplateIds, tid) : AncestorTemplateIds)"
                                      Depth="@(Depth + 1)"
-                                     ReadOnly="@(ReadOnly || instance.MarkedForDeletion)" />
+                                     ReadOnly="@(ReadOnly || instance.MarkedForDeletion)"
+                                     OnMediaPickRequested="OnMediaPickRequested" OnFilePickRequested="OnFilePickRequested"
+                                     FieldTemplateOverrides="@FieldTemplateOverrides" />
                 }
                 else
                 {
@@ -88,6 +90,9 @@ else
     [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
     [Parameter] public int Depth { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnMediaPickRequested { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnFilePickRequested { get; set; }
+    [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
 
     private readonly Dictionary<InlineChildInstance, ChildRenderState> stateByInstance = [];
     private bool candidatesLoaded;

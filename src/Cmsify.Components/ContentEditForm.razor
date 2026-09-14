@@ -21,8 +21,8 @@
                              PickListsByRevisionId="@PickListsByRevisionId"
                              ReferenceOptionsByTemplateId="@ReferenceOptionsByTemplateId"
                              CurrentContentId="@CurrentContentId"
-                             OnMediaPickRequested="@(() => OnMediaPickRequested.InvokeAsync(GetOrCreateValue(field.Id)))"
-                             OnFilePickRequested="@(() => OnFilePickRequested.InvokeAsync(GetOrCreateValue(field.Id)))"
+                             OnMediaPickRequested="OnMediaPickRequested"
+                             OnFilePickRequested="OnFilePickRequested"
                              FieldTemplateOverrides="@FieldTemplateOverrides"
                              Client="@Client"
                              WorkspaceId="@WorkspaceId"
@@ -59,7 +59,7 @@
 
 @code {
     [Parameter, EditorRequired] public TemplateVersionResponse TemplateVersion { get; set; } = null!;
-    [Parameter, EditorRequired] public IReadOnlyDictionary<Guid, ContentFieldEditorValue> FieldValues { get; set; } = new Dictionary<Guid, ContentFieldEditorValue>();
+    [Parameter, EditorRequired] public IDictionary<Guid, ContentFieldEditorValue> FieldValues { get; set; } = new Dictionary<Guid, ContentFieldEditorValue>();
     [Parameter] public EventCallback<(TemplateFieldResponse Field, ContentFieldEditorValue Value)> FieldValueChanged { get; set; }
     [Parameter] public IReadOnlyDictionary<Guid, PickListResponse> PickListsByRevisionId { get; set; } = new Dictionary<Guid, PickListResponse>();
     [Parameter] public IReadOnlyDictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> ReferenceOptionsByTemplateId { get; set; } = new Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>>();
@@ -85,6 +85,11 @@
     [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
     [Parameter] public int Depth { get; set; }
 
+    // Storing (not just returning a throwaway) is essential: OnMediaPickRequested/OnFilePickRequested
+    // is a fire-and-forget request that only mutates the ContentFieldEditorValue later, once the user
+    // actually picks an asset - by then, re-rendering (e.g. to show the picker) would otherwise call
+    // this again and get a brand new, never-stored instance, silently discarding the pick. Mirrors
+    // ComponentInstanceValue.GetOrCreate, which stores into its own dictionary for the same reason.
     private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
-        FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();
+        FieldValues.TryGetValue(fieldId, out var value) ? value : FieldValues[fieldId] = new ContentFieldEditorValue();
 }

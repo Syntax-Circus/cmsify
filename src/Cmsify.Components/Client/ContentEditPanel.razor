@@ -208,6 +208,12 @@
         catch (InvalidOperationException)
         {
         }
+        catch (HttpRequestException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
 
         foreach (var (editorValue, childContentItemId, task) in inlineChildLookups)
         {
@@ -215,7 +221,7 @@
             {
                 editorValue.ChildInstances = [.. editorValue.ChildInstances, await task];
             }
-            catch (Exception ex) when (ex is CmsifyApiException or InvalidOperationException)
+            catch (Exception ex) when (ex is CmsifyApiException or InvalidOperationException or HttpRequestException or TaskCanceledException)
             {
                 editorValue.ChildInstances = [.. editorValue.ChildInstances, new InlineChildInstance { ContentItemId = childContentItemId, LoadFailed = true }];
             }

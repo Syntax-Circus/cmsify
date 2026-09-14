@@ -47,7 +47,7 @@ Use a template-as-child-field when the content needs its own lifecycle, URL/slug
 - Keeping related content together in a single edit session
 - Simplified authoring workflows where child and parent are always published together
 
-The child can be edited, saved, and removed entirely within the parent's editing context. If you delete the parent, the child is also deleted.
+The child can be edited, saved, and removed entirely within the parent's editing context: removing a child inside the editor and saving deletes that child. **This is a known limitation, not a guarantee:** deleting the parent content item itself (for example, from the content list's delete action) does not cascade-delete its Inline children today. There is no server-side cascade delete for Inline children, so a child removed any other way than through the editor's own explicit remove-then-save flow becomes orphaned.
 
 ## Example: a blog post with a call to action
 

@@ -264,6 +264,12 @@ public static class ContentEditSupport
         catch (InvalidOperationException)
         {
         }
+        catch (HttpRequestException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
 
         foreach (var (editorValue, nestedChildId, task) in inlineLookups)
         {
@@ -271,7 +277,7 @@ public static class ContentEditSupport
             {
                 editorValue.ChildInstances = [.. editorValue.ChildInstances, await task];
             }
-            catch (Exception ex) when (ex is CmsifyApiException or InvalidOperationException)
+            catch (Exception ex) when (ex is CmsifyApiException or InvalidOperationException or HttpRequestException or TaskCanceledException)
             {
                 editorValue.ChildInstances = [.. editorValue.ChildInstances, new InlineChildInstance { ContentItemId = nestedChildId, LoadFailed = true }];
             }
@@ -553,6 +559,17 @@ public static class ContentEditSupport
                 await DeleteInlineInstanceRecursivelyAsync(client, workspaceId, nested, ct);
             }
         }
+
+        // Same ETag-refresh reasoning as ContentEditPanel.SaveAsync's pre-item-PUT refresh and
+        // SaveInlineFieldAsync's post-version-PUT refresh: loading this child (see
+        // LoadInlineChildInstanceAsync) may have minted a Draft version via CreateVersionAsync for a
+        // child that had none, which bumps the item's UpdatedAt (and therefore its ETag) server-side
+        // with no fresh ETag ever returned to the client for that side effect. The SDK's cached ETag
+        // for this item's URI can therefore be stale by the time this delete runs (which may be much
+        // later, after the whole parent save has succeeded) - a GET here refreshes it immediately
+        // before DeleteAsync reuses it as If-Match, otherwise this deterministically 412s with no
+        // recovery path (a 412 response carries no fresh ETag to retry with).
+        _ = await client.Content.GetAsync(workspaceId, contentItemId, ct: ct);
 
         await client.Content.DeleteAsync(workspaceId, contentItemId, ct);
     }

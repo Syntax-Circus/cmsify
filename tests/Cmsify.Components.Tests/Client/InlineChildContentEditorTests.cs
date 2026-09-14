@@ -386,6 +386,59 @@ public sealed class InlineChildContentEditorTests : BunitContext
     }
 
     [Fact]
+    public void MediaPickRequestedInsideAnInlineChildInstanceRaisesTheCallbackWithTheChildsOwnFieldValueInstance()
+    {
+        // I1: Media/File picking used to be completely non-functional inside Inline children, because
+        // InlineChildContentEditor never accepted or forwarded OnMediaPickRequested/OnFilePickRequested
+        // to its own nested ContentEditForm - a Media field's "Choose" button rendered but did nothing.
+        // This proves clicking it now raises the pick-request callback with the correct
+        // ContentFieldEditorValue instance, owned by the child instance's own FieldValues.
+        var workspaceId = Guid.NewGuid();
+        var childTemplateId = Guid.NewGuid();
+        var mediaFieldId = Guid.NewGuid();
+        var field = TestFieldFactory.Create(templateId: childTemplateId, compositionMode: CompositionMode.Inline);
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == $"/api/v1/workspaces/{workspaceId}/templates/{childTemplateId}")
+            {
+                var mediaFieldJson = $$"""
+                    [{ "id": "{{mediaFieldId}}", "sectionId": null, "key": "photo", "label": "Photo", "helpText": null,
+                       "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                       "compositionMode": "Reference", "primitiveType": "Media", "templateId": null,
+                       "allowedTypes": [], "fieldConfig": null, "componentId": null }]
+                    """;
+                return TemplateJson(childTemplateId, workspaceId, fieldsJson: mediaFieldJson);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var instance = new InlineChildInstance { TemplateId = childTemplateId };
+        var instances = new List<InlineChildInstance> { instance };
+        ContentFieldEditorValue? requestedValue = null;
+
+        var cut = Render<InlineChildContentEditor>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.Field, field)
+            .Add(p => p.Instances, instances)
+            .Add(p => p.OnMediaPickRequested, EventCallback.Factory.Create<ContentFieldEditorValue>(this, v => requestedValue = v)));
+
+        // Wait via FindComponents (not a raw markup/DOM text check) - bUnit's component lookup forces
+        // the renderer to settle any still-pending render from the async child-state resolution before
+        // returning, which a plain markup check does not guarantee, and clicking against a not-yet-
+        // settled render can silently miss the event.
+        cut.WaitForState(() => cut.FindComponents<MediaFieldEditor>().Count == 1, TimeSpan.FromSeconds(5));
+
+        cut.FindAll("button").Single(b => b.TextContent.Trim() == "Select asset").Click();
+
+        requestedValue.ShouldNotBeNull();
+        instance.FieldValues.ShouldContainKey(mediaFieldId);
+        ReferenceEquals(instance.FieldValues[mediaFieldId], requestedValue).ShouldBeTrue();
+    }
+
+    [Fact]
     public void NullClientRendersWarningInsteadOfThrowing()
     {
         // I9: an external consumer of the published component package rendering ContentEditForm

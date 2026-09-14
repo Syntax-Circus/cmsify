@@ -109,6 +109,42 @@ public sealed class ContentEditFormTests : BunitContext
     }
 
     [Fact]
+    public void MediaPickRequestedForAFieldWithNoExistingValueUsesTheSameInstanceBoundToTheRenderedEditor()
+    {
+        // C1 regression: a field with no entry yet in FieldValues (not pre-populated) must still have
+        // its pick request carry the SAME ContentFieldEditorValue instance that's bound as the
+        // rendered editor's Value - GetOrCreateValue used to return a fresh, never-stored, throwaway
+        // instance every call, so the object mutated after picking an asset was an orphan that never
+        // reached the rendered form or a save.
+        var field = TestFieldFactory.Create(primitiveType: PrimitiveType.Media);
+        var templateVersion = CreateTemplateVersion(field);
+        var fieldValues = new Dictionary<Guid, ContentFieldEditorValue>();
+        ContentFieldEditorValue? requestedValue = null;
+
+        var cut = Render<ContentEditForm>(parameters => parameters
+            .Add(p => p.TemplateVersion, templateVersion)
+            .Add(p => p.FieldValues, fieldValues)
+            .Add(p => p.OnMediaPickRequested, EventCallback.Factory.Create<ContentFieldEditorValue>(this, v => requestedValue = v)));
+
+        cut.Find("button").Click();
+
+        requestedValue.ShouldNotBeNull();
+        fieldValues.ShouldContainKey(field.Id);
+        ReferenceEquals(fieldValues[field.Id], requestedValue).ShouldBeTrue();
+
+        // Mutate the requested instance exactly as ContentEditPanel.OnAssetSelectedAsync does after a
+        // real pick, then force a re-render (as opening/closing the picker would) and confirm the
+        // selection is actually reflected in the rendered editor and in the owning FieldValues store
+        // (what a save reads from) - not silently discarded.
+        var asset = new MediaAssetResponse(Guid.NewGuid(), "logo.png", "image/png", 1024, null, "/media/logo.png", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        requestedValue!.SelectedMediaAsset = asset;
+        cut.Render(Microsoft.AspNetCore.Components.ParameterView.Empty);
+
+        cut.Find("button").TextContent.ShouldBe("logo.png");
+        fieldValues[field.Id].SelectedMediaAsset.ShouldBe(asset);
+    }
+
+    [Fact]
     public void HidesSaveButtonAndMarksMetadataInputsReadOnlyWhenReadOnly()
     {
         var field = TestFieldFactory.Create(primitiveType: PrimitiveType.Text);

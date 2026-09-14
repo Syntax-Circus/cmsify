@@ -27,7 +27,9 @@ else if (IsCompositionField)
     {
         <InlineChildContentEditor Client="@Client" WorkspaceId="@WorkspaceId" Field="@Field"
                                    Instances="@Value.ChildInstances" InstancesChanged="@(v => UpdateAsync(x => x.ChildInstances = v))"
-                                   AncestorTemplateIds="@AncestorTemplateIds" Depth="@Depth" ReadOnly="@ReadOnly" />
+                                   AncestorTemplateIds="@AncestorTemplateIds" Depth="@Depth" ReadOnly="@ReadOnly"
+                                   OnMediaPickRequested="OnMediaPickRequested" OnFilePickRequested="OnFilePickRequested"
+                                   FieldTemplateOverrides="@FieldTemplateOverrides" />
     }
 }
 else
