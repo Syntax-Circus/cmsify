@@ -1068,9 +1068,9 @@ public sealed class ContentEditPanelTests : BunitContext
         var mediaFieldBId = Guid.NewGuid();
         var assetAId = Guid.NewGuid();
         var assetBId = Guid.NewGuid();
-        var tracker = new ConcurrencyTracker();
+        var gate = new ConcurrencyGate(requiredConcurrency: 2);
 
-        var client = TestCmsifyClientFactory.CreateWithConcurrencyTracking(request =>
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyGate(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
@@ -1145,22 +1145,17 @@ public sealed class ContentEditPanelTests : BunitContext
                     """);
             }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
-        }, tracker);
+        }, gate, gateWhen: request => request.RequestUri!.AbsolutePath.Contains("/media/"));
 
-        Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
             .Add(p => p.Client, client)
             .Add(p => p.WorkspaceId, workspaceId)
             .Add(p => p.ContentId, contentId));
 
-        // If the two media lookups ran one at a time, the tracker would never observe more than a
-        // single in-flight request. Observing 2+ proves they were fired concurrently.
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (tracker.MaxObserved < 2 && DateTime.UtcNow < deadline)
-        {
-            Thread.Sleep(10);
-        }
-
-        tracker.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+        // If the two media lookups ran one at a time, the gate would never see more than one
+        // waiting at once (each would time out alone rather than being released together).
+        // Observing 2 proves they were fired concurrently.
+        cut.WaitForState(() => gate.MaxObserved >= 2, TimeSpan.FromSeconds(10));
     }
 
     [Fact]
@@ -1175,9 +1170,9 @@ public sealed class ContentEditPanelTests : BunitContext
         var pickListBId = Guid.NewGuid();
         var revisionAId = Guid.NewGuid();
         var revisionBId = Guid.NewGuid();
-        var tracker = new ConcurrencyTracker();
+        var gate = new ConcurrencyGate(requiredConcurrency: 2);
 
-        var client = TestCmsifyClientFactory.CreateWithConcurrencyTracking(request =>
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyGate(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
@@ -1220,20 +1215,14 @@ public sealed class ContentEditPanelTests : BunitContext
                     """);
             }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
-        }, tracker);
+        }, gate, gateWhen: request => request.RequestUri!.AbsolutePath.Contains("/revisions/"));
 
-        Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
             .Add(p => p.Client, client)
             .Add(p => p.WorkspaceId, workspaceId)
             .Add(p => p.TemplateId, templateId));
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (tracker.MaxObserved < 2 && DateTime.UtcNow < deadline)
-        {
-            Thread.Sleep(10);
-        }
-
-        tracker.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+        cut.WaitForState(() => gate.MaxObserved >= 2, TimeSpan.FromSeconds(10));
     }
 
     [Fact]
@@ -1246,9 +1235,9 @@ public sealed class ContentEditPanelTests : BunitContext
         var fieldBId = Guid.NewGuid();
         var referencedTemplateAId = Guid.NewGuid();
         var referencedTemplateBId = Guid.NewGuid();
-        var tracker = new ConcurrencyTracker();
+        var gate = new ConcurrencyGate(requiredConcurrency: 2);
 
-        var client = TestCmsifyClientFactory.CreateWithConcurrencyTracking(request =>
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyGate(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
@@ -1275,26 +1264,20 @@ public sealed class ContentEditPanelTests : BunitContext
                     """);
             }
             // Both reference fields list against the same /content endpoint (filtered by
-            // templateId via query string, which .AbsolutePath doesn't include) - the tracker is
+            // templateId via query string, which .AbsolutePath doesn't include) - the gate is
             // what actually proves the two lookups overlapped rather than running one at a time.
             if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content")
             {
                 return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
             }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
-        }, tracker);
+        }, gate, gateWhen: request => request.RequestUri!.AbsolutePath == $"/api/v1/workspaces/{workspaceId}/content");
 
-        Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
             .Add(p => p.Client, client)
             .Add(p => p.WorkspaceId, workspaceId)
             .Add(p => p.TemplateId, templateId));
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (tracker.MaxObserved < 2 && DateTime.UtcNow < deadline)
-        {
-            Thread.Sleep(10);
-        }
-
-        tracker.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+        cut.WaitForState(() => gate.MaxObserved >= 2, TimeSpan.FromSeconds(10));
     }
 }

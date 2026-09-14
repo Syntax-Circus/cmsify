@@ -127,9 +127,9 @@ public sealed class ContentListPanelTests : BunitContext
     public void InitialLoadFetchesTemplatesAndContentConcurrently()
     {
         var workspaceId = Guid.NewGuid();
-        var tracker = new ConcurrencyTracker();
+        var gate = new ConcurrencyGate(requiredConcurrency: 2);
 
-        var client = TestCmsifyClientFactory.CreateWithConcurrencyTracking(request =>
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyGate(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (path == $"/api/v1/workspaces/{workspaceId}/templates")
@@ -141,20 +141,14 @@ public sealed class ContentListPanelTests : BunitContext
                 return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
             }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
-        }, tracker);
+        }, gate);
 
-        Render<SyntaxCircus.Cmsify.Components.Client.ContentListPanel>(parameters => parameters
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentListPanel>(parameters => parameters
             .Add(p => p.Client, client)
             .Add(p => p.WorkspaceId, workspaceId));
 
-        // If the templates and content fetches ran one at a time, the tracker would never observe
-        // more than a single in-flight request. Observing 2+ proves they were fired concurrently.
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (tracker.MaxObserved < 2 && DateTime.UtcNow < deadline)
-        {
-            Thread.Sleep(10);
-        }
-
-        tracker.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+        // If the templates and content fetches ran one at a time, the gate would never see more
+        // than one waiting at once. Observing 2 proves they were fired concurrently.
+        cut.WaitForState(() => gate.MaxObserved >= 2, TimeSpan.FromSeconds(10));
     }
 }
