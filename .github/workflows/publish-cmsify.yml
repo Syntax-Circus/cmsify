@@ -205,12 +205,29 @@ jobs:
       - name: Sign and verify both images by digest
         env: { COSIGN_YES: "true" }
         run: |
+          # cosign verify reads the signature straight back from Docker Hub right after cosign
+          # sign pushes it; Docker Hub's registry occasionally hasn't finished propagating that
+          # signature manifest yet, so verify can spuriously see "no signatures found" on the
+          # first attempt even though signing succeeded. Retry with backoff instead of failing
+          # the whole release on a transient read-after-write lag.
+          verify_with_retry() {
+            local subject="$1"
+            for attempt in 1 2 3 4 5; do
+              if cosign verify --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$subject"; then
+                return 0
+              fi
+              echo "cosign verify attempt $attempt/5 failed for $subject - retrying after registry propagation delay..." >&2
+              sleep $((attempt * 5))
+            done
+            echo "::error::cosign verify failed for $subject after 5 attempts" >&2
+            return 1
+          }
           API_SUBJECT="docker.io/syntaxcircus/cmsify-api@${{ steps.push.outputs.api_digest }}"
           ADMIN_SUBJECT="docker.io/syntaxcircus/cmsify-admin@${{ steps.push.outputs.admin_digest }}"
           cosign sign --yes "$API_SUBJECT"
           cosign sign --yes "$ADMIN_SUBJECT"
-          cosign verify --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$API_SUBJECT"
-          cosign verify --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ADMIN_SUBJECT"
+          verify_with_retry "$API_SUBJECT"
+          verify_with_retry "$ADMIN_SUBJECT"
       - name: Generate an SBOM for each image
         run: |
           mkdir -p artifacts/sbom
