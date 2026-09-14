@@ -1,0 +1,57 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<div class="cmsify-inline-template-picker">
+    @if (ShowFilter)
+    {
+        <input class="cmsify-field-input"
+               type="text"
+               placeholder="Filter templates"
+               value="@FilterText"
+               disabled="@ReadOnly"
+               @oninput="OnFilterChanged" />
+    }
+    <select class="cmsify-field-select" value="" disabled="@ReadOnly" @onchange="OnChange">
+        <option value="">Select a template</option>
+        @foreach (var candidate in FilteredCandidates)
+        {
+            var isDisabled = DisabledTemplateIds.Contains(candidate.Id);
+            <option value="@candidate.Id" disabled="@isDisabled" title="@(isDisabled ? DisabledMessage : null)">
+                @candidate.Name (@candidate.Slug)
+            </option>
+        }
+    </select>
+    @if (DisabledTemplateIds.Count > 0)
+    {
+        <p class="cmsify-inline-template-picker-note">@DisabledMessage</p>
+    }
+</div>
+
+@code {
+    private const int ShortListThreshold = 6;
+    private const string DisabledMessage = "Selecting this template here would create a circular reference chain.";
+
+    [Parameter] public IReadOnlyList<TemplateSummaryResponse> Candidates { get; set; } = [];
+    [Parameter] public IReadOnlySet<Guid> DisabledTemplateIds { get; set; } = new HashSet<Guid>();
+    [Parameter] public EventCallback<Guid> TemplateSelected { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private string FilterText { get; set; } = "";
+
+    private bool ShowFilter => Candidates.Count > ShortListThreshold;
+
+    private IReadOnlyList<TemplateSummaryResponse> FilteredCandidates =>
+        ShowFilter && !string.IsNullOrWhiteSpace(FilterText)
+            ? [.. Candidates.Where(c => c.Name.Contains(FilterText, StringComparison.OrdinalIgnoreCase) || c.Slug.Contains(FilterText, StringComparison.OrdinalIgnoreCase))]
+            : Candidates;
+
+    private void OnFilterChanged(ChangeEventArgs e) => FilterText = e.Value?.ToString() ?? "";
+
+    private Task OnChange(ChangeEventArgs e)
+    {
+        if (!Guid.TryParse(e.Value?.ToString(), out var selected) || DisabledTemplateIds.Contains(selected))
+        {
+            return Task.CompletedTask;
+        }
+        return TemplateSelected.InvokeAsync(selected);
+    }
+}

@@ -1,0 +1,49 @@
+.cmsify-inline-template-picker {
+    display: block;
+}
+
+/* Duplicated from ContentListView.razor.css/ReferenceFieldEditor.razor.css: Blazor CSS
+   isolation scopes rules to the elements a component renders itself, so this control
+   needs its own copies of the shared field-input/field-select styling. */
+.cmsify-field-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    font-family: var(--cmsify-font-family, inherit);
+    color: var(--cmsify-color-text, inherit);
+    background: var(--cmsify-color-field-background, transparent);
+    margin-bottom: var(--cmsify-spacing-sm, 0.375rem);
+}
+
+.cmsify-field-input:focus {
+    outline: none;
+    border-color: var(--cmsify-color-border-focus, #86b7fe);
+    box-shadow: var(--cmsify-focus-ring, 0 0 0 0.2rem rgba(13, 110, 253, 0.25));
+}
+
+.cmsify-field-select {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    font-family: var(--cmsify-font-family, inherit);
+    color: var(--cmsify-color-text, inherit);
+    background: var(--cmsify-color-field-background, transparent);
+}
+
+.cmsify-field-select:focus {
+    outline: none;
+    border-color: var(--cmsify-color-border-focus, #86b7fe);
+    box-shadow: var(--cmsify-focus-ring, 0 0 0 0.2rem rgba(13, 110, 253, 0.25));
+}
+
+.cmsify-inline-template-picker-note {
+    margin: var(--cmsify-spacing-sm, 0.375rem) 0 0;
+    font-size: 0.875rem;
+    color: var(--cmsify-color-muted, #6c757d);
+}
