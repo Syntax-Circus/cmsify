@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-14
+
 ### Added
 
 - Component-typed fields (`TemplateField.ComponentId`) now render as first-class, recursive structured editors in `Cmsify.Components` instead of a raw JSON textarea — nested component-in-component fields, all primitive field types (including Media/File, referenced as a GUID within the component's snapshot JSON), and pick-list bindings all render and save correctly, with add/remove of repeated instances respecting `MinOccurrences`/`MaxOccurrences`.
