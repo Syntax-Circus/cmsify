@@ -34,9 +34,15 @@
         }
 
         loaded = true;
-        var templatePage = await Client.Templates.ListAsync(WorkspaceId);
-        templates = templatePage?.Items ?? [];
-        await LoadAsync();
+
+        // The initial template-list and content-list fetches are independent of each other, so
+        // run them concurrently instead of paying two sequential round trips on first load.
+        var templatesTask = Client.Templates.ListAsync(WorkspaceId);
+        var contentTask = Client.Content.ListAsync(WorkspaceId, status, templateId, locale, null, searchText);
+        await Task.WhenAll(templatesTask, contentTask);
+
+        templates = templatesTask.Result?.Items ?? [];
+        items = (contentTask.Result?.Items ?? []).ToList();
     }
 
     private async Task LoadAsync()

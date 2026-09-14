@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-09-13
+
+### Fixed
+
+- `ContentEditPanel.LoadContentAsync`/`LoadPickListsAsync`/`LoadReferenceOptionsAsync` fetched each media/file asset, pick-list revision, and referenced-template option list one at a time in a sequential loop, turning a single content item's load into 5-10+ back-to-back round trips against Cmsify's API - painfully slow for any template with more than a couple of such fields. All three now gather the independent lookups first and run them concurrently via `Task.WhenAll`, preserving each item's own per-item error handling (a failed media/file lookup still falls back to its raw ID; a failed pick-list revision is still silently skipped) exactly as before - only the timing changed, not the behavior. `ContentListPanel.OnParametersSetAsync`'s initial template-list and content-list fetches are similarly now run concurrently instead of sequentially.
+
 ## [0.4.9] - 2026-09-13
 
 ### Added

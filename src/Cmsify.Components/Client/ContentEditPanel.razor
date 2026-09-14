@@ -97,6 +97,8 @@
         }
 
         fieldValues.Clear();
+        var mediaLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
+        var fileLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
         foreach (var value in loadedVersion.Fields)
         {
             var editorValue = GetOrAddValue(value.FieldId);
@@ -113,25 +115,46 @@
             }
             if (value.MediaAssetId.HasValue)
             {
-                try
-                {
-                    editorValue.SelectedMediaAsset = await Client.Media.GetAsync(WorkspaceId, value.MediaAssetId.Value);
-                }
-                catch (CmsifyApiException)
-                {
-                    editorValue.FallbackMediaAssetId = value.MediaAssetId.Value;
-                }
+                mediaLookups.Add((editorValue, value.MediaAssetId.Value, Client.Media.GetAsync(WorkspaceId, value.MediaAssetId.Value)));
             }
             if (value.FileAssetId.HasValue)
             {
-                try
-                {
-                    editorValue.SelectedFileAsset = await Client.Media.GetAsync(WorkspaceId, value.FileAssetId.Value);
-                }
-                catch (CmsifyApiException)
-                {
-                    editorValue.FallbackFileAssetId = value.FileAssetId.Value;
-                }
+                fileLookups.Add((editorValue, value.FileAssetId.Value, Client.Media.GetAsync(WorkspaceId, value.FileAssetId.Value)));
+            }
+        }
+
+        // Every media/file asset lookup above is independent - fire them all concurrently instead
+        // of awaiting one at a time. The combined await here only needs to unblock once they've all
+        // settled; each lookup's own success/failure (including the per-field fallback-ID behavior)
+        // is still resolved individually below, exactly as before.
+        try
+        {
+            await Task.WhenAll(mediaLookups.Select(l => l.Task).Concat(fileLookups.Select(l => l.Task)));
+        }
+        catch (CmsifyApiException)
+        {
+        }
+
+        foreach (var (editorValue, assetId, task) in mediaLookups)
+        {
+            try
+            {
+                editorValue.SelectedMediaAsset = await task;
+            }
+            catch (CmsifyApiException)
+            {
+                editorValue.FallbackMediaAssetId = assetId;
+            }
+        }
+        foreach (var (editorValue, assetId, task) in fileLookups)
+        {
+            try
+            {
+                editorValue.SelectedFileAsset = await task;
+            }
+            catch (CmsifyApiException)
+            {
+                editorValue.FallbackFileAssetId = assetId;
             }
         }
     }
@@ -167,18 +190,27 @@
             .Where(binding => binding.PickListId.HasValue && binding.RevisionId.HasValue)
             .Select(binding => (binding.PickListId!.Value, binding.RevisionId!.Value))
             .Distinct()
+            .Where(binding => !pickListsByRevisionId.ContainsKey(binding.Item2))
             .ToList();
 
-        foreach (var (pickListId, revisionId) in bindings)
-        {
-            if (pickListsByRevisionId.ContainsKey(revisionId))
-            {
-                continue;
-            }
+        // Fire every distinct pick-list revision lookup concurrently rather than one at a time.
+        var lookups = bindings
+            .Select(binding => (RevisionId: binding.Item2, Task: Client.PickLists.GetRevisionAsync(WorkspaceId, binding.Item1, binding.Item2)))
+            .ToList();
 
+        try
+        {
+            await Task.WhenAll(lookups.Select(l => l.Task));
+        }
+        catch (CmsifyApiException)
+        {
+        }
+
+        foreach (var (revisionId, task) in lookups)
+        {
             try
             {
-                var pickList = await Client.PickLists.GetRevisionAsync(WorkspaceId, pickListId, revisionId);
+                var pickList = await task;
                 if (pickList is not null)
                 {
                     pickListsByRevisionId[revisionId] = pickList;
@@ -196,17 +228,19 @@
             .SelectMany(field => field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value)
                 .Concat(field.TemplateId.HasValue ? [field.TemplateId.Value] : []))
             .Distinct()
+            .Where(templateId => !referenceOptionsByTemplateId.ContainsKey(templateId))
             .ToList();
 
-        foreach (var templateId in templateIds)
-        {
-            if (referenceOptionsByTemplateId.ContainsKey(templateId))
-            {
-                continue;
-            }
+        // Every distinct referenced template's option list is independent of the others - fetch
+        // them all concurrently instead of one at a time.
+        var lookups = templateIds
+            .Select(templateId => (TemplateId: templateId, Task: Client.Content.ListAsync(WorkspaceId, null, templateId, null, null, null)))
+            .ToList();
+        await Task.WhenAll(lookups.Select(l => l.Task));
 
-            var page = await Client.Content.ListAsync(WorkspaceId, null, templateId, null, null, null);
-            referenceOptionsByTemplateId[templateId] = page?.Items ?? [];
+        foreach (var (templateId, task) in lookups)
+        {
+            referenceOptionsByTemplateId[templateId] = task.Result?.Items ?? [];
         }
     }
 

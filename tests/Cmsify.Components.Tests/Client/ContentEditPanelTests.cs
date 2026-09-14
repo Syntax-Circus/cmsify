@@ -1056,4 +1056,245 @@ public sealed class ContentEditPanelTests : BunitContext
         saved.ShouldNotBeNull();
         saved!.Id.ShouldBe(contentId);
     }
+
+    [Fact]
+    public void LoadingMultipleMediaAndFileFieldsFetchesThemConcurrently()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+        var mediaFieldAId = Guid.NewGuid();
+        var mediaFieldBId = Guid.NewGuid();
+        var assetAId = Guid.NewGuid();
+        var assetBId = Guid.NewGuid();
+        var tracker = new ConcurrencyTracker();
+
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyTracking(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{contentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{mediaFieldAId}}", "key": "coverA", "label": "Cover A", "order": 0, "valueKind": "Media",
+                          "textValue": null, "boolValue": null, "mediaAssetId": "{{assetAId}}", "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null },
+                        { "fieldId": "{{mediaFieldBId}}", "key": "coverB", "label": "Cover B", "order": 1, "valueKind": "Media",
+                          "textValue": null, "boolValue": null, "mediaAssetId": "{{assetBId}}", "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "items": [{ "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article", "description": null, "currentVersionId": "{{templateVersionId}}" }], "totalCount": 1, "page": 1, "pageSize": 20 }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{mediaFieldAId}}", "sectionId": null, "key": "coverA", "label": "Cover A", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": 1, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": "Media", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null },
+                          { "id": "{{mediaFieldBId}}", "sectionId": null, "key": "coverB", "label": "Cover B", "helpText": null,
+                            "order": 1, "isRequired": false, "minOccurrences": 0, "maxOccurrences": 1, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": "Media", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/media/{assetAId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{assetAId}}", "fileName": "a.png", "mimeType": "image/png", "sizeBytes": 10,
+                      "altText": null, "url": "https://cmsify.test/a.png", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/media/{assetBId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{assetBId}}", "fileName": "b.png", "mimeType": "image/png", "sizeBytes": 10,
+                      "altText": null, "url": "https://cmsify.test/b.png", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        }, tracker);
+
+        Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, contentId));
+
+        // If the two media lookups ran one at a time, the tracker would never observe more than a
+        // single in-flight request. Observing 2+ proves they were fired concurrently.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (tracker.MaxObserved < 2 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(10);
+        }
+
+        tracker.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public void LoadingMultiplePickListFieldsFetchesRevisionsConcurrently()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldAId = Guid.NewGuid();
+        var fieldBId = Guid.NewGuid();
+        var pickListAId = Guid.NewGuid();
+        var pickListBId = Guid.NewGuid();
+        var revisionAId = Guid.NewGuid();
+        var revisionBId = Guid.NewGuid();
+        var tracker = new ConcurrencyTracker();
+
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyTracking(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldAId}}", "sectionId": null, "key": "colorA", "label": "Color A", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "PickList", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": { "picklistId": "{{pickListAId}}", "picklistRevisionId": "{{revisionAId}}", "multiple": false },
+                            "componentId": null },
+                          { "id": "{{fieldBId}}", "sectionId": null, "key": "colorB", "label": "Color B", "helpText": null,
+                            "order": 1, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "PickList", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": { "picklistId": "{{pickListBId}}", "picklistRevisionId": "{{revisionBId}}", "multiple": false },
+                            "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/picklists/{pickListAId}/revisions/{revisionAId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{pickListAId}}", "name": "Colors A", "slug": "colors-a", "description": null,
+                      "options": [{ "id": "{{Guid.NewGuid()}}", "label": "Red", "value": "red", "order": 0 }] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/picklists/{pickListBId}/revisions/{revisionBId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{pickListBId}}", "name": "Colors B", "slug": "colors-b", "description": null,
+                      "options": [{ "id": "{{Guid.NewGuid()}}", "label": "Blue", "value": "blue", "order": 0 }] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        }, tracker);
+
+        Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId));
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (tracker.MaxObserved < 2 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(10);
+        }
+
+        tracker.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public void LoadingMultipleReferenceFieldsFetchesOptionsConcurrently()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldAId = Guid.NewGuid();
+        var fieldBId = Guid.NewGuid();
+        var referencedTemplateAId = Guid.NewGuid();
+        var referencedTemplateBId = Guid.NewGuid();
+        var tracker = new ConcurrencyTracker();
+
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyTracking(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldAId}}", "sectionId": null, "key": "relatedA", "label": "Related A", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": 1, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": null, "templateId": "{{referencedTemplateAId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null },
+                          { "id": "{{fieldBId}}", "sectionId": null, "key": "relatedB", "label": "Related B", "helpText": null,
+                            "order": 1, "isRequired": false, "minOccurrences": 0, "maxOccurrences": 1, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": null, "templateId": "{{referencedTemplateBId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            // Both reference fields list against the same /content endpoint (filtered by
+            // templateId via query string, which .AbsolutePath doesn't include) - the tracker is
+            // what actually proves the two lookups overlapped rather than running one at a time.
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        }, tracker);
+
+        Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId));
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (tracker.MaxObserved < 2 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(10);
+        }
+
+        tracker.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+    }
 }
