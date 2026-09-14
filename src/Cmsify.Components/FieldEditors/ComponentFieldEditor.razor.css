@@ -1,15 +1,44 @@
-.cmsify-field-textarea--code {
+.cmsify-component-group {
     display: block;
-    width: 100%;
-    box-sizing: border-box;
-    margin-bottom: var(--cmsify-spacing-sm, 0.375rem);
+}
+
+/* Duplicated from FieldEditor.razor.css: Blazor CSS isolation scopes rules to the
+   elements a component renders itself, so this class needs its own copy here since
+   ComponentFieldEditor.razor renders it directly (not via a nested <FieldEditor>). */
+.cmsify-field-warning {
     padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-danger, #dc3545);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    color: var(--cmsify-color-danger, #dc3545);
+    font-size: 0.875rem;
+}
+
+/* Duplicated from ContentEditForm.razor.css: same CSS-isolation reasoning as above -
+   ComponentFieldEditor.razor renders this wrapper directly around its nested fields. */
+.cmsify-form-field {
+    margin-bottom: var(--cmsify-spacing-md, 0.75rem);
+}
+
+.cmsify-component-instance {
     border: 1px solid var(--cmsify-color-border, #ced4da);
     border-radius: var(--cmsify-radius, 0.375rem);
-    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-    color: var(--cmsify-color-text, inherit);
-    background: var(--cmsify-color-field-background, transparent);
-    resize: vertical;
+    padding: var(--cmsify-spacing-md, 0.75rem);
+    margin-bottom: var(--cmsify-spacing-md, 0.75rem);
+}
+
+.cmsify-component-instance-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--cmsify-spacing-sm, 0.375rem);
+}
+
+.cmsify-component-remove-button {
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-danger, #dc3545);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    background: transparent;
+    color: var(--cmsify-color-danger, #dc3545);
+    cursor: pointer;
 }
 
 .cmsify-field-add-button {

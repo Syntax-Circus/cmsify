@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Component-typed fields (`TemplateField.ComponentId`) now render as first-class, recursive structured editors in `Cmsify.Components` instead of a raw JSON textarea — nested component-in-component fields, all primitive field types (including Media/File, referenced as a GUID within the component's snapshot JSON), and pick-list bindings all render and save correctly, with add/remove of repeated instances respecting `MinOccurrences`/`MaxOccurrences`.
+- `CompositionMode.Inline` template-reference fields now render a first-class, recursive child-content editor in `Cmsify.Components` instead of a "not available yet" placeholder — a user can create, edit, and remove real child `ContentItem`s directly embedded in the parent's form, at any nesting depth. Since there is no server-side cascade-delete for Inline children and no server-side cycle protection for polymorphic (`IsOpen`) composition fields, the editor enforces a client-side depth/cycle guard (8 levels) and performs save writes children-before-parents, aborting on any child failure and deleting removed children only after the parent's own save succeeds.
+- Documented when to use a component field versus a template-as-child-field (`Reference` vs. `Inline` composition) in `docs/content-modeling.md`.
+
+### Changed
+
+- **Breaking:** `ContentFieldEditorValue.ComponentValues` is now `IReadOnlyList<ComponentInstanceValue>` (was `IReadOnlyList<string>` of raw JSON). `ContentEditForm`'s and `FieldEditor`'s `OnMediaPickRequested`/`OnFilePickRequested` callbacks are now `EventCallback<ContentFieldEditorValue>` (were `EventCallback<TemplateFieldResponse>`), and `ContentEditForm.FieldValues` is now `IDictionary<Guid, ContentFieldEditorValue>` (was `IReadOnlyDictionary<...>`). `ComponentFieldEditor`'s entire parameter surface changed to support structured editing. Consumers who render `ContentEditForm`/`FieldEditor`/`ComponentFieldEditor` directly (rather than through the SDK-backed `ContentEditPanel`) will need to update call sites; `ContentEditPanel` itself absorbs all of these changes transparently.
+
 ## [0.4.10] - 2026-09-13
 
 ### Fixed

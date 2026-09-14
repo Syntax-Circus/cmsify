@@ -50,14 +50,33 @@ public sealed class FieldEditorTests : BunitContext
     [Fact]
     public void RendersComponentFieldEditorWhenComponentIdIsSet()
     {
-        var field = TestFieldFactory.Create(componentId: Guid.NewGuid());
-        var value = new ContentFieldEditorValue { ComponentValues = ["{\"a\":1}"] };
+        var titleField = TestComponentFactory.CreateField(key: "title", primitiveType: PrimitiveType.Text);
+        var component = TestComponentFactory.Create(currentVersion: TestComponentFactory.CreateVersion(fields: [titleField]));
+        var componentSchemas = new Dictionary<Guid, ComponentResponse> { [component.Id] = component };
+
+        var field = TestFieldFactory.Create(componentId: component.Id);
+        var instance = new ComponentInstanceValue();
+        instance.GetOrCreate(titleField.Id).TextValue = "Hello";
+        var value = new ContentFieldEditorValue { ComponentValues = [instance] };
 
         var cut = Render<FieldEditor>(parameters => parameters
             .Add(p => p.Field, field)
-            .Add(p => p.Value, value));
+            .Add(p => p.Value, value)
+            .Add(p => p.ComponentSchemas, componentSchemas));
 
-        cut.FindComponent<ComponentFieldEditor>().Instance.Values.ShouldBe(new[] { "{\"a\":1}" });
+        cut.FindComponent<ComponentFieldEditor>().Instance.Values.ShouldBe(new[] { instance });
+    }
+
+    [Fact]
+    public void RendersFallbackWarningWhenComponentSchemaIsUnresolved()
+    {
+        var field = TestFieldFactory.Create(componentId: Guid.NewGuid());
+
+        var cut = Render<FieldEditor>(parameters => parameters
+            .Add(p => p.Field, field)
+            .Add(p => p.Value, new ContentFieldEditorValue()));
+
+        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("Component schema unavailable.");
     }
 
     [Fact]
@@ -74,15 +93,23 @@ public sealed class FieldEditorTests : BunitContext
     }
 
     [Fact]
-    public void RendersInlineNotAvailableWarningForInlineCompositionField()
+    public void RendersInlineChildContentEditorForInlineCompositionField()
     {
+        var workspaceId = Guid.NewGuid();
         var field = TestFieldFactory.Create(templateId: Guid.NewGuid(), compositionMode: CompositionMode.Inline);
+
+        // A fixed TemplateId with no AllowedTypes skips the picker/candidate resolution entirely, so
+        // no HTTP request should ever be issued for this render.
+        var client = TestCmsifyClientFactory.Create(request =>
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}"));
 
         var cut = Render<FieldEditor>(parameters => parameters
             .Add(p => p.Field, field)
-            .Add(p => p.Value, new ContentFieldEditorValue()));
+            .Add(p => p.Value, new ContentFieldEditorValue())
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId));
 
-        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("not available yet");
+        cut.FindComponent<SyntaxCircus.Cmsify.Components.Client.InlineChildContentEditor>().ShouldNotBeNull();
     }
 
     [Fact]

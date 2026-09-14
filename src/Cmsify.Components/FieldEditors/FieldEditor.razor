@@ -1,4 +1,6 @@
 @namespace SyntaxCircus.Cmsify.Components
+@using System.Collections.Immutable
+@using SyntaxCircus.Cmsify.Components.Client
 
 @if (TryGetOverride(out var overrideFragment))
 {
@@ -6,7 +8,12 @@
 }
 else if (Field.ComponentId.HasValue)
 {
-    <ComponentFieldEditor Values="@Value.ComponentValues" MaxOccurrences="@Field.MaxOccurrences" ReadOnly="@ReadOnly"
+    <ComponentFieldEditor ComponentId="@Field.ComponentId.Value" Values="@Value.ComponentValues"
+                          MinOccurrences="@Field.MinOccurrences" MaxOccurrences="@Field.MaxOccurrences" ReadOnly="@ReadOnly"
+                          ComponentSchemas="@ComponentSchemas" PickListsByRevisionId="@PickListsByRevisionId"
+                          ReferenceOptionsByTemplateId="@ReferenceOptionsByTemplateId" CurrentContentId="@CurrentContentId"
+                          FieldTemplateOverrides="@FieldTemplateOverrides"
+                          OnMediaPickRequested="OnMediaPickRequested" OnFilePickRequested="OnFilePickRequested"
                           ValuesChanged="@(values => UpdateAsync(v => v.ComponentValues = values))" />
 }
 else if (IsCompositionField)
@@ -18,7 +25,11 @@ else if (IsCompositionField)
     }
     else
     {
-        <div class="cmsify-field-warning">Inline child content editing is not available yet. Use a reference field or create the child content separately.</div>
+        <InlineChildContentEditor Client="@Client" WorkspaceId="@WorkspaceId" Field="@Field"
+                                   Instances="@Value.ChildInstances" InstancesChanged="@(v => UpdateAsync(x => x.ChildInstances = v))"
+                                   AncestorTemplateIds="@AncestorTemplateIds" Depth="@Depth" ReadOnly="@ReadOnly"
+                                   OnMediaPickRequested="OnMediaPickRequested" OnFilePickRequested="OnFilePickRequested"
+                                   FieldTemplateOverrides="@FieldTemplateOverrides" />
     }
 }
 else
@@ -35,10 +46,10 @@ else
             <RichTextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.Media:
-            <MediaFieldEditor SelectedAsset="@Value.SelectedMediaAsset" OnPickRequested="OnMediaPickRequested" ReadOnly="@ReadOnly" />
+            <MediaFieldEditor SelectedAsset="@Value.SelectedMediaAsset" OnPickRequested="@(() => OnMediaPickRequested.InvokeAsync(Value))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.File:
-            <FileFieldEditor SelectedAsset="@Value.SelectedFileAsset" OnPickRequested="OnFilePickRequested" ReadOnly="@ReadOnly" />
+            <FileFieldEditor SelectedAsset="@Value.SelectedFileAsset" OnPickRequested="@(() => OnFilePickRequested.InvokeAsync(Value))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.PickList:
             <PickListFieldEditor PickList="@ResolvedPickList" Multiple="@PickListBinding.Multiple" IsRequired="@Field.IsRequired" ReadOnly="@ReadOnly"
@@ -66,10 +77,18 @@ else
     [Parameter] public EventCallback<ContentFieldEditorValue> ValueChanged { get; set; }
     [Parameter] public PickListResponse? ResolvedPickList { get; set; }
     [Parameter] public IReadOnlyList<ContentItemSummaryResponse> ReferenceOptions { get; set; } = [];
-    [Parameter] public EventCallback OnMediaPickRequested { get; set; }
-    [Parameter] public EventCallback OnFilePickRequested { get; set; }
+    [Parameter] public IReadOnlyDictionary<Guid, ComponentResponse> ComponentSchemas { get; set; } = new Dictionary<Guid, ComponentResponse>();
+    [Parameter] public IReadOnlyDictionary<Guid, PickListResponse> PickListsByRevisionId { get; set; } = new Dictionary<Guid, PickListResponse>();
+    [Parameter] public IReadOnlyDictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> ReferenceOptionsByTemplateId { get; set; } = new Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>>();
+    [Parameter] public Guid? CurrentContentId { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnMediaPickRequested { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnFilePickRequested { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public CmsifyClient? Client { get; set; }
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
+    [Parameter] public int Depth { get; set; }
 
     private bool IsCompositionField =>
         Field.TemplateId.HasValue || Field.IsOpen || Field.AllowedTypes.Any(allowed => allowed.AllowedTemplateId.HasValue);

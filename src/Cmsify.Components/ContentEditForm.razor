@@ -1,4 +1,5 @@
 @namespace SyntaxCircus.Cmsify.Components
+@using System.Collections.Immutable
 
 <div class="cmsify-form">
     @if (!string.IsNullOrWhiteSpace(Error))
@@ -8,18 +9,25 @@
     <div class="cmsify-form-fields">
         @foreach (var field in TemplateVersion.Fields.OrderBy(f => f.Order))
         {
-            var binding = PickListFieldBinding.FromFieldConfig(field.FieldConfig);
-            var resolvedPickList = binding.RevisionId.HasValue && PickListsByRevisionId.TryGetValue(binding.RevisionId.Value, out var pickList) ? pickList : null;
-            var referenceOptions = ReferenceOptionsForField(field);
+            var resolvedPickList = PickListFieldBinding.Resolve(field, PickListsByRevisionId);
+            var referenceOptions = PickListFieldBinding.ResolveReferenceOptions(field, ReferenceOptionsByTemplateId, CurrentContentId);
             <div class="cmsify-form-field">
                 <label class="cmsify-form-label">@field.Label @(field.IsRequired ? "*" : "")</label>
                 <FieldEditor Field="@field" Value="@GetOrCreateValue(field.Id)"
                              ValueChanged="@(value => FieldValueChanged.InvokeAsync((field, value)))"
                              ResolvedPickList="@resolvedPickList"
                              ReferenceOptions="@referenceOptions"
-                             OnMediaPickRequested="@(() => OnMediaPickRequested.InvokeAsync(field))"
-                             OnFilePickRequested="@(() => OnFilePickRequested.InvokeAsync(field))"
+                             ComponentSchemas="@ComponentSchemas"
+                             PickListsByRevisionId="@PickListsByRevisionId"
+                             ReferenceOptionsByTemplateId="@ReferenceOptionsByTemplateId"
+                             CurrentContentId="@CurrentContentId"
+                             OnMediaPickRequested="OnMediaPickRequested"
+                             OnFilePickRequested="OnFilePickRequested"
                              FieldTemplateOverrides="@FieldTemplateOverrides"
+                             Client="@Client"
+                             WorkspaceId="@WorkspaceId"
+                             AncestorTemplateIds="@AncestorTemplateIds"
+                             Depth="@Depth"
                              ReadOnly="@ReadOnly" />
                 @if (!string.IsNullOrWhiteSpace(field.HelpText))
                 {
@@ -43,7 +51,7 @@
         <label class="cmsify-form-label">Tags</label>
         <input class="cmsify-field-input" value="@Tags" readonly="@ReadOnly" @oninput="e => TagsChanged.InvokeAsync(e.Value?.ToString())" />
     </div>
-    @if (!ReadOnly)
+    @if (!ReadOnly && ShowSaveButton)
     {
         <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()" disabled="@Busy">@(Busy ? "Saving…" : "Save")</button>
     }
@@ -51,10 +59,11 @@
 
 @code {
     [Parameter, EditorRequired] public TemplateVersionResponse TemplateVersion { get; set; } = null!;
-    [Parameter, EditorRequired] public IReadOnlyDictionary<Guid, ContentFieldEditorValue> FieldValues { get; set; } = new Dictionary<Guid, ContentFieldEditorValue>();
+    [Parameter, EditorRequired] public IDictionary<Guid, ContentFieldEditorValue> FieldValues { get; set; } = new Dictionary<Guid, ContentFieldEditorValue>();
     [Parameter] public EventCallback<(TemplateFieldResponse Field, ContentFieldEditorValue Value)> FieldValueChanged { get; set; }
     [Parameter] public IReadOnlyDictionary<Guid, PickListResponse> PickListsByRevisionId { get; set; } = new Dictionary<Guid, PickListResponse>();
     [Parameter] public IReadOnlyDictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> ReferenceOptionsByTemplateId { get; set; } = new Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>>();
+    [Parameter] public IReadOnlyDictionary<Guid, ComponentResponse> ComponentSchemas { get; set; } = new Dictionary<Guid, ComponentResponse>();
     [Parameter] public string? Slug { get; set; }
     [Parameter] public EventCallback<string?> SlugChanged { get; set; }
     [Parameter] public string? Locale { get; set; }
@@ -64,32 +73,23 @@
     [Parameter] public string? SlugHelpText { get; set; }
     [Parameter] public string? Error { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
-    [Parameter] public EventCallback<TemplateFieldResponse> OnMediaPickRequested { get; set; }
-    [Parameter] public EventCallback<TemplateFieldResponse> OnFilePickRequested { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnMediaPickRequested { get; set; }
+    [Parameter] public EventCallback<ContentFieldEditorValue> OnFilePickRequested { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public Guid? CurrentContentId { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
     [Parameter] public bool Busy { get; set; }
+    [Parameter] public bool ShowSaveButton { get; set; } = true;
+    [Parameter] public CmsifyClient? Client { get; set; }
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
+    [Parameter] public int Depth { get; set; }
 
+    // Storing (not just returning a throwaway) is essential: OnMediaPickRequested/OnFilePickRequested
+    // is a fire-and-forget request that only mutates the ContentFieldEditorValue later, once the user
+    // actually picks an asset - by then, re-rendering (e.g. to show the picker) would otherwise call
+    // this again and get a brand new, never-stored instance, silently discarding the pick. Mirrors
+    // ComponentInstanceValue.GetOrCreate, which stores into its own dictionary for the same reason.
     private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
-        FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();
-
-    private IReadOnlyList<ContentItemSummaryResponse> ReferenceOptionsForField(TemplateFieldResponse field)
-    {
-        var templateIds = new List<Guid>();
-        if (field.TemplateId.HasValue)
-        {
-            templateIds.Add(field.TemplateId.Value);
-        }
-
-        templateIds.AddRange(field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value));
-
-        return templateIds
-            .SelectMany(id => ReferenceOptionsByTemplateId.TryGetValue(id, out var options) ? options : [])
-            .Where(option => option.Id != CurrentContentId)
-            .GroupBy(option => option.Id)
-            .Select(group => group.First())
-            .OrderBy(option => option.Slug ?? option.Id.ToString())
-            .ToList();
-    }
+        FieldValues.TryGetValue(fieldId, out var value) ? value : FieldValues[fieldId] = new ContentFieldEditorValue();
 }

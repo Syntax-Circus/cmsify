@@ -1,0 +1,52 @@
+.cmsify-inline-child-list {
+    display: block;
+}
+
+.cmsify-inline-child-card {
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-left: 3px solid var(--cmsify-color-border-focus, #0d6efd);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    padding: var(--cmsify-spacing-md, 0.75rem);
+    margin-bottom: var(--cmsify-spacing-md, 0.75rem);
+}
+
+.cmsify-inline-child-card--pending-delete {
+    opacity: 0.5;
+}
+
+.cmsify-inline-child-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--cmsify-spacing-sm, 0.375rem);
+}
+
+/* Duplicated from FieldEditor.razor.css: Blazor CSS isolation scopes rules to the elements a
+   component renders itself, so this component needs its own copy since it renders this class
+   directly (the depth-limit terminal message, and the "resolving template" placeholder). */
+.cmsify-field-warning {
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-danger, #dc3545);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    color: var(--cmsify-color-danger, #dc3545);
+    font-size: 0.875rem;
+}
+
+/* Duplicated from ComponentFieldEditor.razor.css: same CSS-isolation reasoning as above - this
+   component renders its own Add/Remove/Restore buttons rather than reusing ComponentFieldEditor's. */
+.cmsify-field-add-button {
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    background: transparent;
+    color: var(--cmsify-color-text, inherit);
+    cursor: pointer;
+}
+
+.cmsify-component-remove-button {
+    padding: var(--cmsify-spacing-sm, 0.375rem) var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-danger, #dc3545);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    background: transparent;
+    color: var(--cmsify-color-danger, #dc3545);
+    cursor: pointer;
+}

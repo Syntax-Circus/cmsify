@@ -1,12 +1,14 @@
 @namespace SyntaxCircus.Cmsify.Components.Client
-@using System.Text.Json
+@using System.Collections.Immutable
 
 <ContentEditForm TemplateVersion="@templateVersion" FieldValues="@fieldValues" FieldValueChanged="OnFieldValueChangedAsync"
                  PickListsByRevisionId="@pickListsByRevisionId" ReferenceOptionsByTemplateId="@referenceOptionsByTemplateId"
+                 ComponentSchemas="@componentSchemas"
                  Slug="@slug" SlugChanged="@(v => slug = v)" Locale="@locale" LocaleChanged="@(v => locale = v)"
                  Tags="@tags" TagsChanged="@(v => tags = v)" Error="@error" OnSave="SaveAsync"
                  OnMediaPickRequested="OpenMediaPickerAsync" OnFilePickRequested="OpenFilePickerAsync"
                  FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText"
+                 Client="@Client" WorkspaceId="@WorkspaceId"
                  ReadOnly="@ReadOnly" Busy="@busy" />
 
 <MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix"
@@ -34,13 +36,14 @@
     private readonly Dictionary<Guid, ContentFieldEditorValue> fieldValues = [];
     private readonly Dictionary<Guid, PickListResponse> pickListsByRevisionId = [];
     private readonly Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> referenceOptionsByTemplateId = [];
+    private Dictionary<Guid, ComponentResponse> componentSchemas = [];
     private string? slug;
     private string? locale;
     private string? tags;
     private string? error;
     private bool pickerVisible;
     private string? pickerMimePrefix;
-    private Guid pickerFieldId;
+    private ContentFieldEditorValue? pickerTargetValue;
     private bool pickerIsFileField;
     private bool loaded;
     private bool busy;
@@ -97,8 +100,17 @@
         }
 
         fieldValues.Clear();
+        var fieldsById = templateVersion.Fields.ToDictionary(f => f.Id);
         var mediaLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
         var fileLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
+        var inlineChildLookups = new List<(ContentFieldEditorValue Value, Guid ChildContentItemId, Task<InlineChildInstance> Task)>();
+
+        // Read-only viewing (or pinning an explicit historical VersionNumber) must never mint a new
+        // Draft version for an Inline child that lacks one - Draft-creation requires Editor role
+        // server-side, so a Viewer-role user opening a read-only view would otherwise 403, and even
+        // for an Editor, merely viewing content should not have the side effect of creating rows.
+        var allowInlineDraftCreation = !ReadOnly && !VersionNumber.HasValue;
+
         foreach (var value in loadedVersion.Fields)
         {
             var editorValue = GetOrAddValue(value.FieldId);
@@ -109,9 +121,31 @@
             {
                 editorValue.MultiValues = [.. editorValue.MultiValues, value.TextValue];
             }
-            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue)
+            var field = fieldsById.GetValueOrDefault(value.FieldId);
+            if (field?.CompositionMode == CompositionMode.Inline && value.ChildContentItemId is { } childContentItemId)
             {
-                editorValue.ComponentValues = [.. editorValue.ComponentValues, value.JsonValue.Value.GetRawText()];
+                inlineChildLookups.Add((editorValue, childContentItemId, ContentEditSupport.LoadInlineChildInstanceAsync(
+                    Client, WorkspaceId, childContentItemId, null, ImmutableHashSet<Guid>.Empty, 0, allowInlineDraftCreation, CancellationToken.None)));
+            }
+            if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue && field?.ComponentId is { } componentId)
+            {
+                var instance = ComponentValueSerializer.Deserialize(value.JsonValue.Value, componentId, componentSchemas);
+                editorValue.ComponentValues = [.. editorValue.ComponentValues, instance];
+
+                // Media/File fields nested anywhere inside the component instance need the same
+                // asset resolution as top-level fields - fold them into the same concurrent-fetch
+                // lists below instead of resolving them separately.
+                foreach (var nestedValue in ContentEditSupport.CollectValuesWithFallbackAssets(instance))
+                {
+                    if (nestedValue.FallbackMediaAssetId is { } nestedMediaId)
+                    {
+                        mediaLookups.Add((nestedValue, nestedMediaId, Client.Media.GetAsync(WorkspaceId, nestedMediaId)));
+                    }
+                    if (nestedValue.FallbackFileAssetId is { } nestedFileId)
+                    {
+                        fileLookups.Add((nestedValue, nestedFileId, Client.Media.GetAsync(WorkspaceId, nestedFileId)));
+                    }
+                }
             }
             if (value.MediaAssetId.HasValue)
             {
@@ -157,6 +191,41 @@
                 editorValue.FallbackFileAssetId = assetId;
             }
         }
+
+        // Sibling Inline children at this level are independent of each other - fire every lookup
+        // concurrently rather than depth-first loading them one at a time. A single failed lookup
+        // must not destroy every sibling's link: SaveAsync's Inline branch rebuilds this field's
+        // whole ChildContent row set from ChildInstances alone, so if one lookup here were allowed to
+        // fault the whole Task.WhenAll (as it did before), the resulting empty ChildInstances would
+        // silently orphan every healthy sibling on the very next save.
+        try
+        {
+            await Task.WhenAll(inlineChildLookups.Select(l => l.Task));
+        }
+        catch (CmsifyApiException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (HttpRequestException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
+
+        foreach (var (editorValue, childContentItemId, task) in inlineChildLookups)
+        {
+            try
+            {
+                editorValue.ChildInstances = [.. editorValue.ChildInstances, await task];
+            }
+            catch (Exception ex) when (ex is CmsifyApiException or InvalidOperationException or HttpRequestException or TaskCanceledException)
+            {
+                editorValue.ChildInstances = [.. editorValue.ChildInstances, new InlineChildInstance { ContentItemId = childContentItemId, LoadFailed = true }];
+            }
+        }
     }
 
     private ContentFieldEditorValue GetOrAddValue(Guid fieldId)
@@ -180,69 +249,40 @@
 
         await LoadPickListsAsync();
         await LoadReferenceOptionsAsync();
+
+        // Component schemas must be resolved before the second pick-list/reference-option pass
+        // below, which extends the same two dictionaries with bindings found nested inside every
+        // resolved component schema (the resolver has already flattened the full nested tree, so
+        // no further recursion is needed here).
+        await LoadComponentSchemasAsync();
+        var componentFields = ComponentSchemaTemplateFields();
+        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, componentFields, pickListsByRevisionId);
+        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, componentFields, referenceOptionsByTemplateId);
+    }
+
+    private async Task LoadComponentSchemasAsync()
+    {
+        var rootIds = templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value);
+        componentSchemas = await ComponentSchemaResolver.ResolveAsync(Client, WorkspaceId, rootIds);
     }
 
     private async Task LoadPickListsAsync()
     {
-        var bindings = templateVersion.Fields
-            .Where(field => field.PrimitiveType == PrimitiveType.PickList)
-            .Select(field => PickListFieldBinding.FromFieldConfig(field.FieldConfig))
-            .Where(binding => binding.PickListId.HasValue && binding.RevisionId.HasValue)
-            .Select(binding => (binding.PickListId!.Value, binding.RevisionId!.Value))
-            .Distinct()
-            .Where(binding => !pickListsByRevisionId.ContainsKey(binding.Item2))
-            .ToList();
-
-        // Fire every distinct pick-list revision lookup concurrently rather than one at a time.
-        var lookups = bindings
-            .Select(binding => (RevisionId: binding.Item2, Task: Client.PickLists.GetRevisionAsync(WorkspaceId, binding.Item1, binding.Item2)))
-            .ToList();
-
-        try
-        {
-            await Task.WhenAll(lookups.Select(l => l.Task));
-        }
-        catch (CmsifyApiException)
-        {
-        }
-
-        foreach (var (revisionId, task) in lookups)
-        {
-            try
-            {
-                var pickList = await task;
-                if (pickList is not null)
-                {
-                    pickListsByRevisionId[revisionId] = pickList;
-                }
-            }
-            catch (CmsifyApiException)
-            {
-            }
-        }
+        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, templateVersion.Fields, pickListsByRevisionId);
     }
 
     private async Task LoadReferenceOptionsAsync()
     {
-        var templateIds = templateVersion.Fields
-            .SelectMany(field => field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value)
-                .Concat(field.TemplateId.HasValue ? [field.TemplateId.Value] : []))
-            .Distinct()
-            .Where(templateId => !referenceOptionsByTemplateId.ContainsKey(templateId))
-            .ToList();
-
-        // Every distinct referenced template's option list is independent of the others - fetch
-        // them all concurrently instead of one at a time.
-        var lookups = templateIds
-            .Select(templateId => (TemplateId: templateId, Task: Client.Content.ListAsync(WorkspaceId, null, templateId, null, null, null)))
-            .ToList();
-        await Task.WhenAll(lookups.Select(l => l.Task));
-
-        foreach (var (templateId, task) in lookups)
-        {
-            referenceOptionsByTemplateId[templateId] = task.Result?.Items ?? [];
-        }
+        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, templateVersion.Fields, referenceOptionsByTemplateId);
     }
+
+    // componentSchemas is already the fully-flattened (recursively resolved) set of every nested
+    // component schema reachable from the template - no further recursion needed here.
+    private IEnumerable<TemplateFieldResponse> ComponentSchemaTemplateFields() =>
+        componentSchemas.Values
+            .Where(c => c.CurrentVersion is not null)
+            .SelectMany(c => c.CurrentVersion!.Fields)
+            .Select(ComponentFieldAdapter.ToTemplateField);
 
     private Task OnFieldValueChangedAsync((TemplateFieldResponse Field, ContentFieldEditorValue Value) change)
     {
@@ -250,18 +290,18 @@
         return Task.CompletedTask;
     }
 
-    private Task OpenMediaPickerAsync(TemplateFieldResponse field)
+    private Task OpenMediaPickerAsync(ContentFieldEditorValue value)
     {
-        pickerFieldId = field.Id;
+        pickerTargetValue = value;
         pickerIsFileField = false;
         pickerMimePrefix = "image/";
         pickerVisible = true;
         return Task.CompletedTask;
     }
 
-    private Task OpenFilePickerAsync(TemplateFieldResponse field)
+    private Task OpenFilePickerAsync(ContentFieldEditorValue value)
     {
-        pickerFieldId = field.Id;
+        pickerTargetValue = value;
         pickerIsFileField = true;
         pickerMimePrefix = null;
         pickerVisible = true;
@@ -270,14 +310,18 @@
 
     private Task OnAssetSelectedAsync(MediaAssetResponse asset)
     {
-        var value = GetOrAddValue(pickerFieldId);
-        if (pickerIsFileField)
+        // A reference type, so this works uniformly no matter how deeply the field is nested
+        // inside a component instance - there is no flat field-id to look it back up by.
+        if (pickerTargetValue is { } value)
         {
-            value.SelectedFileAsset = asset;
-        }
-        else
-        {
-            value.SelectedMediaAsset = asset;
+            if (pickerIsFileField)
+            {
+                value.SelectedFileAsset = asset;
+            }
+            else
+            {
+                value.SelectedMediaAsset = asset;
+            }
         }
 
         pickerVisible = false;
@@ -297,133 +341,207 @@
             return;
         }
 
-        var values = new List<ContentFieldValueRequest>();
-        foreach (var field in templateVersion.Fields.OrderBy(f => f.Order))
-        {
-            var value = GetOrAddValue(field.Id);
-
-            if (field.ComponentId.HasValue)
-            {
-                foreach (var raw in value.ComponentValues)
-                {
-                    try
-                    {
-                        using var document = JsonDocument.Parse(raw);
-                        if (document.RootElement.ValueKind != JsonValueKind.Object)
-                        {
-                            error = $"Component field '{field.Label}' must contain JSON objects.";
-                            return;
-                        }
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, document.RootElement.Clone()));
-                    }
-                    catch (JsonException)
-                    {
-                        error = $"Component field '{field.Label}' contains invalid JSON.";
-                        return;
-                    }
-                }
-                continue;
-            }
-
-            var isComposition = field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue);
-            if (isComposition)
-            {
-                if (value.ChildContentItemId is { } referencedId)
-                {
-                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
-                }
-                continue;
-            }
-
-            if (field.PrimitiveType == PrimitiveType.PickList)
-            {
-                var binding = PickListFieldBinding.FromFieldConfig(field.FieldConfig);
-                if (binding.Multiple)
-                {
-                    var index = 0;
-                    foreach (var selectedValue in value.MultiValues)
-                    {
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order + index, ValueKind.PickList, selectedValue, null, null, null, null, null));
-                        index++;
-                    }
-                }
-                else if (!string.IsNullOrWhiteSpace(value.TextValue))
-                {
-                    values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.PickList, value.TextValue, null, null, null, null, null));
-                }
-                continue;
-            }
-
-            values.Add(new ContentFieldValueRequest(
-                field.Id,
-                field.Order,
-                field.PrimitiveType switch
-                {
-                    PrimitiveType.Boolean => ValueKind.Boolean,
-                    PrimitiveType.Media => ValueKind.Media,
-                    PrimitiveType.File => ValueKind.File,
-                    PrimitiveType.Markdown => ValueKind.Markdown,
-                    PrimitiveType.RichText => ValueKind.RichText,
-                    PrimitiveType.Link => ValueKind.Link,
-                    PrimitiveType.Quote => ValueKind.Quote,
-                    PrimitiveType.Separator => ValueKind.Separator,
-                    _ => ValueKind.Text
-                },
-                value.TextValue,
-                value.BoolValue,
-                field.PrimitiveType == PrimitiveType.Media ? value.SelectedMediaAsset?.Id ?? value.FallbackMediaAssetId : null,
-                field.PrimitiveType == PrimitiveType.File ? value.SelectedFileAsset?.Id ?? value.FallbackFileAssetId : null,
-                null,
-                null));
-        }
-
-        var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
+        // Set busy (and notify) before any Inline child writes can begin below - those start well
+        // before the parent's own save call. Without this here, the Save button stays clickable
+        // during those child round-trips and a double-click can start a second concurrent SaveAsync
+        // while the first pass's not-yet-created children still have a null ContentItemId, creating
+        // duplicates.
         busy = true;
         await BusyChanged.InvokeAsync(true);
         try
         {
             error = null;
-            if (ContentId.HasValue)
-            {
-                var versionNumber = VersionNumber ?? version?.VersionNumber ?? 1;
-                var updatedVersion = await Client.Content.UpdateVersionAsync(WorkspaceId, ContentId.Value, versionNumber,
-                    new UpdateContentVersionRequest(version?.EffectiveStartAt, version?.EffectiveEndAt, values))
-                    ?? throw new InvalidOperationException("Cmsify API returned no payload while updating the content version.");
-                version = updatedVersion;
 
-                // Saving a version bumps the parent item's UpdatedAt server-side (search vector, list sort),
-                // which invalidates the item ETag captured at page load. Refresh it before the item PUT below,
-                // otherwise that PUT's If-Match always fails against its own prior write.
-                item = await Client.Content.GetAsync(WorkspaceId, ContentId.Value) ?? item;
-
-                var updatedItem = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
-                    new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, tagList))
-                    ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
-                item = updatedItem;
-
-                await ItemChanged.InvokeAsync(item);
-                await Saved.InvokeAsync(item);
-            }
-            else
+            // Pre-flight: validate EVERY Inline field's full instance tree (including nested Inline
+            // fields inside children) once, before ANY child write is issued - not interleaved with
+            // the per-field save calls below, so a deep validation failure in (say) field 2 is caught
+            // before field 1's children have already been created/updated.
+            var validationErrors = new List<string>();
+            foreach (var inlineField in templateVersion.Fields.Where(f => f.CompositionMode == CompositionMode.Inline))
             {
-                var createdItem = await Client.Content.CreateAsync(WorkspaceId,
-                    new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values))
-                    ?? throw new InvalidOperationException("Cmsify API returned no payload while creating content.");
-                item = createdItem;
-                await ItemChanged.InvokeAsync(item);
-                await Created.InvokeAsync(createdItem);
+                var inlineValue = GetOrAddValue(inlineField.Id);
+                validationErrors.AddRange(await InlineChildValidation.ValidateAsync(Client, WorkspaceId, inlineField, inlineValue.ChildInstances));
             }
-        }
-        catch (CmsifyApiException ex)
-        {
-            error = ex.Message;
-            if (ex.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && ContentId.HasValue)
+            if (validationErrors.Count > 0)
             {
-                await LoadContentAsync();
-                error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
+                error = string.Join(" ", validationErrors);
+                await InvokeOnErrorAsync(new InvalidOperationException(error));
+                return;
             }
-            await InvokeOnErrorAsync(ex);
+
+            var values = new List<ContentFieldValueRequest>();
+            try
+            {
+                foreach (var field in templateVersion.Fields.OrderBy(f => f.Order))
+                {
+                    var value = GetOrAddValue(field.Id);
+
+                    if (field.ComponentId.HasValue)
+                    {
+                        if (!componentSchemas.TryGetValue(field.ComponentId.Value, out var componentSchema) || componentSchema.CurrentVersion is null)
+                        {
+                            error = $"Component field '{field.Label}' schema could not be resolved.";
+                            return;
+                        }
+
+                        foreach (var instance in value.ComponentValues)
+                        {
+                            var serialized = ComponentValueSerializer.Serialize(instance, field.ComponentId.Value, componentSchemas);
+                            values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, serialized));
+                        }
+                        continue;
+                    }
+
+                    var isComposition = field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue);
+                    if (isComposition)
+                    {
+                        if (field.CompositionMode == CompositionMode.Inline)
+                        {
+                            // Children before parents, and this throws (aborting before the parent's own
+                            // save below) on the first child save failure - see ContentEditSupport.SaveInlineFieldAsync.
+                            var childRequests = await ContentEditSupport.SaveInlineFieldAsync(
+                                Client, WorkspaceId, field, value.ChildInstances, ImmutableHashSet<Guid>.Empty, 0);
+                            values.AddRange(childRequests);
+                        }
+                        else if (value.ChildContentItemId is { } referencedId)
+                        {
+                            values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
+                        }
+                        continue;
+                    }
+
+                    if (field.PrimitiveType == PrimitiveType.PickList)
+                    {
+                        var binding = PickListFieldBinding.FromFieldConfig(field.FieldConfig);
+                        if (binding.Multiple)
+                        {
+                            var index = 0;
+                            foreach (var selectedValue in value.MultiValues)
+                            {
+                                values.Add(new ContentFieldValueRequest(field.Id, field.Order + index, ValueKind.PickList, selectedValue, null, null, null, null, null));
+                                index++;
+                            }
+                        }
+                        else if (!string.IsNullOrWhiteSpace(value.TextValue))
+                        {
+                            values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.PickList, value.TextValue, null, null, null, null, null));
+                        }
+                        continue;
+                    }
+
+                    values.Add(new ContentFieldValueRequest(
+                        field.Id,
+                        field.Order,
+                        field.PrimitiveType switch
+                        {
+                            PrimitiveType.Boolean => ValueKind.Boolean,
+                            PrimitiveType.Media => ValueKind.Media,
+                            PrimitiveType.File => ValueKind.File,
+                            PrimitiveType.Markdown => ValueKind.Markdown,
+                            PrimitiveType.RichText => ValueKind.RichText,
+                            PrimitiveType.Link => ValueKind.Link,
+                            PrimitiveType.Quote => ValueKind.Quote,
+                            PrimitiveType.Separator => ValueKind.Separator,
+                            _ => ValueKind.Text
+                        },
+                        value.TextValue,
+                        value.BoolValue,
+                        field.PrimitiveType == PrimitiveType.Media ? value.SelectedMediaAsset?.Id ?? value.FallbackMediaAssetId : null,
+                        field.PrimitiveType == PrimitiveType.File ? value.SelectedFileAsset?.Id ?? value.FallbackFileAssetId : null,
+                        null,
+                        null));
+                }
+            }
+            catch (CmsifyApiException ex)
+            {
+                // A failed Inline child save aborts here, before the parent's own save is attempted -
+                // any children already saved before the failure remain persisted (a retry is then
+                // idempotent for them).
+                error = ex.Message;
+                await InvokeOnErrorAsync(ex);
+                return;
+            }
+            catch (InvalidOperationException ex)
+            {
+                // The Inline depth guard, or an unresolvable component/template schema - same
+                // abort-before-parent-save behavior as above.
+                error = ex.Message;
+                await InvokeOnErrorAsync(ex);
+                return;
+            }
+
+            var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var parentSaveSucceeded = false;
+            try
+            {
+                if (ContentId.HasValue)
+                {
+                    var versionNumber = VersionNumber ?? version?.VersionNumber ?? 1;
+                    var updatedVersion = await Client.Content.UpdateVersionAsync(WorkspaceId, ContentId.Value, versionNumber,
+                        new UpdateContentVersionRequest(version?.EffectiveStartAt, version?.EffectiveEndAt, values))
+                        ?? throw new InvalidOperationException("Cmsify API returned no payload while updating the content version.");
+                    version = updatedVersion;
+
+                    // Saving a version bumps the parent item's UpdatedAt server-side (search vector, list sort),
+                    // which invalidates the item ETag captured at page load. Refresh it before the item PUT below,
+                    // otherwise that PUT's If-Match always fails against its own prior write.
+                    item = await Client.Content.GetAsync(WorkspaceId, ContentId.Value) ?? item;
+
+                    var updatedItem = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
+                        new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, tagList))
+                        ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
+                    item = updatedItem;
+                    parentSaveSucceeded = true;
+
+                    await ItemChanged.InvokeAsync(item);
+                    await Saved.InvokeAsync(item);
+                }
+                else
+                {
+                    var createdItem = await Client.Content.CreateAsync(WorkspaceId,
+                        new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values))
+                        ?? throw new InvalidOperationException("Cmsify API returned no payload while creating content.");
+                    item = createdItem;
+                    parentSaveSucceeded = true;
+
+                    await ItemChanged.InvokeAsync(item);
+                    await Created.InvokeAsync(createdItem);
+                }
+            }
+            catch (CmsifyApiException ex)
+            {
+                error = ex.Message;
+                if (ex.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && ContentId.HasValue)
+                {
+                    await LoadContentAsync();
+                    error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
+                }
+                await InvokeOnErrorAsync(ex);
+                return;
+            }
+
+            // Only now that the parent's own save has succeeded is it safe to delete
+            // MarkedForDeletion Inline children - never before, so an aborted parent save never
+            // leaves an already-deleted id that the parent still (would have) referenced. This runs
+            // in its own try/catch, separate from the parent save above: a delete failure here (e.g.
+            // a stale ETag on the child) must surface as its own distinct, clearly-labeled error -
+            // not be misreported as a parent save failure (Saved/Created/ItemChanged already fired
+            // above, correctly, since the parent's own content WAS saved), and must not trigger the
+            // "content changed while saving, reloaded" message that's meant for the parent's own
+            // save conflict.
+            if (parentSaveSucceeded)
+            {
+                try
+                {
+                    await DeleteMarkedInlineChildrenAsync();
+                }
+                catch (Exception ex)
+                {
+                    error = $"Content was saved, but removing deleted inline items failed: {ex.Message}";
+                    await InvokeOnErrorAsync(ex);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -437,6 +555,26 @@
         {
             busy = false;
             await BusyChanged.InvokeAsync(false);
+        }
+    }
+
+    // Deletes every MarkedForDeletion Inline child instance across every Inline field, once (and
+    // only once) the parent's own save has already succeeded. No server-side cascade-delete exists
+    // for Inline children, so this explicit client-side pass is what actually removes them - dropping
+    // a child from the parent's field values alone would otherwise silently orphan it.
+    private async Task DeleteMarkedInlineChildrenAsync()
+    {
+        foreach (var field in templateVersion.Fields.Where(f => f.CompositionMode == CompositionMode.Inline))
+        {
+            var value = GetOrAddValue(field.Id);
+            foreach (var instance in value.ChildInstances.Where(i => i.MarkedForDeletion && i.ContentItemId.HasValue).ToList())
+            {
+                // Recursive: instance may itself own further Inline descendants (marked for deletion
+                // or not - everything inside a deleted instance becomes unreachable regardless), and
+                // no server-side cascade delete exists to clean those up.
+                await ContentEditSupport.DeleteInlineInstanceRecursivelyAsync(Client, WorkspaceId, instance);
+                value.ChildInstances.Remove(instance);
+            }
         }
     }
 

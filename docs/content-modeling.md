@@ -16,6 +16,39 @@ Use a component when the same structured block belongs in more than one template
 
 Then create content from a template. A content item is pinned to the template version it was created from until it is deliberately upgraded. This preserves the schema and values used by each published version.
 
+## Choosing between a component field and a template-as-child-field
+
+When a template field needs to reference structured content, you can use either a **component field** or a **template-as-child-field**. Each serves a different purpose:
+
+### Component field (`TemplateField.ComponentId`)
+
+Use a component field when the content is a small, reusable inline block with no independent lifecycle. The component's value is stored as snapshot JSON directly in the parent content item's version. Component fields are ideal for:
+
+- Structural elements that appear in multiple templates (a hero block, a call to action, a card with a title and description)
+- SEO metadata or configuration (Open Graph tags, analytics settings)
+- Repeatable nested structures (gallery items, FAQ question-answer pairs)
+
+**Important:** When you edit a component field in the UI, you always see the component's *current* published schema, not the schema in effect when the value was originally captured. This means the editor form may show fields that did not exist when the value was saved.
+
+### Template-as-child-field (`TemplateField.TemplateId` and `TemplateFieldAllowedType.AllowedTemplateId`)
+
+Use a template-as-child-field when the content needs its own lifecycle, URL/slug, and independent permissions. The value is a real, independent `ContentItem` with `ValueKind.ChildContent`. How the editor interacts with this child depends on the `CompositionMode`:
+
+**`CompositionMode.Reference`:** The child is meant to be shared and reused independently across multiple parents. The editor picks the child from a list of existing content items using a reference selector. This is ideal for:
+
+- Related articles or resources
+- Reusable landing page modules
+- Shared testimonials or case studies
+- Any content that needs its own independent publish cycle and URL
+
+**`CompositionMode.Inline`:** The child is owned by and intended to be removed alongside its parent. The editor creates and edits the child directly, embedded within the parent's form. This is ideal for:
+
+- Child content that has no independent value (e.g., a "gallery" that only makes sense as part of its parent page)
+- Keeping related content together in a single edit session
+- Simplified authoring workflows where child and parent are always published together
+
+The child can be edited, saved, and removed entirely within the parent's editing context: removing a child inside the editor and saving deletes that child. **This is a known limitation, not a guarantee:** deleting the parent content item itself (for example, from the content list's delete action) does not cascade-delete its Inline children today. There is no server-side cascade delete for Inline children, so a child removed any other way than through the editor's own explicit remove-then-save flow becomes orphaned.
+
 ## Example: a blog post with a call to action
 
 1. Create a **Call to Action** component with `heading`, `body`, `buttonLabel`, and `buttonUrl` fields.
