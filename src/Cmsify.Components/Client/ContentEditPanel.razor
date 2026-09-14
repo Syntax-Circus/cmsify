@@ -184,64 +184,12 @@
 
     private async Task LoadPickListsAsync()
     {
-        var bindings = templateVersion.Fields
-            .Where(field => field.PrimitiveType == PrimitiveType.PickList)
-            .Select(field => PickListFieldBinding.FromFieldConfig(field.FieldConfig))
-            .Where(binding => binding.PickListId.HasValue && binding.RevisionId.HasValue)
-            .Select(binding => (binding.PickListId!.Value, binding.RevisionId!.Value))
-            .Distinct()
-            .Where(binding => !pickListsByRevisionId.ContainsKey(binding.Item2))
-            .ToList();
-
-        // Fire every distinct pick-list revision lookup concurrently rather than one at a time.
-        var lookups = bindings
-            .Select(binding => (RevisionId: binding.Item2, Task: Client.PickLists.GetRevisionAsync(WorkspaceId, binding.Item1, binding.Item2)))
-            .ToList();
-
-        try
-        {
-            await Task.WhenAll(lookups.Select(l => l.Task));
-        }
-        catch (CmsifyApiException)
-        {
-        }
-
-        foreach (var (revisionId, task) in lookups)
-        {
-            try
-            {
-                var pickList = await task;
-                if (pickList is not null)
-                {
-                    pickListsByRevisionId[revisionId] = pickList;
-                }
-            }
-            catch (CmsifyApiException)
-            {
-            }
-        }
+        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, templateVersion.Fields, pickListsByRevisionId);
     }
 
     private async Task LoadReferenceOptionsAsync()
     {
-        var templateIds = templateVersion.Fields
-            .SelectMany(field => field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value)
-                .Concat(field.TemplateId.HasValue ? [field.TemplateId.Value] : []))
-            .Distinct()
-            .Where(templateId => !referenceOptionsByTemplateId.ContainsKey(templateId))
-            .ToList();
-
-        // Every distinct referenced template's option list is independent of the others - fetch
-        // them all concurrently instead of one at a time.
-        var lookups = templateIds
-            .Select(templateId => (TemplateId: templateId, Task: Client.Content.ListAsync(WorkspaceId, null, templateId, null, null, null)))
-            .ToList();
-        await Task.WhenAll(lookups.Select(l => l.Task));
-
-        foreach (var (templateId, task) in lookups)
-        {
-            referenceOptionsByTemplateId[templateId] = task.Result?.Items ?? [];
-        }
+        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, templateVersion.Fields, referenceOptionsByTemplateId);
     }
 
     private Task OnFieldValueChangedAsync((TemplateFieldResponse Field, ContentFieldEditorValue Value) change)
