@@ -106,13 +106,23 @@ public static class ContentEditSupport
     // loop one level down, for a child content item rather than the top-level one being edited.
     //
     // Opening a parent for editing mints a Draft for each existing Inline child that doesn't already
-    // have one (when versionNumber is null) - a deliberate product choice (not incidental): the
-    // nested editor always needs something editable to bind to, and minting eagerly here is far
-    // simpler than deferring it to first-edit. If this proves undesirable in practice it's a
-    // follow-up, not something this pass needs to get exactly right.
+    // have one (when versionNumber is null AND allowDraftCreation is true) - a deliberate product
+    // choice (not incidental): the nested editor always needs something editable to bind to, and
+    // minting eagerly here is far simpler than deferring it to first-edit. If this proves
+    // undesirable in practice it's a follow-up, not something this pass needs to get exactly right.
+    //
+    // allowDraftCreation is false for read-only viewing or an explicit historical VersionNumber -
+    // draft-creation requires Editor role server-side, so minting one unconditionally while merely
+    // viewing (possibly as a Viewer-role user) either 403s or has an unwanted side effect of creating
+    // Draft rows nobody asked for.
+    //
+    // depth is the authoritative recursion terminator (see MaxInlineDepth) - ancestorTemplateIds is
+    // a set and stops growing once a template repeats in the chain (A -> B -> A -> B -> ...), so it
+    // alone cannot bound recursion against cyclic real content data. depth always increases by
+    // exactly one per recursive call regardless of repeats, guaranteeing termination.
     public static async Task<InlineChildInstance> LoadInlineChildInstanceAsync(
         CmsifyClient client, Guid workspaceId, Guid childContentItemId, int? versionNumber,
-        IReadOnlySet<Guid> ancestorTemplateIds, CancellationToken ct = default)
+        IReadOnlySet<Guid> ancestorTemplateIds, int depth, bool allowDraftCreation, CancellationToken ct = default)
     {
         var item = await client.Content.GetAsync(workspaceId, childContentItemId, ct: ct)
             ?? throw new InvalidOperationException("Cmsify API returned no payload while loading inline child content.");
@@ -138,9 +148,16 @@ public static class ContentEditSupport
                 var servingVersionNumber = item.CurrentlyServingVersion?.VersionNumber
                     ?? item.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()?.VersionNumber
                     ?? 1;
-                var created = await client.Content.CreateVersionAsync(workspaceId, childContentItemId,
-                    new CreateContentVersionRequest(null, null, servingVersionNumber, null), ct);
-                resolvedVersionNumber = created?.VersionNumber ?? servingVersionNumber;
+                if (allowDraftCreation)
+                {
+                    var created = await client.Content.CreateVersionAsync(workspaceId, childContentItemId,
+                        new CreateContentVersionRequest(null, null, servingVersionNumber, null), ct);
+                    resolvedVersionNumber = created?.VersionNumber ?? servingVersionNumber;
+                }
+                else
+                {
+                    resolvedVersionNumber = servingVersionNumber;
+                }
             }
         }
 
@@ -163,7 +180,7 @@ public static class ContentEditSupport
             EffectiveEndAt = version.EffectiveEndAt,
         };
 
-        if (templateSummary is null || ancestorTemplateIds.Count >= MaxInlineDepth)
+        if (templateSummary is null || depth >= MaxInlineDepth)
         {
             return instance;
         }
@@ -180,7 +197,7 @@ public static class ContentEditSupport
             client, workspaceId, templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value), ct);
 
         var childAncestors = WithAncestor(ancestorTemplateIds, templateSummary.Id);
-        var inlineLookups = new List<(ContentFieldEditorValue Value, Task<InlineChildInstance> Task)>();
+        var inlineLookups = new List<(ContentFieldEditorValue Value, Guid ChildContentItemId, Task<InlineChildInstance> Task)>();
         var mediaLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
         var fileLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
 
@@ -193,7 +210,8 @@ public static class ContentEditSupport
 
             if (field?.CompositionMode == CompositionMode.Inline && fieldValue.ChildContentItemId is { } nestedChildId)
             {
-                inlineLookups.Add((editorValue, LoadInlineChildInstanceAsync(client, workspaceId, nestedChildId, null, childAncestors, ct)));
+                inlineLookups.Add((editorValue, nestedChildId, LoadInlineChildInstanceAsync(
+                    client, workspaceId, nestedChildId, null, childAncestors, depth + 1, allowDraftCreation, ct)));
                 continue;
             }
 
@@ -232,10 +250,31 @@ public static class ContentEditSupport
             }
         }
 
-        await Task.WhenAll(inlineLookups.Select(l => l.Task));
-        foreach (var (editorValue, task) in inlineLookups)
+        // A single failed grandchild load must not take down the whole load - each lookup is awaited
+        // and handled independently (mirroring the media/file fault-tolerance below), and a failure
+        // becomes a LoadFailed placeholder that still carries the known ContentItemId, so a later
+        // save preserves this link instead of silently dropping it (see SaveInlineFieldAsync).
+        try
         {
-            editorValue.ChildInstances = [.. editorValue.ChildInstances, await task];
+            await Task.WhenAll(inlineLookups.Select(l => l.Task));
+        }
+        catch (CmsifyApiException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        foreach (var (editorValue, nestedChildId, task) in inlineLookups)
+        {
+            try
+            {
+                editorValue.ChildInstances = [.. editorValue.ChildInstances, await task];
+            }
+            catch (Exception ex) when (ex is CmsifyApiException or InvalidOperationException)
+            {
+                editorValue.ChildInstances = [.. editorValue.ChildInstances, new InlineChildInstance { ContentItemId = nestedChildId, LoadFailed = true }];
+            }
         }
 
         try
@@ -276,23 +315,35 @@ public static class ContentEditSupport
     // ContentFieldValueRequest(ChildContent) per surviving instance for the caller to append to the
     // parent's own field-value list. No transactional multi-item save endpoint exists server-side, so
     // this sequencing is deliberately best-effort-with-safe-ordering:
-    //   1. Pre-flight occurrence-count validation across the whole tree, before any write call.
-    //   2. Depth-first, children before parents: each instance's own Inline children are saved (via
-    //      the recursive call below) before the instance itself is created/updated.
-    //   3. On any failure, this method throws immediately - callers must not attempt the parent's own
+    //   1. Depth-first, children before parents: each instance's own Inline children are saved (via
+    //      the recursive call below) before the instance itself is created/updated. Pre-flight
+    //      occurrence-count validation across the WHOLE top-level instance tree happens once, in the
+    //      caller, before any Inline field's writes begin - not here (see InlineChildValidation and
+    //      ContentEditPanel.SaveAsync).
+    //   2. On any failure, this method throws immediately - callers must not attempt the parent's own
     //      save, and instances already saved before the failure remain persisted (a retry is then
     //      idempotent for them, since they're no longer "new").
-    //   4. This method never deletes MarkedForDeletion instances - callers must do that only after
-    //      their own (parent) save succeeds, so an aborted parent save never leaves an
-    //      already-deleted id that the parent still (would have) referenced. The MarkedForDeletion
-    //      instances are left untouched in the input list for the caller to find and delete.
+    //   3. This method never deletes a MarkedForDeletion instance found directly in `instances` - the
+    //      caller must do that only after ITS OWN (parent) save succeeds, so an aborted parent save
+    //      never leaves an already-deleted id that the parent still (would have) referenced. Those
+    //      instances are left untouched in the input list for the caller to find and delete (see
+    //      DeleteInlineInstanceRecursivelyAsync). MarkedForDeletion instances found one level deeper
+    //      (nested inside a surviving instance's own Inline sub-fields) ARE deleted here, but only
+    //      after that surviving instance's own create/update call below has succeeded - mirroring the
+    //      same rule one recursion level down.
+    //
+    // ancestorTemplateIds/depth mirror the load-side guard: depth is the authoritative terminator
+    // (an ancestor set alone cannot bound recursion against cyclic real content, since it stops
+    // growing once a template repeats in the chain) and is threaded one deeper on every recursive
+    // call regardless of repeats.
     public static async Task<IReadOnlyList<ContentFieldValueRequest>> SaveInlineFieldAsync(
-        CmsifyClient client, Guid workspaceId, TemplateFieldResponse field, IList<InlineChildInstance> instances, CancellationToken ct = default)
+        CmsifyClient client, Guid workspaceId, TemplateFieldResponse field, IList<InlineChildInstance> instances,
+        IReadOnlySet<Guid> ancestorTemplateIds, int depth, CancellationToken ct = default)
     {
-        var validationErrors = await InlineChildValidation.ValidateAsync(client, workspaceId, field, instances, ct);
-        if (validationErrors.Count > 0)
+        if (depth >= MaxInlineDepth)
         {
-            throw new InvalidOperationException(string.Join(" ", validationErrors));
+            throw new InvalidOperationException(
+                $"'{field.Label}' exceeds the maximum inline nesting depth ({MaxInlineDepth}) and cannot be saved. This usually indicates circular inline content.");
         }
 
         var requests = new List<ContentFieldValueRequest>();
@@ -300,11 +351,29 @@ public static class ContentEditSupport
 
         foreach (var instance in instances)
         {
-            if (instance.MarkedForDeletion || instance.TemplateId is not { } templateId)
+            if (instance.MarkedForDeletion)
             {
-                // MarkedForDeletion: deletion is the caller's responsibility, after its own save
-                // succeeds. Not-yet-committed slot (picker still open, no TemplateId chosen): nothing
-                // to save yet.
+                // Deletion is the caller's responsibility, after its own save succeeds.
+                continue;
+            }
+
+            if (instance.LoadFailed)
+            {
+                // This instance's own content failed to load client-side - there is no field data to
+                // save, but the link must be preserved (not silently dropped), or this field's whole
+                // ChildContent row set would be rebuilt from `instances` minus this one, orphaning
+                // every healthy sibling of the same field too.
+                if (instance.ContentItemId is { } preservedId)
+                {
+                    requests.Add(new ContentFieldValueRequest(field.Id, order, ValueKind.ChildContent, null, null, null, null, preservedId, null));
+                    order++;
+                }
+                continue;
+            }
+
+            if (instance.TemplateId is not { } templateId)
+            {
+                // Not-yet-committed slot (picker still open, no TemplateId chosen): nothing to save yet.
                 continue;
             }
 
@@ -315,6 +384,9 @@ public static class ContentEditSupport
 
             var componentSchemas = await ComponentSchemaResolver.ResolveAsync(
                 client, workspaceId, templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value), ct);
+
+            var childAncestors = WithAncestor(ancestorTemplateIds, templateId);
+            var pendingDeletions = new List<(IList<InlineChildInstance> List, InlineChildInstance Instance)>();
 
             var childValues = new List<ContentFieldValueRequest>();
             foreach (var childField in templateVersion.Fields.OrderBy(f => f.Order))
@@ -339,8 +411,16 @@ public static class ContentEditSupport
                 {
                     // Children before parents: this recursive call fully saves (or throws for) this
                     // instance's own Inline children before the instance itself is saved below.
-                    var nestedRequests = await SaveInlineFieldAsync(client, workspaceId, childField, childValue.ChildInstances, ct);
+                    var nestedRequests = await SaveInlineFieldAsync(client, workspaceId, childField, childValue.ChildInstances, childAncestors, depth + 1, ct);
                     childValues.AddRange(nestedRequests);
+
+                    // A grandchild-level MarkedForDeletion instance is deleted only after THIS
+                    // instance's own create/update below succeeds - never before, for the same reason
+                    // the top-level caller waits for its own save (see DeleteMarkedInlineChildrenAsync).
+                    foreach (var toDelete in childValue.ChildInstances.Where(i => i.MarkedForDeletion && i.ContentItemId.HasValue).ToList())
+                    {
+                        pendingDeletions.Add((childValue.ChildInstances, toDelete));
+                    }
                     continue;
                 }
 
@@ -424,6 +504,24 @@ public static class ContentEditSupport
                 instance.ContentItemId = created.Id;
                 instance.VersionNumber = created.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()?.VersionNumber
                     ?? created.CurrentlyServingVersion?.VersionNumber ?? 1;
+
+                // Prime the SDK's per-URI ETag cache for this child's version sub-resource. CreateAsync's
+                // response came from POST /content (the collection) - never a GET/PUT against the
+                // version's own URI - so without this, a second save of this same child later in the
+                // same session would send its UpdateVersionAsync PUT with no If-Match header and get
+                // rejected with 412, with no recovery path (that 412 doesn't match the reload-and-retry
+                // handling meant for the parent's own save conflict).
+                _ = await client.Content.GetVersionAsync(workspaceId, instance.ContentItemId.Value, instance.VersionNumber.Value, ct);
+            }
+
+            // Only now that THIS instance's own save has succeeded is it safe to delete any
+            // MarkedForDeletion instances nested inside its own Inline sub-fields - recursively, so a
+            // marked grandchild's own further descendants are cleaned up too (no server-side cascade
+            // delete exists for Inline children at any depth).
+            foreach (var (list, toDelete) in pendingDeletions)
+            {
+                await DeleteInlineInstanceRecursivelyAsync(client, workspaceId, toDelete, ct);
+                list.Remove(toDelete);
             }
 
             requests.Add(new ContentFieldValueRequest(field.Id, order, ValueKind.ChildContent, null, null, null, null, instance.ContentItemId, null));
@@ -431,5 +529,31 @@ public static class ContentEditSupport
         }
 
         return requests;
+    }
+
+    // Deletes one Inline child instance and, recursively, every one of its own nested Inline
+    // descendants first - the instance is being wholly removed, so anything inside it becomes
+    // unreachable garbage regardless of whether the user explicitly marked it for deletion, and no
+    // server-side cascade delete exists to clean that up. A never-persisted instance (no
+    // ContentItemId) has nothing to delete. Only ChildInstances populated by Inline-mode loading are
+    // ever walked here - Reference-mode fields never populate ChildInstances, so this is safe to run
+    // over every FieldValue unconditionally without re-resolving the instance's own template.
+    public static async Task DeleteInlineInstanceRecursivelyAsync(
+        CmsifyClient client, Guid workspaceId, InlineChildInstance instance, CancellationToken ct = default)
+    {
+        if (instance.ContentItemId is not { } contentItemId)
+        {
+            return;
+        }
+
+        foreach (var value in instance.FieldValues.Values)
+        {
+            foreach (var nested in value.ChildInstances.ToList())
+            {
+                await DeleteInlineInstanceRecursivelyAsync(client, workspaceId, nested, ct);
+            }
+        }
+
+        await client.Content.DeleteAsync(workspaceId, contentItemId, ct);
     }
 }

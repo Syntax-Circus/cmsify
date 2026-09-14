@@ -1,7 +1,11 @@
 @namespace SyntaxCircus.Cmsify.Components.Client
 @using System.Collections.Immutable
 
-@if (AncestorTemplateIds.Count >= ContentEditSupport.MaxInlineDepth)
+@if (Client is null)
+{
+    <div class="cmsify-field-warning">Inline content editing requires a Client and is not available in this context.</div>
+}
+else if (Depth >= ContentEditSupport.MaxInlineDepth)
 {
     <div class="cmsify-field-warning">Maximum nesting depth reached — edit this content separately.</div>
 }
@@ -24,7 +28,11 @@ else
                         }
                     }
                 </div>
-                @if (stateByInstance.TryGetValue(instance, out var state) && state.TemplateVersion is not null)
+                @if (instance.LoadFailed)
+                {
+                    <div class="cmsify-field-warning">This item's content could not be loaded and cannot be edited here. It will remain linked when you save.</div>
+                }
+                else if (stateByInstance.TryGetValue(instance, out var state) && state.TemplateVersion is not null)
                 {
                     <ContentEditForm ShowSaveButton="false" Client="@Client" WorkspaceId="@WorkspaceId"
                                      TemplateVersion="@state.TemplateVersion"
@@ -38,6 +46,7 @@ else
                                      Tags="@instance.Tags" TagsChanged="@(v => instance.Tags = v)"
                                      CurrentContentId="@instance.ContentItemId"
                                      AncestorTemplateIds="@(instance.TemplateId is { } tid ? ContentEditSupport.WithAncestor(AncestorTemplateIds, tid) : AncestorTemplateIds)"
+                                     Depth="@(Depth + 1)"
                                      ReadOnly="@(ReadOnly || instance.MarkedForDeletion)" />
                 }
                 else
@@ -49,7 +58,11 @@ else
     </div>
     @if (!ReadOnly && CanAddMore)
     {
-        @if (showPicker)
+        @if (FixedTemplateBlockedByCycle)
+        {
+            <div class="cmsify-field-warning">This field's template would create a circular reference here and cannot be added.</div>
+        }
+        else if (showPicker)
         {
             <InlineTemplatePicker Candidates="@candidates" DisabledTemplateIds="@AncestorTemplateIds" ReadOnly="@ReadOnly"
                                    TemplateSelected="OnNewInstanceTemplateSelectedAsync" />
@@ -62,12 +75,18 @@ else
 }
 
 @code {
-    [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
+    // Nullable (not [EditorRequired]) so an external consumer of the published component library who
+    // renders ContentEditForm directly (rather than through the SDK-backed ContentEditPanel wrapper)
+    // without supplying a Client degrades to a warning message instead of a NullReferenceException
+    // that would crash their whole Blazor circuit - consistent with ContentEditForm/FieldEditor,
+    // which already declare Client nullable for the same reason.
+    [Parameter] public CmsifyClient? Client { get; set; }
     [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
     [Parameter, EditorRequired] public TemplateFieldResponse Field { get; set; } = null!;
     [Parameter] public IList<InlineChildInstance> Instances { get; set; } = [];
     [Parameter] public EventCallback<IList<InlineChildInstance>> InstancesChanged { get; set; }
     [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
+    [Parameter] public int Depth { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
 
     private readonly Dictionary<InlineChildInstance, ChildRenderState> stateByInstance = [];
@@ -79,6 +98,12 @@ else
     // candidate is auto-created against directly, with no need to ever resolve a "candidates" list.
     private Guid? FixedTemplateId => Field.TemplateId.HasValue && Field.AllowedTypes.Count == 0 ? Field.TemplateId : null;
 
+    // The auto-add path (fixed TemplateId, no picker) must not be able to route around the picker's
+    // own ancestor-disable check - adding an instance whose template is already an ancestor in this
+    // chain would create a genuine A -> B -> A cycle in real content data with no server-side cycle
+    // validation to catch it (TemplateGraphValidator exempts IsOpen fields from that check).
+    private bool FixedTemplateBlockedByCycle => FixedTemplateId is { } fixedId && AncestorTemplateIds.Contains(fixedId);
+
     private int ActiveCount => Instances.Count(i => !i.MarkedForDeletion);
     private bool CanAddMore => !Field.MaxOccurrences.HasValue || ActiveCount < Field.MaxOccurrences.Value;
     private bool CanRemove => ActiveCount > Field.MinOccurrences;
@@ -88,7 +113,7 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        if (AncestorTemplateIds.Count >= ContentEditSupport.MaxInlineDepth)
+        if (Client is null || Depth >= ContentEditSupport.MaxInlineDepth)
         {
             return;
         }
@@ -118,25 +143,27 @@ else
 
     private async Task LoadCandidatesAsync()
     {
+        var client = Client!;
         if (Field.AllowedTypes.Count > 0)
         {
             var ids = Field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value).Distinct().ToList();
-            var lookups = await Task.WhenAll(ids.Select(id => Client.Templates.GetAsync(WorkspaceId, id)));
+            var lookups = await Task.WhenAll(ids.Select(id => client.Templates.GetAsync(WorkspaceId, id)));
             candidates = [.. lookups
                 .Where(t => t is not null)
                 .Select(t => new TemplateSummaryResponse(t!.Id, t.WorkspaceId, t.Name, t.Slug, t.Description, t.CurrentVersion?.Id))];
         }
         else
         {
-            var page = await Client.Templates.ListAsync(WorkspaceId, isSystem: null, search: null, page: 1, pageSize: 100);
+            var page = await client.Templates.ListAsync(WorkspaceId, isSystem: null, search: null, page: 1, pageSize: 100);
             candidates = page?.Items ?? [];
         }
     }
 
     private async Task ResolveChildStateAsync(InlineChildInstance instance)
     {
+        var client = Client!;
         var state = stateByInstance[instance];
-        var template = await Client.Templates.GetAsync(WorkspaceId, instance.TemplateId!.Value);
+        var template = await client.Templates.GetAsync(WorkspaceId, instance.TemplateId!.Value);
         var templateVersion = template?.CurrentVersion;
         if (templateVersion is null)
         {
@@ -145,11 +172,11 @@ else
 
         state.TemplateVersion = templateVersion;
 
-        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, templateVersion.Fields, state.PickListsByRevisionId);
-        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, templateVersion.Fields, state.ReferenceOptionsByTemplateId);
+        await ContentEditSupport.LoadPickListsAsync(client, WorkspaceId, templateVersion.Fields, state.PickListsByRevisionId);
+        await ContentEditSupport.LoadReferenceOptionsAsync(client, WorkspaceId, templateVersion.Fields, state.ReferenceOptionsByTemplateId);
 
         var rootComponentIds = templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value);
-        var resolvedSchemas = await ComponentSchemaResolver.ResolveAsync(Client, WorkspaceId, rootComponentIds);
+        var resolvedSchemas = await ComponentSchemaResolver.ResolveAsync(client, WorkspaceId, rootComponentIds);
         foreach (var (id, schema) in resolvedSchemas)
         {
             state.ComponentSchemas[id] = schema;
@@ -163,8 +190,8 @@ else
             .SelectMany(c => c.CurrentVersion!.Fields)
             .Select(ComponentFieldAdapter.ToTemplateField)
             .ToList();
-        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, componentFields, state.PickListsByRevisionId);
-        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, componentFields, state.ReferenceOptionsByTemplateId);
+        await ContentEditSupport.LoadPickListsAsync(client, WorkspaceId, componentFields, state.PickListsByRevisionId);
+        await ContentEditSupport.LoadReferenceOptionsAsync(client, WorkspaceId, componentFields, state.ReferenceOptionsByTemplateId);
     }
 
     private Task OnChildFieldChangedAsync(InlineChildInstance instance, (TemplateFieldResponse Field, ContentFieldEditorValue Value) change)
@@ -175,11 +202,20 @@ else
 
     private Task AddInstanceAsync()
     {
+        // The fixed-TemplateId path has no picker to fall back to, so a cycle here is caught by
+        // FixedTemplateBlockedByCycle hiding the Add button entirely (see markup above) rather than
+        // by this guard - but re-check here too, defensively, in case Add is ever reachable some
+        // other way while a cycle is present.
         if (FixedTemplateId is { } fixedId)
         {
-            return CommitNewInstanceAsync(fixedId);
+            return AncestorTemplateIds.Contains(fixedId) ? Task.CompletedTask : CommitNewInstanceAsync(fixedId);
         }
-        if (candidates.Count == 1)
+
+        // A single open/AllowedTypes candidate that's already an ancestor in this chain must not be
+        // auto-created either - that would silently create a cycle, bypassing the picker's own
+        // ancestor-disable check entirely. Fall through to the picker instead, where the one
+        // candidate renders visibly disabled.
+        if (candidates.Count == 1 && !AncestorTemplateIds.Contains(candidates[0].Id))
         {
             return CommitNewInstanceAsync(candidates[0].Id);
         }

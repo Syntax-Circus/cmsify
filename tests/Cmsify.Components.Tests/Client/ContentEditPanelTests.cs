@@ -1735,6 +1735,20 @@ public sealed class ContentEditPanelTests : BunitContext
                       "currentlyServingVersion": null, "versions": [] }
                     """);
             }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{newChildContentId}/versions/1")
+            {
+                // ContentEditSupport.SaveInlineFieldAsync primes the SDK's per-URI ETag cache for a
+                // newly-created child's version sub-resource right after CreateAsync (see I5) - a
+                // GET here, distinct from the POST /content above.
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{newChildContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": null,
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z", "fields": [] }
+                    """);
+            }
             throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
         });
 
@@ -1986,5 +2000,663 @@ public sealed class ContentEditPanelTests : BunitContext
         cut.WaitForState(() => saved is not null, TimeSpan.FromSeconds(10));
 
         events.ShouldBe(["parent-save", "child-delete"]);
+    }
+
+    [Fact]
+    public void AFailedSiblingChildLoadDoesNotDropTheHealthySiblingsLinkOnSave()
+    {
+        var workspaceId = Guid.NewGuid();
+        var parentTemplateId = Guid.NewGuid();
+        var parentTemplateVersionId = Guid.NewGuid();
+        var inlineFieldId = Guid.NewGuid();
+        var childTemplateId = Guid.NewGuid();
+        var childTemplateVersionId = Guid.NewGuid();
+        var childTextFieldId = Guid.NewGuid();
+        var parentContentId = Guid.NewGuid();
+        var healthyChildId = Guid.NewGuid();
+        var failingChildId = Guid.NewGuid();
+        var healthyVersionId = Guid.NewGuid();
+        string? capturedVersionUpdateBody = null;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentContentId}}", "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent",
+                      "slug": "parent-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}/versions/1")
+            {
+                // Two rows for the SAME Inline field: one child loads fine, the other's own GetAsync
+                // (below) fails - a single bad sibling must not cost the healthy one its link.
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{parentContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent", "slug": "parent-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{inlineFieldId}}", "key": "children", "label": "Children", "order": 0, "valueKind": "ChildContent",
+                          "textValue": null, "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": "{{healthyChildId}}", "child": null, "jsonValue": null, "displayLabel": null },
+                        { "fieldId": "{{inlineFieldId}}", "key": "children", "label": "Children", "order": 1, "valueKind": "ChildContent",
+                          "textValue": null, "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": "{{failingChildId}}", "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "items": [
+                        { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent", "description": null, "currentVersionId": "{{parentTemplateVersionId}}" },
+                        { "id": "{{childTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child", "slug": "child", "description": null, "currentVersionId": "{{childTemplateVersionId}}" }
+                      ], "totalCount": 2, "page": 1, "pageSize": 20 }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{parentTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{parentTemplateVersionId}}", "templateId": "{{parentTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{inlineFieldId}}", "sectionId": null, "key": "children", "label": "Children", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": null, "templateId": "{{childTemplateId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{healthyChildId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{healthyChildId}}", "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child",
+                      "slug": "child-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null,
+                      "versions": [ { "id": "{{healthyVersionId}}", "contentItemId": "{{healthyChildId}}", "versionNumber": 1, "status": "Draft",
+                        "templateVersionId": "{{childTemplateVersionId}}", "slug": "child-post", "localeCode": null,
+                        "effectiveStartAt": null, "effectiveEndAt": null, "publishAt": null, "publishedAt": null, "archivedAt": null,
+                        "publishedByUserId": null, "rolledBackFromVersionNumber": null, "tags": [],
+                        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" } ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{healthyChildId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{healthyVersionId}}", "contentItemId": "{{healthyChildId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": "child-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{childTextFieldId}}", "key": "title", "label": "Title", "order": 0, "valueKind": "Text",
+                          "textValue": "Child Text", "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{healthyChildId}/versions/1")
+            {
+                // The healthy sibling is already persisted, so saving takes the update branch -
+                // needs its own version PUT / item PUT stubs, distinct from the load-time GETs above.
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{healthyVersionId}}", "contentItemId": "{{healthyChildId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": "child-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{healthyChildId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{healthyChildId}}", "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child",
+                      "slug": "child-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{childTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child", "slug": "child",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{childTemplateVersionId}}", "templateId": "{{childTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{childTextFieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ] } }
+                    """);
+            }
+            // The failing sibling's own item GET fails outright - this must become a LoadFailed
+            // placeholder rather than faulting the whole Task.WhenAll and dropping the healthy sibling.
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{failingChildId}")
+            {
+                return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}/versions/1")
+            {
+                capturedVersionUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{parentContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent", "slug": "parent-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentContentId}}", "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent",
+                      "slug": "parent-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        ContentItemDetailResponse? saved = null;
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, parentContentId)
+            .Add(p => p.Saved, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => saved = c)));
+
+        cut.WaitForState(() => cut.FindComponents<TextFieldEditor>().Any(c => c.Instance.Value == "Child Text"), TimeSpan.FromSeconds(10));
+        cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count == 2, TimeSpan.FromSeconds(5));
+
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => saved is not null, TimeSpan.FromSeconds(10));
+
+        capturedVersionUpdateBody.ShouldNotBeNull();
+        capturedVersionUpdateBody.ShouldContain(healthyChildId.ToString());
+        capturedVersionUpdateBody.ShouldContain(failingChildId.ToString());
+    }
+
+    [Fact]
+    public void PreFlightValidationForAllInlineFieldsRunsBeforeAnyFieldsChildWritesBegin()
+    {
+        var workspaceId = Guid.NewGuid();
+        var parentTemplateId = Guid.NewGuid();
+        var parentTemplateVersionId = Guid.NewGuid();
+        var field1Id = Guid.NewGuid();
+        var field2Id = Guid.NewGuid();
+        var child1TemplateId = Guid.NewGuid();
+        var child1TemplateVersionId = Guid.NewGuid();
+        var child2TemplateId = Guid.NewGuid();
+        var child2TemplateVersionId = Guid.NewGuid();
+        var childCreateIssued = false;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{parentTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{parentTemplateVersionId}}", "templateId": "{{parentTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{field1Id}}", "sectionId": null, "key": "field1", "label": "Field1", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": null, "templateId": "{{child1TemplateId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null },
+                          { "id": "{{field2Id}}", "sectionId": null, "key": "field2", "label": "Field2", "helpText": null,
+                            "order": 1, "isRequired": false, "minOccurrences": 1, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": null, "templateId": "{{child2TemplateId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{child1TemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{child1TemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child1", "slug": "child1",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{child1TemplateVersionId}}", "templateId": "{{child1TemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [], "fields": [] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{child2TemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{child2TemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child2", "slug": "child2",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{child2TemplateVersionId}}", "templateId": "{{child2TemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [], "fields": [] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                // Field2 (order 1) requires at least one instance and has none - pre-flight validation
+                // for it must fail BEFORE field1's (order 0) own instance is ever created.
+                childCreateIssued = true;
+                return FakeHttpMessageHandler.Json("{}");
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, parentTemplateId));
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-field-add-button").Count == 2, TimeSpan.FromSeconds(5));
+        // Add an instance to field1 only - field2 is deliberately left empty to violate its own
+        // MinOccurrences of 1.
+        cut.FindAll(".cmsify-field-add-button")[0].Click();
+        cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(5));
+
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0, TimeSpan.FromSeconds(10));
+
+        cut.Find(".cmsify-form-error").TextContent.ShouldContain("Field2");
+        childCreateIssued.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SavingSetsBusyBeforeAnyInlineChildWriteIsIssued()
+    {
+        var workspaceId = Guid.NewGuid();
+        var parentTemplateId = Guid.NewGuid();
+        var parentTemplateVersionId = Guid.NewGuid();
+        var inlineFieldId = Guid.NewGuid();
+        var childTemplateId = Guid.NewGuid();
+        var childTemplateVersionId = Guid.NewGuid();
+        var newChildContentId = Guid.NewGuid();
+        var events = new List<string>();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{parentTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{parentTemplateVersionId}}", "templateId": "{{parentTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{inlineFieldId}}", "sectionId": null, "key": "children", "label": "Children", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": null, "templateId": "{{childTemplateId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{childTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child", "slug": "child",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{childTemplateVersionId}}", "templateId": "{{childTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [], "fields": [] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                if (body.Contains(childTemplateVersionId.ToString()))
+                {
+                    events.Add("child-create");
+                    return FakeHttpMessageHandler.Json($$"""
+                        { "id": "{{newChildContentId}}", "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child",
+                          "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
+                          "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                          "currentlyServingVersion": null, "versions": [] }
+                        """);
+                }
+                events.Add("parent-create");
+                return FakeHttpMessageHandler.Json("""{ "id": "00000000-0000-0000-0000-000000000000", "templateVersionId": "00000000-0000-0000-0000-000000000000", "templateName": "Parent", "slug": null, "localeCode": null, "translationGroupId": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z", "currentlyServingVersion": null, "versions": [] }""");
+            }
+            if (request.Method == HttpMethod.Get && path.Contains("/versions/"))
+            {
+                // ETag priming after the child's create (see SavingTheSameChildTwiceInOneSessionDoesNotSendTheSecondVersionUpdateWithoutAnIfMatchHeader).
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{newChildContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": null,
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z", "fields": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, parentTemplateId)
+            .Add(p => p.BusyChanged, EventCallback.Factory.Create<bool>(this, b => { if (b) { events.Add("busy-true"); } })));
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-field-add-button").Count > 0);
+        cut.Find(".cmsify-field-add-button").Click();
+        cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(5));
+
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => events.Contains("parent-create"), TimeSpan.FromSeconds(10));
+
+        // busy must flip true BEFORE the child's own create request is issued, not after - otherwise
+        // the Save button stays clickable for the whole duration of the child's HTTP round-trip and a
+        // double-click can start a second concurrent SaveAsync while the first pass's child still has
+        // a null ContentItemId, creating a duplicate.
+        events.IndexOf("busy-true").ShouldBeLessThan(events.IndexOf("child-create"));
+    }
+
+    [Fact]
+    public void AFailureDeletingAMarkedInlineChildIsReportedDistinctlyAndDoesNotMisreportTheSaveItself()
+    {
+        var workspaceId = Guid.NewGuid();
+        var parentTemplateId = Guid.NewGuid();
+        var parentTemplateVersionId = Guid.NewGuid();
+        var inlineFieldId = Guid.NewGuid();
+        var childTemplateId = Guid.NewGuid();
+        var childTemplateVersionId = Guid.NewGuid();
+        var parentContentId = Guid.NewGuid();
+        var childContentId = Guid.NewGuid();
+        var childVersionId = Guid.NewGuid();
+        ContentItemDetailResponse? saved = null;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentContentId}}", "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent",
+                      "slug": "parent-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{parentContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent", "slug": "parent-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{inlineFieldId}}", "key": "children", "label": "Children", "order": 0, "valueKind": "ChildContent",
+                          "textValue": null, "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": "{{childContentId}}", "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "items": [
+                        { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent", "description": null, "currentVersionId": "{{parentTemplateVersionId}}" },
+                        { "id": "{{childTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child", "slug": "child", "description": null, "currentVersionId": "{{childTemplateVersionId}}" }
+                      ], "totalCount": 2, "page": 1, "pageSize": 20 }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{parentTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{parentTemplateVersionId}}", "templateId": "{{parentTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{inlineFieldId}}", "sectionId": null, "key": "children", "label": "Children", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": null, "templateId": "{{childTemplateId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childContentId}}", "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child",
+                      "slug": "child-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null,
+                      "versions": [ { "id": "{{childVersionId}}", "contentItemId": "{{childContentId}}", "versionNumber": 1, "status": "Draft",
+                        "templateVersionId": "{{childTemplateVersionId}}", "slug": "child-post", "localeCode": null,
+                        "effectiveStartAt": null, "effectiveEndAt": null, "publishAt": null, "publishedAt": null, "archivedAt": null,
+                        "publishedByUserId": null, "rolledBackFromVersionNumber": null, "tags": [],
+                        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" } ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childVersionId}}", "contentItemId": "{{childContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": "child-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{childTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child", "slug": "child",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{childTemplateVersionId}}", "templateId": "{{childTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [], "fields": [] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{parentContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent", "slug": "parent-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentContentId}}", "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent",
+                      "slug": "parent-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Delete && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                // Deletion of the marked child fails (stale ETag) - this must surface as a distinct,
+                // clearly-labeled error and must NOT be misreported as a parent save failure: the
+                // parent's own content WAS saved, so Saved must still fire.
+                return new HttpResponseMessage(System.Net.HttpStatusCode.PreconditionFailed);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, parentContentId)
+            .Add(p => p.Saved, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => saved = c)));
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(10));
+        cut.Find(".cmsify-component-remove-button").Click();
+        cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card--pending-delete").Count > 0, TimeSpan.FromSeconds(5));
+
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => saved is not null, TimeSpan.FromSeconds(10));
+
+        // The parent's own save succeeded (Saved fired), and the surfaced error is the distinct
+        // delete-failure message - not the "content changed while saving, reloaded" message meant for
+        // a conflict on the parent's OWN save.
+        saved.ShouldNotBeNull();
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0, TimeSpan.FromSeconds(5));
+        cut.Find(".cmsify-form-error").TextContent.ShouldContain("removing deleted inline items failed");
+        cut.Find(".cmsify-form-error").TextContent.ShouldNotContain("reloaded");
+    }
+
+    [Fact]
+    public void ReadOnlyViewingWithAnExistingInlineChildLackingADraftDoesNotMintOneOrIssueAnyWriteRequest()
+    {
+        var workspaceId = Guid.NewGuid();
+        var parentTemplateId = Guid.NewGuid();
+        var parentTemplateVersionId = Guid.NewGuid();
+        var inlineFieldId = Guid.NewGuid();
+        var childTemplateId = Guid.NewGuid();
+        var childTemplateVersionId = Guid.NewGuid();
+        var parentContentId = Guid.NewGuid();
+        var childContentId = Guid.NewGuid();
+        var servingVersionId = Guid.NewGuid();
+        var writeRequestIssued = false;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method != HttpMethod.Get)
+            {
+                writeRequestIssued = true;
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentContentId}}", "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent",
+                      "slug": "parent-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{parentContentId}}", "versionNumber": 1, "status": "Published",
+                      "templateVersionId": "{{parentTemplateVersionId}}", "templateName": "Parent", "slug": "parent-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{inlineFieldId}}", "key": "children", "label": "Children", "order": 0, "valueKind": "ChildContent",
+                          "textValue": null, "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": "{{childContentId}}", "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "items": [
+                        { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent", "description": null, "currentVersionId": "{{parentTemplateVersionId}}" },
+                        { "id": "{{childTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child", "slug": "child", "description": null, "currentVersionId": "{{childTemplateVersionId}}" }
+                      ], "totalCount": 2, "page": 1, "pageSize": 20 }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{parentTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{parentTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Parent", "slug": "parent",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{parentTemplateVersionId}}", "templateId": "{{parentTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{inlineFieldId}}", "sectionId": null, "key": "children", "label": "Children", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Inline", "primitiveType": null, "templateId": "{{childTemplateId}}",
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ] } }
+                    """);
+            }
+            // The child has NO Draft version - only a Published CurrentlyServingVersion. Read-only
+            // viewing must load that version directly and must never POST a new Draft version for it.
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childContentId}}", "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child",
+                      "slug": "child-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": { "id": "{{servingVersionId}}", "contentItemId": "{{childContentId}}",
+                        "versionNumber": 1, "status": "Published", "templateVersionId": "{{childTemplateVersionId}}",
+                        "templateName": "Child", "slug": "child-post", "localeCode": null, "translationGroupId": null,
+                        "effectiveStartAt": null, "effectiveEndAt": null, "publishAt": null, "publishedAt": null,
+                        "archivedAt": null, "publishedByUserId": null, "rolledBackFromVersionNumber": null, "tags": [],
+                        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" },
+                      "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{servingVersionId}}", "contentItemId": "{{childContentId}}", "versionNumber": 1, "status": "Published",
+                      "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": "child-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{childTemplateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childTemplateId}}", "workspaceId": "{{workspaceId}}", "name": "Child", "slug": "child",
+                      "description": null, "isSystem": false,
+                      "currentVersion": { "id": "{{childTemplateVersionId}}", "templateId": "{{childTemplateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [], "fields": [] } }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, parentContentId)
+            .Add(p => p.ReadOnly, true));
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(10));
+
+        writeRequestIssued.ShouldBeFalse();
+        cut.FindAll(".cmsify-form-error").ShouldBeEmpty();
     }
 }

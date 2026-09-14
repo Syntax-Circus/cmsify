@@ -27,6 +27,7 @@
                              Client="@Client"
                              WorkspaceId="@WorkspaceId"
                              AncestorTemplateIds="@AncestorTemplateIds"
+                             Depth="@Depth"
                              ReadOnly="@ReadOnly" />
                 @if (!string.IsNullOrWhiteSpace(field.HelpText))
                 {
@@ -82,6 +83,7 @@
     [Parameter] public CmsifyClient? Client { get; set; }
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
+    [Parameter] public int Depth { get; set; }
 
     private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
         FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();

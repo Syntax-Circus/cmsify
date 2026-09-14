@@ -27,7 +27,7 @@ else if (IsCompositionField)
     {
         <InlineChildContentEditor Client="@Client" WorkspaceId="@WorkspaceId" Field="@Field"
                                    Instances="@Value.ChildInstances" InstancesChanged="@(v => UpdateAsync(x => x.ChildInstances = v))"
-                                   AncestorTemplateIds="@AncestorTemplateIds" ReadOnly="@ReadOnly" />
+                                   AncestorTemplateIds="@AncestorTemplateIds" Depth="@Depth" ReadOnly="@ReadOnly" />
     }
 }
 else
@@ -86,6 +86,7 @@ else
     [Parameter] public CmsifyClient? Client { get; set; }
     [Parameter] public Guid WorkspaceId { get; set; }
     [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
+    [Parameter] public int Depth { get; set; }
 
     private bool IsCompositionField =>
         Field.TemplateId.HasValue || Field.IsOpen || Field.AllowedTypes.Any(allowed => allowed.AllowedTemplateId.HasValue);

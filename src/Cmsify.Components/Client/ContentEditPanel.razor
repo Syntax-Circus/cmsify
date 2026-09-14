@@ -103,7 +103,14 @@
         var fieldsById = templateVersion.Fields.ToDictionary(f => f.Id);
         var mediaLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
         var fileLookups = new List<(ContentFieldEditorValue Value, Guid AssetId, Task<MediaAssetResponse?> Task)>();
-        var inlineChildLookups = new List<(ContentFieldEditorValue Value, Task<InlineChildInstance> Task)>();
+        var inlineChildLookups = new List<(ContentFieldEditorValue Value, Guid ChildContentItemId, Task<InlineChildInstance> Task)>();
+
+        // Read-only viewing (or pinning an explicit historical VersionNumber) must never mint a new
+        // Draft version for an Inline child that lacks one - Draft-creation requires Editor role
+        // server-side, so a Viewer-role user opening a read-only view would otherwise 403, and even
+        // for an Editor, merely viewing content should not have the side effect of creating rows.
+        var allowInlineDraftCreation = !ReadOnly && !VersionNumber.HasValue;
+
         foreach (var value in loadedVersion.Fields)
         {
             var editorValue = GetOrAddValue(value.FieldId);
@@ -117,8 +124,8 @@
             var field = fieldsById.GetValueOrDefault(value.FieldId);
             if (field?.CompositionMode == CompositionMode.Inline && value.ChildContentItemId is { } childContentItemId)
             {
-                inlineChildLookups.Add((editorValue, ContentEditSupport.LoadInlineChildInstanceAsync(
-                    Client, WorkspaceId, childContentItemId, null, ImmutableHashSet<Guid>.Empty, CancellationToken.None)));
+                inlineChildLookups.Add((editorValue, childContentItemId, ContentEditSupport.LoadInlineChildInstanceAsync(
+                    Client, WorkspaceId, childContentItemId, null, ImmutableHashSet<Guid>.Empty, 0, allowInlineDraftCreation, CancellationToken.None)));
             }
             if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue && field?.ComponentId is { } componentId)
             {
@@ -186,11 +193,32 @@
         }
 
         // Sibling Inline children at this level are independent of each other - fire every lookup
-        // concurrently rather than depth-first loading them one at a time.
-        await Task.WhenAll(inlineChildLookups.Select(l => l.Task));
-        foreach (var (editorValue, task) in inlineChildLookups)
+        // concurrently rather than depth-first loading them one at a time. A single failed lookup
+        // must not destroy every sibling's link: SaveAsync's Inline branch rebuilds this field's
+        // whole ChildContent row set from ChildInstances alone, so if one lookup here were allowed to
+        // fault the whole Task.WhenAll (as it did before), the resulting empty ChildInstances would
+        // silently orphan every healthy sibling on the very next save.
+        try
         {
-            editorValue.ChildInstances = [.. editorValue.ChildInstances, await task];
+            await Task.WhenAll(inlineChildLookups.Select(l => l.Task));
+        }
+        catch (CmsifyApiException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        foreach (var (editorValue, childContentItemId, task) in inlineChildLookups)
+        {
+            try
+            {
+                editorValue.ChildInstances = [.. editorValue.ChildInstances, await task];
+            }
+            catch (Exception ex) when (ex is CmsifyApiException or InvalidOperationException)
+            {
+                editorValue.ChildInstances = [.. editorValue.ChildInstances, new InlineChildInstance { ContentItemId = childContentItemId, LoadFailed = true }];
+            }
         }
     }
 
@@ -307,161 +335,207 @@
             return;
         }
 
-        var values = new List<ContentFieldValueRequest>();
-        try
-        {
-            foreach (var field in templateVersion.Fields.OrderBy(f => f.Order))
-            {
-                var value = GetOrAddValue(field.Id);
-
-                if (field.ComponentId.HasValue)
-                {
-                    if (!componentSchemas.TryGetValue(field.ComponentId.Value, out var componentSchema) || componentSchema.CurrentVersion is null)
-                    {
-                        error = $"Component field '{field.Label}' schema could not be resolved.";
-                        return;
-                    }
-
-                    foreach (var instance in value.ComponentValues)
-                    {
-                        var serialized = ComponentValueSerializer.Serialize(instance, field.ComponentId.Value, componentSchemas);
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, serialized));
-                    }
-                    continue;
-                }
-
-                var isComposition = field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue);
-                if (isComposition)
-                {
-                    if (field.CompositionMode == CompositionMode.Inline)
-                    {
-                        // Children before parents, and this throws (aborting before the parent's own
-                        // save below) on the first child save failure - see ContentEditSupport.SaveInlineFieldAsync.
-                        var childRequests = await ContentEditSupport.SaveInlineFieldAsync(Client, WorkspaceId, field, value.ChildInstances);
-                        values.AddRange(childRequests);
-                    }
-                    else if (value.ChildContentItemId is { } referencedId)
-                    {
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
-                    }
-                    continue;
-                }
-
-                if (field.PrimitiveType == PrimitiveType.PickList)
-                {
-                    var binding = PickListFieldBinding.FromFieldConfig(field.FieldConfig);
-                    if (binding.Multiple)
-                    {
-                        var index = 0;
-                        foreach (var selectedValue in value.MultiValues)
-                        {
-                            values.Add(new ContentFieldValueRequest(field.Id, field.Order + index, ValueKind.PickList, selectedValue, null, null, null, null, null));
-                            index++;
-                        }
-                    }
-                    else if (!string.IsNullOrWhiteSpace(value.TextValue))
-                    {
-                        values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.PickList, value.TextValue, null, null, null, null, null));
-                    }
-                    continue;
-                }
-
-                values.Add(new ContentFieldValueRequest(
-                    field.Id,
-                    field.Order,
-                    field.PrimitiveType switch
-                    {
-                        PrimitiveType.Boolean => ValueKind.Boolean,
-                        PrimitiveType.Media => ValueKind.Media,
-                        PrimitiveType.File => ValueKind.File,
-                        PrimitiveType.Markdown => ValueKind.Markdown,
-                        PrimitiveType.RichText => ValueKind.RichText,
-                        PrimitiveType.Link => ValueKind.Link,
-                        PrimitiveType.Quote => ValueKind.Quote,
-                        PrimitiveType.Separator => ValueKind.Separator,
-                        _ => ValueKind.Text
-                    },
-                    value.TextValue,
-                    value.BoolValue,
-                    field.PrimitiveType == PrimitiveType.Media ? value.SelectedMediaAsset?.Id ?? value.FallbackMediaAssetId : null,
-                    field.PrimitiveType == PrimitiveType.File ? value.SelectedFileAsset?.Id ?? value.FallbackFileAssetId : null,
-                    null,
-                    null));
-            }
-        }
-        catch (CmsifyApiException ex)
-        {
-            // A failed Inline child save aborts here, before the parent's own save is attempted -
-            // any children already saved before the failure remain persisted (a retry is then
-            // idempotent for them).
-            error = ex.Message;
-            await InvokeOnErrorAsync(ex);
-            return;
-        }
-        catch (InvalidOperationException ex)
-        {
-            // Inline pre-flight occurrence-count validation failure, or an unresolvable
-            // component/template schema - same abort-before-parent-save behavior as above.
-            error = ex.Message;
-            await InvokeOnErrorAsync(ex);
-            return;
-        }
-
-        var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
+        // Set busy (and notify) before any Inline child writes can begin below - those start well
+        // before the parent's own save call. Without this here, the Save button stays clickable
+        // during those child round-trips and a double-click can start a second concurrent SaveAsync
+        // while the first pass's not-yet-created children still have a null ContentItemId, creating
+        // duplicates.
         busy = true;
         await BusyChanged.InvokeAsync(true);
         try
         {
             error = null;
-            if (ContentId.HasValue)
+
+            // Pre-flight: validate EVERY Inline field's full instance tree (including nested Inline
+            // fields inside children) once, before ANY child write is issued - not interleaved with
+            // the per-field save calls below, so a deep validation failure in (say) field 2 is caught
+            // before field 1's children have already been created/updated.
+            var validationErrors = new List<string>();
+            foreach (var inlineField in templateVersion.Fields.Where(f => f.CompositionMode == CompositionMode.Inline))
             {
-                var versionNumber = VersionNumber ?? version?.VersionNumber ?? 1;
-                var updatedVersion = await Client.Content.UpdateVersionAsync(WorkspaceId, ContentId.Value, versionNumber,
-                    new UpdateContentVersionRequest(version?.EffectiveStartAt, version?.EffectiveEndAt, values))
-                    ?? throw new InvalidOperationException("Cmsify API returned no payload while updating the content version.");
-                version = updatedVersion;
-
-                // Saving a version bumps the parent item's UpdatedAt server-side (search vector, list sort),
-                // which invalidates the item ETag captured at page load. Refresh it before the item PUT below,
-                // otherwise that PUT's If-Match always fails against its own prior write.
-                item = await Client.Content.GetAsync(WorkspaceId, ContentId.Value) ?? item;
-
-                var updatedItem = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
-                    new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, tagList))
-                    ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
-                item = updatedItem;
-
-                // Only now that the parent's own save has succeeded is it safe to delete
-                // MarkedForDeletion Inline children - never before, so an aborted parent save never
-                // leaves an already-deleted id that the parent still (would have) referenced.
-                await DeleteMarkedInlineChildrenAsync();
-
-                await ItemChanged.InvokeAsync(item);
-                await Saved.InvokeAsync(item);
+                var inlineValue = GetOrAddValue(inlineField.Id);
+                validationErrors.AddRange(await InlineChildValidation.ValidateAsync(Client, WorkspaceId, inlineField, inlineValue.ChildInstances));
             }
-            else
+            if (validationErrors.Count > 0)
             {
-                var createdItem = await Client.Content.CreateAsync(WorkspaceId,
-                    new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values))
-                    ?? throw new InvalidOperationException("Cmsify API returned no payload while creating content.");
-                item = createdItem;
-
-                await DeleteMarkedInlineChildrenAsync();
-
-                await ItemChanged.InvokeAsync(item);
-                await Created.InvokeAsync(createdItem);
+                error = string.Join(" ", validationErrors);
+                await InvokeOnErrorAsync(new InvalidOperationException(error));
+                return;
             }
-        }
-        catch (CmsifyApiException ex)
-        {
-            error = ex.Message;
-            if (ex.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && ContentId.HasValue)
+
+            var values = new List<ContentFieldValueRequest>();
+            try
             {
-                await LoadContentAsync();
-                error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
+                foreach (var field in templateVersion.Fields.OrderBy(f => f.Order))
+                {
+                    var value = GetOrAddValue(field.Id);
+
+                    if (field.ComponentId.HasValue)
+                    {
+                        if (!componentSchemas.TryGetValue(field.ComponentId.Value, out var componentSchema) || componentSchema.CurrentVersion is null)
+                        {
+                            error = $"Component field '{field.Label}' schema could not be resolved.";
+                            return;
+                        }
+
+                        foreach (var instance in value.ComponentValues)
+                        {
+                            var serialized = ComponentValueSerializer.Serialize(instance, field.ComponentId.Value, componentSchemas);
+                            values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, serialized));
+                        }
+                        continue;
+                    }
+
+                    var isComposition = field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue);
+                    if (isComposition)
+                    {
+                        if (field.CompositionMode == CompositionMode.Inline)
+                        {
+                            // Children before parents, and this throws (aborting before the parent's own
+                            // save below) on the first child save failure - see ContentEditSupport.SaveInlineFieldAsync.
+                            var childRequests = await ContentEditSupport.SaveInlineFieldAsync(
+                                Client, WorkspaceId, field, value.ChildInstances, ImmutableHashSet<Guid>.Empty, 0);
+                            values.AddRange(childRequests);
+                        }
+                        else if (value.ChildContentItemId is { } referencedId)
+                        {
+                            values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.ChildContent, null, null, null, null, referencedId, null));
+                        }
+                        continue;
+                    }
+
+                    if (field.PrimitiveType == PrimitiveType.PickList)
+                    {
+                        var binding = PickListFieldBinding.FromFieldConfig(field.FieldConfig);
+                        if (binding.Multiple)
+                        {
+                            var index = 0;
+                            foreach (var selectedValue in value.MultiValues)
+                            {
+                                values.Add(new ContentFieldValueRequest(field.Id, field.Order + index, ValueKind.PickList, selectedValue, null, null, null, null, null));
+                                index++;
+                            }
+                        }
+                        else if (!string.IsNullOrWhiteSpace(value.TextValue))
+                        {
+                            values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.PickList, value.TextValue, null, null, null, null, null));
+                        }
+                        continue;
+                    }
+
+                    values.Add(new ContentFieldValueRequest(
+                        field.Id,
+                        field.Order,
+                        field.PrimitiveType switch
+                        {
+                            PrimitiveType.Boolean => ValueKind.Boolean,
+                            PrimitiveType.Media => ValueKind.Media,
+                            PrimitiveType.File => ValueKind.File,
+                            PrimitiveType.Markdown => ValueKind.Markdown,
+                            PrimitiveType.RichText => ValueKind.RichText,
+                            PrimitiveType.Link => ValueKind.Link,
+                            PrimitiveType.Quote => ValueKind.Quote,
+                            PrimitiveType.Separator => ValueKind.Separator,
+                            _ => ValueKind.Text
+                        },
+                        value.TextValue,
+                        value.BoolValue,
+                        field.PrimitiveType == PrimitiveType.Media ? value.SelectedMediaAsset?.Id ?? value.FallbackMediaAssetId : null,
+                        field.PrimitiveType == PrimitiveType.File ? value.SelectedFileAsset?.Id ?? value.FallbackFileAssetId : null,
+                        null,
+                        null));
+                }
             }
-            await InvokeOnErrorAsync(ex);
+            catch (CmsifyApiException ex)
+            {
+                // A failed Inline child save aborts here, before the parent's own save is attempted -
+                // any children already saved before the failure remain persisted (a retry is then
+                // idempotent for them).
+                error = ex.Message;
+                await InvokeOnErrorAsync(ex);
+                return;
+            }
+            catch (InvalidOperationException ex)
+            {
+                // The Inline depth guard, or an unresolvable component/template schema - same
+                // abort-before-parent-save behavior as above.
+                error = ex.Message;
+                await InvokeOnErrorAsync(ex);
+                return;
+            }
+
+            var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var parentSaveSucceeded = false;
+            try
+            {
+                if (ContentId.HasValue)
+                {
+                    var versionNumber = VersionNumber ?? version?.VersionNumber ?? 1;
+                    var updatedVersion = await Client.Content.UpdateVersionAsync(WorkspaceId, ContentId.Value, versionNumber,
+                        new UpdateContentVersionRequest(version?.EffectiveStartAt, version?.EffectiveEndAt, values))
+                        ?? throw new InvalidOperationException("Cmsify API returned no payload while updating the content version.");
+                    version = updatedVersion;
+
+                    // Saving a version bumps the parent item's UpdatedAt server-side (search vector, list sort),
+                    // which invalidates the item ETag captured at page load. Refresh it before the item PUT below,
+                    // otherwise that PUT's If-Match always fails against its own prior write.
+                    item = await Client.Content.GetAsync(WorkspaceId, ContentId.Value) ?? item;
+
+                    var updatedItem = await Client.Content.UpdateAsync(WorkspaceId, ContentId.Value,
+                        new UpdateContentItemRequest(string.IsNullOrWhiteSpace(slug) ? null : slug, locale, item?.TranslationGroupId, tagList))
+                        ?? throw new InvalidOperationException("Cmsify API returned no payload while updating content.");
+                    item = updatedItem;
+                    parentSaveSucceeded = true;
+
+                    await ItemChanged.InvokeAsync(item);
+                    await Saved.InvokeAsync(item);
+                }
+                else
+                {
+                    var createdItem = await Client.Content.CreateAsync(WorkspaceId,
+                        new CreateContentItemRequest(templateVersion.Id, string.IsNullOrWhiteSpace(slug) ? null : slug, locale, null, tagList, values))
+                        ?? throw new InvalidOperationException("Cmsify API returned no payload while creating content.");
+                    item = createdItem;
+                    parentSaveSucceeded = true;
+
+                    await ItemChanged.InvokeAsync(item);
+                    await Created.InvokeAsync(createdItem);
+                }
+            }
+            catch (CmsifyApiException ex)
+            {
+                error = ex.Message;
+                if (ex.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && ContentId.HasValue)
+                {
+                    await LoadContentAsync();
+                    error = "Content changed while saving. The latest version has been reloaded; please review and save again.";
+                }
+                await InvokeOnErrorAsync(ex);
+                return;
+            }
+
+            // Only now that the parent's own save has succeeded is it safe to delete
+            // MarkedForDeletion Inline children - never before, so an aborted parent save never
+            // leaves an already-deleted id that the parent still (would have) referenced. This runs
+            // in its own try/catch, separate from the parent save above: a delete failure here (e.g.
+            // a stale ETag on the child) must surface as its own distinct, clearly-labeled error -
+            // not be misreported as a parent save failure (Saved/Created/ItemChanged already fired
+            // above, correctly, since the parent's own content WAS saved), and must not trigger the
+            // "content changed while saving, reloaded" message that's meant for the parent's own
+            // save conflict.
+            if (parentSaveSucceeded)
+            {
+                try
+                {
+                    await DeleteMarkedInlineChildrenAsync();
+                }
+                catch (Exception ex)
+                {
+                    error = $"Content was saved, but removing deleted inline items failed: {ex.Message}";
+                    await InvokeOnErrorAsync(ex);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -489,7 +563,10 @@
             var value = GetOrAddValue(field.Id);
             foreach (var instance in value.ChildInstances.Where(i => i.MarkedForDeletion && i.ContentItemId.HasValue).ToList())
             {
-                await Client.Content.DeleteAsync(WorkspaceId, instance.ContentItemId!.Value);
+                // Recursive: instance may itself own further Inline descendants (marked for deletion
+                // or not - everything inside a deleted instance becomes unreachable regardless), and
+                // no server-side cascade delete exists to clean those up.
+                await ContentEditSupport.DeleteInlineInstanceRecursivelyAsync(Client, WorkspaceId, instance);
                 value.ChildInstances.Remove(instance);
             }
         }

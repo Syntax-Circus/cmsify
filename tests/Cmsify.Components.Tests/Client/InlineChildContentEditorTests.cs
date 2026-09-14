@@ -313,7 +313,6 @@ public sealed class InlineChildContentEditorTests : BunitContext
     {
         var workspaceId = Guid.NewGuid();
         var field = TestFieldFactory.Create(templateId: Guid.NewGuid(), compositionMode: CompositionMode.Inline);
-        var ancestors = new HashSet<Guid>(Enumerable.Range(0, 8).Select(_ => Guid.NewGuid()));
 
         // No request should be issued at all once the depth cap is reached - resolution of
         // candidates and existing instances alike is skipped entirely.
@@ -325,10 +324,81 @@ public sealed class InlineChildContentEditorTests : BunitContext
             .Add(p => p.WorkspaceId, workspaceId)
             .Add(p => p.Field, field)
             .Add(p => p.Instances, new List<InlineChildInstance> { new() { TemplateId = Guid.NewGuid() } })
-            .Add(p => p.AncestorTemplateIds, ancestors));
+            .Add(p => p.Depth, 8));
 
         cut.Find(".cmsify-field-warning").TextContent.ShouldContain("Maximum nesting depth reached");
         cut.FindAll(".cmsify-inline-child-card").ShouldBeEmpty();
         cut.FindAll(".cmsify-field-add-button").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void DepthCapTerminatesByLevelCountEvenWhenTheAncestorSetDoesNotGrowDueToRepeatedTemplateIds()
+    {
+        // C1 regression: a cyclic chain (A -> B -> A -> B -> ...) means the SAME two template ids
+        // repeat forever, so a set-based ancestor guard never grows past 2 members and never trips.
+        // Depth must terminate recursion purely by level count regardless of repeats. AncestorTemplateIds
+        // here deliberately holds only the two repeating ids (nowhere near MaxInlineDepth by count),
+        // while Depth alone has already reached the cap - proving Depth, not the ancestor set size, is
+        // what stops rendering.
+        var workspaceId = Guid.NewGuid();
+        var templateAId = Guid.NewGuid();
+        var templateBId = Guid.NewGuid();
+        var field = TestFieldFactory.Create(templateId: templateAId, compositionMode: CompositionMode.Inline);
+
+        var client = TestCmsifyClientFactory.Create(request =>
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}"));
+
+        var cut = Render<InlineChildContentEditor>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.Field, field)
+            .Add(p => p.Instances, new List<InlineChildInstance> { new() { TemplateId = templateAId } })
+            .Add(p => p.AncestorTemplateIds, new HashSet<Guid> { templateAId, templateBId })
+            .Add(p => p.Depth, 8));
+
+        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("Maximum nesting depth reached");
+        cut.FindAll(".cmsify-inline-child-card").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void FixedTemplateIdMatchingAnAncestorIsBlockedFromAutoAddInsteadOfBypassingTheCycleGuard()
+    {
+        // C1: the auto-add path (fixed TemplateId, no picker) must not be able to route around the
+        // picker's own ancestor-disable check. Below the numeric depth cap, adding an instance whose
+        // template already appears in the ancestor chain would create a genuine cycle in real content
+        // data with no server-side cycle validation to catch it.
+        var workspaceId = Guid.NewGuid();
+        var ancestorTemplateId = Guid.NewGuid();
+        var field = TestFieldFactory.Create(templateId: ancestorTemplateId, compositionMode: CompositionMode.Inline);
+
+        var client = TestCmsifyClientFactory.Create(request =>
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}"));
+
+        var cut = Render<InlineChildContentEditor>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.Field, field)
+            .Add(p => p.Instances, new List<InlineChildInstance>())
+            .Add(p => p.AncestorTemplateIds, new HashSet<Guid> { ancestorTemplateId }));
+
+        cut.FindAll(".cmsify-field-add-button").ShouldBeEmpty();
+        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("circular reference");
+    }
+
+    [Fact]
+    public void NullClientRendersWarningInsteadOfThrowing()
+    {
+        // I9: an external consumer of the published component package rendering ContentEditForm
+        // without a Client must degrade gracefully, not NullReferenceException and crash their whole
+        // Blazor circuit.
+        var workspaceId = Guid.NewGuid();
+        var field = TestFieldFactory.Create(templateId: Guid.NewGuid(), compositionMode: CompositionMode.Inline);
+
+        var cut = Render<InlineChildContentEditor>(parameters => parameters
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.Field, field)
+            .Add(p => p.Instances, new List<InlineChildInstance>()));
+
+        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("requires a Client");
     }
 }
