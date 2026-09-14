@@ -1,4 +1,6 @@
 @namespace SyntaxCircus.Cmsify.Components
+@using System.Collections.Immutable
+@using SyntaxCircus.Cmsify.Components.Client
 
 @if (TryGetOverride(out var overrideFragment))
 {
@@ -23,7 +25,9 @@ else if (IsCompositionField)
     }
     else
     {
-        <div class="cmsify-field-warning">Inline child content editing is not available yet. Use a reference field or create the child content separately.</div>
+        <InlineChildContentEditor Client="@Client" WorkspaceId="@WorkspaceId" Field="@Field"
+                                   Instances="@Value.ChildInstances" InstancesChanged="@(v => UpdateAsync(x => x.ChildInstances = v))"
+                                   AncestorTemplateIds="@AncestorTemplateIds" ReadOnly="@ReadOnly" />
     }
 }
 else
@@ -79,6 +83,9 @@ else
     [Parameter] public EventCallback<ContentFieldEditorValue> OnFilePickRequested { get; set; }
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public CmsifyClient? Client { get; set; }
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
 
     private bool IsCompositionField =>
         Field.TemplateId.HasValue || Field.IsOpen || Field.AllowedTypes.Any(allowed => allowed.AllowedTemplateId.HasValue);

@@ -1,0 +1,225 @@
+@namespace SyntaxCircus.Cmsify.Components.Client
+@using System.Collections.Immutable
+
+@if (AncestorTemplateIds.Count >= ContentEditSupport.MaxInlineDepth)
+{
+    <div class="cmsify-field-warning">Maximum nesting depth reached — edit this content separately.</div>
+}
+else
+{
+    <div class="cmsify-inline-child-list">
+        @foreach (var instance in Instances)
+        {
+            <div class="@CardClass(instance)">
+                <div class="cmsify-inline-child-header">
+                    @if (!ReadOnly)
+                    {
+                        @if (instance.MarkedForDeletion)
+                        {
+                            <button type="button" class="cmsify-field-add-button" @onclick="() => RestoreInstanceAsync(instance)">Restore</button>
+                        }
+                        else if (CanRemove)
+                        {
+                            <button type="button" class="cmsify-component-remove-button" @onclick="() => RemoveInstanceAsync(instance)">Remove</button>
+                        }
+                    }
+                </div>
+                @if (stateByInstance.TryGetValue(instance, out var state) && state.TemplateVersion is not null)
+                {
+                    <ContentEditForm ShowSaveButton="false" Client="@Client" WorkspaceId="@WorkspaceId"
+                                     TemplateVersion="@state.TemplateVersion"
+                                     FieldValues="@instance.FieldValues"
+                                     FieldValueChanged="@(change => OnChildFieldChangedAsync(instance, change))"
+                                     PickListsByRevisionId="@state.PickListsByRevisionId"
+                                     ReferenceOptionsByTemplateId="@state.ReferenceOptionsByTemplateId"
+                                     ComponentSchemas="@state.ComponentSchemas"
+                                     Slug="@instance.Slug" SlugChanged="@(v => instance.Slug = v)"
+                                     Locale="@instance.Locale" LocaleChanged="@(v => instance.Locale = v)"
+                                     Tags="@instance.Tags" TagsChanged="@(v => instance.Tags = v)"
+                                     CurrentContentId="@instance.ContentItemId"
+                                     AncestorTemplateIds="@(instance.TemplateId is { } tid ? ContentEditSupport.WithAncestor(AncestorTemplateIds, tid) : AncestorTemplateIds)"
+                                     ReadOnly="@(ReadOnly || instance.MarkedForDeletion)" />
+                }
+                else
+                {
+                    <div class="cmsify-field-warning">Resolving template…</div>
+                }
+            </div>
+        }
+    </div>
+    @if (!ReadOnly && CanAddMore)
+    {
+        @if (showPicker)
+        {
+            <InlineTemplatePicker Candidates="@candidates" DisabledTemplateIds="@AncestorTemplateIds" ReadOnly="@ReadOnly"
+                                   TemplateSelected="OnNewInstanceTemplateSelectedAsync" />
+        }
+        else
+        {
+            <button type="button" class="cmsify-field-add-button" @onclick="AddInstanceAsync">Add @Field.Label</button>
+        }
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public CmsifyClient Client { get; set; } = null!;
+    [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
+    [Parameter, EditorRequired] public TemplateFieldResponse Field { get; set; } = null!;
+    [Parameter] public IList<InlineChildInstance> Instances { get; set; } = [];
+    [Parameter] public EventCallback<IList<InlineChildInstance>> InstancesChanged { get; set; }
+    [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private readonly Dictionary<InlineChildInstance, ChildRenderState> stateByInstance = [];
+    private bool candidatesLoaded;
+    private IReadOnlyList<TemplateSummaryResponse> candidates = [];
+    private bool showPicker;
+
+    // A field with a single fixed TemplateId and no AllowedTypes skips the picker entirely - the one
+    // candidate is auto-created against directly, with no need to ever resolve a "candidates" list.
+    private Guid? FixedTemplateId => Field.TemplateId.HasValue && Field.AllowedTypes.Count == 0 ? Field.TemplateId : null;
+
+    private int ActiveCount => Instances.Count(i => !i.MarkedForDeletion);
+    private bool CanAddMore => !Field.MaxOccurrences.HasValue || ActiveCount < Field.MaxOccurrences.Value;
+    private bool CanRemove => ActiveCount > Field.MinOccurrences;
+
+    private static string CardClass(InlineChildInstance instance) =>
+        instance.MarkedForDeletion ? "cmsify-inline-child-card cmsify-inline-child-card--pending-delete" : "cmsify-inline-child-card";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AncestorTemplateIds.Count >= ContentEditSupport.MaxInlineDepth)
+        {
+            return;
+        }
+
+        if (!candidatesLoaded && !FixedTemplateId.HasValue)
+        {
+            candidatesLoaded = true;
+            await LoadCandidatesAsync();
+        }
+
+        var pending = Instances.Where(i => i.TemplateId.HasValue && !stateByInstance.ContainsKey(i)).ToList();
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        // Reserve a placeholder for each pending instance before awaiting anything, so a re-entrant
+        // OnParametersSetAsync (e.g. another instance added while these loads are in flight) doesn't
+        // kick off duplicate resolution for the same instance.
+        foreach (var instance in pending)
+        {
+            stateByInstance[instance] = new ChildRenderState();
+        }
+
+        await Task.WhenAll(pending.Select(ResolveChildStateAsync));
+    }
+
+    private async Task LoadCandidatesAsync()
+    {
+        if (Field.AllowedTypes.Count > 0)
+        {
+            var ids = Field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value).Distinct().ToList();
+            var lookups = await Task.WhenAll(ids.Select(id => Client.Templates.GetAsync(WorkspaceId, id)));
+            candidates = [.. lookups
+                .Where(t => t is not null)
+                .Select(t => new TemplateSummaryResponse(t!.Id, t.WorkspaceId, t.Name, t.Slug, t.Description, t.CurrentVersion?.Id))];
+        }
+        else
+        {
+            var page = await Client.Templates.ListAsync(WorkspaceId, isSystem: null, search: null, page: 1, pageSize: 100);
+            candidates = page?.Items ?? [];
+        }
+    }
+
+    private async Task ResolveChildStateAsync(InlineChildInstance instance)
+    {
+        var state = stateByInstance[instance];
+        var template = await Client.Templates.GetAsync(WorkspaceId, instance.TemplateId!.Value);
+        var templateVersion = template?.CurrentVersion;
+        if (templateVersion is null)
+        {
+            return;
+        }
+
+        state.TemplateVersion = templateVersion;
+
+        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, templateVersion.Fields, state.PickListsByRevisionId);
+        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, templateVersion.Fields, state.ReferenceOptionsByTemplateId);
+
+        var rootComponentIds = templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value);
+        var resolvedSchemas = await ComponentSchemaResolver.ResolveAsync(Client, WorkspaceId, rootComponentIds);
+        foreach (var (id, schema) in resolvedSchemas)
+        {
+            state.ComponentSchemas[id] = schema;
+        }
+
+        // Component schemas must be resolved before this second pick-list/reference-option pass,
+        // which extends the same two dictionaries with bindings found nested inside every resolved
+        // component schema (the resolver has already flattened the full nested tree).
+        var componentFields = state.ComponentSchemas.Values
+            .Where(c => c.CurrentVersion is not null)
+            .SelectMany(c => c.CurrentVersion!.Fields)
+            .Select(ComponentFieldAdapter.ToTemplateField)
+            .ToList();
+        await ContentEditSupport.LoadPickListsAsync(Client, WorkspaceId, componentFields, state.PickListsByRevisionId);
+        await ContentEditSupport.LoadReferenceOptionsAsync(Client, WorkspaceId, componentFields, state.ReferenceOptionsByTemplateId);
+    }
+
+    private Task OnChildFieldChangedAsync(InlineChildInstance instance, (TemplateFieldResponse Field, ContentFieldEditorValue Value) change)
+    {
+        instance.FieldValues[change.Field.Id] = change.Value;
+        return Task.CompletedTask;
+    }
+
+    private Task AddInstanceAsync()
+    {
+        if (FixedTemplateId is { } fixedId)
+        {
+            return CommitNewInstanceAsync(fixedId);
+        }
+        if (candidates.Count == 1)
+        {
+            return CommitNewInstanceAsync(candidates[0].Id);
+        }
+
+        showPicker = true;
+        return Task.CompletedTask;
+    }
+
+    private Task OnNewInstanceTemplateSelectedAsync(Guid templateId) => CommitNewInstanceAsync(templateId);
+
+    private Task CommitNewInstanceAsync(Guid templateId)
+    {
+        showPicker = false;
+        var updated = Instances.ToList();
+        updated.Add(new InlineChildInstance { TemplateId = templateId });
+        return InstancesChanged.InvokeAsync(updated);
+    }
+
+    private Task RemoveInstanceAsync(InlineChildInstance instance)
+    {
+        if (instance.ContentItemId is null)
+        {
+            return InstancesChanged.InvokeAsync([.. Instances.Where(i => i != instance)]);
+        }
+
+        instance.MarkedForDeletion = true;
+        return InstancesChanged.InvokeAsync(Instances);
+    }
+
+    private Task RestoreInstanceAsync(InlineChildInstance instance)
+    {
+        instance.MarkedForDeletion = false;
+        return InstancesChanged.InvokeAsync(Instances);
+    }
+
+    private sealed class ChildRenderState
+    {
+        public TemplateVersionResponse? TemplateVersion { get; set; }
+        public Dictionary<Guid, PickListResponse> PickListsByRevisionId { get; } = [];
+        public Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> ReferenceOptionsByTemplateId { get; } = [];
+        public Dictionary<Guid, ComponentResponse> ComponentSchemas { get; } = [];
+    }
+}

@@ -1,4 +1,5 @@
 @namespace SyntaxCircus.Cmsify.Components
+@using System.Collections.Immutable
 
 <div class="cmsify-form">
     @if (!string.IsNullOrWhiteSpace(Error))
@@ -23,6 +24,9 @@
                              OnMediaPickRequested="@(() => OnMediaPickRequested.InvokeAsync(GetOrCreateValue(field.Id)))"
                              OnFilePickRequested="@(() => OnFilePickRequested.InvokeAsync(GetOrCreateValue(field.Id)))"
                              FieldTemplateOverrides="@FieldTemplateOverrides"
+                             Client="@Client"
+                             WorkspaceId="@WorkspaceId"
+                             AncestorTemplateIds="@AncestorTemplateIds"
                              ReadOnly="@ReadOnly" />
                 @if (!string.IsNullOrWhiteSpace(field.HelpText))
                 {
@@ -46,7 +50,7 @@
         <label class="cmsify-form-label">Tags</label>
         <input class="cmsify-field-input" value="@Tags" readonly="@ReadOnly" @oninput="e => TagsChanged.InvokeAsync(e.Value?.ToString())" />
     </div>
-    @if (!ReadOnly)
+    @if (!ReadOnly && ShowSaveButton)
     {
         <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()" disabled="@Busy">@(Busy ? "Saving…" : "Save")</button>
     }
@@ -74,6 +78,10 @@
     [Parameter] public Guid? CurrentContentId { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
     [Parameter] public bool Busy { get; set; }
+    [Parameter] public bool ShowSaveButton { get; set; } = true;
+    [Parameter] public CmsifyClient? Client { get; set; }
+    [Parameter] public Guid WorkspaceId { get; set; }
+    [Parameter] public IReadOnlySet<Guid> AncestorTemplateIds { get; set; } = ImmutableHashSet<Guid>.Empty;
 
     private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
         FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();
