@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `ContentEditPanel` gained an optional `RequireSlug` parameter: when set, `SaveAsync` rejects a blank slug immediately (sets `error`, issues no API request) instead of silently creating/updating content with a null slug that a consumer's own downstream logic can't use. `ContentEditPanel`/`ContentEditForm` also gained a `Busy` surface — `ContentEditPanel.BusyChanged` (`EventCallback<bool>`) fires around the save API call, and `ContentEditForm`'s own Save button now disables and reads "Saving…" while busy — so consumers no longer need to guess whether a save click actually did anything.
+
 ## [0.4.8] - 2026-09-13
 
 ### Fixed
