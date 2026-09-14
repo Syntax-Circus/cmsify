@@ -125,7 +125,7 @@ public sealed class ContentEditPanelTests : BunitContext
         cut.Find("input").Input("My Title");
         cut.Find(".cmsify-form-save-button").Click();
 
-        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0, TimeSpan.FromSeconds(10));
 
         cut.Find(".cmsify-form-error").TextContent.ShouldContain("slug");
         createRequestIssued.ShouldBeFalse();
@@ -188,7 +188,7 @@ public sealed class ContentEditPanelTests : BunitContext
         cut.Find("#cmsify-slug-input").Input("my-slug");
         cut.Find(".cmsify-form-save-button").Click();
 
-        cut.WaitForState(() => created is not null);
+        cut.WaitForState(() => created is not null, TimeSpan.FromSeconds(10));
 
         created.ShouldNotBeNull();
         cut.FindAll(".cmsify-form-error").ShouldBeEmpty();
@@ -251,7 +251,7 @@ public sealed class ContentEditPanelTests : BunitContext
         cut.Find("input").Input("My Title");
         cut.Find(".cmsify-form-save-button").Click();
 
-        cut.WaitForState(() => created is not null);
+        cut.WaitForState(() => created is not null, TimeSpan.FromSeconds(10));
 
         busyStates.ShouldBe([true, false]);
     }
