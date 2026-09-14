@@ -93,15 +93,23 @@ public sealed class FieldEditorTests : BunitContext
     }
 
     [Fact]
-    public void RendersInlineNotAvailableWarningForInlineCompositionField()
+    public void RendersInlineChildContentEditorForInlineCompositionField()
     {
+        var workspaceId = Guid.NewGuid();
         var field = TestFieldFactory.Create(templateId: Guid.NewGuid(), compositionMode: CompositionMode.Inline);
+
+        // A fixed TemplateId with no AllowedTypes skips the picker/candidate resolution entirely, so
+        // no HTTP request should ever be issued for this render.
+        var client = TestCmsifyClientFactory.Create(request =>
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}"));
 
         var cut = Render<FieldEditor>(parameters => parameters
             .Add(p => p.Field, field)
-            .Add(p => p.Value, new ContentFieldEditorValue()));
+            .Add(p => p.Value, new ContentFieldEditorValue())
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId));
 
-        cut.Find(".cmsify-field-warning").TextContent.ShouldContain("not available yet");
+        cut.FindComponent<SyntaxCircus.Cmsify.Components.Client.InlineChildContentEditor>().ShouldNotBeNull();
     }
 
     [Fact]
