@@ -76,6 +76,187 @@ public sealed class ContentEditPanelTests : BunitContext
     }
 
     [Fact]
+    public void RequireSlugBlocksSavingWithBlankSlugAndIssuesNoRequest()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var createRequestIssued = false;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                createRequestIssued = true;
+                return FakeHttpMessageHandler.Json("{}");
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId)
+            .Add(p => p.RequireSlug, true));
+
+        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+
+        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
+
+        cut.Find(".cmsify-form-error").TextContent.ShouldContain("slug");
+        createRequestIssued.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void RequireSlugAllowsSavingWhenSlugIsProvided()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var newContentId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{newContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
+                      "slug": "my-slug", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        ContentItemDetailResponse? created = null;
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId)
+            .Add(p => p.RequireSlug, true)
+            .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => created = c)));
+
+        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+
+        cut.Find("input").Input("My Title");
+        cut.Find("#cmsify-slug-input").Input("my-slug");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => created is not null);
+
+        created.ShouldNotBeNull();
+        cut.FindAll(".cmsify-form-error").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void SavingRaisesBusyChangedTrueThenFalseAroundTheApiCall()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var newContentId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    {
+                      "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article",
+                      "description": null, "isSystem": false,
+                      "currentVersion": {
+                        "id": "{{templateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                        "status": "Published", "publishedAt": null, "notes": null, "sections": [],
+                        "fields": [
+                          { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                            "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                            "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                            "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                        ]
+                      }
+                    }
+                    """);
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{newContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Article",
+                      "slug": null, "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        ContentItemDetailResponse? created = null;
+        var busyStates = new List<bool>();
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.TemplateId, templateId)
+            .Add(p => p.BusyChanged, EventCallback.Factory.Create<bool>(this, b => busyStates.Add(b)))
+            .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => created = c)));
+
+        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+
+        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => created is not null);
+
+        busyStates.ShouldBe([true, false]);
+    }
+
+    [Fact]
     public void CreatedCallbackThrowingNonApiExceptionSurfacesErrorInsteadOfPropagating()
     {
         var workspaceId = Guid.NewGuid();

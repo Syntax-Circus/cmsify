@@ -45,7 +45,7 @@
     </div>
     @if (!ReadOnly)
     {
-        <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()">Save</button>
+        <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()" disabled="@Busy">@(Busy ? "Saving…" : "Save")</button>
     }
 </div>
 
@@ -69,6 +69,7 @@
     [Parameter] public IReadOnlyDictionary<PrimitiveType, RenderFragment<FieldEditorRenderContext>>? FieldTemplateOverrides { get; set; }
     [Parameter] public Guid? CurrentContentId { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public bool Busy { get; set; }
 
     private ContentFieldEditorValue GetOrCreateValue(Guid fieldId) =>
         FieldValues.TryGetValue(fieldId, out var value) ? value : new ContentFieldEditorValue();

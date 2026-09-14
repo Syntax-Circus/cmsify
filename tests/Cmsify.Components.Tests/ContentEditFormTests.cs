@@ -96,6 +96,19 @@ public sealed class ContentEditFormTests : BunitContext
     }
 
     [Fact]
+    public void ShowsSavingTextAndDisablesSaveButtonWhenBusy()
+    {
+        var cut = Render<ContentEditForm>(parameters => parameters
+            .Add(p => p.TemplateVersion, CreateTemplateVersion())
+            .Add(p => p.FieldValues, new Dictionary<Guid, ContentFieldEditorValue>())
+            .Add(p => p.Busy, true));
+
+        var button = cut.Find(".cmsify-form-save-button");
+        button.TextContent.ShouldBe("Saving…");
+        button.HasAttribute("disabled").ShouldBeTrue();
+    }
+
+    [Fact]
     public void HidesSaveButtonAndMarksMetadataInputsReadOnlyWhenReadOnly()
     {
         var field = TestFieldFactory.Create(primitiveType: PrimitiveType.Text);

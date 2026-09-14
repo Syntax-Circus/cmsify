@@ -7,7 +7,7 @@
                  Tags="@tags" TagsChanged="@(v => tags = v)" Error="@error" OnSave="SaveAsync"
                  OnMediaPickRequested="OpenMediaPickerAsync" OnFilePickRequested="OpenFilePickerAsync"
                  FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText"
-                 ReadOnly="@ReadOnly" />
+                 ReadOnly="@ReadOnly" Busy="@busy" />
 
 <MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix"
                    Selected="OnAssetSelectedAsync" Closed="() => pickerVisible = false" />
@@ -25,6 +25,8 @@
     [Parameter] public string? SlugHelpText { get; set; }
     [Parameter] public int? VersionNumber { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public bool RequireSlug { get; set; }
+    [Parameter] public EventCallback<bool> BusyChanged { get; set; }
 
     private TemplateVersionResponse templateVersion = new(Guid.Empty, Guid.Empty, 0, TemplateVersionStatus.Draft, null, null, [], []);
     private ContentItemDetailResponse? item;
@@ -41,6 +43,7 @@
     private Guid pickerFieldId;
     private bool pickerIsFileField;
     private bool loaded;
+    private bool busy;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -254,6 +257,12 @@
             return;
         }
 
+        if (RequireSlug && string.IsNullOrWhiteSpace(slug))
+        {
+            error = "A slug is required before this can be saved.";
+            return;
+        }
+
         var values = new List<ContentFieldValueRequest>();
         foreach (var field in templateVersion.Fields.OrderBy(f => f.Order))
         {
@@ -336,6 +345,8 @@
 
         var tagList = (tags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        busy = true;
+        await BusyChanged.InvokeAsync(true);
         try
         {
             error = null;
@@ -387,6 +398,11 @@
             // where an unhandled exception would terminate the whole Blazor circuit.
             error = ex.Message;
             await InvokeOnErrorAsync(ex);
+        }
+        finally
+        {
+            busy = false;
+            await BusyChanged.InvokeAsync(false);
         }
     }
 
