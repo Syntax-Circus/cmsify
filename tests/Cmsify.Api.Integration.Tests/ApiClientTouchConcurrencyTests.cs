@@ -83,6 +83,31 @@ public sealed class ApiClientTouchConcurrencyTests : IAsyncLifetime
         Assert.Equal(secondTouch, persisted.LastUsedAt);
     }
 
+    [Fact]
+    public async Task TouchUserSessionIfStaleAsync_WhenCalledFromTwoContextsForTheSameStaleSession_NeverThrowsAndTheLaterValuesWin()
+    {
+        await using var factory = CreateFactory();
+        var sessionId = await SeedUserSessionAsync(factory);
+        var firstTouch = TruncateToMicroseconds(DateTimeOffset.UtcNow);
+        var secondTouch = firstTouch.AddSeconds(1);
+        var touchInterval = TimeSpan.FromTicks(1);
+
+        using var firstScope = factory.Services.CreateScope();
+        var firstContext = firstScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        await CmsifyOpaqueBearerAuthenticationHandler.TouchUserSessionIfStaleAsync(firstContext, sessionId, null, firstTouch, touchInterval, firstTouch.AddHours(1), "10.0.0.1", TestContext.Current.CancellationToken);
+
+        using var secondScope = factory.Services.CreateScope();
+        var secondContext = secondScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        await CmsifyOpaqueBearerAuthenticationHandler.TouchUserSessionIfStaleAsync(secondContext, sessionId, null, secondTouch, touchInterval, secondTouch.AddHours(1), "10.0.0.2", TestContext.Current.CancellationToken);
+
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationContext = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var persisted = await verificationContext.UserSessions.AsNoTracking().SingleAsync(s => s.Id == sessionId, TestContext.Current.CancellationToken);
+        Assert.Equal(secondTouch, persisted.LastSeenAt);
+        Assert.Equal(secondTouch.AddHours(1), persisted.ExpiresAt);
+        Assert.Equal("10.0.0.2", persisted.IpAddress);
+    }
+
     private static DateTimeOffset TruncateToMicroseconds(DateTimeOffset value) => new(value.Ticks - value.Ticks % 10, value.Offset);
 
     private WebApplicationFactory<Program> CreateFactory() => new();
@@ -104,6 +129,22 @@ public sealed class ApiClientTouchConcurrencyTests : IAsyncLifetime
         dbContext.ApiClients.Add(client);
         await dbContext.SaveChangesAsync();
         return client.Id;
+    }
+
+    private static async Task<Guid> SeedUserSessionAsync(WebApplicationFactory<Program> factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var adminUserId = await dbContext.Users.Select(user => user.Id).FirstAsync();
+        var session = new UserSession
+        {
+            UserId = adminUserId,
+            TokenHash = TokenUtility.Sha256Hash($"session-{Guid.NewGuid():N}"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+        };
+        dbContext.UserSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        return session.Id;
     }
 
     private static void ClearEnvironment()
