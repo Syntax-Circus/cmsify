@@ -60,29 +60,43 @@ public sealed class CmsifyOpaqueBearerAuthenticationHandler(
     private async Task<CurrentActorInfo> ResolveUserSessionAsync(string token)
     {
         var now = DateTimeOffset.UtcNow;
-        var session = await dbContext.UserSessions.FirstOrDefaultAsync(candidate => candidate.TokenHash == TokenUtility.Sha256Hash(token) && candidate.ExpiresAt > now, Context.RequestAborted);
+        var session = await dbContext.UserSessions.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.TokenHash == TokenUtility.Sha256Hash(token) && candidate.ExpiresAt > now, Context.RequestAborted);
         if (session is null) return CurrentActorInfo.Anonymous;
 
         var user = await dbContext.Users.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == session.UserId && candidate.IsActive, Context.RequestAborted);
         if (user is null) return CurrentActorInfo.Anonymous;
 
         var touchInterval = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Auth:SessionTouchIntervalSeconds", 300), 1, 3600));
+        var expiresAt = session.ExpiresAt;
         if (!session.LastSeenAt.HasValue || session.LastSeenAt.Value <= now - touchInterval)
         {
-            session.LastSeenAt = now;
-            session.ExpiresAt = LocalSessionLifetime.CalculateExpiresAt(configuration, now);
-            session.IpAddress = Context.Connection.RemoteIpAddress?.ToString();
-            await dbContext.SaveChangesAsync(Context.RequestAborted);
+            expiresAt = LocalSessionLifetime.CalculateExpiresAt(configuration, now);
+            await TouchUserSessionIfStaleAsync(dbContext, session.Id, session.LastSeenAt, now, touchInterval, expiresAt, Context.Connection.RemoteIpAddress?.ToString(), Context.RequestAborted);
         }
-        Response.Headers[LocalSessionLifetime.ExpiresAtHeaderName] = session.ExpiresAt.ToString("O");
+        Response.Headers[LocalSessionLifetime.ExpiresAtHeaderName] = expiresAt.ToString("O");
         return new CurrentActorInfo(user.Id, null, user.Role, null, true, user.IsSuperAdmin);
+    }
+
+    internal static Task TouchUserSessionIfStaleAsync(CmsifyDbContext dbContext, Guid sessionId, DateTimeOffset? lastSeenAt, DateTimeOffset now, TimeSpan touchInterval, DateTimeOffset newExpiresAt, string? ipAddress, CancellationToken ct)
+    {
+        if (lastSeenAt.HasValue && lastSeenAt.Value > now - touchInterval)
+        {
+            return Task.CompletedTask;
+        }
+
+        return dbContext.UserSessions
+            .Where(s => s.Id == sessionId && (!s.LastSeenAt.HasValue || s.LastSeenAt.Value <= now - touchInterval))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(s => s.LastSeenAt, now)
+                .SetProperty(s => s.ExpiresAt, newExpiresAt)
+                .SetProperty(s => s.IpAddress, ipAddress), ct);
     }
 
     private async Task<CurrentActorInfo> ResolveApiClientAsync(string token)
     {
         var now = DateTimeOffset.UtcNow;
         var identifiers = GetApiTokenIdentifierCandidates(token);
-        var query = dbContext.ApiClients.Where(client => client.IsActive && !client.IsDeleted && (!client.ExpiresAt.HasValue || client.ExpiresAt > now));
+        var query = dbContext.ApiClients.AsNoTracking().Where(client => client.IsActive && !client.IsDeleted && (!client.ExpiresAt.HasValue || client.ExpiresAt > now));
         var identifiedClients = await query
             .Where(client => client.TokenIdentifier != null && identifiers.Contains(client.TokenIdentifier))
             .ToListAsync(Context.RequestAborted);
@@ -102,14 +116,22 @@ public sealed class CmsifyOpaqueBearerAuthenticationHandler(
         {
             if (!BCrypt.Net.BCrypt.Verify(token, client.TokenHash)) continue;
             var touchInterval = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Auth:ApiClientTouchIntervalSeconds", 300), 1, 3600));
-            if (!client.LastUsedAt.HasValue || client.LastUsedAt.Value <= now - touchInterval)
-            {
-                client.LastUsedAt = now;
-                await dbContext.SaveChangesAsync(Context.RequestAborted);
-            }
+            await TouchApiClientIfStaleAsync(dbContext, client.Id, client.LastUsedAt, now, touchInterval, Context.RequestAborted);
             return new CurrentActorInfo(null, client.Id, client.Role, client.WorkspaceId, true);
         }
         return CurrentActorInfo.Anonymous;
+    }
+
+    internal static Task TouchApiClientIfStaleAsync(CmsifyDbContext dbContext, Guid clientId, DateTimeOffset? lastUsedAt, DateTimeOffset now, TimeSpan touchInterval, CancellationToken ct)
+    {
+        if (lastUsedAt.HasValue && lastUsedAt.Value > now - touchInterval)
+        {
+            return Task.CompletedTask;
+        }
+
+        return dbContext.ApiClients
+            .Where(c => c.Id == clientId && (!c.LastUsedAt.HasValue || c.LastUsedAt.Value <= now - touchInterval))
+            .ExecuteUpdateAsync(setters => setters.SetProperty(c => c.LastUsedAt, now), ct);
     }
 
     internal static string[] GetApiTokenIdentifierCandidates(string token)
