@@ -82,7 +82,7 @@ public sealed class CmsifyOpaqueBearerAuthenticationHandler(
     {
         var now = DateTimeOffset.UtcNow;
         var identifiers = GetApiTokenIdentifierCandidates(token);
-        var query = dbContext.ApiClients.Where(client => client.IsActive && !client.IsDeleted && (!client.ExpiresAt.HasValue || client.ExpiresAt > now));
+        var query = dbContext.ApiClients.AsNoTracking().Where(client => client.IsActive && !client.IsDeleted && (!client.ExpiresAt.HasValue || client.ExpiresAt > now));
         var identifiedClients = await query
             .Where(client => client.TokenIdentifier != null && identifiers.Contains(client.TokenIdentifier))
             .ToListAsync(Context.RequestAborted);
@@ -102,14 +102,22 @@ public sealed class CmsifyOpaqueBearerAuthenticationHandler(
         {
             if (!BCrypt.Net.BCrypt.Verify(token, client.TokenHash)) continue;
             var touchInterval = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Auth:ApiClientTouchIntervalSeconds", 300), 1, 3600));
-            if (!client.LastUsedAt.HasValue || client.LastUsedAt.Value <= now - touchInterval)
-            {
-                client.LastUsedAt = now;
-                await dbContext.SaveChangesAsync(Context.RequestAborted);
-            }
+            await TouchApiClientIfStaleAsync(dbContext, client.Id, client.LastUsedAt, now, touchInterval, Context.RequestAborted);
             return new CurrentActorInfo(null, client.Id, client.Role, client.WorkspaceId, true);
         }
         return CurrentActorInfo.Anonymous;
+    }
+
+    internal static Task TouchApiClientIfStaleAsync(CmsifyDbContext dbContext, Guid clientId, DateTimeOffset? lastUsedAt, DateTimeOffset now, TimeSpan touchInterval, CancellationToken ct)
+    {
+        if (lastUsedAt.HasValue && lastUsedAt.Value > now - touchInterval)
+        {
+            return Task.CompletedTask;
+        }
+
+        return dbContext.ApiClients
+            .Where(c => c.Id == clientId && (!c.LastUsedAt.HasValue || c.LastUsedAt.Value <= now - touchInterval))
+            .ExecuteUpdateAsync(setters => setters.SetProperty(c => c.LastUsedAt, now), ct);
     }
 
     internal static string[] GetApiTokenIdentifierCandidates(string token)
