@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-09-15
+
 ### Fixed
 
 - `CmsifyOpaqueBearerAuthenticationHandler.VerifyApiClientCandidatesAsync` "touched" `ApiClient.LastUsedAt` on every API-client-authenticated request (at most once per `Auth:ApiClientTouchIntervalSeconds`) by mutating a tracked entity and calling `SaveChangesAsync`, and `ApiClient` uses PostgreSQL `xmin`-based optimistic concurrency. Two requests authenticating with the same API key inside the same touch window raced: the first save bumped the row's `xmin`, the second's threw an unhandled `DbUpdateConcurrencyException`, surfacing as a 500 `internal-server-error` - seen repeatedly in production for content-delivery endpoints under ordinary concurrent traffic. The touch now goes through `ExecuteUpdateAsync`, a raw conditional update that bypasses the change tracker and the concurrency token entirely, so concurrent touches settle as a race-free "last write wins" on this purely informational timestamp.
