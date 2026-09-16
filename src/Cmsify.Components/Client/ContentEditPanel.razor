@@ -88,7 +88,11 @@
         tags = string.Join(",", loadedItem.Tags);
 
         var versionNumber = VersionNumber ?? loadedItem.CurrentlyServingVersion?.VersionNumber ?? 1;
-        var loadedVersion = await Client.Content.GetVersionAsync(WorkspaceId, ContentId!.Value, versionNumber)
+        // This editor only ever reads ChildContentItemId off each field (see the loop below and
+        // FieldEditor's ReferenceFieldEditor) - it never reads the nested Child response - so skip
+        // the server's recursive child expansion entirely. Inline children are loaded separately,
+        // on their own terms, by LoadInlineChildInstanceAsync below.
+        var loadedVersion = await Client.Content.GetVersionAsync(WorkspaceId, ContentId!.Value, versionNumber, expandChildren: false)
             ?? throw new InvalidOperationException("Cmsify API returned no payload while loading a content version.");
         version = loadedVersion;
 
@@ -109,6 +113,8 @@
         // Draft version for an Inline child that lacks one - Draft-creation requires Editor role
         // server-side, so a Viewer-role user opening a read-only view would otherwise 403, and even
         // for an Editor, merely viewing content should not have the side effect of creating rows.
+        // Loading itself never mints a Draft either way now (see LoadInlineChildInstanceAsync) - this
+        // flag is threaded onto each loaded instance and only actually consulted later, at save time.
         var allowInlineDraftCreation = !ReadOnly && !VersionNumber.HasValue;
 
         foreach (var value in loadedVersion.Fields)
@@ -124,8 +130,11 @@
             var field = fieldsById.GetValueOrDefault(value.FieldId);
             if (field?.CompositionMode == CompositionMode.Inline && value.ChildContentItemId is { } childContentItemId)
             {
+                // Reuse this load's own already-fetched template list and (once resolved below)
+                // component schemas across every Inline child instead of each one refetching them.
                 inlineChildLookups.Add((editorValue, childContentItemId, ContentEditSupport.LoadInlineChildInstanceAsync(
-                    Client, WorkspaceId, childContentItemId, null, ImmutableHashSet<Guid>.Empty, 0, allowInlineDraftCreation, CancellationToken.None)));
+                    Client, WorkspaceId, childContentItemId, null, ImmutableHashSet<Guid>.Empty, 0, allowInlineDraftCreation, CancellationToken.None,
+                    templates, componentSchemas)));
             }
             if (value.ValueKind == ValueKind.Component && value.JsonValue.HasValue && field?.ComponentId is { } componentId)
             {
@@ -399,8 +408,10 @@
                         {
                             // Children before parents, and this throws (aborting before the parent's own
                             // save below) on the first child save failure - see ContentEditSupport.SaveInlineFieldAsync.
+                            // componentSchemaSeed reuses this panel's own already-resolved component
+                            // schemas instead of every top-level Inline field re-resolving them.
                             var childRequests = await ContentEditSupport.SaveInlineFieldAsync(
-                                Client, WorkspaceId, field, value.ChildInstances, ImmutableHashSet<Guid>.Empty, 0);
+                                Client, WorkspaceId, field, value.ChildInstances, ImmutableHashSet<Guid>.Empty, 0, componentSchemaSeed: componentSchemas);
                             values.AddRange(childRequests);
                         }
                         else if (value.ChildContentItemId is { } referencedId)
@@ -478,8 +489,10 @@
                 if (ContentId.HasValue)
                 {
                     var versionNumber = VersionNumber ?? version?.VersionNumber ?? 1;
+                    // Same reasoning as the GetVersionAsync call in LoadContentAsync - this editor
+                    // never reads the nested Child response, only ChildContentItemId.
                     var updatedVersion = await Client.Content.UpdateVersionAsync(WorkspaceId, ContentId.Value, versionNumber,
-                        new UpdateContentVersionRequest(version?.EffectiveStartAt, version?.EffectiveEndAt, values))
+                        new UpdateContentVersionRequest(version?.EffectiveStartAt, version?.EffectiveEndAt, values), expandChildren: false)
                         ?? throw new InvalidOperationException("Cmsify API returned no payload while updating the content version.");
                     version = updatedVersion;
 

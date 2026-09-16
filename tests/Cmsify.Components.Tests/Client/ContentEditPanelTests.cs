@@ -1998,7 +1998,7 @@ public sealed class ContentEditPanelTests : BunitContext
 
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(10));
         // cut.InvokeAsync wraps Find+Click atomically - see the identical comment on
-        // DeletingAnInlineChildWhoseLoadMintedADraftUsesARefreshedNotStaleETagOnDelete below.
+        // DeletingAnInlineChildRefreshesItsETagImmediatelyBeforeDeleteInsteadOfReusingTheLoadTimeOne below.
         cut.InvokeAsync(() => cut.Find(".cmsify-component-remove-button").Click());
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card--pending-delete").Count > 0, TimeSpan.FromSeconds(5));
 
@@ -2010,14 +2010,20 @@ public sealed class ContentEditPanelTests : BunitContext
     }
 
     [Fact]
-    public void DeletingAnInlineChildWhoseLoadMintedADraftUsesARefreshedNotStaleETagOnDelete()
+    public void DeletingAnInlineChildRefreshesItsETagImmediatelyBeforeDeleteInsteadOfReusingTheLoadTimeOne()
     {
-        // I2: LoadInlineChildInstanceAsync mints a Draft (via CreateVersionAsync) for a child that has
-        // none at load time - a real server bumps the item's UpdatedAt (and therefore its ETag) as a
-        // side effect of that, with no fresh ETag ever returned to the client for it. The SDK's cached
-        // ETag for the child's own item URI is therefore stale by the time a later delete reuses it as
-        // If-Match, unless something refreshes it first. This asserts the DELETE actually carries the
-        // freshly-refreshed ETag, not the one captured when the child was first loaded.
+        // I2 (updated for lazy draft minting): LoadInlineChildInstanceAsync no longer mints a Draft at
+        // load time at all (see ContentEditSupport) - a child with no Draft is loaded read-only, as-is,
+        // purely for display. The child here has NO Draft version - only a Published one - and is
+        // never edited, only marked for deletion and saved: this proves that flow issues no
+        // CreateVersionAsync POST whatsoever (the fake client's catch-all throws on any unexpected
+        // request, including that POST) and still deletes successfully.
+        //
+        // DeleteInlineInstanceRecursivelyAsync's own pre-delete GET-refresh remains valuable
+        // regardless of why the SDK's cached item ETag might be stale by delete time - the child's own
+        // item URI was last GETted back when the parent's own load first pulled it in, and arbitrarily
+        // more time (and possibly other writes) may have passed since. This asserts the DELETE actually
+        // carries that freshly-refreshed ETag, not the one captured at initial load.
         var workspaceId = Guid.NewGuid();
         var parentTemplateId = Guid.NewGuid();
         var parentTemplateVersionId = Guid.NewGuid();
@@ -2097,10 +2103,11 @@ public sealed class ContentEditPanelTests : BunitContext
             if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
             {
                 childItemGetCount++;
-                // First GET (during LoadInlineChildInstanceAsync) has no Draft version - only a
-                // Published one - so the load mints a Draft via CreateVersionAsync below. The second
-                // GET (the I2 pre-delete refresh) simulates the server having bumped UpdatedAt (and
-                // therefore its ETag) as a side effect of that Draft creation.
+                // First GET happens during LoadInlineChildInstanceAsync. The second is the I2
+                // pre-delete refresh inside DeleteInlineInstanceRecursivelyAsync - this etag swap
+                // simulates the cached load-time ETag having gone stale by delete time for whatever
+                // reason (a real system has several: another actor touching the item, or - before this
+                // pass - a lazily-deferred Draft mint elsewhere; the refresh must not care WHY).
                 var etag = childItemGetCount == 1 ? "\"child-etag-stale\"" : "\"child-etag-refreshed\"";
                 return WithETag(FakeHttpMessageHandler.Json($$"""
                     { "id": "{{childContentId}}", "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child",
@@ -2115,26 +2122,20 @@ public sealed class ContentEditPanelTests : BunitContext
                       "versions": [] }
                     """), etag);
             }
-            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions")
+            // No POST .../versions branch is registered here on purpose: this child has no Draft, is
+            // never edited (only marked for deletion), and lazy draft minting means loading it must
+            // never mint one either - if the loader (or anything else in this flow) regressed to
+            // eagerly minting a Draft, the catch-all below would fail this test with an unexpected
+            // request instead of silently passing.
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/1")
             {
                 return FakeHttpMessageHandler.Json($$"""
-                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{childContentId}}", "versionNumber": 2, "status": "Draft",
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{childContentId}}", "versionNumber": 1, "status": "Published",
                       "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": "child-post",
                       "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
                       "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
                       "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
-                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
-                    """);
-            }
-            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/2")
-            {
-                return FakeHttpMessageHandler.Json($$"""
-                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{childContentId}}", "versionNumber": 2, "status": "Draft",
-                      "templateVersionId": "{{childTemplateVersionId}}", "templateName": "Child", "slug": "child-post",
-                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
-                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
-                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
-                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                      "updatedAt": "2026-01-01T00:00:00Z", "fields": [] }
                     """);
             }
             if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{parentContentId}/versions/1")
@@ -2173,9 +2174,9 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.Saved, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => saved = c)));
 
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(10));
-        // cut.InvokeAsync wraps Find+Click atomically - the still-in-flight Draft-minting load in this
-        // test leaves extra renders pending right around here, and a plain Find().Click() can otherwise
-        // race a render that invalidates the found element's event handler.
+        // cut.InvokeAsync wraps Find+Click atomically - a still-in-flight load leaves extra renders
+        // pending right around here, and a plain Find().Click() can otherwise race a render that
+        // invalidates the found element's event handler.
         cut.InvokeAsync(() => cut.Find(".cmsify-component-remove-button").Click());
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card--pending-delete").Count > 0, TimeSpan.FromSeconds(5));
 
@@ -2909,7 +2910,7 @@ public sealed class ContentEditPanelTests : BunitContext
 
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card").Count > 0, TimeSpan.FromSeconds(10));
         // cut.InvokeAsync wraps Find+Click atomically - see the identical comment on
-        // DeletingAnInlineChildWhoseLoadMintedADraftUsesARefreshedNotStaleETagOnDelete below.
+        // DeletingAnInlineChildRefreshesItsETagImmediatelyBeforeDeleteInsteadOfReusingTheLoadTimeOne below.
         cut.InvokeAsync(() => cut.Find(".cmsify-component-remove-button").Click());
         cut.WaitForState(() => cut.FindAll(".cmsify-inline-child-card--pending-delete").Count > 0, TimeSpan.FromSeconds(5));
 

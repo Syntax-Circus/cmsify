@@ -235,7 +235,7 @@ public sealed class ContentController : ControllerBase
     }
 
     [HttpGet("by-slug/{slug}")]
-    public async Task<ActionResult<ContentVersionDetailResponse>> GetBySlug(Guid workspaceId, string slug, [FromQuery] DateTimeOffset? asOf = null, CancellationToken ct = default)
+    public async Task<ActionResult<ContentVersionDetailResponse>> GetBySlug(Guid workspaceId, string slug, [FromQuery] DateTimeOffset? asOf = null, [FromQuery] bool expandChildren = true, CancellationToken ct = default)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -250,7 +250,7 @@ public sealed class ContentController : ControllerBase
         }
 
         Response.Headers.ETag = ControllerHelpers.ETag(version.PublishedAt ?? version.UpdatedAt);
-        return Ok(await ToVersionDetailResponseAsync(version, resolvedAsOf, ct: ct));
+        return Ok(await ToVersionDetailResponseAsync(version, resolvedAsOf, expandChildren, ct));
     }
 
     [HttpPut("{id:guid}")]
@@ -427,7 +427,7 @@ public sealed class ContentController : ControllerBase
 
     [HttpPost("{id:guid}/versions")]
     [RequireRole(UserRole.Editor)]
-    public async Task<ActionResult<ContentVersionDetailResponse>> CreateVersion(Guid workspaceId, Guid id, CreateContentVersionRequest request, CancellationToken ct)
+    public async Task<ActionResult<ContentVersionDetailResponse>> CreateVersion(Guid workspaceId, Guid id, CreateContentVersionRequest request, CancellationToken ct, [FromQuery] bool expandChildren = true)
     {
         if (!await workspaceAuthorization.CanWriteWorkspaceAsync(workspaceId, ct))
         {
@@ -503,7 +503,7 @@ public sealed class ContentController : ControllerBase
         EnqueueContentEvent("content.version_created", content, version);
         await dbContext.SaveChangesAsync(ct);
         Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
-        return CreatedAtAction(nameof(GetVersion), new { workspaceId, id, versionNumber = version.VersionNumber }, await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, ct: ct));
+        return CreatedAtAction(nameof(GetVersion), new { workspaceId, id, versionNumber = version.VersionNumber }, await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, expandChildren, ct));
     }
 
     [HttpGet("{id:guid}/versions")]
@@ -534,7 +534,7 @@ public sealed class ContentController : ControllerBase
     }
 
     [HttpGet("{id:guid}/versions/{versionNumber:int}")]
-    public async Task<ActionResult<ContentVersionDetailResponse>> GetVersion(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
+    public async Task<ActionResult<ContentVersionDetailResponse>> GetVersion(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct, [FromQuery] bool expandChildren = true)
     {
         if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
         {
@@ -556,12 +556,12 @@ public sealed class ContentController : ControllerBase
         }
 
         Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
-        return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, ct: ct));
+        return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, expandChildren, ct));
     }
 
     [HttpPut("{id:guid}/versions/{versionNumber:int}")]
     [RequireRole(UserRole.Editor)]
-    public async Task<ActionResult<ContentVersionDetailResponse>> UpdateVersion(Guid workspaceId, Guid id, int versionNumber, UpdateContentVersionRequest request, CancellationToken ct)
+    public async Task<ActionResult<ContentVersionDetailResponse>> UpdateVersion(Guid workspaceId, Guid id, int versionNumber, UpdateContentVersionRequest request, CancellationToken ct, [FromQuery] bool expandChildren = true)
     {
         var version = await LoadVersionForEditAsync(workspaceId, id, versionNumber, ct);
         if (version is null)
@@ -620,7 +620,7 @@ public sealed class ContentController : ControllerBase
         }
 
         Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
-        return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, ct: ct));
+        return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, expandChildren, ct));
     }
 
     [HttpDelete("{id:guid}/versions/{versionNumber:int}")]
@@ -1273,47 +1273,159 @@ public sealed class ContentController : ControllerBase
         return candidates.Count == 0 ? null : SelectMostSpecific(candidates, asOf);
     }
 
+    // Batched sibling of ResolvePublishedVersionAsync above, for resolving a whole set of content
+    // item ids in ONE query instead of one query per id - used by ToVersionDetailResponseAsync to
+    // expand a whole layer of a version's field-value tree at once. Filtering semantics are
+    // identical to the single-id overload (published, effective as of `asOf`, not soft-deleted);
+    // only the shape differs, batched with an IN-clause and grouped by content item id before
+    // SelectMostSpecific picks the winner for each one.
+    private async Task<Dictionary<Guid, ContentVersion>> ResolvePublishedVersionsAsync(Guid workspaceId, IReadOnlyCollection<Guid> contentItemIds, DateTimeOffset asOf, CancellationToken ct)
+    {
+        if (contentItemIds.Count == 0)
+        {
+            return [];
+        }
+
+        var candidates = await dbContext.ContentVersions.AsNoTracking()
+            .Include(version => version.FieldValues)
+            .Where(version => version.WorkspaceId == workspaceId && version.Status == ContentStatus.Published)
+            .Where(version => contentItemIds.Contains(version.ContentItemId))
+            .Where(version =>
+                (version.EffectiveStartAt == null && version.EffectiveEndAt == null)
+                || (version.EffectiveStartAt <= asOf && asOf < version.EffectiveEndAt))
+            .Where(version => !dbContext.ContentItems.Any(content => content.Id == version.ContentItemId && content.IsDeleted))
+            .ToListAsync(ct);
+
+        return candidates
+            .GroupBy(version => version.ContentItemId)
+            .ToDictionary(group => group.Key, group => SelectMostSpecific(group, asOf));
+    }
+
     private static ContentVersionSummaryResponse ToVersionSummaryResponse(ContentVersion version) =>
         new(version.Id, version.ContentItemId, version.VersionNumber, version.Status.ToContract(), version.TemplateVersionId,
             version.Slug, version.LocaleCode, version.EffectiveStartAt, version.EffectiveEndAt, version.PublishAt, version.PublishedAt,
             version.ArchivedAt, version.PublishedByUserId, version.RolledBackFromVersionNumber, version.Tags.ToList(),
             version.CreatedAt, version.UpdatedAt);
 
-    private async Task<ContentVersionDetailResponse> ToVersionDetailResponseAsync(ContentVersion version, DateTimeOffset asOf, int depth = 0, CancellationToken ct = default)
+    // expandChildren controls whether ChildContentItemId fields are resolved into a nested `Child`
+    // ContentVersionDetailResponse (as this always did historically) or left as just the id -
+    // editing clients (ContentEditPanel/ContentEditSupport) only ever read ChildContentItemId, never
+    // Child, so they pass false to skip the whole expansion below. Defaulting to true preserves the
+    // response shape for every pre-existing consumer of this endpoint family.
+    //
+    // Expansion, when enabled, is batched per recursion layer instead of recursing field-by-field:
+    // layer 0 is just `version` itself, and each subsequent layer resolves EVERY ChildContentItemId
+    // referenced anywhere in the previous layer with one query (see ResolvePublishedVersionsAsync)
+    // instead of one query per child. The original shape here did one sequential DB round trip per
+    // child, at every depth down to 8 - for a deeply-nested Inline content tree that's dozens of
+    // round trips for what a single batched query per layer now covers. Template name/field lookups
+    // are also memoized per TemplateVersionId (templateCache) for the lifetime of one response
+    // build, since the same template is commonly reused by many sibling/descendant children.
+    private async Task<ContentVersionDetailResponse> ToVersionDetailResponseAsync(ContentVersion version, DateTimeOffset asOf, bool expandChildren = true, CancellationToken ct = default)
     {
-        var templateName = await dbContext.TemplateVersions.AsNoTracking()
-            .Where(tv => tv.Id == version.TemplateVersionId)
-            .Select(tv => dbContext.Templates.Where(t => t.Id == tv.TemplateId).Select(t => t.Name).First())
-            .FirstOrDefaultAsync(ct) ?? string.Empty;
-        var templateFields = await dbContext.TemplateFields.AsNoTracking()
-            .Where(field => field.TemplateVersionId == version.TemplateVersionId)
-            .ToDictionaryAsync(field => field.Id, ct);
-        var fieldValues = version.FieldValues.Count > 0
-            ? version.FieldValues
-            : await dbContext.ContentVersionFieldValues.AsNoTracking().Where(value => value.ContentVersionId == version.Id).ToListAsync(ct);
+        var templateCache = new Dictionary<Guid, (string Name, Dictionary<Guid, TemplateField> Fields)>();
+        var layers = new List<IReadOnlyList<ContentVersion>> { new List<ContentVersion> { version } };
+        var fieldValuesByVersionId = new Dictionary<Guid, IReadOnlyList<ContentVersionFieldValue>>();
+        // Index i holds the content-item-id -> resolved-version map produced FROM layer i's field
+        // values, i.e. it's the map that layer i+1 was built from - kept around so the bottom-up
+        // build below can look up which already-built child response belongs to which field.
+        var resolvedChildrenPerLayer = new List<Dictionary<Guid, ContentVersion>>();
 
-        var fields = new List<ContentVersionFieldValueResponse>();
-        foreach (var value in fieldValues.OrderBy(value => templateFields.GetValueOrDefault(value.FieldId)?.Order ?? 0).ThenBy(value => value.Order))
+        for (var depth = 0; expandChildren && depth < 8 && layers[depth].Count > 0; depth++)
         {
-            templateFields.TryGetValue(value.FieldId, out var field);
-            ContentVersionDetailResponse? child = null;
-            if (depth < 8 && value.ChildContentItemId.HasValue)
+            var childIds = new HashSet<Guid>();
+            foreach (var layerVersion in layers[depth])
             {
-                var childVersion = await ResolvePublishedVersionAsync(version.WorkspaceId, value.ChildContentItemId.Value, slug: null, asOf, ct);
-                if (childVersion is not null)
+                var fieldValues = await GetFieldValuesAsync(layerVersion, ct);
+                fieldValuesByVersionId[layerVersion.Id] = fieldValues;
+                foreach (var value in fieldValues)
                 {
-                    child = await ToVersionDetailResponseAsync(childVersion, asOf, depth + 1, ct);
+                    if (value.ChildContentItemId is { } childId)
+                    {
+                        childIds.Add(childId);
+                    }
                 }
             }
 
-            fields.Add(new ContentVersionFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue?.Clone(), value.DisplayLabel));
+            var resolvedChildren = await ResolvePublishedVersionsAsync(version.WorkspaceId, childIds, asOf, ct);
+            resolvedChildrenPerLayer.Add(resolvedChildren);
+            layers.Add(resolvedChildren.Count == 0 ? [] : resolvedChildren.Values.ToList());
         }
 
-        return new ContentVersionDetailResponse(
-            version.Id, version.ContentItemId, version.VersionNumber, version.Status.ToContract(), version.TemplateVersionId, templateName,
-            version.Slug, version.LocaleCode, version.TranslationGroupId, version.EffectiveStartAt, version.EffectiveEndAt,
-            version.PublishAt, version.PublishedAt, version.ArchivedAt, version.PublishedByUserId, version.RolledBackFromVersionNumber,
-            version.Tags.ToList(), version.CreatedAt, version.UpdatedAt, fields);
+        // The last layer's own field values are only loaded above when the loop actually inspects
+        // it to discover the NEXT layer - a layer stopped by the depth-8 cap (rather than simply
+        // having no children) never gets that turn, so make sure it's loaded here too before the
+        // bottom-up build below.
+        foreach (var layerVersion in layers[^1])
+        {
+            fieldValuesByVersionId.TryAdd(layerVersion.Id, await GetFieldValuesAsync(layerVersion, ct));
+        }
+
+        // Build bottom-up: the deepest layer has nothing further to attach (either genuinely
+        // childless or past the depth cap), then each shallower layer attaches the already-built
+        // response for whichever child ContentVersion was resolved for its ChildContentItemId.
+        var builtByVersionId = new Dictionary<Guid, ContentVersionDetailResponse>();
+        for (var depth = layers.Count - 1; depth >= 0; depth--)
+        {
+            var childrenByContentItemId = depth < resolvedChildrenPerLayer.Count ? resolvedChildrenPerLayer[depth] : null;
+            foreach (var layerVersion in layers[depth])
+            {
+                var (templateName, templateFields) = await GetTemplateVersionInfoAsync(layerVersion.TemplateVersionId, templateCache, ct);
+                var fieldValues = fieldValuesByVersionId[layerVersion.Id];
+
+                var fields = new List<ContentVersionFieldValueResponse>();
+                foreach (var value in fieldValues.OrderBy(value => templateFields.GetValueOrDefault(value.FieldId)?.Order ?? 0).ThenBy(value => value.Order))
+                {
+                    templateFields.TryGetValue(value.FieldId, out var field);
+                    ContentVersionDetailResponse? child = null;
+                    if (childrenByContentItemId is not null
+                        && value.ChildContentItemId is { } childContentItemId
+                        && childrenByContentItemId.TryGetValue(childContentItemId, out var childVersion))
+                    {
+                        child = builtByVersionId[childVersion.Id];
+                    }
+
+                    fields.Add(new ContentVersionFieldValueResponse(value.FieldId, field?.Key, field?.Label, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, child, value.JsonValue?.Clone(), value.DisplayLabel));
+                }
+
+                builtByVersionId[layerVersion.Id] = new ContentVersionDetailResponse(
+                    layerVersion.Id, layerVersion.ContentItemId, layerVersion.VersionNumber, layerVersion.Status.ToContract(), layerVersion.TemplateVersionId, templateName,
+                    layerVersion.Slug, layerVersion.LocaleCode, layerVersion.TranslationGroupId, layerVersion.EffectiveStartAt, layerVersion.EffectiveEndAt,
+                    layerVersion.PublishAt, layerVersion.PublishedAt, layerVersion.ArchivedAt, layerVersion.PublishedByUserId, layerVersion.RolledBackFromVersionNumber,
+                    layerVersion.Tags.ToList(), layerVersion.CreatedAt, layerVersion.UpdatedAt, fields);
+            }
+        }
+
+        return builtByVersionId[version.Id];
+    }
+
+    private async Task<IReadOnlyList<ContentVersionFieldValue>> GetFieldValuesAsync(ContentVersion version, CancellationToken ct) =>
+        version.FieldValues.Count > 0
+            ? [.. version.FieldValues]
+            : await dbContext.ContentVersionFieldValues.AsNoTracking().Where(value => value.ContentVersionId == version.Id).ToListAsync(ct);
+
+    // Memoizes template name + field lookups per TemplateVersionId for the lifetime of a single
+    // ToVersionDetailResponseAsync build - the same template is commonly reused by many
+    // sibling/descendant children in an expanded content tree, and this avoids re-querying it once
+    // per occurrence.
+    private async Task<(string Name, Dictionary<Guid, TemplateField> Fields)> GetTemplateVersionInfoAsync(Guid templateVersionId, Dictionary<Guid, (string Name, Dictionary<Guid, TemplateField> Fields)> cache, CancellationToken ct)
+    {
+        if (cache.TryGetValue(templateVersionId, out var cached))
+        {
+            return cached;
+        }
+
+        var templateName = await dbContext.TemplateVersions.AsNoTracking()
+            .Where(tv => tv.Id == templateVersionId)
+            .Select(tv => dbContext.Templates.Where(t => t.Id == tv.TemplateId).Select(t => t.Name).First())
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+        var templateFields = await dbContext.TemplateFields.AsNoTracking()
+            .Where(field => field.TemplateVersionId == templateVersionId)
+            .ToDictionaryAsync(field => field.Id, ct);
+
+        var info = (templateName, templateFields);
+        cache[templateVersionId] = info;
+        return info;
     }
 
     private void EnqueueContentEvent(string eventType, ContentItem content, ContentVersion? version)

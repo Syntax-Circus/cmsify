@@ -1469,6 +1469,14 @@
               "type": "string",
               "format": "date-time"
             }
+          },
+          {
+            "name": "expandChildren",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
           }
         ],
         "responses": {
@@ -1660,6 +1668,14 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "expandChildren",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
           }
         ],
         "requestBody": {
@@ -1800,6 +1816,14 @@
               "type": "integer",
               "format": "int32"
             }
+          },
+          {
+            "name": "expandChildren",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
           }
         ],
         "responses": {
@@ -1855,6 +1879,14 @@
             "schema": {
               "type": "integer",
               "format": "int32"
+            }
+          },
+          {
+            "name": "expandChildren",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
             }
           }
         ],

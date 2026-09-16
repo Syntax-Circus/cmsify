@@ -209,6 +209,232 @@ public sealed class ContentEditSupportTests
     }
 
     [Fact]
+    public async Task LoadInlineChildInstanceAsyncNeverMintsADraftEvenWhenDraftCreationIsAllowed()
+    {
+        // Lazy draft minting: opening a parent for editing must not have the side effect of creating
+        // a Draft version for every Inline child that lacks one - only saving that child's own edits
+        // does (see SaveInlineFieldAsyncMintsADraftOnlyWhenSavingAChildWhoseVersionIsNotYetEditable
+        // below). This is true even with allowDraftCreation: true (an ordinary editable parent load) -
+        // the flag is now only consulted at save time, never here.
+        var workspaceId = Guid.NewGuid();
+        var childContentId = Guid.NewGuid();
+        var servingVersionId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childContentId}}", "templateVersionId": "{{Guid.NewGuid()}}", "templateName": "Child",
+                      "slug": "child", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": { "id": "{{servingVersionId}}", "contentItemId": "{{childContentId}}",
+                        "versionNumber": 5, "status": "Published", "templateVersionId": "{{Guid.NewGuid()}}",
+                        "templateName": "Child", "slug": "child", "localeCode": null, "translationGroupId": null,
+                        "effectiveStartAt": null, "effectiveEndAt": null, "publishAt": null, "publishedAt": null,
+                        "archivedAt": null, "publishedByUserId": null, "rolledBackFromVersionNumber": null, "tags": [],
+                        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" },
+                      "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/5")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{servingVersionId}}", "contentItemId": "{{childContentId}}", "versionNumber": 5, "status": "Published",
+                      "templateVersionId": "{{Guid.NewGuid()}}", "templateName": "Child", "slug": "child",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json("""{ "items": [], "totalCount": 0, "page": 1, "pageSize": 20 }""");
+            }
+            // A POST here would be a Draft-minting CreateVersionAsync call - must never happen, even
+            // though allowDraftCreation is true below.
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var instance = await ContentEditSupport.LoadInlineChildInstanceAsync(
+            client, workspaceId, childContentId, null, ImmutableHashSet<Guid>.Empty, 0, allowDraftCreation: true, TestContext.Current.CancellationToken);
+
+        instance.VersionNumber.ShouldBe(5);
+        instance.VersionStatus.ShouldBe(ContentStatus.Published);
+        instance.AllowDraftCreation.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SaveInlineFieldAsyncMintsADraftOnlyWhenSavingAChildWhoseVersionIsNotYetEditable()
+    {
+        // The other half of lazy draft minting: an instance that LoadInlineChildInstanceAsync
+        // resolved to a non-editable version (Published, no Draft) must have SaveInlineFieldAsync
+        // mint a fresh Draft - duplicated from that version - before it can save this instance's
+        // edits, and must then update THAT new draft, not the original published version.
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var childContentId = Guid.NewGuid();
+        var mintedFromVersionNumber = -1;
+        var updatedVersionNumber = -1;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return TemplateJson(templateId, workspaceId, templateVersionId);
+            }
+            if (request.Method == HttpMethod.Post && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions")
+            {
+                var body = System.Text.Json.JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                mintedFromVersionNumber = body.RootElement.GetProperty("duplicateFromVersionNumber").GetInt32();
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{childContentId}}", "versionNumber": 2, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Template", "slug": "child",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/2")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{childContentId}}", "versionNumber": 2, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Template", "slug": "child",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/2")
+            {
+                updatedVersionNumber = 2;
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{childContentId}}", "versionNumber": 2, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Template", "slug": "child",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Template",
+                      "slug": "child", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Template",
+                      "slug": "child", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var field = TestFieldFactory.Create(templateId: templateId, compositionMode: CompositionMode.Inline);
+        // Simulates what LoadInlineChildInstanceAsync would have populated for a child whose only
+        // version is a Published one (version 1) - no Draft, so VersionStatus is Published.
+        var instance = new InlineChildInstance
+        {
+            ContentItemId = childContentId,
+            TemplateId = templateId,
+            VersionNumber = 1,
+            VersionStatus = ContentStatus.Published,
+            AllowDraftCreation = true,
+        };
+
+        var requests = await ContentEditSupport.SaveInlineFieldAsync(
+            client, workspaceId, field, [instance], ImmutableHashSet<Guid>.Empty, 0, TestContext.Current.CancellationToken);
+
+        mintedFromVersionNumber.ShouldBe(1);
+        updatedVersionNumber.ShouldBe(2);
+        instance.VersionNumber.ShouldBe(2);
+        instance.VersionStatus.ShouldBe(ContentStatus.Draft);
+        requests.Count.ShouldBe(1);
+        requests[0].ChildContentItemId.ShouldBe(childContentId);
+    }
+
+    [Fact]
+    public async Task SaveInlineFieldAsyncDoesNotMintADraftWhenTheInstanceIsAlreadyEditable()
+    {
+        // The counterpart to the test above: a child whose resolved version is already Draft (or
+        // Review/Approved) must be updated directly, with no CreateVersionAsync POST at all.
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var templateVersionId = Guid.NewGuid();
+        var childContentId = Guid.NewGuid();
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/{templateId}")
+            {
+                return TemplateJson(templateId, workspaceId, templateVersionId);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{childContentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{templateVersionId}}", "templateName": "Template", "slug": "child",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Template",
+                      "slug": "child", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{childContentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{childContentId}}", "templateVersionId": "{{templateVersionId}}", "templateName": "Template",
+                      "slug": "child", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            // A POST here would be an (unnecessary) Draft-minting CreateVersionAsync call.
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var field = TestFieldFactory.Create(templateId: templateId, compositionMode: CompositionMode.Inline);
+        var instance = new InlineChildInstance
+        {
+            ContentItemId = childContentId,
+            TemplateId = templateId,
+            VersionNumber = 1,
+            VersionStatus = ContentStatus.Draft,
+            AllowDraftCreation = true,
+        };
+
+        await ContentEditSupport.SaveInlineFieldAsync(
+            client, workspaceId, field, [instance], ImmutableHashSet<Guid>.Empty, 0, TestContext.Current.CancellationToken);
+
+        instance.VersionNumber.ShouldBe(1);
+        instance.VersionStatus.ShouldBe(ContentStatus.Draft);
+    }
+
+    [Fact]
     public async Task SavingTheSameChildTwiceInOneSessionDoesNotSendTheSecondVersionUpdateWithoutAnIfMatchHeader()
     {
         // I5: after CreateAsync, the SDK's per-URI ETag cache has no entry for the new child's own
