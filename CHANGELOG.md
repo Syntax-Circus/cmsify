@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `ContentEditPanelTests.RequireSlugBlocksSavingWithBlankSlugAndIssuesNoRequest` kept failing intermittently on CI (including the `main` run for 0.6.0) despite 0.5.4's `cut.InvokeAsync` change, because the real cause was not a render race on the click. The test waited for *any* `<input>` to render, but `ContentEditForm` renders its slug/locale/tags metadata inputs before the template's fields have loaded, so `Find("input")` could return the slug input: "My Title" was typed into the slug, the RequireSlug guard legitimately passed, and the expected slug error never appeared. The test (and six sibling `ContentEditPanelTests` using the same wait/lookup) now wait for and target `.cmsify-form-fields input` explicitly, and the RequireSlug test awaits each dispatched event so any dispatch failure surfaces as its real exception instead of an unobserved task. No product code changed.
+
 ## [0.6.0] - 2026-09-16
 
 ### Changed
