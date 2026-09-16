@@ -973,6 +973,7 @@ export interface paths {
             parameters: {
                 query?: {
                     asOf?: string;
+                    expandChildren?: boolean;
                 };
                 header?: never;
                 path: {
@@ -1131,7 +1132,9 @@ export interface paths {
         put?: never;
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    expandChildren?: boolean;
+                };
                 header?: never;
                 path: {
                     workspaceId: string;
@@ -1175,7 +1178,9 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    expandChildren?: boolean;
+                };
                 header?: never;
                 path: {
                     workspaceId: string;
@@ -1201,7 +1206,9 @@ export interface paths {
         };
         put: {
             parameters: {
-                query?: never;
+                query?: {
+                    expandChildren?: boolean;
+                };
                 header?: never;
                 path: {
                     workspaceId: string;
