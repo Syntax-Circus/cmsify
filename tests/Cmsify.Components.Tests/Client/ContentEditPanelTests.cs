@@ -61,9 +61,9 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.TemplateId, templateId)
             .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => created = c)));
 
-        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-fields input").Count > 0);
 
-        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-fields input").Input("My Title");
         cut.Find(".cmsify-form-save-button").Click();
 
         cut.WaitForState(() => capturedCreateBody is not null);
@@ -76,7 +76,7 @@ public sealed class ContentEditPanelTests : BunitContext
     }
 
     [Fact]
-    public void RequireSlugBlocksSavingWithBlankSlugAndIssuesNoRequest()
+    public async Task RequireSlugBlocksSavingWithBlankSlugAndIssuesNoRequest()
     {
         var workspaceId = Guid.NewGuid();
         var templateId = Guid.NewGuid();
@@ -120,15 +120,17 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.TemplateId, templateId)
             .Add(p => p.RequireSlug, true));
 
-        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-fields input").Count > 0);
 
-        // cut.InvokeAsync wraps Find+Input/Click atomically - a plain Find().Click() can race a
-        // pending render and either silently miss (leaving SaveAsync never invoked, which is what
-        // made this test intermittently time out waiting for .cmsify-form-error) or throw bUnit's
-        // UnknownEventHandlerIdException. Same fix already applied to the inline-child-removal tests
-        // in this file.
-        cut.InvokeAsync(() => cut.Find("input").Input("My Title"));
-        cut.InvokeAsync(() => cut.Find(".cmsify-form-save-button").Click());
+        // cut.InvokeAsync wraps Find+Input/Click atomically, but its Task must also be awaited, and the
+        // dispatched event's own Task with it. Previously both calls were fire-and-forget: the Click
+        // could be queued before the Input's re-render had rebound the save button's handler, and any
+        // UnknownEventHandlerIdException from that race landed on an unobserved Task - so the click was
+        // silently lost and the test surfaced it only as a 10s timeout waiting for .cmsify-form-error
+        // (seen again on CI after 0.5.4's partial fix). Awaiting each step serializes input -> render ->
+        // click -> SaveAsync, and any dispatch failure now fails the test with its real exception.
+        await cut.InvokeAsync(() => cut.Find(".cmsify-form-fields input").InputAsync(new ChangeEventArgs { Value = "My Title" }));
+        await cut.InvokeAsync(() => cut.Find(".cmsify-form-save-button").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs()));
 
         cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0, TimeSpan.FromSeconds(10));
 
@@ -187,9 +189,9 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.RequireSlug, true)
             .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => created = c)));
 
-        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-fields input").Count > 0);
 
-        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-fields input").Input("My Title");
         cut.Find("#cmsify-slug-input").Input("my-slug");
         cut.Find(".cmsify-form-save-button").Click();
 
@@ -251,9 +253,9 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.BusyChanged, EventCallback.Factory.Create<bool>(this, b => busyStates.Add(b)))
             .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => created = c)));
 
-        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-fields input").Count > 0);
 
-        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-fields input").Input("My Title");
         cut.Find(".cmsify-form-save-button").Click();
 
         cut.WaitForState(() => created is not null, TimeSpan.FromSeconds(10));
@@ -311,9 +313,9 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, _ =>
                 throw new InvalidOperationException("host callback failed"))));
 
-        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-fields input").Count > 0);
 
-        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-fields input").Input("My Title");
         cut.Find(".cmsify-form-save-button").Click();
 
         cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
@@ -372,9 +374,9 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, _ =>
                 throw new InvalidOperationException("host callback failed"))));
 
-        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-fields input").Count > 0);
 
-        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-fields input").Input("My Title");
         cut.Find(".cmsify-form-save-button").Click();
 
         cut.WaitForState(() => observedError is not null);
@@ -463,9 +465,9 @@ public sealed class ContentEditPanelTests : BunitContext
             .Add(p => p.Created, EventCallback.Factory.Create<ContentItemDetailResponse>(this, _ =>
                 throw new InvalidOperationException("host callback failed"))));
 
-        cut.WaitForState(() => cut.FindAll("input").Count > 0);
+        cut.WaitForState(() => cut.FindAll(".cmsify-form-fields input").Count > 0);
 
-        cut.Find("input").Input("My Title");
+        cut.Find(".cmsify-form-fields input").Input("My Title");
         cut.Find(".cmsify-form-save-button").Click();
 
         cut.WaitForState(() => cut.FindAll(".cmsify-form-error").Count > 0);
