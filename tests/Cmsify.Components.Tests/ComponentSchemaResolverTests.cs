@@ -121,6 +121,123 @@ public sealed class ComponentSchemaResolverTests
         result.ShouldNotContainKey(missingId);
     }
 
+    [Fact]
+    public async Task ACyclicComponentReferenceTerminatesAndResolvesBothComponentsExactlyOnce()
+    {
+        // The per-layer parallel resolution still has to break a genuine cycle (A -> B -> A) the same
+        // way the original sequential BFS did: the result dictionary IS the visited set, so B's own
+        // "nested: A" field is skipped once A is already resolved, instead of looping forever.
+        var workspaceId = Guid.NewGuid();
+        var aId = Guid.NewGuid();
+        var bId = Guid.NewGuid();
+        var aCallCount = 0;
+        var bCallCount = 0;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith($"/components/{aId}"))
+            {
+                aCallCount++;
+                return FakeHttpMessageHandler.Json(ComponentJson(aId, workspaceId, nestedComponentId: bId));
+            }
+            if (path.EndsWith($"/components/{bId}"))
+            {
+                bCallCount++;
+                return FakeHttpMessageHandler.Json(ComponentJson(bId, workspaceId, nestedComponentId: aId));
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.RequestUri}");
+        });
+
+        var result = await ComponentSchemaResolver.ResolveAsync(client, workspaceId, [aId], TestContext.Current.CancellationToken);
+
+        result.Count.ShouldBe(2);
+        result.ShouldContainKey(aId);
+        result.ShouldContainKey(bId);
+        aCallCount.ShouldBe(1);
+        bCallCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ASeedPrePopulatesResultAndSkipsRefetchingAlreadyResolvedIds()
+    {
+        // ContentEditSupport threads an ancestor's already-resolved schemas in as `seed` so a
+        // component reused down an Inline hierarchy (or across a parent's own fields and its
+        // children's) is fetched once instead of once per level/child.
+        var workspaceId = Guid.NewGuid();
+        var seededId = Guid.NewGuid();
+        var freshId = Guid.NewGuid();
+        var freshCallCount = 0;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith($"/components/{freshId}"))
+            {
+                freshCallCount++;
+                return FakeHttpMessageHandler.Json(ComponentJson(freshId, workspaceId));
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.RequestUri}");
+        });
+
+        var seed = new Dictionary<Guid, ComponentResponse>
+        {
+            [seededId] = System.Text.Json.JsonSerializer.Deserialize<ComponentResponse>(ComponentJson(seededId, workspaceId), SyntaxCircus.Cmsify.Contracts.CmsifyJsonOptions.Create())!
+        };
+
+        var result = await ComponentSchemaResolver.ResolveAsync(client, workspaceId, [seededId, freshId], TestContext.Current.CancellationToken, seed);
+
+        result.Count.ShouldBe(2);
+        result.ShouldContainKey(seededId);
+        result.ShouldContainKey(freshId);
+        freshCallCount.ShouldBe(1);
+
+        // The seed dictionary itself must be untouched (ResolveAsync only ever reads from it) - a
+        // caller sharing one seed across several concurrent sibling loads relies on this.
+        seed.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ResolvesEveryIdInALayerConcurrentlyRatherThanOneAtATime()
+    {
+        // Proves the per-layer resolution genuinely fires Task.WhenAll over the whole layer instead
+        // of just being correct under a sequential-equivalent ordering - two independent root ids
+        // must both be in flight at once, deterministically (via ConcurrencyGate) rather than by
+        // racing a fixed delay against wall-clock time.
+        var workspaceId = Guid.NewGuid();
+        var idA = Guid.NewGuid();
+        var idB = Guid.NewGuid();
+        var gate = new ConcurrencyGate(requiredConcurrency: 2);
+
+        var client = TestCmsifyClientFactory.CreateWithConcurrencyGate(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith($"/components/{idA}"))
+            {
+                return FakeHttpMessageHandler.Json(ComponentJson(idA, workspaceId));
+            }
+            if (path.EndsWith($"/components/{idB}"))
+            {
+                return FakeHttpMessageHandler.Json(ComponentJson(idB, workspaceId));
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.RequestUri}");
+        }, gate);
+
+        var resolveTask = ComponentSchemaResolver.ResolveAsync(client, workspaceId, [idA, idB], TestContext.Current.CancellationToken);
+
+        // If the two ids were resolved one at a time, the gate would never see more than one waiting
+        // at once. Observing 2 proves they were fired concurrently.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (gate.MaxObserved < 2 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+        gate.MaxObserved.ShouldBeGreaterThanOrEqualTo(2);
+
+        var result = await resolveTask;
+        result.Count.ShouldBe(2);
+    }
+
     private static string ComponentJson(Guid componentId, Guid workspaceId, Guid? nestedComponentId = null) =>
         $$"""
         {
