@@ -496,6 +496,137 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
         Assert.Equal("hello", field.TextValue);
     }
 
+    [Fact]
+    public async Task CreateVersion_Duplicate_FromVersionUpgradedToNewTemplate_ValidatesAgainstThatTemplateVersion()
+    {
+        // Reproduces the production bug: item.TemplateVersionId is set once at item creation and
+        // is never updated by UpgradeTemplateVersion, so it still points at the ORIGINAL template
+        // version even after the item's latest (and now published) version has been upgraded and
+        // moved on. Duplicating from that published version must validate the copied field values
+        // against the template version the SOURCE version actually carries, not the item's stale one.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldAId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "duplicate-after-upgrade", [new ContentFieldValueRequest(fieldAId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var version1Number = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{version1Number}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{version1Number}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{version1Number}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var draftResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, version1Number, null),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+        draftResponse.EnsureSuccessStatusCode();
+        var draft = await draftResponse.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(draft);
+
+        var (newTemplateVersionId, fieldBId) = await PublishNewTemplateVersionWithSameFieldKeyAsync(factory, templateId, "subtitle");
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draft.VersionNumber}/upgrade-template-version", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var current = await client.GetFromJsonAsync<ContentVersionDetailResponse>($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draft.VersionNumber}", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(current);
+        using var setFieldBRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draft.VersionNumber}")
+        {
+            Content = JsonContent.Create(new UpdateContentVersionRequest(null, null, [new ContentFieldValueRequest(fieldBId, 0, ValueKind.Text, "world", null, null, null, null, null)]), options: ApiJsonOptions)
+        };
+        setFieldBRequest.Headers.TryAddWithoutValidation("If-Match", $"\"{current.UpdatedAt.UtcTicks}\"");
+        (await client.SendAsync(setFieldBRequest, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draft.VersionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draft.VersionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{draft.VersionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var duplicateResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, draft.VersionNumber, null),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(duplicateResponse.IsSuccessStatusCode, $"Expected 201 but got {duplicateResponse.StatusCode}: {await duplicateResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}");
+        var duplicated = await duplicateResponse.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(duplicated);
+        Assert.Equal(newTemplateVersionId, duplicated.TemplateVersionId);
+        var field = Assert.Single(duplicated.Fields);
+        Assert.Equal(fieldBId, field.FieldId);
+        Assert.Equal("world", field.TextValue);
+    }
+
+    [Fact]
+    public async Task CreateVersion_WithoutDuplicate_AfterUpgrade_UsesLatestVersionsTemplateVersion()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldAId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "no-duplicate-after-upgrade", [new ContentFieldValueRequest(fieldAId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        var (newTemplateVersionId, fieldBId) = await PublishNewTemplateVersionWithSameFieldKeyAsync(factory, templateId, "subtitle");
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        // A plain CreateVersion (no DuplicateFromVersionNumber) must validate the caller-supplied
+        // fields against the item's LATEST version's template version, not the item-level
+        // TemplateVersionId set once at item creation.
+        var createResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, null, [new ContentFieldValueRequest(fieldBId, 0, ValueKind.Text, "world", null, null, null, null, null)]),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(createResponse.IsSuccessStatusCode, $"Expected 201 but got {createResponse.StatusCode}: {await createResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}");
+        var created = await createResponse.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(created);
+        Assert.Equal(newTemplateVersionId, created.TemplateVersionId);
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersion_OfLatestVersion_SyncsItemLevelTemplateVersionId()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldAId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "sync-item-level", [new ContentFieldValueRequest(fieldAId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+        Assert.Equal(templateVersionId, (await GetItemAsync(client, workspaceId, itemId)).TemplateVersionId);
+
+        var newTemplateVersionId = await PublishNewTemplateVersionWithoutFieldAsync(factory, templateId);
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var item = await GetItemAsync(client, workspaceId, itemId);
+        Assert.Equal(newTemplateVersionId, item.TemplateVersionId);
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersion_OfNonLatestVersion_DoesNotChangeItemLevelTemplateVersionId()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldAId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "no-sync-older-version", [new ContentFieldValueRequest(fieldAId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var version1Number = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        // A second, newer draft version exists on the original template version - it, not version 1,
+        // is now the item's latest version.
+        var createSecondResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, null, []),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+        createSecondResponse.EnsureSuccessStatusCode();
+
+        var newTemplateVersionId = await PublishNewTemplateVersionWithoutFieldAsync(factory, templateId);
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{version1Number}/upgrade-template-version", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var item = await GetItemAsync(client, workspaceId, itemId);
+        Assert.Equal(templateVersionId, item.TemplateVersionId);
+        Assert.NotEqual(newTemplateVersionId, item.TemplateVersionId);
+    }
+
     private static async Task<HttpClient> AuthenticatedClientAsync(WebApplicationFactory<Program> factory)
     {
         var client = factory.CreateClient();
