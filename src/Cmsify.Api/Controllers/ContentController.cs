@@ -445,14 +445,48 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid effective range", rangeError);
         }
 
-        var templateVersion = await LoadTemplateVersionAsync(content.TemplateVersionId, ct);
+        // The item-level ContentItem.TemplateVersionId is set once at item creation and is never
+        // updated by UpgradeTemplateVersion (which only ever mutates a single version's own
+        // TemplateVersionId), so it goes stale the moment any version is upgraded to a newer
+        // template version. Validating a new version against it - rather than against whichever
+        // template version the new version is actually built from - rejects perfectly valid field
+        // values with "targets a field not present on the template version" (see the
+        // CreateVersion_* tests below). Instead:
+        //   - when duplicating, the new version must be validated against the SOURCE version's own
+        //     TemplateVersionId, since that's the template version its copied field values actually
+        //     belong to;
+        //   - otherwise, it follows the item's latest existing version's TemplateVersionId, i.e.
+        //     whatever template version the content is already sitting on - matching what
+        //     duplicating the latest version would have done, and never silently jumping content to
+        //     an unrelated newer template version the caller never asked to upgrade to.
+        var latestVersion = await dbContext.ContentVersions.AsNoTracking()
+            .Where(v => v.ContentItemId == id)
+            .OrderByDescending(v => v.VersionNumber)
+            .Select(v => new { v.VersionNumber, v.TemplateVersionId })
+            .FirstAsync(ct);
+        var nextNumber = latestVersion.VersionNumber + 1;
+        var tagNames = await GetTagNamesAsync(id, ct);
+
+        ContentVersion? duplicateSource = null;
+        var baseTemplateVersionId = latestVersion.TemplateVersionId;
+        if (request.DuplicateFromVersionNumber.HasValue)
+        {
+            duplicateSource = await dbContext.ContentVersions.AsNoTracking()
+                .Include(v => v.FieldValues)
+                .FirstOrDefaultAsync(v => v.ContentItemId == id && v.VersionNumber == request.DuplicateFromVersionNumber.Value, ct);
+            if (duplicateSource is null)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", $"Version {request.DuplicateFromVersionNumber} does not exist.");
+            }
+
+            baseTemplateVersionId = duplicateSource.TemplateVersionId;
+        }
+
+        var templateVersion = await LoadTemplateVersionAsync(baseTemplateVersionId, ct);
         if (templateVersion is null)
         {
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", "Template version is unavailable.");
         }
-
-        var nextNumber = 1 + (await dbContext.ContentVersions.Where(v => v.ContentItemId == id).Select(v => (int?)v.VersionNumber).MaxAsync(ct) ?? 0);
-        var tagNames = await GetTagNamesAsync(id, ct);
 
         var version = new ContentVersion
         {
@@ -460,7 +494,7 @@ public sealed class ContentController : ControllerBase
             WorkspaceId = workspaceId,
             VersionNumber = nextNumber,
             Status = ContentStatus.Draft,
-            TemplateVersionId = content.TemplateVersionId,
+            TemplateVersionId = baseTemplateVersionId,
             Slug = content.Slug,
             LocaleCode = content.LocaleCode,
             TranslationGroupId = content.TranslationGroupId,
@@ -472,20 +506,12 @@ public sealed class ContentController : ControllerBase
         };
 
         IReadOnlyList<ContentFieldValueRequest> fields;
-        if (request.DuplicateFromVersionNumber.HasValue)
+        if (duplicateSource is not null)
         {
-            var source = await dbContext.ContentVersions.AsNoTracking()
-                .Include(v => v.FieldValues)
-                .FirstOrDefaultAsync(v => v.ContentItemId == id && v.VersionNumber == request.DuplicateFromVersionNumber.Value, ct);
-            if (source is null)
-            {
-                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", $"Version {request.DuplicateFromVersionNumber} does not exist.");
-            }
-
-            fields = source.FieldValues
+            fields = duplicateSource.FieldValues
                 .Select(value => new ContentFieldValueRequest(value.FieldId, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, value.JsonValue))
                 .ToList();
-            version.RolledBackFromVersionNumber = source.VersionNumber;
+            version.RolledBackFromVersionNumber = duplicateSource.VersionNumber;
         }
         else
         {
@@ -823,6 +849,21 @@ public sealed class ContentController : ControllerBase
 
         var item = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);
         item.SearchVector = searchVectorBuilder.Build(version, target);
+
+        // Keep the item-level TemplateVersionId (an informational field read by List's
+        // templateVersionId/templateId filters and by the item summary/detail "template name")
+        // in step with whichever template version the content is actually built on, but only when
+        // the version just upgraded is the item's LATEST one. Upgrading an older, non-latest draft
+        // must not make the item's own field regress past a newer version that's already ahead of
+        // it - CreateVersion above no longer depends on this field for validation (it now always
+        // resolves the correct template version itself), so this is purely about keeping the
+        // item-level view accurate for callers that display or filter by it.
+        var isLatestVersion = !await dbContext.ContentVersions.AnyAsync(v => v.ContentItemId == id && v.VersionNumber > version.VersionNumber, ct);
+        if (isLatestVersion)
+        {
+            item.TemplateVersionId = target.Id;
+        }
+
         // Bumping the template version invalidates any scheduled publish, same reasoning as UpdateVersion.
         version.PublishAt = null;
         version.PublishLeaseOwner = null;
