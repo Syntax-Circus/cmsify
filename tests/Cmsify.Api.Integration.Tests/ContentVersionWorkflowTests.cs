@@ -344,6 +344,110 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Publish_SucceedsForOlderInFlightVersion_WhenNewerVersionIsAlreadyPublished()
+    {
+        // Reproduces the production 23505 unique-violation on ix_content_versions_content_item_id:
+        // version A is created first (lower UUIDv7 id) but stays in flight while version B - created
+        // afterwards (higher id) - is submitted, approved and published first, making B the
+        // currently-Published default. Only then is A submitted, approved and published. Publishing A
+        // must archive B before A's own status flips to Published, or Postgres's non-deferrable partial
+        // unique index on default-published rows momentarily sees two Published rows for the item.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId) = await SeedTemplateAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "lower-id-publish");
+        var versionA = (await GetItemAsync(client, workspaceId, itemId)).Versions[0];
+
+        var createSecondResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, null, []),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+        createSecondResponse.EnsureSuccessStatusCode();
+        var versionB = await createSecondResponse.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(versionB);
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionB.VersionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionB.VersionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionB.VersionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionA.VersionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionA.VersionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        var publishAResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionA.VersionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken);
+
+        Assert.True(publishAResponse.IsSuccessStatusCode, $"Expected success but got {publishAResponse.StatusCode}: {await publishAResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}");
+
+        var item = await GetItemAsync(client, workspaceId, itemId);
+        var reloadedA = item.Versions.Single(v => v.VersionNumber == versionA.VersionNumber);
+        var reloadedB = item.Versions.Single(v => v.VersionNumber == versionB.VersionNumber);
+        Assert.Equal(ContentStatus.Published, reloadedA.Status);
+        Assert.Equal(ContentStatus.Archived, reloadedB.Status);
+        Assert.Equal(1, item.Versions.Count(v => v.Status == ContentStatus.Published));
+        Assert.NotNull(item.CurrentlyServingVersion);
+        Assert.Equal(versionA.VersionNumber, item.CurrentlyServingVersion.VersionNumber);
+    }
+
+    [Fact]
+    public async Task Publish_WhenOutboxInsertFails_RollsBackArchivalAndStatusChangeTogether()
+    {
+        // The publish flow now flushes prior-version archival to Postgres before the target version's
+        // status flips to Published (see ContentPublishingService.PublishAsync), which means the whole
+        // publish spans two SaveChanges calls instead of one. Both must still live inside a single
+        // database transaction: if the final save (status flip + outbox enqueue) fails, the archival
+        // flush from earlier in the same request must be rolled back too, leaving the prior version
+        // still Published rather than stranded as Archived with no successor.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId) = await SeedTemplateAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "rollback-publish");
+        var firstVersionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{firstVersionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{firstVersionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{firstVersionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var createSecondResponse = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, null, []),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+        createSecondResponse.EnsureSuccessStatusCode();
+        var secondVersion = await createSecondResponse.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(secondVersion);
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{secondVersion.VersionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{secondVersion.VersionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            // NOT VALID: the first publish above already inserted a 'content.version_published' row,
+            // and this constraint only needs to reject the *next* insert, not retroactively validate history.
+            await dbContext.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE webhook_outbox_events ADD CONSTRAINT reject_version_published CHECK (event_type <> 'content.version_published') NOT VALID",
+                TestContext.Current.CancellationToken);
+        }
+
+        try
+        {
+            var publishResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{secondVersion.VersionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken);
+            Assert.False(publishResponse.IsSuccessStatusCode, "Publish should have failed once the outbox insert was rejected.");
+        }
+        finally
+        {
+            using var scope = factory.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("ALTER TABLE webhook_outbox_events DROP CONSTRAINT reject_version_published", TestContext.Current.CancellationToken);
+        }
+
+        var item = await GetItemAsync(client, workspaceId, itemId);
+        var first = item.Versions.Single(v => v.VersionNumber == firstVersionNumber);
+        var second = item.Versions.Single(v => v.VersionNumber == secondVersion.VersionNumber);
+        Assert.Equal(ContentStatus.Published, first.Status);
+        Assert.Equal(ContentStatus.Approved, second.Status);
+        Assert.Equal(1, item.Versions.Count(v => v.Status == ContentStatus.Published));
+    }
+
+    [Fact]
     public async Task UpgradeTemplateVersion_MovesVersionToLatestPublishedTemplateVersion_AndDropsRemovedFields()
     {
         await using var factory = new WebApplicationFactory<Program>();

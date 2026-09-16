@@ -129,6 +129,34 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CompleteClaimAsync_SucceedsForOlderInFlightVersion_WhenNewerVersionIsAlreadyPublished()
+    {
+        // Same repro as the API-level test (ContentVersionWorkflowTests.Publish_SucceedsForOlderInFlightVersion_...)
+        // but through the scheduled-publish path: version A is seeded first (lower UUIDv7 id) as the
+        // due-for-publish Approved version, while version B - created afterwards (higher id) - is
+        // already Published as the item's default. Completing A's claim must archive B before A's own
+        // status flips to Published, or the two UPDATEs can hit Postgres in an order that violates the
+        // non-deferrable partial unique index on default-published rows.
+        var now = DateTimeOffset.Parse("2026-08-26T13:00:00Z");
+        var seeded = await SeedDueContentWithPriorPublishedDefaultAsync("lower-id-schedule", now);
+
+        await using var worker = await CreateContextAsync();
+        var dispatcher = CreateDispatcher(worker);
+        var claim = Assert.Single(await dispatcher.ClaimDueAsync("worker-a", now, TimeSpan.FromMinutes(1), 1, TestContext.Current.CancellationToken));
+        Assert.Equal(seeded.VersionId, claim.ContentVersionId);
+        var completed = await dispatcher.CompleteClaimAsync(claim, now, TestContext.Current.CancellationToken);
+        Assert.True(completed);
+
+        await using var verification = await CreateContextAsync();
+        var versionA = await verification.ContentVersions.SingleAsync(candidate => candidate.Id == seeded.VersionId, cancellationToken: TestContext.Current.CancellationToken);
+        var versionB = await verification.ContentVersions.SingleAsync(candidate => candidate.Id == seeded.PriorPublishedVersionId, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ContentStatus.Published, versionA.Status);
+        Assert.Equal(ContentStatus.Archived, versionB.Status);
+        Assert.Equal(1, await verification.ContentVersions.CountAsync(candidate => candidate.ContentItemId == seeded.ItemId && candidate.Status == ContentStatus.Published, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await verification.WebhookOutboxEvents.CountAsync(item => item.EntityId == seeded.ItemId && item.EventType == PublishedEventType, cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task ExpiredScheduleLease_CannotPublishBeforeAnotherWorkerReclaimsIt()
     {
         var now = DateTimeOffset.Parse("2026-08-26T12:30:00Z");
@@ -235,6 +263,54 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
         return new SeededContent(content.Id, contentVersion.Id);
     }
 
+    /// <summary>
+    /// Seeds a content item with version A (Approved, due for scheduled publish, created - and so
+    /// UUIDv7-ordered - first) and version B (already Published as the item's default, created
+    /// afterwards so it sorts with a higher id than A despite being the one to archive).
+    /// </summary>
+    private async Task<SeededContent> SeedDueContentWithPriorPublishedDefaultAsync(string slug, DateTimeOffset dueAt)
+    {
+        await using var setup = await CreateContextAsync();
+        var workspace = new Workspace { Name = slug, Slug = slug };
+        var template = new Template { WorkspaceId = workspace.Id, Name = slug, Slug = slug };
+        var templateVersion = new TemplateVersion { TemplateId = template.Id, VersionNumber = 1, Status = TemplateVersionStatus.Published, PublishedAt = dueAt };
+        var content = new ContentItem
+        {
+            WorkspaceId = workspace.Id,
+            TemplateVersionId = templateVersion.Id,
+            Slug = slug
+        };
+        var versionA = new ContentVersion
+        {
+            ContentItemId = content.Id,
+            WorkspaceId = workspace.Id,
+            TemplateVersionId = templateVersion.Id,
+            VersionNumber = 1,
+            Status = ContentStatus.Approved,
+            Slug = slug,
+            PublishAt = dueAt
+        };
+        setup.AddRange(workspace, template, templateVersion, content, versionA);
+        await setup.SaveChangesAsync();
+
+        // Created after A, so its UUIDv7 id sorts higher, even though it is the version that must be
+        // archived when A is published.
+        var versionB = new ContentVersion
+        {
+            ContentItemId = content.Id,
+            WorkspaceId = workspace.Id,
+            TemplateVersionId = templateVersion.Id,
+            VersionNumber = 2,
+            Status = ContentStatus.Published,
+            Slug = slug,
+            PublishedAt = dueAt.AddMinutes(-30)
+        };
+        setup.Add(versionB);
+        await setup.SaveChangesAsync();
+
+        return new SeededContent(content.Id, versionA.Id, versionB.Id);
+    }
+
     private async Task<CmsifyDbContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var builder = new DbContextOptionsBuilder<CmsifyDbContext>()
@@ -247,7 +323,7 @@ public sealed class ScheduledPublishingDurabilityTests : IAsyncLifetime
         return context;
     }
 
-    private sealed record SeededContent(Guid ItemId, Guid VersionId);
+    private sealed record SeededContent(Guid ItemId, Guid VersionId, Guid? PriorPublishedVersionId = null);
 
     private sealed class ConcurrentStartGate(int expected)
     {

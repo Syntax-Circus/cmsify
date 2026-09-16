@@ -727,15 +727,28 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "invalid-state-transition", "Invalid content state transition", $"Content version cannot transition from {version.Status} to {ContentStatus.Published}.");
         }
 
-        await lifecycleService.TransitionAsync(version, ContentStatus.Published, currentActor.UserId ?? Guid.Empty, allowOverride);
+        // Note: the actual Status/PublishedAt/PublishedByUserId/UpdatedAt/UpdatedByUserId mutation for the
+        // transition to Published is applied by publishingService.PublishAsync below, not lifecycleService
+        // here - CanTransition above already validated the transition is allowed. Setting version.Status
+        // ahead of PublishAsync (as this used to do via lifecycleService.TransitionAsync) would let it flush
+        // as Published together with the prior-version archival in whichever order EF happens to batch them,
+        // reopening the ix_content_versions_content_item_id race PublishAsync's internal ordering fix exists
+        // to prevent.
         version.PublishAt = null;
         version.PublishLeaseOwner = null;
         version.PublishLeaseToken = null;
         version.PublishLeaseExpiresAt = null;
+
+        // PublishAsync may need to flush an intermediate SaveChanges (to archive a prior default-published
+        // version before this version's own Status becomes Published - see ContentPublishingService) before
+        // the final SaveChanges below persists this version's Published status and the outbox event. Both
+        // saves must commit or roll back as one unit, so wrap them in an explicit transaction.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
         var publishResult = await publishingService.PublishAsync(version, currentActor.UserId, ct);
         var publishedItem = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);
         EnqueueContentEvent("content.version_published", publishedItem, publishResult.Version);
         await dbContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         return Ok(new PublishContentVersionResponse(await ToVersionDetailResponseAsync(publishResult.Version, DateTimeOffset.UtcNow, ct: ct), publishResult.Warnings));
     }

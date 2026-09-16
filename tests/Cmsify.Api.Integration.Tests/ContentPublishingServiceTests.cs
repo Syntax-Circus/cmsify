@@ -70,6 +70,33 @@ public sealed class ContentPublishingServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PublishAsync_SucceedsForOlderInFlightVersion_WhenNewerVersionIsAlreadyPublished()
+    {
+        // ix_content_versions_content_item_id repro: version A is seeded first (lower UUIDv7 id) but is
+        // published LAST, after version B - seeded afterwards (higher id) - has already been published
+        // as the item's default. Archiving B must be flushed to Postgres before A's own row flips to
+        // Published, or Postgres's partial unique index on default-published rows sees two matching rows
+        // for an instant (A briefly Published while B has not yet been archived) and raises 23505.
+        var (item, versionA) = await SeedDraftVersionAsync(effectiveStartAt: null, effectiveEndAt: null);
+        var versionB = await SeedAdditionalVersionAsync(item, effectiveStartAt: null, effectiveEndAt: null);
+        var service = new ContentPublishingService(dbContext, CurrentActorInfo.Anonymous);
+
+        await service.PublishAsync(versionB, ct: TestContext.Current.CancellationToken);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await service.PublishAsync(versionA, ct: TestContext.Current.CancellationToken);
+        await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ContentStatus.Published, result.Version.Status);
+        var reloadedA = await dbContext.ContentVersions.AsNoTracking().FirstAsync(v => v.Id == versionA.Id, TestContext.Current.CancellationToken);
+        var reloadedB = await dbContext.ContentVersions.AsNoTracking().FirstAsync(v => v.Id == versionB.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(ContentStatus.Published, reloadedA.Status);
+        Assert.Equal(ContentStatus.Archived, reloadedB.Status);
+        var publishedCount = await dbContext.ContentVersions.CountAsync(v => v.ContentItemId == item.Id && v.Status == ContentStatus.Published, TestContext.Current.CancellationToken);
+        Assert.Equal(1, publishedCount);
+    }
+
+    [Fact]
     public async Task PublishAsync_WarnsOnEqualSpecificityOverlap_ForBoundedRanges()
     {
         var (item, _) = await SeedDraftVersionAsync(effectiveStartAt: null, effectiveEndAt: null);
