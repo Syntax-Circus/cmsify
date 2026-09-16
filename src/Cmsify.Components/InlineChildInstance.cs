@@ -5,6 +5,19 @@ public sealed class InlineChildInstance
     public Guid? ContentItemId { get; set; }
     public Guid? TemplateId { get; set; }              // null = not yet chosen; fixed forever once set (no API moves a ContentItem to a different template)
     public int? VersionNumber { get; set; }
+
+    // The status of the version resolved for VersionNumber at load time. Draft/Review/Approved is
+    // already directly editable; anything else (typically Published or Archived, when the child has
+    // no Draft yet) means SaveInlineFieldAsync must mint a fresh Draft - duplicated from this
+    // version - before it can save this instance's edits (see ContentEditSupport's lazy-draft
+    // comments). Null for a not-yet-persisted instance (ContentItemId is null).
+    public ContentStatus? VersionStatus { get; set; }
+
+    // Threaded from LoadInlineChildInstanceAsync's own allowDraftCreation parameter (true by default
+    // so a freshly-created "add new" instance, which never goes through that loader, isn't
+    // accidentally blocked from ever getting its first Draft). False only for a read-only view or an
+    // explicit historical VersionNumber - mirrors the load-time gate this replaces.
+    public bool AllowDraftCreation { get; set; } = true;
     public string? Slug { get; set; }
     public string? Locale { get; set; }
     public string? Tags { get; set; }

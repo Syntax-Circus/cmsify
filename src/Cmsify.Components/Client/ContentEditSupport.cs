@@ -120,32 +120,48 @@ public static class ContentEditSupport
     // of its own Inline sub-fields. Mirrors ContentEditPanel.LoadContentAsync's per-field population
     // loop one level down, for a child content item rather than the top-level one being edited.
     //
-    // Opening a parent for editing mints a Draft for each existing Inline child that doesn't already
-    // have one (when versionNumber is null AND allowDraftCreation is true) - a deliberate product
-    // choice (not incidental): the nested editor always needs something editable to bind to, and
-    // minting eagerly here is far simpler than deferring it to first-edit. If this proves
-    // undesirable in practice it's a follow-up, not something this pass needs to get exactly right.
+    // Loading never mints a Draft for an Inline child that lacks one - it merely reads whatever
+    // version is already current (its own Draft if one exists, otherwise its serving/latest
+    // version) purely for DISPLAY. A Draft is minted lazily, only if and when this instance's
+    // changes are actually saved (see SaveInlineFieldAsync) - opening (or merely viewing) a parent
+    // no longer has the side effect of creating version rows for every Inline child that happens to
+    // lack a Draft. instance.VersionStatus records which version was resolved here so the save path
+    // knows whether it's already editable or needs promoting first.
     //
-    // allowDraftCreation is false for read-only viewing or an explicit historical VersionNumber -
-    // draft-creation requires Editor role server-side, so minting one unconditionally while merely
-    // viewing (possibly as a Viewer-role user) either 403s or has an unwanted side effect of creating
-    // Draft rows nobody asked for.
+    // allowDraftCreation is threaded onto the loaded instance (see InlineChildInstance) rather than
+    // acted on here - it's false for read-only viewing or an explicit historical VersionNumber, and
+    // a save is never reachable from either of those paths (ContentEditPanel.SaveAsync bails out for
+    // ReadOnly, and a pinned historical VersionNumber never renders a Save affordance), but the flag
+    // is preserved end to end so SaveInlineFieldAsync can still honor it defensively.
     //
     // depth is the authoritative recursion terminator (see MaxInlineDepth) - ancestorTemplateIds is
     // a set and stops growing once a template repeats in the chain (A -> B -> A -> B -> ...), so it
     // alone cannot bound recursion against cyclic real content data. depth always increases by
     // exactly one per recursive call regardless of repeats, guaranteeing termination.
+    //
+    // templates, when supplied, is the caller's own already-fetched Templates.ListAsync result -
+    // every Inline child (at any depth) resolves its TemplateId against the SAME workspace-wide
+    // template list as its parent, so reusing it here avoids refetching that list once per child.
+    // componentSchemaSeed, when supplied, pre-populates this call's own component-schema resolution
+    // with schemas an ancestor (parent or grandparent) already resolved, so a component reused down
+    // an Inline hierarchy is fetched once instead of once per level. It is only ever read from, never
+    // mutated - each call still resolves into its OWN dictionary (see ComponentSchemaResolver), so
+    // concurrent sibling loads (fired via Task.WhenAll below and in ContentEditPanel) never share a
+    // single mutable dictionary across threads.
     public static async Task<InlineChildInstance> LoadInlineChildInstanceAsync(
         CmsifyClient client, Guid workspaceId, Guid childContentItemId, int? versionNumber,
-        IReadOnlySet<Guid> ancestorTemplateIds, int depth, bool allowDraftCreation, CancellationToken ct = default)
+        IReadOnlySet<Guid> ancestorTemplateIds, int depth, bool allowDraftCreation, CancellationToken ct = default,
+        IReadOnlyList<TemplateSummaryResponse>? templates = null, IReadOnlyDictionary<Guid, ComponentResponse>? componentSchemaSeed = null)
     {
         var item = await client.Content.GetAsync(workspaceId, childContentItemId, ct: ct)
             ?? throw new InvalidOperationException("Cmsify API returned no payload while loading inline child content.");
 
         int resolvedVersionNumber;
+        ContentStatus resolvedVersionStatus;
         if (versionNumber.HasValue)
         {
             resolvedVersionNumber = versionNumber.Value;
+            resolvedVersionStatus = item.Versions.FirstOrDefault(v => v.VersionNumber == versionNumber.Value)?.Status ?? ContentStatus.Draft;
         }
         else
         {
@@ -157,36 +173,30 @@ public static class ContentEditSupport
             if (draft is not null)
             {
                 resolvedVersionNumber = draft.VersionNumber;
+                resolvedVersionStatus = ContentStatus.Draft;
             }
             else
             {
-                var servingVersionNumber = item.CurrentlyServingVersion?.VersionNumber
-                    ?? item.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()?.VersionNumber
-                    ?? 1;
-                if (allowDraftCreation)
-                {
-                    var created = await client.Content.CreateVersionAsync(workspaceId, childContentItemId,
-                        new CreateContentVersionRequest(null, null, servingVersionNumber, null), ct);
-                    resolvedVersionNumber = created?.VersionNumber ?? servingVersionNumber;
-                }
-                else
-                {
-                    resolvedVersionNumber = servingVersionNumber;
-                }
+                var servingVersion = item.CurrentlyServingVersion
+                    ?? item.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault();
+                resolvedVersionNumber = servingVersion?.VersionNumber ?? 1;
+                resolvedVersionStatus = servingVersion?.Status ?? ContentStatus.Draft;
             }
         }
 
-        var version = await client.Content.GetVersionAsync(workspaceId, childContentItemId, resolvedVersionNumber, ct)
+        var version = await client.Content.GetVersionAsync(workspaceId, childContentItemId, resolvedVersionNumber, ct, expandChildren: false)
             ?? throw new InvalidOperationException("Cmsify API returned no payload while loading an inline child content version.");
 
-        var templates = (await client.Templates.ListAsync(workspaceId, ct: ct))?.Items ?? [];
-        var templateSummary = templates.FirstOrDefault(t => t.CurrentVersionId == version.TemplateVersionId);
+        var templateList = templates ?? (await client.Templates.ListAsync(workspaceId, ct: ct))?.Items ?? [];
+        var templateSummary = templateList.FirstOrDefault(t => t.CurrentVersionId == version.TemplateVersionId);
 
         var instance = new InlineChildInstance
         {
             ContentItemId = childContentItemId,
             TemplateId = templateSummary?.Id,
             VersionNumber = resolvedVersionNumber,
+            VersionStatus = resolvedVersionStatus,
+            AllowDraftCreation = allowDraftCreation,
             Slug = version.Slug,
             Locale = version.LocaleCode,
             Tags = string.Join(",", version.Tags),
@@ -209,7 +219,7 @@ public static class ContentEditSupport
 
         var fieldsById = templateVersion.Fields.ToDictionary(f => f.Id);
         var componentSchemas = await ComponentSchemaResolver.ResolveAsync(
-            client, workspaceId, templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value), ct);
+            client, workspaceId, templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value), ct, componentSchemaSeed);
 
         var childAncestors = WithAncestor(ancestorTemplateIds, templateSummary.Id);
         var inlineLookups = new List<(ContentFieldEditorValue Value, Guid ChildContentItemId, Task<InlineChildInstance> Task)>();
@@ -226,7 +236,7 @@ public static class ContentEditSupport
             if (field?.CompositionMode == CompositionMode.Inline && fieldValue.ChildContentItemId is { } nestedChildId)
             {
                 inlineLookups.Add((editorValue, nestedChildId, LoadInlineChildInstanceAsync(
-                    client, workspaceId, nestedChildId, null, childAncestors, depth + 1, allowDraftCreation, ct)));
+                    client, workspaceId, nestedChildId, null, childAncestors, depth + 1, allowDraftCreation, ct, templateList, componentSchemas)));
                 continue;
             }
 
@@ -357,9 +367,15 @@ public static class ContentEditSupport
     // (an ancestor set alone cannot bound recursion against cyclic real content, since it stops
     // growing once a template repeats in the chain) and is threaded one deeper on every recursive
     // call regardless of repeats.
+    //
+    // componentSchemaSeed mirrors LoadInlineChildInstanceAsync's own parameter of the same name -
+    // schemas an ancestor already resolved (the parent's own component fields, or an outer Inline
+    // ancestor's) are reused here instead of being re-fetched. Same safety note applies: it's only
+    // ever read from, never mutated.
     public static async Task<IReadOnlyList<ContentFieldValueRequest>> SaveInlineFieldAsync(
         CmsifyClient client, Guid workspaceId, TemplateFieldResponse field, IList<InlineChildInstance> instances,
-        IReadOnlySet<Guid> ancestorTemplateIds, int depth, CancellationToken ct = default)
+        IReadOnlySet<Guid> ancestorTemplateIds, int depth, CancellationToken ct = default,
+        IReadOnlyDictionary<Guid, ComponentResponse>? componentSchemaSeed = null)
     {
         if (depth >= MaxInlineDepth)
         {
@@ -404,7 +420,7 @@ public static class ContentEditSupport
                 ?? throw new InvalidOperationException($"Template '{template.Name}' has no published version to save inline content against.");
 
             var componentSchemas = await ComponentSchemaResolver.ResolveAsync(
-                client, workspaceId, templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value), ct);
+                client, workspaceId, templateVersion.Fields.Where(f => f.ComponentId.HasValue).Select(f => f.ComponentId!.Value), ct, componentSchemaSeed);
 
             var childAncestors = WithAncestor(ancestorTemplateIds, templateId);
             var pendingDeletions = new List<(IList<InlineChildInstance> List, InlineChildInstance Instance)>();
@@ -441,7 +457,7 @@ public static class ContentEditSupport
                     {
                         // Children before parents: this recursive call fully saves (or throws for) this
                         // instance's own Inline children before the instance itself is saved below.
-                        var nestedRequests = await SaveInlineFieldAsync(client, workspaceId, childField, childValue.ChildInstances, childAncestors, depth + 1, ct);
+                        var nestedRequests = await SaveInlineFieldAsync(client, workspaceId, childField, childValue.ChildInstances, childAncestors, depth + 1, ct, componentSchemas);
                         childValues.AddRange(nestedRequests);
 
                         // A grandchild-level MarkedForDeletion instance is deleted only after THIS
@@ -506,8 +522,30 @@ public static class ContentEditSupport
             if (instance.ContentItemId is { } existingChildId)
             {
                 var childVersionNumber = instance.VersionNumber ?? 1;
+
+                // Lazy draft minting: LoadInlineChildInstanceAsync never mints a Draft, it only reads
+                // whatever version is already current for display (see its VersionStatus comment).
+                // If that version isn't already editable (Draft/Review/Approved), mint one now - right
+                // before the save that actually needs it - by duplicating this instance's current
+                // content, instead of every parent load eagerly minting one for every Inline child.
+                if (instance.AllowDraftCreation && instance.VersionStatus is not (ContentStatus.Draft or ContentStatus.Review or ContentStatus.Approved))
+                {
+                    var createdDraft = await client.Content.CreateVersionAsync(workspaceId, existingChildId,
+                        new CreateContentVersionRequest(null, null, childVersionNumber, null), ct, expandChildren: false)
+                        ?? throw new InvalidOperationException("Cmsify API returned no payload while creating a draft for an inline child's content version.");
+                    childVersionNumber = createdDraft.VersionNumber;
+                    instance.VersionNumber = childVersionNumber;
+                    instance.VersionStatus = ContentStatus.Draft;
+
+                    // Same ETag-priming reasoning as the newly-created-instance branch below:
+                    // CreateVersionAsync's response came from POST .../versions (the collection),
+                    // never a GET/PUT against the new draft's own URI, so the UpdateVersionAsync PUT
+                    // immediately below would otherwise carry no If-Match and get rejected with 412.
+                    _ = await client.Content.GetVersionAsync(workspaceId, existingChildId, childVersionNumber, ct, expandChildren: false);
+                }
+
                 _ = await client.Content.UpdateVersionAsync(workspaceId, existingChildId, childVersionNumber,
-                    new UpdateContentVersionRequest(instance.EffectiveStartAt, instance.EffectiveEndAt, childValues), ct)
+                    new UpdateContentVersionRequest(instance.EffectiveStartAt, instance.EffectiveEndAt, childValues), ct, expandChildren: false)
                     ?? throw new InvalidOperationException("Cmsify API returned no payload while updating an inline child's content version.");
 
                 // Same ETag-refresh reasoning as ContentEditPanel.SaveAsync: the version PUT above
@@ -529,6 +567,7 @@ public static class ContentEditSupport
                 instance.ContentItemId = created.Id;
                 instance.VersionNumber = created.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()?.VersionNumber
                     ?? created.CurrentlyServingVersion?.VersionNumber ?? 1;
+                instance.VersionStatus = ContentStatus.Draft;
 
                 // Prime the SDK's per-URI ETag cache for this child's version sub-resource. CreateAsync's
                 // response came from POST /content (the collection) - never a GET/PUT against the
@@ -536,7 +575,7 @@ public static class ContentEditSupport
                 // same session would send its UpdateVersionAsync PUT with no If-Match header and get
                 // rejected with 412, with no recovery path (that 412 doesn't match the reload-and-retry
                 // handling meant for the parent's own save conflict).
-                _ = await client.Content.GetVersionAsync(workspaceId, instance.ContentItemId.Value, instance.VersionNumber.Value, ct);
+                _ = await client.Content.GetVersionAsync(workspaceId, instance.ContentItemId.Value, instance.VersionNumber.Value, ct, expandChildren: false);
             }
 
             // Only now that THIS instance's own save has succeeded is it safe to delete any
@@ -580,14 +619,15 @@ public static class ContentEditSupport
         }
 
         // Same ETag-refresh reasoning as ContentEditPanel.SaveAsync's pre-item-PUT refresh and
-        // SaveInlineFieldAsync's post-version-PUT refresh: loading this child (see
-        // LoadInlineChildInstanceAsync) may have minted a Draft version via CreateVersionAsync for a
-        // child that had none, which bumps the item's UpdatedAt (and therefore its ETag) server-side
-        // with no fresh ETag ever returned to the client for that side effect. The SDK's cached ETag
-        // for this item's URI can therefore be stale by the time this delete runs (which may be much
-        // later, after the whole parent save has succeeded) - a GET here refreshes it immediately
-        // before DeleteAsync reuses it as If-Match, otherwise this deterministically 412s with no
-        // recovery path (a 412 response carries no fresh ETag to retry with).
+        // SaveInlineFieldAsync's post-version-PUT refresh: saving this child earlier in the same
+        // parent save (see SaveInlineFieldAsync's lazy draft-mint branch) may have minted a Draft
+        // version via CreateVersionAsync for a child that had none, which bumps the item's UpdatedAt
+        // (and therefore its ETag) server-side with no fresh ETag ever returned to the client for
+        // that side effect. The SDK's cached ETag for this item's URI can therefore be stale by the
+        // time this delete runs (which may be much later, after the whole parent save has succeeded)
+        // - a GET here refreshes it immediately before DeleteAsync reuses it as If-Match, otherwise
+        // this deterministically 412s with no recovery path (a 412 response carries no fresh ETag to
+        // retry with).
         _ = await client.Content.GetAsync(workspaceId, contentItemId, ct: ct);
 
         await client.Content.DeleteAsync(workspaceId, contentItemId, ct);
