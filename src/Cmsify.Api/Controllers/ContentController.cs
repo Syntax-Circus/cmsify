@@ -7,6 +7,7 @@ using Cmsify.Core.Domain.ValueObjects;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using SyntaxCircus.Cmsify.Contracts;
 using CompositionMode = Cmsify.Core.Domain.Enums.CompositionMode;
@@ -781,7 +782,7 @@ public sealed class ContentController : ControllerBase
 
     [HttpPost("{id:guid}/versions/{versionNumber:int}/upgrade-template-version")]
     [RequireRole(UserRole.Editor)]
-    public async Task<ActionResult<ContentVersionDetailResponse>> UpgradeTemplateVersion(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
+    public async Task<ActionResult<ContentVersionDetailResponse>> UpgradeTemplateVersion(Guid workspaceId, Guid id, int versionNumber, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] UpgradeTemplateVersionRequest? request, CancellationToken ct)
     {
         var version = await LoadVersionForEditAsync(workspaceId, id, versionNumber, ct);
         if (version is null)
@@ -809,42 +810,63 @@ public sealed class ContentController : ControllerBase
 
         version.TemplateVersionId = target.Id;
 
-        // A package re-import always mints brand-new TemplateField rows for every field in a
-        // template version - even one whose key didn't change at all - so field identity across
-        // versions lives in the key, not the row's own Id (see PackagesController.ToField, which
-        // never reuses a prior field's Id). Remap each value onto the target field with the same
-        // key instead of matching by Id, so upgrading doesn't wipe every value the instant the
-        // schema changes at all; only a value whose key genuinely no longer exists is dropped.
-        var oldFieldKeyById = currentTemplateVersion.Fields.ToDictionary(field => field.Id, field => field.Key);
-        var targetFieldIdByKey = target.Fields
-            .GroupBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
-        var stale = new List<ContentVersionFieldValue>();
-        foreach (var value in version.FieldValues)
+        if (request?.Fields is { } fields)
         {
-            if (oldFieldKeyById.TryGetValue(value.FieldId, out var key) && targetFieldIdByKey.TryGetValue(key, out var newFieldId))
+            // Caller supplied explicit values for the target template version: this is a full
+            // replacement of the version's field values (ApplyVersionFieldValuesAsync removes every
+            // existing value first, matching UpdateVersion's semantics), validated against the
+            // finished result as one atomic step - not the key-remap below. This is what lets an
+            // upgrade onto a template version that added a required field succeed: the remap has no
+            // old value to carry over for a brand-new field, but the caller can supply one directly.
+            // Field ids in `fields` refer to the TARGET template version's fields.
+            if (await ApplyVersionFieldValuesAsync(version, target, fields, ct) is { } fieldError)
             {
-                value.FieldId = newFieldId;
-            }
-            else
-            {
-                stale.Add(value);
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", fieldError);
             }
         }
-        dbContext.ContentVersionFieldValues.RemoveRange(stale);
-        foreach (var value in stale)
+        else
         {
-            version.FieldValues.Remove(value);
-        }
+            // No body, or a body with Fields null: exactly today's behaviour, unchanged. Every
+            // existing caller (including the .NET SDK's original UpgradeTemplateVersionAsync overload)
+            // sends no body and must keep hitting this path byte for byte.
+            //
+            // A package re-import always mints brand-new TemplateField rows for every field in a
+            // template version - even one whose key didn't change at all - so field identity across
+            // versions lives in the key, not the row's own Id (see PackagesController.ToField, which
+            // never reuses a prior field's Id). Remap each value onto the target field with the same
+            // key instead of matching by Id, so upgrading doesn't wipe every value the instant the
+            // schema changes at all; only a value whose key genuinely no longer exists is dropped.
+            var oldFieldKeyById = currentTemplateVersion.Fields.ToDictionary(field => field.Id, field => field.Key);
+            var targetFieldIdByKey = target.Fields
+                .GroupBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
+            var stale = new List<ContentVersionFieldValue>();
+            foreach (var value in version.FieldValues)
+            {
+                if (oldFieldKeyById.TryGetValue(value.FieldId, out var key) && targetFieldIdByKey.TryGetValue(key, out var newFieldId))
+                {
+                    value.FieldId = newFieldId;
+                }
+                else
+                {
+                    stale.Add(value);
+                }
+            }
+            dbContext.ContentVersionFieldValues.RemoveRange(stale);
+            foreach (var value in stale)
+            {
+                version.FieldValues.Remove(value);
+            }
 
-        var validation = contentValidator.Validate(version, target);
-        if (!validation.IsValid)
-        {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
-        }
-        if (await ValidatePickListValuesAsync(version, target, ct) is { } pickListError)
-        {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", pickListError);
+            var validation = contentValidator.Validate(version, target);
+            if (!validation.IsValid)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", string.Join(" ", validation.Errors.Select(error => error.ErrorMessage)));
+            }
+            if (await ValidatePickListValuesAsync(version, target, ct) is { } pickListError)
+            {
+                return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content does not satisfy the target template version", pickListError);
+            }
         }
 
         var item = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);

@@ -497,6 +497,164 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpgradeTemplateVersion_WithFields_SatisfiesTemplateVersionThatAddedRequiredField()
+    {
+        // Reproduces the production bug: template v2 adds a required field ("billingLine") with no
+        // counterpart key on v1, so the key-remap path (no body) can never carry a value for it and
+        // always 422s (see UpgradeTemplateVersion_NoBody_StillFailsWhenTargetAddsRequiredField below,
+        // which is the compatibility guard proving that path is untouched). Supplying Fields lets the
+        // caller give the new required field's value directly, validated against the finished result.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "upgrade-fields-required", [new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        var (newTemplateVersionId, requiredFieldId) = await PublishNewTemplateVersionWithRequiredFieldAsync(factory, templateId, "billingLine");
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version",
+            new UpgradeTemplateVersionRequest([new ContentFieldValueRequest(requiredFieldId, 0, ValueKind.Text, "$100 setup fee", null, null, null, null, null)]),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var upgraded = await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(upgraded);
+        Assert.Equal(newTemplateVersionId, upgraded.TemplateVersionId);
+        var field = Assert.Single(upgraded.Fields);
+        Assert.Equal(requiredFieldId, field.FieldId);
+        Assert.Equal("$100 setup fee", field.TextValue);
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersion_NoBody_StillFailsWhenTargetAddsRequiredField()
+    {
+        // Compatibility guard: this is the exact same production-bug scenario as the test above, but
+        // with no request body - proving the no-body path is byte-for-byte unchanged. Every existing
+        // caller (including the .NET SDK's original overload) sends no body and must keep 422ing here
+        // exactly as it did before this endpoint gained an optional request body.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "upgrade-no-body-fails", [new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        await PublishNewTemplateVersionWithRequiredFieldAsync(factory, templateId, "billingLine");
+
+        var response = await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version", null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("validation-failed", body);
+        Assert.Contains("billingLine", body);
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersion_WithGenuinelyEmptyBody_SucceedsIdenticallyToNoBody()
+    {
+        // The body must be genuinely optional over HTTP, not just "null is fine when the client
+        // library sends it" - a request with no Content-Type header and zero length (what the
+        // existing .NET SDK sends, and what a plain [FromBody] parameter would reject with 415/400)
+        // must still bind to a null request and succeed exactly as today.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "upgrade-empty-body", [new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        var newTemplateVersionId = await PublishNewTemplateVersionWithoutFieldAsync(factory, templateId);
+
+        // No Content set at all means no request body and no Content-Type header (Content-Type is a
+        // content header, carried on HttpContent - asserting Content is null is sufficient to prove
+        // this is a genuinely empty request, not merely a JSON-serialized null).
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version");
+        Assert.Null(request.Content);
+
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var upgraded = await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.NotNull(upgraded);
+        Assert.Equal(newTemplateVersionId, upgraded.TemplateVersionId);
+        Assert.Empty(upgraded.Fields);
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersion_WithFields_OmittingRequiredFieldOfTarget_Returns422()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "upgrade-fields-missing-required", [new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        await PublishNewTemplateVersionWithRequiredFieldAsync(factory, templateId, "billingLine");
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version",
+            new UpgradeTemplateVersionRequest([]),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("billingLine", body);
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersion_WithFields_ReferencingFieldNotOnTarget_Returns422AndDoesNotPersist()
+    {
+        // Case that matters most after the production-bug fix above: a failed upgrade must not
+        // half-apply. version.TemplateVersionId is set to the target in memory before validation
+        // runs, but SaveChangesAsync is never reached on this path, so the version must still be
+        // reported as sitting on the ORIGINAL template version afterward.
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "upgrade-fields-bad-id", [new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        await PublishNewTemplateVersionWithRequiredFieldAsync(factory, templateId, "billingLine");
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version",
+            new UpgradeTemplateVersionRequest([new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "stale-field-id", null, null, null, null, null)]),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+
+        var current = await GetItemAsync(client, workspaceId, itemId);
+        var currentVersion = current.Versions.Single(v => v.VersionNumber == versionNumber);
+        Assert.Equal(templateVersionId, currentVersion.TemplateVersionId);
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersion_WithFields_OnPublishedVersion_Returns409()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, templateId, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "upgrade-fields-published", [new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null)]);
+        var versionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/submit", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/approve", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/publish", new PublishContentVersionRequest(null, null), ApiJsonOptions, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var (_, requiredFieldId) = await PublishNewTemplateVersionWithRequiredFieldAsync(factory, templateId, "billingLine");
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{versionNumber}/upgrade-template-version",
+            new UpgradeTemplateVersionRequest([new ContentFieldValueRequest(requiredFieldId, 0, ValueKind.Text, "x", null, null, null, null, null)]),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
     public async Task CreateVersion_Duplicate_FromVersionUpgradedToNewTemplate_ValidatesAgainstThatTemplateVersion()
     {
         // Reproduces the production bug: item.TemplateVersionId is set once at item creation and
@@ -705,6 +863,38 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
         template.CurrentVersionId = newVersion.Id;
         await dbContext.SaveChangesAsync();
         return newVersion.Id;
+    }
+
+    private static async Task<(Guid TemplateVersionId, Guid FieldId)> PublishNewTemplateVersionWithRequiredFieldAsync(WebApplicationFactory<Program> factory, Guid templateId, string key)
+    {
+        // The production scenario: a new template version whose only field is a brand-new REQUIRED
+        // field with no counterpart key on the prior version, so the key-remap upgrade path has no
+        // value to carry over for it and always fails validation.
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var newVersion = new Cmsify.Core.Domain.Entities.TemplateVersion
+        {
+            TemplateId = templateId,
+            VersionNumber = 2,
+            Status = Cmsify.Core.Domain.Enums.TemplateVersionStatus.Published,
+            PublishedAt = DateTimeOffset.UtcNow
+        };
+        var field = new Cmsify.Core.Domain.Entities.TemplateField
+        {
+            TemplateVersionId = newVersion.Id,
+            Key = key,
+            Label = key,
+            PrimitiveType = Cmsify.Core.Domain.Enums.PrimitiveType.Text,
+            Order = 0,
+            IsRequired = true
+        };
+        dbContext.TemplateVersions.Add(newVersion);
+        dbContext.TemplateFields.Add(field);
+        await dbContext.SaveChangesAsync();
+        var template = await dbContext.Templates.FirstAsync(t => t.Id == templateId);
+        template.CurrentVersionId = newVersion.Id;
+        await dbContext.SaveChangesAsync();
+        return (newVersion.Id, field.Id);
     }
 
     private static async Task<(Guid TemplateVersionId, Guid FieldId)> PublishNewTemplateVersionWithSameFieldKeyAsync(WebApplicationFactory<Program> factory, Guid templateId, string key)
