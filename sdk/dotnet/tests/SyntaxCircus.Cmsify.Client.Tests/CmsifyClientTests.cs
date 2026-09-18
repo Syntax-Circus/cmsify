@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SyntaxCircus.Http.Resilience;
 
 namespace SyntaxCircus.Cmsify.Client.Tests;
@@ -1069,6 +1070,52 @@ public sealed class CmsifyClientTests
         routes.ShouldContain(route => route.Contains($"GET /api/v1/workspaces/{workspaceId}/components/{resourceId}/versions/{version}"));
         routes.ShouldContain(route => route.Contains($"POST /api/v1/workspaces/{workspaceId}/webhooks/{resourceId}/deliveries/"));
         routes.ShouldContain(route => route.StartsWith($"GET /api/v1/workspaces/{workspaceId}/packages/export?templateIds="));
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersionAsync_OriginalOverload_StillSendsNoBody()
+    {
+        // Binary compatibility guard: this signature must keep sending no request content at all
+        // (not even a serialized "null"), exactly as it did before an optional body was added to the
+        // endpoint - every consumer compiled against this exact overload relies on that.
+        HttpRequestMessage? captured = null;
+        var client = CreateClient(request =>
+        {
+            captured = request;
+            return Json(HttpStatusCode.OK, new { });
+        });
+        var workspaceId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        await client.Content.UpgradeTemplateVersionAsync(workspaceId, itemId, 3, TestContext.Current.CancellationToken);
+
+        captured!.Content.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task UpgradeTemplateVersionAsync_FieldsOverload_PostsUpgradeTemplateVersionRequestBody()
+    {
+        string? capturedBody = null;
+        var client = CreateClient(request =>
+        {
+            capturedBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return Json(HttpStatusCode.OK, new { });
+        });
+        var workspaceId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var fields = new List<ContentFieldValueRequest> { new(fieldId, 0, ValueKind.Text, "hello", null, null, null, null, null) };
+
+        await client.Content.UpgradeTemplateVersionAsync(workspaceId, itemId, 3, fields, TestContext.Current.CancellationToken);
+
+        capturedBody.ShouldNotBeNull();
+        var deserializeOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+        var parsed = JsonSerializer.Deserialize<UpgradeTemplateVersionRequest>(capturedBody, deserializeOptions);
+        parsed.ShouldNotBeNull();
+        parsed.Fields.ShouldNotBeNull();
+        var field = parsed.Fields!.ShouldHaveSingleItem();
+        field.FieldId.ShouldBe(fieldId);
+        field.TextValue.ShouldBe("hello");
     }
 
     private static CmsifyClient CreateClient(Func<HttpRequestMessage, HttpResponseMessage> handler, string? token = null, Action<CmsifyClientOptions>? configure = null)

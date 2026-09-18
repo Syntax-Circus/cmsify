@@ -89,7 +89,11 @@ public sealed class ContentClient(CmsifyClient client)
     public Task<ContentVersionDetailResponse?> ArchiveVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => client.PostAsync<ContentVersionDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}/archive"), null, ct);
     public Task<ContentVersionDetailResponse?> RestoreVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => client.PostAsync<ContentVersionDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}/restore"), null, ct);
     public Task<PublishContentVersionResponse?> PublishVersionAsync(Guid workspaceId, Guid id, int versionNumber, PublishContentVersionRequest? request = null, CancellationToken ct = default) => client.PostAsync<PublishContentVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}/publish"), request, ct);
+    // Must keep posting no body: every existing caller (compiled against this exact signature)
+    // relies on that, and adding a parameter here would be binary-breaking. Use the overload below
+    // to supply Fields.
     public Task<ContentVersionDetailResponse?> UpgradeTemplateVersionAsync(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct = default) => client.PostAsync<ContentVersionDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}/upgrade-template-version"), null, ct);
+    public Task<ContentVersionDetailResponse?> UpgradeTemplateVersionAsync(Guid workspaceId, Guid id, int versionNumber, IReadOnlyList<ContentFieldValueRequest> fields, CancellationToken ct = default) => client.PostAsync<ContentVersionDetailResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/content/{id}/versions/{versionNumber}/upgrade-template-version"), new UpgradeTemplateVersionRequest(fields), ct);
 }
 
 public sealed class MediaClient(CmsifyClient client)

@@ -1544,7 +1544,13 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["UpgradeTemplateVersionRequest"];
+                    "text/json": components["schemas"]["UpgradeTemplateVersionRequest"];
+                    "application/*+json": components["schemas"]["UpgradeTemplateVersionRequest"];
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -4631,6 +4637,9 @@ export interface components {
             url: string;
             isActive: boolean;
             events: string[];
+        };
+        UpgradeTemplateVersionRequest: {
+            fields?: components["schemas"]["ContentFieldValueRequest"][] | null;
         };
         UserDto: {
             /** Format: uuid */

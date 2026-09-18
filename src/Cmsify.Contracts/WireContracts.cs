@@ -108,6 +108,12 @@ public sealed record CreateContentVersionRequest(DateTimeOffset? EffectiveStartA
 
 public sealed record UpdateContentVersionRequest(DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, IReadOnlyList<ContentFieldValueRequest> Fields);
 
+// Optional: absent (or Fields null) preserves today's key-remap upgrade behavior exactly. When
+// supplied, Fields is a full replacement of the version's values (matching UpdateContentVersionRequest's
+// semantics) validated against the target template version as one atomic step - see ContentController.UpgradeTemplateVersion.
+// Field ids in Fields refer to the TARGET template version's fields, not the version's current one.
+public sealed record UpgradeTemplateVersionRequest(IReadOnlyList<ContentFieldValueRequest>? Fields);
+
 public sealed record PublishContentVersionRequest(DateTimeOffset? PublishAt, bool? OverrideWorkflow = null);
 
 public sealed record PublishContentVersionResponse(ContentVersionDetailResponse Version, IReadOnlyList<string> Warnings);
