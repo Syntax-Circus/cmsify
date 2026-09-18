@@ -16,6 +16,12 @@ Use a component when the same structured block belongs in more than one template
 
 Then create content from a template. A content item is pinned to the template version it was created from until it is deliberately upgraded. This preserves the schema and values used by each published version.
 
+### Upgrading content to a newer template version
+
+`POST .../content/{id}/versions/{n}/upgrade-template-version` moves a Draft, Review, or Approved version onto the template's latest published version. By default (no request body) it remaps each existing value onto the target's field with the same key and drops values whose key no longer exists, then validates - this is why upgrading onto a template version that *adds a required field* fails with 422: there is no old value to carry over for a field that didn't previously exist.
+
+To upgrade onto such a version, pass an optional `fields` array in the request body: `{ "fields": [...] }`. When supplied, `fields` **fully replaces** the version's values (the same full-replacement semantics as updating a version's fields) instead of remapping by key, and the replaced result is validated as one atomic step - if validation fails (for example, a required field is still missing, or a field id isn't present on the target), nothing is persisted and the version stays on its original template version. Field ids in `fields` refer to the **target** template version's fields, not the version's current one.
+
 ## Choosing between a component field and a template-as-child-field
 
 When a template field needs to reference structured content, you can use either a **component field** or a **template-as-child-field**. Each serves a different purpose:
