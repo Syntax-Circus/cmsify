@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-19
+
+Re-release of 0.7.1: its automated promotion failed partway through (the NuGet preflight check errored before publishing), so no packages or GitHub Release ever went out for that tag. No functional changes from 0.7.1 - see that section below.
+
 ## [0.7.1] - 2026-09-19
 
 ### Fixed
