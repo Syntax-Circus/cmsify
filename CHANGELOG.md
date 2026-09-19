@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `Cmsify.Components`' `ContentEditPanel` rendered zero fields - silently, with no error and no failed request - when editing or read-only-viewing a content item whose pinned template version was no longer any template's *current* version (reproduced against production content that predated a later template republish and had never been upgraded via `upgrade-template-version`). `LoadContentAsync` resolved which template's fields to load by scanning `GET /templates` for a template whose `CurrentVersionId` matched the content version's own `TemplateVersionId`; a content item pinned to an older, now-Archived version has no such match, so `template` came back `null`, `LoadTemplateVersionAsync` was never called, and `templateVersion` silently kept its hardcoded empty default (`Fields: []`) - the same code path runs for both edit and read-only display, so both modes rendered identically blank. `TemplatesController` gained `GET /api/v1/workspaces/{ws}/templates/versions/{versionId}`, which resolves a template version by its own id regardless of which template owns it or whether it's current (additive per `docs/api-compatibility.md`); `SyntaxCircus.Cmsify.Client.TemplateClient` gained a matching `GetVersionByIdAsync(workspaceId, versionId, ct)`. `ContentEditPanel.LoadContentAsync` now falls back to it whenever the current-version scan finds no match, instead of leaving the form silently empty.
+
 ## [0.7.0] - 2026-09-18
 
 ### Added
