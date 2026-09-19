@@ -1055,6 +1055,7 @@ public sealed class CmsifyClientTests
         await client.Content.LinkTranslationAsync(workspaceId, resourceId, new LinkTranslationRequest(Guid.NewGuid()), TestContext.Current.CancellationToken);
         await client.Content.GetVersionAsync(workspaceId, resourceId, version, TestContext.Current.CancellationToken);
         await client.Content.CreateVersionAsync(workspaceId, resourceId, new CreateContentVersionRequest(null, null, version, null), TestContext.Current.CancellationToken);
+        await client.Templates.GetVersionByIdAsync(workspaceId, resourceId, TestContext.Current.CancellationToken);
         await client.Templates.DeleteSectionAsync(workspaceId, resourceId, version, Guid.NewGuid(), TestContext.Current.CancellationToken);
         await client.Templates.DeleteFieldAsync(workspaceId, resourceId, version, Guid.NewGuid(), TestContext.Current.CancellationToken);
         await client.Templates.ReorderFieldsAsync(workspaceId, resourceId, version, [], TestContext.Current.CancellationToken);
@@ -1067,6 +1068,7 @@ public sealed class CmsifyClientTests
 
         routes.ShouldContain($"POST /api/v1/workspaces/{workspaceId}/content/{resourceId}/versions/{version}/upgrade-template-version");
         routes.ShouldContain($"POST /api/v1/workspaces/{workspaceId}/content/{resourceId}/versions");
+        routes.ShouldContain($"GET /api/v1/workspaces/{workspaceId}/templates/versions/{resourceId}");
         routes.ShouldContain(route => route.Contains($"GET /api/v1/workspaces/{workspaceId}/components/{resourceId}/versions/{version}"));
         routes.ShouldContain(route => route.Contains($"POST /api/v1/workspaces/{workspaceId}/webhooks/{resourceId}/deliveries/"));
         routes.ShouldContain(route => route.StartsWith($"GET /api/v1/workspaces/{workspaceId}/packages/export?templateIds="));

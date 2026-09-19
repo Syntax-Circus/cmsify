@@ -44,6 +44,10 @@ public sealed class TemplateClient(CmsifyClient client)
     public Task<TemplateVersionResponse?> CreateVersionAsync(Guid workspaceId, Guid id, CreateTemplateVersionRequest request, CancellationToken ct = default) => client.PostAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions"), request, ct);
     public Task<TemplateVersionResponse?> CreateDraftAsync(Guid workspaceId, Guid id, string? notes, CancellationToken ct = default) => CreateVersionAsync(workspaceId, id, new CreateTemplateVersionRequest(notes), ct);
     public Task<TemplateVersionResponse?> GetVersionAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => client.GetAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}"), ct);
+    // Unlike GetVersionAsync above, this needs only the version's own id - not its owning template's
+    // id or version number - so it can resolve a content item's pinned TemplateVersionId even when
+    // that version is no longer any template's current one (see TemplatesController.GetVersionById).
+    public Task<TemplateVersionResponse?> GetVersionByIdAsync(Guid workspaceId, Guid versionId, CancellationToken ct = default) => client.GetAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/versions/{versionId}"), ct);
     public Task<TemplateVersionResponse?> PublishVersionAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => client.PutAsync<TemplateVersionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}/publish"), null, ct);
     public Task<TemplateVersionResponse?> PublishAsync(Guid workspaceId, Guid id, int version, CancellationToken ct = default) => PublishVersionAsync(workspaceId, id, version, ct);
     public Task<TemplateSectionResponse?> AddSectionAsync(Guid workspaceId, Guid id, int version, TemplateSectionRequest request, CancellationToken ct = default) => client.PostAsync<TemplateSectionResponse>(CmsifyClient.WorkspacePath(workspaceId, $"/templates/{id}/versions/{version}/sections"), request, ct);

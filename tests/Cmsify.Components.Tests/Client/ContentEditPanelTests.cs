@@ -587,6 +587,197 @@ public sealed class ContentEditPanelTests : BunitContext
         saved!.Id.ShouldBe(contentId);
     }
 
+    // Reproduces the bug directly: before the fix, `template` in LoadContentAsync's
+    // FirstOrDefault(t => t.CurrentVersionId == loadedVersion.TemplateVersionId) came back null
+    // whenever the content's pinned version wasn't any template's *current* one, so
+    // LoadTemplateVersionAsync was never called and templateVersion silently stayed at its empty
+    // default (Fields: []) - the form rendered with zero fields and no error. Here the `/templates`
+    // list only exposes a DIFFERENT (current) version id than the one this content is pinned to,
+    // simulating a content item that was never upgraded after its template moved on - exactly
+    // epic-torch's situation in production. The fields must still load, via the
+    // GET .../templates/versions/{id} fallback.
+    [Fact]
+    public void EditingContentPinnedToANonCurrentTemplateVersionStillLoadsAndSavesFields()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var currentTemplateVersionId = Guid.NewGuid();
+        var pinnedTemplateVersionId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        string? capturedVersionUpdateBody = null;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{contentId}}", "templateVersionId": "{{pinnedTemplateVersionId}}", "templateName": "Article",
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{pinnedTemplateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{fieldId}}", "key": "title", "label": "Title", "order": 0, "valueKind": "Text",
+                          "textValue": "Existing", "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "items": [{ "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article", "description": null, "currentVersionId": "{{currentTemplateVersionId}}" }], "totalCount": 1, "page": 1, "pageSize": 20 }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/versions/{pinnedTemplateVersionId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{pinnedTemplateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                      "status": "Archived", "publishedAt": null, "notes": null, "sections": [],
+                      "fields": [
+                        { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                          "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                          "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                          "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                capturedVersionUpdateBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Draft",
+                      "templateVersionId": "{{pinnedTemplateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-02T00:00:00Z", "fields": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Put && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{contentId}}", "templateVersionId": "{{pinnedTemplateVersionId}}", "templateName": "Article",
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        ContentItemDetailResponse? saved = null;
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, contentId)
+            .Add(p => p.Saved, EventCallback.Factory.Create<ContentItemDetailResponse>(this, c => saved = c)));
+
+        cut.WaitForState(() => cut.FindAll("input").Any(input => input.GetAttribute("value") == "Existing"), TimeSpan.FromSeconds(10));
+
+        cut.Find("input").GetAttribute("value").ShouldBe("Existing");
+
+        cut.Find("input").Input("Updated");
+        cut.Find(".cmsify-form-save-button").Click();
+
+        cut.WaitForState(() => capturedVersionUpdateBody is not null, TimeSpan.FromSeconds(10));
+        cut.WaitForState(() => saved is not null, TimeSpan.FromSeconds(10));
+
+        capturedVersionUpdateBody.ShouldNotBeNull();
+        capturedVersionUpdateBody.ShouldContain("Updated");
+        saved.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void ReadOnlyModeStillLoadsFieldsWhenContentIsPinnedToANonCurrentTemplateVersion()
+    {
+        var workspaceId = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var currentTemplateVersionId = Guid.NewGuid();
+        var pinnedTemplateVersionId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var writeRequestIssued = false;
+
+        var client = TestCmsifyClientFactory.Create(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method != HttpMethod.Get)
+            {
+                writeRequestIssued = true;
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{contentId}}", "templateVersionId": "{{pinnedTemplateVersionId}}", "templateName": "Article",
+                      "slug": "existing-post", "localeCode": null, "translationGroupId": null, "tags": [],
+                      "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                      "currentlyServingVersion": null, "versions": [] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/content/{contentId}/versions/1")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{Guid.NewGuid()}}", "contentItemId": "{{contentId}}", "versionNumber": 1, "status": "Published",
+                      "templateVersionId": "{{pinnedTemplateVersionId}}", "templateName": "Article", "slug": "existing-post",
+                      "localeCode": null, "translationGroupId": null, "effectiveStartAt": null, "effectiveEndAt": null,
+                      "publishAt": null, "publishedAt": null, "archivedAt": null, "publishedByUserId": null,
+                      "rolledBackFromVersionNumber": null, "tags": [], "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "fields": [
+                        { "fieldId": "{{fieldId}}", "key": "title", "label": "Title", "order": 0, "valueKind": "Text",
+                          "textValue": "Existing", "boolValue": null, "mediaAssetId": null, "fileAssetId": null,
+                          "childContentItemId": null, "child": null, "jsonValue": null, "displayLabel": null }
+                      ] }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "items": [{ "id": "{{templateId}}", "workspaceId": "{{workspaceId}}", "name": "Article", "slug": "article", "description": null, "currentVersionId": "{{currentTemplateVersionId}}" }], "totalCount": 1, "page": 1, "pageSize": 20 }
+                    """);
+            }
+            if (request.Method == HttpMethod.Get && path == $"/api/v1/workspaces/{workspaceId}/templates/versions/{pinnedTemplateVersionId}")
+            {
+                return FakeHttpMessageHandler.Json($$"""
+                    { "id": "{{pinnedTemplateVersionId}}", "templateId": "{{templateId}}", "versionNumber": 1,
+                      "status": "Archived", "publishedAt": null, "notes": null, "sections": [],
+                      "fields": [
+                        { "id": "{{fieldId}}", "sectionId": null, "key": "title", "label": "Title", "helpText": null,
+                          "order": 0, "isRequired": false, "minOccurrences": 0, "maxOccurrences": null, "isOpen": false,
+                          "compositionMode": "Reference", "primitiveType": "Text", "templateId": null,
+                          "allowedTypes": [], "fieldConfig": null, "componentId": null }
+                      ] }
+                    """);
+            }
+            throw new InvalidOperationException($"Unexpected request: {request.Method} {request.RequestUri}");
+        });
+
+        var cut = Render<SyntaxCircus.Cmsify.Components.Client.ContentEditPanel>(parameters => parameters
+            .Add(p => p.Client, client)
+            .Add(p => p.WorkspaceId, workspaceId)
+            .Add(p => p.ContentId, contentId)
+            .Add(p => p.ReadOnly, true));
+
+        cut.WaitForState(() => cut.FindAll("input").Any(input => input.GetAttribute("value") == "Existing"), TimeSpan.FromSeconds(10));
+
+        cut.FindAll(".cmsify-form-save-button").ShouldBeEmpty();
+        cut.Find("input").HasAttribute("readonly").ShouldBeTrue();
+        writeRequestIssued.ShouldBeFalse();
+    }
+
     [Fact]
     public void SavingRefreshesItemETagBeforeItemUpdateSoStaleLoadTimeETagIsNotReused()
     {

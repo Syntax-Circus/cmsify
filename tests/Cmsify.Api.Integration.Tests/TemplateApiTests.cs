@@ -12,6 +12,7 @@ using Testcontainers.PostgreSql;
 using SyntaxCircus.Cmsify.Contracts;
 using CompositionMode = SyntaxCircus.Cmsify.Contracts.CompositionMode;
 using PrimitiveType = SyntaxCircus.Cmsify.Contracts.PrimitiveType;
+using TemplateVersionStatus = SyntaxCircus.Cmsify.Contracts.TemplateVersionStatus;
 
 namespace Cmsify.Api.Integration.Tests;
 
@@ -138,6 +139,67 @@ public sealed class TemplateApiTests : IAsyncLifetime
         var response = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{template.CurrentVersion!.VersionNumber}/fields", request, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
+    }
+
+    // Reproduces the state ContentEditPanel.LoadContentAsync silently mishandled before this fix:
+    // content pinned to a template version that is no longer any template's *current* one (the
+    // template moved on to a second published version, archiving the first). GET .../templates only
+    // ever exposes each template's CurrentVersionId, so a caller that only has the content's pinned
+    // TemplateVersionId - not the owning template's id - had no way to resolve that archived version
+    // at all. This endpoint resolves it directly, by the version's own id.
+    [Fact]
+    public async Task GetVersionById_ResolvesAnArchivedNonCurrentVersionByItsOwnId()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var createResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates", new CreateTemplateRequest("Archived Version Template", $"archived-version-template-{Guid.NewGuid():N}", null), cancellationToken: TestContext.Current.CancellationToken);
+        createResponse.EnsureSuccessStatusCode();
+        var template = await createResponse.Content.ReadFromJsonAsync<TemplateResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(template);
+        Assert.NotNull(template.CurrentVersion);
+        var firstVersion = template.CurrentVersion!;
+
+        var addFieldResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{firstVersion.VersionNumber}/fields", new TemplateFieldRequest(null, "title", "Title", null, 0, false, 0, 1, false, CompositionMode.Inline, PrimitiveType.Text, null, [], null), cancellationToken: TestContext.Current.CancellationToken);
+        addFieldResponse.EnsureSuccessStatusCode();
+
+        (await client.PutAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{firstVersion.VersionNumber}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        var secondDraftResponse = await client.PostAsJsonAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions", new CreateTemplateVersionRequest(null), cancellationToken: TestContext.Current.CancellationToken);
+        secondDraftResponse.EnsureSuccessStatusCode();
+        var secondVersion = await secondDraftResponse.Content.ReadFromJsonAsync<TemplateVersionResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(secondVersion);
+        (await client.PutAsync($"/api/v1/workspaces/{workspaceId}/templates/{template.Id}/versions/{secondVersion!.VersionNumber}/publish", null, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+
+        // firstVersion is now Archived and no longer any template's CurrentVersionId - exactly the
+        // state a content item ends up pinned to when it's never upgraded after its template moves on.
+        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/templates/versions/{firstVersion.Id}", TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+        var resolved = await response.Content.ReadFromJsonAsync<TemplateVersionResponse>(ApiJsonOptions, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(resolved);
+        Assert.Equal(firstVersion.Id, resolved!.Id);
+        Assert.Equal(template.Id, resolved.TemplateId);
+        Assert.Equal(TemplateVersionStatus.Archived, resolved.Status);
+        Assert.Single(resolved.Fields);
+        Assert.Equal("title", resolved.Fields[0].Key);
+    }
+
+    [Fact]
+    public async Task GetVersionById_UnknownVersionId_ReturnsNotFound()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var workspaceId = await GetWorkspaceIdAsync(factory);
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var response = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/templates/versions/{Guid.NewGuid()}", TestContext.Current.CancellationToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]

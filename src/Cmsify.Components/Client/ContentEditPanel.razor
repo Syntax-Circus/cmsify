@@ -102,6 +102,17 @@
         {
             await LoadTemplateVersionAsync(template.Id);
         }
+        else
+        {
+            // This content's version is pinned to a template version that is no longer any
+            // template's *current* one (the template moved on after this content was created or
+            // last upgraded - see docs/content_migration.md's upgrade-template-version flow). Without
+            // this fallback, `template` above is null, LoadTemplateVersionAsync is never called, and
+            // templateVersion silently keeps its empty default (Fields: []) - the form then renders
+            // with zero fields and no error, in both edit and read-only mode alike. Resolve the exact
+            // pinned version directly instead of only ever matching against a template's current one.
+            await LoadTemplateVersionByIdAsync(loadedVersion.TemplateVersionId);
+        }
 
         fieldValues.Clear();
         var fieldsById = templateVersion.Fields.ToDictionary(f => f.Id);
@@ -252,9 +263,24 @@
     {
         var template = await Client.Templates.GetAsync(WorkspaceId, templateId)
             ?? throw new InvalidOperationException("Cmsify API returned no payload while loading a template.");
-        templateVersion = template.CurrentVersion
+        var resolvedVersion = template.CurrentVersion
             ?? await Client.Templates.CreateDraftAsync(WorkspaceId, templateId, "Content draft version")
             ?? throw new InvalidOperationException("Cmsify API returned no payload while creating a template draft.");
+        await ApplyTemplateVersionAsync(resolvedVersion);
+    }
+
+    // See the LoadContentAsync fallback: resolves a specific pinned template version directly, for
+    // content that has fallen behind its template's current version.
+    private async Task LoadTemplateVersionByIdAsync(Guid templateVersionId)
+    {
+        var resolvedVersion = await Client.Templates.GetVersionByIdAsync(WorkspaceId, templateVersionId)
+            ?? throw new InvalidOperationException("Cmsify API returned no payload while loading a template version.");
+        await ApplyTemplateVersionAsync(resolvedVersion);
+    }
+
+    private async Task ApplyTemplateVersionAsync(TemplateVersionResponse resolvedVersion)
+    {
+        templateVersion = resolvedVersion;
 
         await LoadPickListsAsync();
         await LoadReferenceOptionsAsync();

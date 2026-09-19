@@ -266,6 +266,37 @@ public sealed class TemplatesController : ControllerBase
         return Ok(ToVersionResponse(version));
     }
 
+    // Looks a template version up by its own id, independent of which template owns it and
+    // regardless of whether it's that template's current version. A content version only ever
+    // records the template VERSION it was created/upgraded against (ContentVersion.TemplateVersionId)
+    // - never the owning template's id or a version number - and that pin does not move when the
+    // template is later republished. Every other route here needs the template id up front
+    // ({id:guid}/versions/{versionNumber:int}), which content editing does not have for a version
+    // that has fallen behind its template's current one. "versions" is a literal path segment, so it
+    // never collides with the {id:guid} route above (a GUID can't equal the literal text "versions").
+    [HttpGet("versions/{versionId:guid}")]
+    public async Task<ActionResult<TemplateVersionResponse>> GetVersionById(Guid workspaceId, Guid versionId, CancellationToken ct)
+    {
+        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        {
+            return NotFound();
+        }
+
+        var version = await dbContext.TemplateVersions.AsNoTracking()
+            .Include(item => item.Sections)
+            .Include(item => item.Fields).ThenInclude(field => field.AllowedTypes)
+            .Where(item => item.Id == versionId && !item.IsDeleted
+                && dbContext.Templates.Any(template => template.Id == item.TemplateId && template.WorkspaceId == workspaceId && !template.IsDeleted))
+            .FirstOrDefaultAsync(ct);
+        if (version is null)
+        {
+            return NotFound();
+        }
+
+        Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
+        return Ok(ToVersionResponse(version));
+    }
+
     [HttpPut("{id:guid}/versions/{versionNumber:int}/publish")]
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<ActionResult<TemplateVersionResponse>> Publish(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
