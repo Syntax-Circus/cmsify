@@ -588,6 +588,9 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
             Assert.Equal(seed.LiveItemIds[itemIndex], item.GetProperty("id").GetGuid());
             Assert.Equal(seed.TemplateVersionIds[itemIndex % seed.TemplateVersionIds.Count], item.GetProperty("templateVersionId").GetGuid());
             Assert.Equal($"Capacity Template {itemIndex % seed.TemplateVersionIds.Count}", item.GetProperty("templateName").GetString());
+            // TemplateSlug is the stable matching key threaded through the same resolved-list projection
+            // as TemplateName - it must never equal the display name.
+            Assert.Equal($"capacity-template-{itemIndex % seed.TemplateVersionIds.Count}", item.GetProperty("templateSlug").GetString());
             Assert.Equal(CapacitySelectedSlug(itemIndex), item.GetProperty("slug").GetString());
             Assert.Equal(itemIndex % 2 == 0 ? "en-US" : "fr-FR", item.GetProperty("localeCode").GetString());
             Assert.Equal(

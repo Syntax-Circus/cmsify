@@ -419,7 +419,8 @@ public sealed class ContentController : ControllerBase
         var responses = page.Items
             .Select(row => new ContentItemSummaryResponse(
                 row.ContentItemId, row.TemplateVersionId, row.TemplateName, row.Slug, row.LocaleCode,
-                row.TranslationGroupId, row.Tags, row.PublishedAt, row.PublishedAt, 1, null))
+                row.TranslationGroupId, row.Tags, row.PublishedAt, row.PublishedAt, 1, null,
+                row.TemplateSlug))
             .ToList();
         return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, page.TotalCount, query.Page, query.PageSize));
     }
@@ -1276,15 +1277,16 @@ public sealed class ContentController : ControllerBase
     {
         var template = await dbContext.TemplateVersions.AsNoTracking()
             .Where(version => version.Id == content.TemplateVersionId)
-            .Select(version => dbContext.Templates.Where(t => t.Id == version.TemplateId).Select(t => t.Name).First())
+            .Select(version => dbContext.Templates.Where(t => t.Id == version.TemplateId).Select(t => new { t.Name, t.Slug }).First())
             .FirstAsync(ct);
         var tags = await GetTagNamesAsync(content.Id, ct);
         var versions = await dbContext.ContentVersions.AsNoTracking().Where(v => v.ContentItemId == content.Id).ToListAsync(ct);
         var currentlyServing = ComputeCurrentlyServing(versions, DateTimeOffset.UtcNow);
         return new ContentItemSummaryResponse(
-            content.Id, content.TemplateVersionId, template, content.Slug, content.LocaleCode, content.TranslationGroupId,
+            content.Id, content.TemplateVersionId, template.Name, content.Slug, content.LocaleCode, content.TranslationGroupId,
             tags, content.CreatedAt, content.UpdatedAt, versions.Count,
-            currentlyServing is null ? null : ToVersionSummaryResponse(currentlyServing));
+            currentlyServing is null ? null : ToVersionSummaryResponse(currentlyServing),
+            template.Slug);
     }
 
     private async Task<ContentItemDetailResponse> ToItemDetailResponseAsync(Guid id, CancellationToken ct)
@@ -1292,7 +1294,7 @@ public sealed class ContentController : ControllerBase
         var content = await dbContext.ContentItems.AsNoTracking().FirstAsync(item => item.Id == id, ct);
         var template = await dbContext.TemplateVersions.AsNoTracking()
             .Where(version => version.Id == content.TemplateVersionId)
-            .Select(version => dbContext.Templates.Where(t => t.Id == version.TemplateId).Select(t => t.Name).First())
+            .Select(version => dbContext.Templates.Where(t => t.Id == version.TemplateId).Select(t => new { t.Name, t.Slug }).First())
             .FirstAsync(ct);
         var tags = await GetTagNamesAsync(content.Id, ct);
         var versions = await dbContext.ContentVersions.AsNoTracking()
@@ -1301,10 +1303,11 @@ public sealed class ContentController : ControllerBase
             .ToListAsync(ct);
         var currentlyServing = ComputeCurrentlyServing(versions, DateTimeOffset.UtcNow);
         return new ContentItemDetailResponse(
-            content.Id, content.TemplateVersionId, template, content.Slug, content.LocaleCode, content.TranslationGroupId,
+            content.Id, content.TemplateVersionId, template.Name, content.Slug, content.LocaleCode, content.TranslationGroupId,
             tags, content.CreatedAt, content.UpdatedAt,
             currentlyServing is null ? null : ToVersionSummaryResponse(currentlyServing),
-            versions.Select(ToVersionSummaryResponse).ToList());
+            versions.Select(ToVersionSummaryResponse).ToList(),
+            template.Slug);
     }
 
     private static ContentVersion? ComputeCurrentlyServing(IReadOnlyList<ContentVersion> versions, DateTimeOffset asOf)
@@ -1399,7 +1402,7 @@ public sealed class ContentController : ControllerBase
     // build, since the same template is commonly reused by many sibling/descendant children.
     private async Task<ContentVersionDetailResponse> ToVersionDetailResponseAsync(ContentVersion version, DateTimeOffset asOf, bool expandChildren = true, CancellationToken ct = default)
     {
-        var templateCache = new Dictionary<Guid, (string Name, Dictionary<Guid, TemplateField> Fields)>();
+        var templateCache = new Dictionary<Guid, (string Name, string Slug, Dictionary<Guid, TemplateField> Fields)>();
         var layers = new List<IReadOnlyList<ContentVersion>> { new List<ContentVersion> { version } };
         var fieldValuesByVersionId = new Dictionary<Guid, IReadOnlyList<ContentVersionFieldValue>>();
         // Index i holds the content-item-id -> resolved-version map produced FROM layer i's field
@@ -1446,7 +1449,7 @@ public sealed class ContentController : ControllerBase
             var childrenByContentItemId = depth < resolvedChildrenPerLayer.Count ? resolvedChildrenPerLayer[depth] : null;
             foreach (var layerVersion in layers[depth])
             {
-                var (templateName, templateFields) = await GetTemplateVersionInfoAsync(layerVersion.TemplateVersionId, templateCache, ct);
+                var (templateName, templateSlug, templateFields) = await GetTemplateVersionInfoAsync(layerVersion.TemplateVersionId, templateCache, ct);
                 var fieldValues = fieldValuesByVersionId[layerVersion.Id];
 
                 var fields = new List<ContentVersionFieldValueResponse>();
@@ -1468,7 +1471,7 @@ public sealed class ContentController : ControllerBase
                     layerVersion.Id, layerVersion.ContentItemId, layerVersion.VersionNumber, layerVersion.Status.ToContract(), layerVersion.TemplateVersionId, templateName,
                     layerVersion.Slug, layerVersion.LocaleCode, layerVersion.TranslationGroupId, layerVersion.EffectiveStartAt, layerVersion.EffectiveEndAt,
                     layerVersion.PublishAt, layerVersion.PublishedAt, layerVersion.ArchivedAt, layerVersion.PublishedByUserId, layerVersion.RolledBackFromVersionNumber,
-                    layerVersion.Tags.ToList(), layerVersion.CreatedAt, layerVersion.UpdatedAt, fields);
+                    layerVersion.Tags.ToList(), layerVersion.CreatedAt, layerVersion.UpdatedAt, fields, templateSlug);
             }
         }
 
@@ -1484,22 +1487,22 @@ public sealed class ContentController : ControllerBase
     // ToVersionDetailResponseAsync build - the same template is commonly reused by many
     // sibling/descendant children in an expanded content tree, and this avoids re-querying it once
     // per occurrence.
-    private async Task<(string Name, Dictionary<Guid, TemplateField> Fields)> GetTemplateVersionInfoAsync(Guid templateVersionId, Dictionary<Guid, (string Name, Dictionary<Guid, TemplateField> Fields)> cache, CancellationToken ct)
+    private async Task<(string Name, string Slug, Dictionary<Guid, TemplateField> Fields)> GetTemplateVersionInfoAsync(Guid templateVersionId, Dictionary<Guid, (string Name, string Slug, Dictionary<Guid, TemplateField> Fields)> cache, CancellationToken ct)
     {
         if (cache.TryGetValue(templateVersionId, out var cached))
         {
             return cached;
         }
 
-        var templateName = await dbContext.TemplateVersions.AsNoTracking()
+        var template = await dbContext.TemplateVersions.AsNoTracking()
             .Where(tv => tv.Id == templateVersionId)
-            .Select(tv => dbContext.Templates.Where(t => t.Id == tv.TemplateId).Select(t => t.Name).First())
-            .FirstOrDefaultAsync(ct) ?? string.Empty;
+            .Select(tv => dbContext.Templates.Where(t => t.Id == tv.TemplateId).Select(t => new { t.Name, t.Slug }).First())
+            .FirstOrDefaultAsync(ct);
         var templateFields = await dbContext.TemplateFields.AsNoTracking()
             .Where(field => field.TemplateVersionId == templateVersionId)
             .ToDictionaryAsync(field => field.Id, ct);
 
-        var info = (templateName, templateFields);
+        var info = (template?.Name ?? string.Empty, template?.Slug ?? string.Empty, templateFields);
         cache[templateVersionId] = info;
         return info;
     }

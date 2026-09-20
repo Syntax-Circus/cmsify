@@ -86,9 +86,15 @@ public sealed record ComponentFieldRequest(string Key, string Label, string? Hel
 
 public sealed record ReorderFieldRequest(Guid FieldId, int Order);
 
-public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int VersionCount, ContentVersionSummaryResponse? CurrentlyServingVersion);
+// TemplateName is the template's display name (e.g. "Libraries Index"); TemplateSlug is the stable
+// key (e.g. "libraries-index") consumers should match against. Never match on TemplateName: it is
+// editor-editable and does not generally equal the slug, so comparisons against it silently fail.
+public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int VersionCount, ContentVersionSummaryResponse? CurrentlyServingVersion, string TemplateSlug = "");
 
-public sealed record ContentItemDetailResponse(Guid Id, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, ContentVersionSummaryResponse? CurrentlyServingVersion, IReadOnlyList<ContentVersionSummaryResponse> Versions);
+// TemplateName is the template's display name (e.g. "Libraries Index"); TemplateSlug is the stable
+// key (e.g. "libraries-index") consumers should match against. Never match on TemplateName: it is
+// editor-editable and does not generally equal the slug, so comparisons against it silently fail.
+public sealed record ContentItemDetailResponse(Guid Id, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, ContentVersionSummaryResponse? CurrentlyServingVersion, IReadOnlyList<ContentVersionSummaryResponse> Versions, string TemplateSlug = "");
 
 public sealed record ContentFieldValueRequest(Guid FieldId, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);
 
@@ -102,7 +108,10 @@ public sealed record ContentVersionSummaryResponse(Guid Id, Guid ContentItemId, 
 
 public sealed record ContentVersionFieldValueResponse(Guid FieldId, string? Key, string? Label, int Order, ValueKind ValueKind, string? TextValue, bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, ContentVersionDetailResponse? Child, JsonElement? JsonValue, string? DisplayLabel = null);
 
-public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset? PublishAt, DateTimeOffset? PublishedAt, DateTimeOffset? ArchivedAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, IReadOnlyList<ContentVersionFieldValueResponse> Fields);
+// TemplateName is the template's display name (e.g. "Libraries Index"); TemplateSlug is the stable
+// key (e.g. "libraries-index") consumers should match against. Never match on TemplateName: it is
+// editor-editable and does not generally equal the slug, so comparisons against it silently fail.
+public sealed record ContentVersionDetailResponse(Guid Id, Guid ContentItemId, int VersionNumber, ContentStatus Status, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, DateTimeOffset? PublishAt, DateTimeOffset? PublishedAt, DateTimeOffset? ArchivedAt, Guid? PublishedByUserId, int? RolledBackFromVersionNumber, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, IReadOnlyList<ContentVersionFieldValueResponse> Fields, string TemplateSlug = "");
 
 public sealed record CreateContentVersionRequest(DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt, int? DuplicateFromVersionNumber, IReadOnlyList<ContentFieldValueRequest>? Fields);
 
