@@ -3992,6 +3992,7 @@ export interface components {
             updatedAt: string;
             currentlyServingVersion?: components["schemas"]["ContentVersionSummaryResponse"];
             versions: components["schemas"]["ContentVersionSummaryResponse"][];
+            templateSlug: string;
         };
         ContentItemSummaryResponse: {
             /** Format: uuid */
@@ -4011,6 +4012,7 @@ export interface components {
             /** Format: int32 */
             versionCount: number;
             currentlyServingVersion?: components["schemas"]["ContentVersionSummaryResponse"];
+            templateSlug: string;
         };
         ContentItemSummaryResponsePagedResponse: {
             items: components["schemas"]["ContentItemSummaryResponse"][];
@@ -4060,6 +4062,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             fields: components["schemas"]["ContentVersionFieldValueResponse"][];
+            templateSlug: string;
         };
         ContentVersionFieldValueResponse: {
             /** Format: uuid */

@@ -6206,6 +6206,7 @@
           "id",
           "tags",
           "templateName",
+          "templateSlug",
           "templateVersionId",
           "updatedAt",
           "versions"
@@ -6258,6 +6259,9 @@
             "items": {
               "$ref": "#/components/schemas/ContentVersionSummaryResponse"
             }
+          },
+          "templateSlug": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -6268,6 +6272,7 @@
           "id",
           "tags",
           "templateName",
+          "templateSlug",
           "templateVersionId",
           "updatedAt",
           "versionCount"
@@ -6318,6 +6323,9 @@
           },
           "currentlyServingVersion": {
             "$ref": "#/components/schemas/ContentVersionSummaryResponse"
+          },
+          "templateSlug": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -6377,6 +6385,7 @@
           "status",
           "tags",
           "templateName",
+          "templateSlug",
           "templateVersionId",
           "updatedAt",
           "versionNumber"
@@ -6472,6 +6481,9 @@
             "items": {
               "$ref": "#/components/schemas/ContentVersionFieldValueResponse"
             }
+          },
+          "templateSlug": {
+            "type": "string"
           }
         },
         "additionalProperties": false

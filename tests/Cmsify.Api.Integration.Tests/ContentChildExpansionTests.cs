@@ -62,6 +62,10 @@ public sealed class ContentChildExpansionTests : IAsyncLifetime
 
         Assert.NotNull(body);
         Assert.Equal("Node", body.TemplateName);
+        // TemplateSlug is the stable matching key and must never equal the display name -
+        // regressing to TemplateName ("Node") here is exactly the bug this field exists to prevent.
+        Assert.Equal(seed.TemplateSlug, body.TemplateSlug);
+        Assert.NotEqual(body.TemplateName, body.TemplateSlug);
         Assert.Equal(2, body.Fields.Count);
 
         var parentChildField = Assert.Single(body.Fields, f => f.Key == "child");
@@ -70,6 +74,7 @@ public sealed class ContentChildExpansionTests : IAsyncLifetime
         Assert.NotNull(childResponse);
         Assert.Equal(seed.ChildVersionId, childResponse.Id);
         Assert.Equal("Node", childResponse.TemplateName);
+        Assert.Equal(seed.TemplateSlug, childResponse.TemplateSlug);
         Assert.Equal("Child", Assert.Single(childResponse.Fields, f => f.Key == "name").TextValue);
 
         var childChildField = Assert.Single(childResponse.Fields, f => f.Key == "child");
@@ -135,7 +140,7 @@ public sealed class ContentChildExpansionTests : IAsyncLifetime
         return (await response.Content.ReadFromJsonAsync<LoginResponse>())!;
     }
 
-    private sealed record SeededTree(Guid WorkspaceId, Guid ParentContentId, Guid ChildContentId, Guid GrandchildContentId, Guid ChildVersionId, Guid GrandchildVersionId);
+    private sealed record SeededTree(Guid WorkspaceId, Guid ParentContentId, Guid ChildContentId, Guid GrandchildContentId, Guid ChildVersionId, Guid GrandchildVersionId, string TemplateSlug);
 
     // Builds Grandchild <- Child <- Parent, all published, all sharing one self-referential
     // TemplateVersion, seeding straight through EF (bypassing the API's own create/publish
@@ -176,7 +181,7 @@ public sealed class ContentChildExpansionTests : IAsyncLifetime
         dbContext.ContentVersions.AddRange(grandchildVersion, childVersion, parentVersion);
         await dbContext.SaveChangesAsync();
 
-        return new SeededTree(workspaceId, parent.Id, child.Id, grandchild.Id, childVersion.Id, grandchildVersion.Id);
+        return new SeededTree(workspaceId, parent.Id, child.Id, grandchild.Id, childVersion.Id, grandchildVersion.Id, template.Slug);
     }
 
     private static void ClearEnvironment()

@@ -24,7 +24,8 @@ internal sealed record ResolvedContentListRow(
     string? LocaleCode,
     Guid? TranslationGroupId,
     IReadOnlyList<string> Tags,
-    DateTimeOffset PublishedAt);
+    DateTimeOffset PublishedAt,
+    string TemplateSlug);
 
 internal sealed record ResolvedContentListPage(
     IReadOnlyList<ResolvedContentListRow> Items,
@@ -132,7 +133,8 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
             select new
             {
                 Version = version,
-                TemplateName = template.Name
+                TemplateName = template.Name,
+                TemplateSlug = template.Slug
             };
 
         var orderedRows = query.SortBy switch
@@ -164,7 +166,8 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
                 row.Version.LocaleCode,
                 row.Version.TranslationGroupId,
                 row.Version.Tags,
-                row.Version.PublishedAt.GetValueOrDefault()))
+                row.Version.PublishedAt.GetValueOrDefault(),
+                row.TemplateSlug))
             .ToListAsync(ct);
         var items = projections
             .Select(row => new ResolvedContentListRow(
@@ -175,7 +178,8 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
                 row.LocaleCode,
                 row.TranslationGroupId,
                 row.Tags.ToList(),
-                row.PublishedAt))
+                row.PublishedAt,
+                row.TemplateSlug))
             .ToList();
 
         return new ResolvedContentListPage(items, totalCount);
@@ -196,5 +200,6 @@ internal sealed class ResolvedContentListQuery(CmsifyDbContext dbContext) : IRes
         string? LocaleCode,
         Guid? TranslationGroupId,
         IList<string> Tags,
-        DateTimeOffset PublishedAt);
+        DateTimeOffset PublishedAt,
+        string TemplateSlug);
 }

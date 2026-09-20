@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-20
+
+### Added
+
+- Content item and version responses (`ContentItemSummaryResponse`, `ContentItemDetailResponse`, `ContentVersionDetailResponse`) now expose `TemplateSlug` alongside the existing display-name `TemplateName`, so API consumers can match on the template's stable slug instead of its human-readable, editor-editable name (e.g. `TemplateName` "Libraries Index" vs. `TemplateSlug` "libraries-index"). Matching against `TemplateName` has caused a real production bug for a consuming site. `TemplateSlug` is a trailing optional parameter (`= ""`) on each record, so existing positional construction by external consumers keeps compiling.
+
 ## [0.7.2] - 2026-09-19
 
 Re-release of 0.7.1: its automated promotion failed partway through (the NuGet preflight check errored before publishing), so no packages or GitHub Release ever went out for that tag. No functional changes from 0.7.1 - see that section below.
