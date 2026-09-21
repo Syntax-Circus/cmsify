@@ -10,9 +10,9 @@
       },
       "Microsoft.AspNetCore.App.Internal.Assets": {
         "type": "Direct",
-        "requested": "[10.0.12, )",
-        "resolved": "10.0.12",
-        "contentHash": "+sIBo9AMBZH46qHWHQdfzcGMt+RuBaPYrUMOAM9VjA7MQ9QtIez3lq1C3E05+Yroa94KKt3DSWaxmCI4H28a9Q=="
+        "requested": "[10.0.11, )",
+        "resolved": "10.0.11",
+        "contentHash": "tYYYBZsuF2DSz1I3hcfB8qC4nNekIKufkYZOJ2R28fNK3PkS7fJao/mIX5H84NH94UACZQ4dhvt8GDlkrJFwLg=="
       },
       "Microsoft.Web.LibraryManager.Build": {
         "type": "Direct",
@@ -75,9 +75,9 @@
       },
       "SyntaxCircus.Blazor.Auth": {
         "type": "Direct",
-        "requested": "[0.1.6, )",
-        "resolved": "0.1.6",
-        "contentHash": "OG0o/3BEh50WA4/91gToLF0w7eEw6RUSHWtsua4WX8EQOQNtHogLMWrFhZLpCMX6p6XyZJfd9iIbcvzmv2JPnQ==",
+        "requested": "[0.1.7, )",
+        "resolved": "0.1.7",
+        "contentHash": "dLa6xnLuLMEy1UhEam5fgIYg8kMDT6TmGie1zTv3bdkalGnrEXhBYa/nHlwUj2IRI73SYoZobhLbonE1FvuadA==",
         "dependencies": {
           "Microsoft.AspNetCore.Authentication.OpenIdConnect": "10.0.11",
           "Microsoft.AspNetCore.DataProtection.StackExchangeRedis": "10.0.11",
@@ -380,8 +380,8 @@
       },
       "RESPite": {
         "type": "Transitive",
-        "resolved": "3.2.1",
-        "contentHash": "xgf0teM++NNTWxlXBv91K8qKW4ULhQNcmO1/rAI/4qVFgaZdWCKD1SeImGtUnCq/orIWkke5GQ4Q40239S/utw=="
+        "resolved": "3.3.0",
+        "contentHash": "pzHmX5/ffYxDs0liGPwbAQ9c9xRmbhtJ6XnZOpktHAs9x7MTqQByEXiySXzT3xPZ/l8U95OfVUYvm/BOBK6f6w=="
       },
       "Sentry": {
         "type": "Transitive",
@@ -519,11 +519,11 @@
       },
       "StackExchange.Redis": {
         "type": "CentralTransitive",
-        "requested": "[3.2.1, )",
-        "resolved": "3.2.1",
-        "contentHash": "jIeqcfmZJ+LUBsVEs0qQ5DRJFMLT4xmV8qVKtox3CiQox6ivaU5Mo4bBs8XsPZ/wvjGUQ4TiYLvWwBTvEBSAbA==",
+        "requested": "[3.3.0, )",
+        "resolved": "3.3.0",
+        "contentHash": "vSB6W7F85IJ9gYAHPcRsQYLGODptvm8kmp1z2XwmKHYWifHiGGDQHzYkNNUKk3bzODOoOM2fuy7nUeNp1MHIKA==",
         "dependencies": {
-          "RESPite": "3.2.1",
+          "RESPite": "3.3.0",
           "System.IO.Hashing": "10.0.12"
         }
       },
