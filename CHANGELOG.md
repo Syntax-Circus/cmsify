@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-24
+
 ### Fixed
 
 - Repeatable component fields (e.g. page sections) now keep their order. The editor writes a distinct, increasing `Order` per component instance, the API renumbers repeated values of one field that arrive with equal `Order` (preserving submitted sequence), and duplicating a version or reading one uses a deterministic tie-break so order is no longer scrambled when a draft is created from a published version. Pages saved by earlier versions have lost their true order and need one re-save in the intended order.
