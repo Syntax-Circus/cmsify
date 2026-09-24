@@ -436,10 +436,11 @@ public static class ContentEditSupport
                     {
                         throw new InvalidOperationException($"Component field '{childField.Label}' schema could not be resolved.");
                     }
+                    var componentIndex = 0;
                     foreach (var componentInstance in childValue.ComponentValues)
                     {
                         var serialized = ComponentValueSerializer.Serialize(componentInstance, childField.ComponentId.Value, componentSchemas);
-                        childValues.Add(new ContentFieldValueRequest(childField.Id, childField.Order, ValueKind.Component, null, null, null, null, null, serialized));
+                        childValues.Add(new ContentFieldValueRequest(childField.Id, childField.Order + componentIndex++, ValueKind.Component, null, null, null, null, null, serialized));
                     }
                     continue;
                 }

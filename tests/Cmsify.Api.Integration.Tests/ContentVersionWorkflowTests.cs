@@ -94,6 +94,61 @@ public sealed class ContentVersionWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateVersion_Duplicate_PreservesOrderOfRepeatedFieldValues()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, _, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var texts = Enumerable.Range(0, 8).Select(i => $"section-{i}").ToArray();
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "ordered-sections",
+            [.. texts.Select((text, index) => new ContentFieldValueRequest(fieldId, index, ValueKind.Text, text, null, null, null, null, null))]);
+        var sourceVersionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        var source = await client.GetFromJsonAsync<ContentVersionDetailResponse>(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{sourceVersionNumber}", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.Equal(texts, source!.Fields.Select(f => f.TextValue));
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, sourceVersionNumber, null),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+        var duplicate = await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+
+        var reread = await client.GetFromJsonAsync<ContentVersionDetailResponse>(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{duplicate!.VersionNumber}", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.Equal(texts, reread!.Fields.Select(f => f.TextValue));
+        Assert.Equal(Enumerable.Range(0, 8), reread.Fields.Select(f => f.Order));
+    }
+
+    [Fact]
+    public async Task Create_RepeatedFieldValuesWithEqualOrder_KeepSubmittedOrderAcrossReadAndDuplicate()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await AuthenticatedClientAsync(factory);
+        var (workspaceId, templateVersionId, _, fieldId) = await SeedTemplateWithFieldAsync(factory);
+        var texts = Enumerable.Range(0, 12).Select(i => $"legacy-{i}").ToArray();
+        var itemId = await CreateItemAsync(client, workspaceId, templateVersionId, "legacy-equal-order",
+            [.. texts.Select(text => new ContentFieldValueRequest(fieldId, 0, ValueKind.Text, text, null, null, null, null, null))]);
+        var sourceVersionNumber = (await GetItemAsync(client, workspaceId, itemId)).Versions[0].VersionNumber;
+
+        var source = await client.GetFromJsonAsync<ContentVersionDetailResponse>(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions/{sourceVersionNumber}", ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.Equal(texts, source!.Fields.Select(f => f.TextValue));
+        Assert.Equal(source.Fields.Count, source.Fields.Select(f => f.Order).Distinct().Count());
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/workspaces/{workspaceId}/content/{itemId}/versions",
+            new CreateContentVersionRequest(null, null, sourceVersionNumber, null),
+            ApiJsonOptions,
+            TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+        var duplicate = await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken);
+        Assert.Equal(texts, duplicate!.Fields.Select(f => f.TextValue));
+    }
+
+    [Fact]
     public async Task WorkflowRoundTrip_SubmitApprovePublish_UpdatesStatusAndResolvesBySlug()
     {
         await using var factory = new WebApplicationFactory<Program>();

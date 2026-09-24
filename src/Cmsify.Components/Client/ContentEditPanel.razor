@@ -419,10 +419,11 @@
                             return;
                         }
 
+                        var componentIndex = 0;
                         foreach (var instance in value.ComponentValues)
                         {
                             var serialized = ComponentValueSerializer.Serialize(instance, field.ComponentId.Value, componentSchemas);
-                            values.Add(new ContentFieldValueRequest(field.Id, field.Order, ValueKind.Component, null, null, null, null, null, serialized));
+                            values.Add(new ContentFieldValueRequest(field.Id, field.Order + componentIndex++, ValueKind.Component, null, null, null, null, null, serialized));
                         }
                         continue;
                     }

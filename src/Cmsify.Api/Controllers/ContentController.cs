@@ -511,6 +511,7 @@ public sealed class ContentController : ControllerBase
         if (duplicateSource is not null)
         {
             fields = duplicateSource.FieldValues
+                .OrderBy(value => value.Order).ThenBy(value => value.Id)
                 .Select(value => new ContentFieldValueRequest(value.FieldId, value.Order, value.ValueKind.ToContract(), value.TextValue, value.BoolValue, value.MediaAssetId, value.FileAssetId, value.ChildContentItemId, value.JsonValue))
                 .ToList();
             version.RolledBackFromVersionNumber = duplicateSource.VersionNumber;
@@ -1052,8 +1053,24 @@ public sealed class ContentController : ControllerBase
             .Where(revision => revisionIds.Contains(revision.Id))
             .ToDictionaryAsync(revision => revision.Id, revision => revision.Options.ToDictionary(option => option.Value, option => option.Label, StringComparer.OrdinalIgnoreCase), ct);
 
-        foreach (var input in fields)
+        // Repeated values of one field (component instances, multi-selects) are positioned by Order.
+        // If a client sent duplicates (older editors wrote the same Order for every instance), renumber
+        // them from the smallest Order in submitted sequence so position survives reads and duplication.
+        var orders = new int[fields.Count];
+        foreach (var group in fields.Select((input, index) => (input, index)).GroupBy(x => x.input.FieldId))
         {
+            var members = group.ToList();
+            var distinct = members.Select(x => x.input.Order).Distinct().Count() == members.Count;
+            var start = members.Min(x => x.input.Order);
+            for (var position = 0; position < members.Count; position++)
+            {
+                orders[members[position].index] = distinct ? members[position].input.Order : start + position;
+            }
+        }
+
+        for (var inputIndex = 0; inputIndex < fields.Count; inputIndex++)
+        {
+            var input = fields[inputIndex];
             var displayLabel = input.ValueKind == SyntaxCircus.Cmsify.Contracts.ValueKind.PickList && input.TextValue is not null && fieldPickLists.TryGetValue(input.FieldId, out var binding)
                 ? (binding.RevisionId.HasValue && revisionLabels.TryGetValue(binding.RevisionId.Value, out var versionedOptions) ? versionedOptions : currentLabels.GetValueOrDefault(binding.PickListId!.Value))?.GetValueOrDefault(input.TextValue)
                 : null;
@@ -1062,7 +1079,7 @@ public sealed class ContentController : ControllerBase
             {
                 ContentVersionId = version.Id,
                 FieldId = input.FieldId,
-                Order = input.Order,
+                Order = orders[inputIndex],
                 ValueKind = input.ValueKind.ToCore(),
                 TextValue = input.TextValue,
                 DisplayLabel = displayLabel,
@@ -1453,7 +1470,7 @@ public sealed class ContentController : ControllerBase
                 var fieldValues = fieldValuesByVersionId[layerVersion.Id];
 
                 var fields = new List<ContentVersionFieldValueResponse>();
-                foreach (var value in fieldValues.OrderBy(value => templateFields.GetValueOrDefault(value.FieldId)?.Order ?? 0).ThenBy(value => value.Order))
+                foreach (var value in fieldValues.OrderBy(value => templateFields.GetValueOrDefault(value.FieldId)?.Order ?? 0).ThenBy(value => value.Order).ThenBy(value => value.Id))
                 {
                     templateFields.TryGetValue(value.FieldId, out var field);
                     ContentVersionDetailResponse? child = null;
