@@ -81,9 +81,9 @@
       },
       "SyntaxCircus.AspNetCore.Authentication": {
         "type": "Direct",
-        "requested": "[0.1.4, )",
-        "resolved": "0.1.4",
-        "contentHash": "+G+I1VM6f8iftKeVnS57yReAyab0AYjASbClvkjPiK8MILJUbwUgoMUf2IyiC2+wiaR2e+w9pFeXouUPYVeVIw==",
+        "requested": "[0.1.5, )",
+        "resolved": "0.1.5",
+        "contentHash": "Q47174iAQKXODQCoBIF3I4hc0RBwlwGryVKiJshihzhDnMrfuGzlS/nuqcGvI5or71oMa/ncd+tXMXjM2tBDHQ==",
         "dependencies": {
           "Microsoft.AspNetCore.Authentication.JwtBearer": "10.0.11",
           "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.19.2"
@@ -91,9 +91,9 @@
       },
       "SyntaxCircus.AspNetCore.Common": {
         "type": "Direct",
-        "requested": "[0.1.13, )",
-        "resolved": "0.1.13",
-        "contentHash": "/JWFQWxbb9J+ZG/OPTaZz/6NIH14B2qyNTVHsgtMP36/gBCwLcV7VkFlwThAX4dN+Qm0csR7sOMQjVMkUkg2Zg==",
+        "requested": "[0.1.15, )",
+        "resolved": "0.1.15",
+        "contentHash": "Ur64xoaGiH8/R+vUvPuk+Tz6c1obTr5N09AsjEWdiyJQhtTZ6Q+WUK45mecClkhFwMcrsNrq4sGsb2RcT5F8FQ==",
         "dependencies": {
           "SyntaxCircus.Common": "[0.1.3]"
         }
