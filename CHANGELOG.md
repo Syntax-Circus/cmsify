@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-10-01
+
+### Changed
+
+- Isolated database-provider mappings and scheduled-publication locking queries behind infrastructure contracts, keeping Core entities free of provider-specific types. PostgreSQL retains its existing schema, migrations, optimistic concurrency and `FOR UPDATE SKIP LOCKED` behavior.
+- **Published Docker containers continue to use PostgreSQL.** Application registration, connection-string configuration and Docker defaults are unchanged; there is no automatic SQLite selection or fallback.
+
+### Added
+
+- Experimental SQLite infrastructure mappings for JSON, tags, timestamps and tracked-save concurrency, plus scheduled-publication claim/reclaim and fencing queries. This is an initial portability slice, **not complete SQLite deployment support**: migrations, deployment registration, other workers, search and bulk-update concurrency still require qualification. See [provider portability](docs/provider-portability.md).
+- Provider regression tests cover JSON/tag roundtrips, in-place tag edits, stale-update rejection, expired-lease recovery, stale-token fencing, independent competing connections and an unchanged PostgreSQL migration snapshot. The full solution suite passed 998 tests with no failures or skips before PR #111 was merged.
+
 ## [0.7.6] - 2026-10-01
 
 ### Fixed
