@@ -10,7 +10,6 @@ internal static class ConfigurationExtensions
         where TEntity : Entity
     {
         builder.HasKey(entity => entity.Id);
-        builder.Property(entity => entity.Id).HasDefaultValueSql("gen_random_uuid()");
     }
 
     public static void ConfigureTimestamps<TEntity>(this EntityTypeBuilder<TEntity> builder)
@@ -32,9 +31,6 @@ internal static class ConfigurationExtensions
         where TEntity : class
     {
         builder.Property<uint>("xmin")
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
             .IsConcurrencyToken();
     }
 }

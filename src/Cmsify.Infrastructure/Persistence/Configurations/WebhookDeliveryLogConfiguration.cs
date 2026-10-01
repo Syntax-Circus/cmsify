@@ -8,6 +8,7 @@ public sealed class WebhookDeliveryLogConfiguration : IEntityTypeConfiguration<W
 {
     public void Configure(EntityTypeBuilder<WebhookDeliveryLog> builder)
     {
+        builder.Property(log => log.Payload);
         builder.ConfigureEntityId();
 
         builder.HasIndex(log => new { log.IsDelivered, log.IsFailed, log.NextRetryAt, log.LeaseExpiresAt });
@@ -21,7 +22,6 @@ public sealed class WebhookDeliveryLogConfiguration : IEntityTypeConfiguration<W
 
         builder.Property(log => log.EventType).HasMaxLength(200).IsRequired();
         builder.Property(log => log.WebhookEventId).IsRequired();
-        builder.Property(log => log.Payload).HasColumnType("jsonb");
         builder.Property(log => log.CreatedAt).IsRequired();
         builder.Property(log => log.LeaseOwner).HasMaxLength(200);
         builder.Property(log => log.LastError).HasMaxLength(4_000);

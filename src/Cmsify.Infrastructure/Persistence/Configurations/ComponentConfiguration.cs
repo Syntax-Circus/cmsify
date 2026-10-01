@@ -40,7 +40,8 @@ public sealed class ComponentFieldConfiguration : IEntityTypeConfiguration<Compo
     {
         builder.ConfigureEntityId();
         builder.Property(field => field.Key).HasMaxLength(100).IsRequired(); builder.Property(field => field.Label).HasMaxLength(200).IsRequired(); builder.Property(field => field.HelpText).HasMaxLength(1_000);
-        builder.Property(field => field.PrimitiveType).HasConversion<string>().HasMaxLength(50); builder.Property(field => field.FieldConfig).HasColumnType("jsonb");
+        builder.Property(field => field.PrimitiveType).HasConversion<string>().HasMaxLength(50);
+        builder.Property(field => field.FieldConfig);
         builder.HasIndex(field => new { field.ComponentVersionId, field.Key }).IsUnique();
         builder.HasOne<ComponentVersion>().WithMany(version => version.Fields).HasForeignKey(field => field.ComponentVersionId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<ComponentDefinition>().WithMany().HasForeignKey(field => field.NestedComponentId).OnDelete(DeleteBehavior.Restrict);

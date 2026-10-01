@@ -16,7 +16,7 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
 
         builder.Property(audit => audit.EntityType).HasMaxLength(200).IsRequired();
         builder.Property(audit => audit.Action).HasConversion<string>().HasMaxLength(50);
-        builder.Property(audit => audit.ChangeDelta).HasColumnType("jsonb");
+        builder.Property(audit => audit.ChangeDelta);
         builder.Property(audit => audit.Timestamp).IsRequired();
     }
 }
