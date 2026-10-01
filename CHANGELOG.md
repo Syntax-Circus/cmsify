@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-10-01
+
+### Fixed
+
+- The shipped compose files (`docker-compose.yml`, `docker-compose.prod.yml`) now put `postgres`, `api` and `admin` on a private `cmsify` network. The API gets a `cmsify-api` alias there, and the admin points at `http://cmsify-api:8080` instead of `http://api:8080`.
+  - The generic name broke as soon as the admin joined a network shared with other stacks, such as an external `backend` network used to reach a shared Postgres. Compose registers every service under its own name on every network it joins, and Docker DNS resolves a name across all of the caller's networks. So `api` round-robined across every project's `api` container.
+  - The result was intermittent "Invalid email or password" for correct passwords, valid sessions suddenly rejected, and Cmsify credentials and session tokens sent to unrelated services.
+  - **Deployments using their own compose file must apply the same change.** `docs/operations.md` ("Shared Docker networks") explains how, and how to verify it: `getent ahosts cmsify-api` from inside the admin must return exactly one address.
+
+### Added
+
+- When the API rejects a login, the admin now logs a warning with:
+  - the status code;
+  - the ProblemDetails type, title and detail;
+  - the trace and correlation ids;
+  - the email;
+  - the kind of `Authorization` header that was actually sent (`none`, `opaque` or `jwt`, read after any delegating handlers).
+
+  A rejection from something other than the Cmsify API is therefore visible in the admin log. Tokens are never logged.
+- The API logs a warning for every 401 response, with:
+  - the method and path;
+  - the correlation id;
+  - the bearer kind (`none`, `opaque`, `api-client` or `jwt`);
+  - the resolved actor and remote IP;
+  - a best-effort source (`RequireRole` filter, endpoint, or no endpoint matched).
+
 ## [0.7.5] - 2026-10-01
 
 ### Security
