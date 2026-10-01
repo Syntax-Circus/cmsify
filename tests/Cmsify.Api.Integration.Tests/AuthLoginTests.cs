@@ -105,6 +105,22 @@ public sealed class AuthLoginTests : IAsyncLifetime
         Assert.DoesNotContain(logs.Entries, entry => entry.Message.Contains("wrong-password-value", StringComparison.Ordinal) || entry.Message.Contains("$2a$", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("dead-session-token-value")]
+    [InlineData("cmsify_deadbeefdeadbeef")]
+    [InlineData("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln")]
+    public async Task Login_Succeeds_WhenRequestCarriesStaleBearerToken(string staleToken)
+    {
+        var logs = new CapturingLoggerProvider();
+        await using var factory = CreateFactory(logs);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", staleToken);
+
+        var response = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest(AdminEmail, AdminPassword), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Fact]
     public async Task Login_PrefersActiveUser_WhenSoftDeletedUserSharesEmail()
     {

@@ -51,6 +51,32 @@ There is no longer an automated upgrade rehearsal harness. Before upgrading acro
 
 Place the API and admin UI behind a trusted reverse proxy that terminates TLS and forwards the required host/proto headers. Set `Admin__ApiBaseUrl` to the API address reachable by the admin service. Allow only known frontend origins through `Cors__AllowedOrigins`.
 
+### Shared Docker networks
+
+The shipped compose files put Cmsify on a private `cmsify` network and point the admin at the `cmsify-api` alias. Don't point `Admin__ApiBaseUrl` at a generic service name such as `http://api:8080` if the admin is attached to any network shared with other stacks, like an external `backend` network used to reach a shared Postgres.
+
+- Compose registers every service under its own name on every network it joins, external networks included.
+- Docker's DNS resolves a name across every network the calling container is on.
+
+So on a shared network, `api` returns every project's `api` container, and the admin round-robins between them. The symptoms look like an auth bug, not a network problem:
+
+- "Invalid email or password" for a correct password.
+- No `Login failed` line in the Cmsify API log.
+- Valid sessions suddenly rejected.
+- All of it intermittent, and often appearing after a restart.
+
+Your Cmsify credentials and session tokens also get sent to the other services.
+
+To prevent it:
+
+- Give the API an alias only Cmsify uses, declared only on the private network (`aliases: [cmsify-api]` under `cmsify`), and use that in `Admin__ApiBaseUrl`.
+- Attach the admin only to the networks it needs. Usually that's just the private one. If only the API needs a shared network, for example for an external database, attach only the API to it.
+- Check from inside the admin. `getent ahosts <api-host>` must return exactly one address:
+
+```bash
+docker compose exec admin getent ahosts cmsify-api
+```
+
 API clients use `Authorization: Bearer cmsify_...`. Keep those tokens server-side, assign an expiry where possible, and rotate or revoke them when a service changes ownership. A rotated token is returned once and cannot be recovered later.
 
 The API auto-bans an IP after `IpBan__RejectionThreshold` (default 20) rate-limit rejections within `IpBan__WindowMinutes` (default 5), for `IpBan__BanDurationHours` (default 24). A banned IP gets a bare, unlogged 403 before rate limiting, authentication, or any endpoint logic runs. Banned IPs are recorded in the Admin UI at Settings → IP Bans (`GET /api/v1/security/ip-bans`, Admin role required). Ban state is in-memory per instance — not shared across a horizontally scaled deployment.

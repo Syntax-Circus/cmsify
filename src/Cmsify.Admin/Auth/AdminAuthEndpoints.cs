@@ -99,11 +99,22 @@ public static class AdminAuthEndpoints
         }
         catch (CmsifyApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
+            LogLoginApiFailure(context, ex, email);
             return Results.Redirect(BuildLoginRedirect(returnUrl, "invalid-credentials"));
         }
-        catch (CmsifyApiException)
+        catch (CmsifyApiException ex)
         {
+            LogLoginApiFailure(context, ex, email);
             return Results.Redirect(BuildLoginRedirect(returnUrl, "api-unavailable"));
+        }
+        catch (Exception ex)
+        {
+            CreateLogger(context).LogWarning(
+                ex,
+                "Admin login failed before an API response was received. Email={Email} ExceptionType={ExceptionType}",
+                SanitizeForLog(email),
+                ex.GetType().Name);
+            throw;
         }
 
         await SignInWithApiSessionAsync(context, response);
@@ -112,6 +123,55 @@ public static class AdminAuthEndpoints
             ? $"/account/change-password?returnUrl={Uri.EscapeDataString(returnUrl)}"
             : returnUrl;
         return Results.Redirect(target);
+    }
+
+    /// <summary>HttpContext.Items key under which the Cmsify client response observer records the outgoing Authorization kind.</summary>
+    internal const string ApiAuthorizationKindItemKey = "Cmsify.Admin.LoginApiAuthorizationKind";
+
+    private static ILogger CreateLogger(HttpContext context) =>
+        context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Cmsify.Admin.Auth.AdminAuthEndpoints");
+
+    private static void LogLoginApiFailure(HttpContext context, CmsifyApiException ex, string email)
+    {
+        var authorizationKind = context.Items.TryGetValue(ApiAuthorizationKindItemKey, out var kind) ? kind as string : null;
+        CreateLogger(context).LogWarning(
+            "Admin login rejected by API. Status={StatusCode} ProblemType={ProblemType} ProblemTitle={ProblemTitle} ProblemDetail={ProblemDetail} TraceId={TraceId} CorrelationId={CorrelationId} Email={Email} OutgoingAuthorization={OutgoingAuthorization}",
+            (int)ex.StatusCode!,
+            ex.Problem.Type,
+            ex.Problem.Title,
+            ex.Problem.Detail,
+            ex.TraceId,
+            ex.CorrelationId,
+            SanitizeForLog(email),
+            authorizationKind ?? "unknown");
+    }
+
+    /// <summary>Returns none, opaque or jwt (two dots) for an outgoing Authorization header. Never exposes the credential.</summary>
+    internal static string ClassifyAuthorization(System.Net.Http.Headers.AuthenticationHeaderValue? header)
+    {
+        if (header is null)
+        {
+            return "none";
+        }
+
+        var parameter = header.Parameter;
+        if (string.IsNullOrWhiteSpace(parameter))
+        {
+            return $"{header.Scheme.ToLowerInvariant()}-empty";
+        }
+
+        return parameter.Count(character => character == '.') == 2 ? "jwt" : "opaque";
+    }
+
+    private static string SanitizeForLog(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length > 254)
+        {
+            trimmed = trimmed[..254];
+        }
+
+        return string.Concat(trimmed.Select(character => char.IsControl(character) ? '?' : character));
     }
 
     private static async Task<IResult> LogoutAsync(

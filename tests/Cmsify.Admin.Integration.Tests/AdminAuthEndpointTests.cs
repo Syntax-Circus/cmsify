@@ -179,6 +179,80 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Login_WhenApiReturns401_LogsStatusProblemTraceIdAndEmailWithoutSecrets()
+    {
+        factory.Responder = request =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            {
+                RequestMessage = request,
+                Content = new StringContent(
+                    """{"type":"https://cmsify.dev/errors/unauthenticated","title":"Unauthorized","status":401,"detail":"Bad things.","traceId":"trace-abc-123"}""",
+                    System.Text.Encoding.UTF8,
+                    "application/problem+json")
+            };
+            response.Headers.Add("X-Correlation-Id", "corr-xyz-789");
+            return response;
+        };
+
+        var client = CreateClient();
+        var token = await FetchAntiforgeryTokenAsync(client);
+
+        using var response = await client.PostAsync("/admin-auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token,
+            ["email"] = "admin@example.com",
+            ["password"] = "hunter2-secret-password",
+            ["returnUrl"] = "/workspaces"
+        }), TestContext.Current.CancellationToken);
+
+        response.Headers.Location!.OriginalString.ShouldContain("error=invalid-credentials");
+        var warning = factory.LogEntries.Single(entry => entry.Message.StartsWith("Admin login rejected by API.", StringComparison.Ordinal));
+        warning.Level.ShouldBe(Microsoft.Extensions.Logging.LogLevel.Warning);
+        warning.Message.ShouldContain("Status=401");
+        warning.Message.ShouldContain("ProblemType=https://cmsify.dev/errors/unauthenticated");
+        warning.Message.ShouldContain("ProblemTitle=Unauthorized");
+        warning.Message.ShouldContain("ProblemDetail=Bad things.");
+        warning.Message.ShouldContain("TraceId=trace-abc-123");
+        warning.Message.ShouldContain("CorrelationId=corr-xyz-789");
+        warning.Message.ShouldContain("Email=admin@example.com");
+        warning.Message.ShouldContain("OutgoingAuthorization=none");
+        factory.LogEntries.ShouldNotContain(entry => entry.Message.Contains("hunter2-secret-password", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(null, "none")]
+    [InlineData("opaque-session-token", "opaque")]
+    [InlineData("aaa.bbb.ccc", "jwt")]
+    public void ClassifyAuthorization_ReportsKindWithoutExposingTheCredential(string? parameter, string expected)
+    {
+        var header = parameter is null ? null : new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", parameter);
+
+        AdminAuthEndpoints.ClassifyAuthorization(header).ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task Login_WhenApiReturnsServerError_LogsWarningAndRedirectsApiUnavailable()
+    {
+        factory.Responder = request => new HttpResponseMessage(HttpStatusCode.BadGateway) { RequestMessage = request };
+        factory.ResiliencePipelineOptions = new SyntaxCircus.Http.Resilience.HttpRequestResilienceOptions { MaxAttempts = 1 };
+
+        var client = CreateClient();
+        var token = await FetchAntiforgeryTokenAsync(client);
+
+        using var response = await client.PostAsync("/admin-auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token,
+            ["email"] = "admin@example.com",
+            ["password"] = "x",
+            ["returnUrl"] = "/workspaces"
+        }), TestContext.Current.CancellationToken);
+
+        response.Headers.Location!.OriginalString.ShouldContain("error=api-unavailable");
+        factory.LogEntries.ShouldContain(entry => entry.Message.StartsWith("Admin login rejected by API.", StringComparison.Ordinal) && entry.Message.Contains("Status=502", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Login_OnSuccess_SetsCookieAndRedirectsToReturnUrl()
     {
         factory.Responder = _ => AdminAuthTestFactory.JsonOk(SuccessfulLogin());
