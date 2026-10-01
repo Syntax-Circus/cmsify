@@ -28,6 +28,7 @@ public sealed class LoginRouteInitializationTests
         services.AddSingleton(new CmsifyClient(
             new HttpClient(api) { BaseAddress = new Uri("http://api.test") },
             new CmsifyClientOptions { EnableRetries = false }));
+        services.AddScoped<Cmsify.Admin.Auth.SessionExpiryHandler>();
         services.AddScoped<BrowserStorage>();
         services.AddScoped<AuthState>();
         services.AddScoped<UserPreferencesState>();

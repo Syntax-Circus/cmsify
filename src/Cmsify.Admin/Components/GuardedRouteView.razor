@@ -6,10 +6,13 @@
 @inject NavigationManager Navigation
 @inject UserPreferencesState Preferences
 @inject WorkspaceState Workspace
+@inject SessionExpiryHandler SessionExpiry
 
 @if (ready)
 {
-    <RouteView RouteData="RouteData" DefaultLayout="DefaultLayout" />
+    <SessionExpiryBoundary @ref="boundary">
+        <RouteView RouteData="RouteData" DefaultLayout="DefaultLayout" />
+    </SessionExpiryBoundary>
 }
 
 @code {
@@ -17,10 +20,12 @@
     [Parameter] public Type? DefaultLayout { get; set; }
 
     private bool ready;
+    private SessionExpiryBoundary? boundary;
 
     protected override async Task OnParametersSetAsync()
     {
         ready = false;
+        boundary?.Recover();
         await Auth.InitializeAsync();
         var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
         if (Auth.IsAuthenticated)
@@ -87,12 +92,8 @@
     }
 
     // The cookie is still valid but the API session token inside it is dead. The cookie must be cleared
-    // server-side (even /login goes through this guard), so hand off to the session-expired endpoint.
-    private void RedirectToSessionExpired(string path) =>
-        Navigation.NavigateTo(
-            $"{AdminAuthEndpoints.SessionExpiredPath}?returnUrl={Uri.EscapeDataString(path)}",
-            forceLoad: true,
-            replace: true);
+    // server-side (even /login goes through this guard); SessionExpiryHandler owns the hand-off.
+    private void RedirectToSessionExpired(string path) => SessionExpiry.Redirect(path);
 
     private static bool TryGetWorkspaceId(string path, out Guid workspaceId)
     {
