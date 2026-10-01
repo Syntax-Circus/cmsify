@@ -45,15 +45,7 @@ public sealed class ContentVersionConfiguration : IEntityTypeConfiguration<Conte
         builder.ToTable(table => table.HasCheckConstraint(
             "ck_content_versions_effective_range",
             "(effective_start_at IS NULL AND effective_end_at IS NULL) OR (effective_start_at IS NOT NULL AND effective_end_at IS NOT NULL AND effective_start_at < effective_end_at)"));
-        builder.Property(version => version.Tags)
-            .HasColumnType("text[]")
-            .HasConversion(
-                tags => tags.ToArray(),
-                array => array.ToList(),
-                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<IList<string>>(
-                    (left, right) => (left ?? new List<string>()).SequenceEqual(right ?? new List<string>()),
-                    list => list == null ? 0 : list.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
-                    list => (IList<string>)list.ToList()));
+        builder.Property(version => version.Tags);
     }
 }
 
@@ -72,6 +64,6 @@ public sealed class ContentVersionFieldValueConfiguration : IEntityTypeConfigura
         builder.Property(value => value.ValueKind).HasConversion<string>().HasMaxLength(50);
         builder.Property(value => value.TextValue);
         builder.Property(value => value.DisplayLabel).HasMaxLength(200);
-        builder.Property(value => value.JsonValue).HasColumnType("jsonb");
+        builder.Property(value => value.JsonValue);
     }
 }

@@ -1,7 +1,6 @@
 using Cmsify.Core.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using NpgsqlTypes;
 
 namespace Cmsify.Infrastructure.Persistence.Configurations;
 
@@ -18,7 +17,6 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
             .HasFilter("slug IS NOT NULL AND is_deleted = false");
         builder.HasIndex(content => content.TranslationGroupId);
         builder.HasIndex(content => content.WorkspaceId);
-        builder.HasIndex(content => content.SearchVector).HasMethod("GIN");
 
         builder.HasOne<Workspace>()
             .WithMany()
@@ -32,12 +30,5 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
 
         builder.Property(content => content.Slug).HasMaxLength(200);
         builder.Property(content => content.LocaleCode).HasMaxLength(20);
-#pragma warning disable CS0618
-        builder.Property(content => content.SearchVector)
-            .HasColumnType("tsvector")
-            .HasConversion(
-                value => NpgsqlTsVector.Parse(value ?? string.Empty),
-                value => value.ToString());
-#pragma warning restore CS0618
     }
 }

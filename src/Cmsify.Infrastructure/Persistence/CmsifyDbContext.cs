@@ -1,5 +1,6 @@
 using Cmsify.Core.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Cmsify.Infrastructure.Persistence.Providers;
 
 namespace Cmsify.Infrastructure.Persistence;
 
@@ -72,7 +73,27 @@ public sealed class CmsifyDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.HasPostgresExtension("pgcrypto");
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(CmsifyDbContext).Assembly);
+        ProviderModel.Configure(modelBuilder);
+        Configurations.CmsifyModelComparers.Configure(modelBuilder);
+    }
+
+    private ICmsifyProviderModel ProviderModel => Database.ProviderName switch
+    {
+        "Npgsql.EntityFrameworkCore.PostgreSQL" => new PostgresCmsifyProviderModel(),
+        "Microsoft.EntityFrameworkCore.Sqlite" => new SqliteCmsifyProviderModel(),
+        _ => throw new NotSupportedException($"Unsupported Cmsify persistence provider: {Database.ProviderName}")
+    };
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ProviderModel.PrepareChanges(ChangeTracker);
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        ProviderModel.PrepareChanges(ChangeTracker);
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

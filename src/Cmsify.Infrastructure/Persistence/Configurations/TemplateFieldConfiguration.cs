@@ -42,7 +42,7 @@ public sealed class TemplateFieldConfiguration : IEntityTypeConfiguration<Templa
         builder.Property(field => field.HelpText).HasMaxLength(1_000);
         builder.Property(field => field.CompositionMode).HasConversion<string>().HasMaxLength(50);
         builder.Property(field => field.PrimitiveType).HasConversion<string>().HasMaxLength(50);
-        builder.Property(field => field.FieldConfig).HasColumnType("jsonb");
+        builder.Property(field => field.FieldConfig);
 
         builder.ToTable(table => table.HasCheckConstraint(
             "ck_template_fields_type_shape",

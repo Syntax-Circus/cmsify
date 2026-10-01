@@ -8,9 +8,9 @@ public sealed class WebhookOutboxEventConfiguration : IEntityTypeConfiguration<W
 {
     public void Configure(EntityTypeBuilder<WebhookOutboxEvent> builder)
     {
+        builder.Property(evt => evt.Payload);
         builder.ConfigureEntityId();
         builder.Property(evt => evt.EventType).HasMaxLength(200).IsRequired();
-        builder.Property(evt => evt.Payload).HasColumnType("jsonb");
         builder.Property(evt => evt.OccurredAt).IsRequired();
         builder.Property(evt => evt.CreatedAt).IsRequired();
         builder.Property(evt => evt.LeaseOwner).HasMaxLength(200);

@@ -6,6 +6,7 @@ using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.BackgroundServices;
 using Microsoft.EntityFrameworkCore;
+using Cmsify.Infrastructure.Persistence.Providers;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
 
@@ -14,19 +15,13 @@ public sealed class ScheduledPublishingRepository(
     IContentPublishingService publishingService,
     IWebhookOutbox webhookOutbox) : IScheduledPublishingRepository
 {
+    private readonly IScheduledPublicationQueries _queries = ScheduledPublicationQueries.Create(dbContext);
+
     public async Task<IReadOnlyList<ScheduledContentClaimDto>> ClaimDueContentAsync(string workerId, DateTimeOffset now, TimeSpan leaseDuration, int limit, CancellationToken ct = default)
     {
         ValidateClaimArguments(workerId, leaseDuration, limit);
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        var ids = await dbContext.Database.SqlQuery<Guid>($"""
-            SELECT id AS "Value" FROM content_versions
-            WHERE status = 'Approved' AND publish_at <= {now}
-              AND EXISTS (SELECT 1 FROM content_items ci WHERE ci.id = content_versions.content_item_id AND NOT ci.is_deleted)
-              AND (publish_lease_expires_at IS NULL OR publish_lease_expires_at <= {now})
-            ORDER BY publish_at, id
-            FOR UPDATE SKIP LOCKED
-            LIMIT {limit}
-            """).ToListAsync(ct);
+        var ids = await _queries.LockDueIdsAsync(now, limit, ct);
         var versions = await dbContext.ContentVersions.Where(version => ids.Contains(version.Id)).ToListAsync(ct);
 
         var reclaimed = new Dictionary<Guid, bool>();
@@ -52,13 +47,7 @@ public sealed class ScheduledPublishingRepository(
     public async Task<bool> CompleteClaimAsync(ScheduledContentClaimDto claim, DateTimeOffset now, CancellationToken ct = default)
     {
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        var claimedId = await dbContext.Database.SqlQuery<Guid>($"""
-            SELECT id AS "Value" FROM content_versions
-            WHERE id = {claim.ContentVersionId} AND status = 'Approved' AND publish_at <= {now}
-              AND publish_lease_owner = {claim.LeaseOwner} AND publish_lease_token = {claim.LeaseToken}
-              AND publish_lease_expires_at > {now}
-            FOR UPDATE
-            """).SingleOrDefaultAsync(ct);
+        var claimedId = await _queries.LockOwnedIdAsync(claim, now, ct);
         if (claimedId == Guid.Empty)
         {
             await transaction.RollbackAsync(ct);
