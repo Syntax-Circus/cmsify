@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-10-01
+
+### Security
+
+- The audit log no longer stores secrets verbatim. `AuditDeltaBuilder` used to write the before and after value of every changed property into `audit_logs.change_delta`, so every password change left raw bcrypt hashes in the audit trail. That covered the seeded admin, change-password, and admin reset. `PasswordHash`, `Secret` (webhook HMAC secret) and `TokenHash` are now recorded as `redacted:<first 12 hex chars of SHA-256>`. The audit log still shows when a secret changed, who changed it, and whether two values are the same, without exposing the value.
+- **Migration `RedactAuditLogSecrets` rewrites existing `audit_logs` rows to the same fingerprint. It is irreversible.** Back up `audit_logs` before upgrading if you need the original values.
+
+### Added
+
+- The API now logs every local login attempt. A failure logs a warning with a reason (`UserNotFound`, `UserDeleted`, `UserInactive` or `BadPassword`), the attempted email, the user id when known, and the remote IP. A success logs at information level. Passwords and hashes are never logged. Every failure still returns the same plain 401, so the response does not reveal which accounts exist. Attempts against unknown accounts are verified against a dummy hash, so they take about as long as real ones.
+- The admin now handles an expired or revoked API session gracefully. The new `GET /admin-auth/session-expired` endpoint clears the admin cookie and redirects to `/login?error=session-expired`, keeping a validated `returnUrl`. Any API 401 inside an interactive admin circuit now redirects there once: during navigation, during page load, or from an event handler.
+  - 401s from credential-checking endpoints (`auth/login`, and `auth/change-password` with a wrong current password) are excluded.
+  - Requests sent without a token are excluded.
+
+### Changed
+
+- New passwords are rejected with `400` if they start or end with whitespace, or contain control characters, invisible formatting characters (zero-width space, BOM, direction marks), line or paragraph separators, or any space other than U+0020 (such as a non-breaking space). This applies to change-password, admin reset, user creation, and the seed admin password, where the API now fails fast at startup. Passwords pasted from password managers or rich text could silently pick up such characters, so the stored password differed from the one the user typed later. Login does not apply these rules, so existing passwords keep working.
+
+### Fixed
+
+- The admin no longer crashes the Blazor circuit (`Unhandled exception rendering component: Unauthorized`) when the API session token inside a still-valid admin cookie has expired. This includes the login page itself. Escaped 401s are caught by a boundary, and error toasts are suppressed while the redirect is under way. `WorkspaceState` is marked initialized only after a successful load, so a failed load no longer leaves the workspace list stuck empty.
+- Login now prefers the active user when a soft-deleted user shares the same email. Email is only unique among non-deleted users.
+
 ## [0.7.4] - 2026-09-24
 
 ### Fixed
