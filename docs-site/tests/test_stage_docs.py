@@ -14,6 +14,14 @@ SPEC.loader.exec_module(STAGE_DOCS)
 
 
 class RewriteLinksTests(unittest.TestCase):
+    def test_changelog_provider_portability_link_targets_repository(self) -> None:
+        source = "[provider portability](docs/provider-portability.md)"
+
+        self.assertEqual(
+            "[provider portability](https://github.com/Syntax-Circus/cmsify/blob/main/docs/provider-portability.md)",
+            STAGE_DOCS.rewrite_links(source),
+        )
+
     def test_repository_links_remain_valid_after_public_docs_are_staged(self) -> None:
         source = "\n".join(
             [

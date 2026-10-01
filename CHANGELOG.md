@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-10-01
+
+### Fixed
+
+- Fixed the changelog's provider-portability link when staging the documentation site, restoring the strict MkDocs build. Added a regression test for the repository-link rewrite; runtime behavior and PostgreSQL defaults are unchanged.
+
 ## [0.7.7] - 2026-10-01
 
 ### Changed
