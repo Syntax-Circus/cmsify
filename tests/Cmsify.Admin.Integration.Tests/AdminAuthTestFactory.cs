@@ -56,6 +56,8 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
 
     public List<OidcTokenRequest> OidcTokenRequests { get; } = new();
 
+    public ConcurrentQueue<CapturedLog> LogEntries { get; } = new();
+
     private readonly object observedRequestsGate = new();
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -88,7 +90,9 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureTestServices(services =>
         {
-            services.AddLogging(logging => logging.ClearProviders());
+            // Program wires Serilog, which owns ILoggerFactory; swap in a capture-only factory so tests can assert on log output.
+            services.RemoveAll<ILoggerFactory>();
+            services.AddSingleton<ILoggerFactory>(new LoggerFactory([new CapturingLoggerProvider(LogEntries)]));
             if (ResiliencePipelineOptions is { } resiliencePipelineOptions)
             {
                 services.RemoveAll<HttpRequestResiliencePipeline>();
@@ -211,6 +215,27 @@ internal sealed class AdminAuthTestFactory : WebApplicationFactory<Program>
     public sealed record OidcTokenRequest(string GrantType, string? RefreshToken);
 
     public sealed record ObservedApiRequest(string Path, string? Authorization, string? CorrelationId);
+
+    public sealed record CapturedLog(LogLevel Level, string Category, string Message);
+
+    private sealed class CapturingLoggerProvider(ConcurrentQueue<CapturedLog> entries) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, entries);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class CapturingLogger(string category, ConcurrentQueue<CapturedLog> entries) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+                => entries.Enqueue(new CapturedLog(logLevel, category, formatter(state, exception)));
+        }
+    }
 
     private sealed class OidcBackchannelHandler(AdminAuthTestFactory factory, SecurityKey signingKey) : HttpMessageHandler
     {

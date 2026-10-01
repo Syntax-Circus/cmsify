@@ -155,6 +155,15 @@ builder.Services.AddScoped<CmsifyClient>(services =>
             // Runs before the SDK maps the response to CmsifyApiException, so the redirect starts before any
             // page-level catch can show an error toast.
             sessionExpiry.TryHandleResponse(response);
+            if (!response.IsSuccessStatusCode
+                && httpContextAccessor.HttpContext is { } observedContext
+                && response.RequestMessage is { } sentRequest)
+            {
+                // Diagnostics for the login endpoint's failure log: the header seen here is the final one, after
+                // ApiAuthHandler (inner to the SDK) has replaced it. Only the kind is stored, never the token.
+                observedContext.Items[AdminAuthEndpoints.ApiAuthorizationKindItemKey] =
+                    AdminAuthEndpoints.ClassifyAuthorization(sentRequest.Headers.Authorization);
+            }
             if (response.Headers.TryGetValues("X-Session-Expires-At", out var values)
                 && DateTimeOffset.TryParse(values.FirstOrDefault(), out var expiresAt))
             {

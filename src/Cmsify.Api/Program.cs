@@ -165,6 +165,7 @@ if (!builder.Configuration.GetValue("Api:OpenApiExport", false))
 }
 
 app.UseCorrelationId();
+app.UseMiddleware<UnauthorizedResponseLoggingMiddleware>();
 app.UseSecurityHeaders();
 app.UseProblemDetailsExceptionHandling();
 app.UseStatusCodePages(async context =>
