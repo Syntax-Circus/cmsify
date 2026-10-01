@@ -1,7 +1,7 @@
-using System.Security.Claims;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Infrastructure.Auth;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -11,11 +11,16 @@ namespace Cmsify.Infrastructure.Persistence.Interceptors;
 
 public sealed class AuditInterceptor : SaveChangesInterceptor
 {
-    private readonly IHttpContextAccessor httpContextAccessor;
+    private readonly IAuditActorAccessor _auditActorAccessor;
+
+    public AuditInterceptor(IAuditActorAccessor auditActorAccessor)
+    {
+        _auditActorAccessor = auditActorAccessor;
+    }
 
     public AuditInterceptor(IHttpContextAccessor httpContextAccessor)
+        : this(new HttpAuditActorAccessor(httpContextAccessor))
     {
-        this.httpContextAccessor = httpContextAccessor;
     }
 
     public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
@@ -33,7 +38,7 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
 
     private void AddAuditLogs(DbContext context)
     {
-        var actor = ResolveActor();
+        var actor = _auditActorAccessor.GetActor();
         var entries = context.ChangeTracker.Entries()
             .Where(entry => entry.Entity is not AuditLog and not WebhookDeliveryLog and not UserSession and not ApiClient)
             .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
@@ -63,36 +68,6 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
                 WorkspaceId = entry.Entity is Workspace ? entityId.Value : GetGuidValue(entry, "WorkspaceId")
             });
         }
-    }
-
-    private (Guid? UserId, Guid? ApiClientId) ResolveActor()
-    {
-        var user = httpContextAccessor.HttpContext?.User;
-        if (httpContextAccessor.HttpContext?.Items.TryGetValue(CurrentActorHttpContextKeys.ItemName, out var actorItem) == true
-            && actorItem is ICurrentActor currentActor
-            && currentActor.IsAuthenticated)
-        {
-            return (currentActor.UserId, currentActor.ApiClientId);
-        }
-
-        if (user?.Identity?.IsAuthenticated != true)
-        {
-            return (null, null);
-        }
-
-        var apiClientClaim = user.FindFirst("cmsify_api_client_id")?.Value;
-        if (Guid.TryParse(apiClientClaim, out var apiClientId))
-        {
-            return (null, apiClientId);
-        }
-
-        var userClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? user.FindFirst("sub")?.Value
-            ?? user.FindFirst("cmsify_user_id")?.Value;
-
-        return Guid.TryParse(userClaim, out var userId)
-            ? (userId, null)
-            : (null, null);
     }
 
     private static AuditAction GetAuditAction(EntityEntry entry)

@@ -58,3 +58,49 @@ pass in Debug, including the subsequently added independent-connection claim tes
 Puppies Plus actual-source host probes pass PostgreSQL migrations/publishing and
 SQLite test-schema/publishing. No production migrations, deployment or package
 publication have been performed. Full provider support remains gated above.
+
+## Embedded host identity and worker registration foundation
+
+`AddCmsifyInfrastructure(configuration)` retains PostgreSQL and all six hosted
+workers. A host can opt into its scoped `ICurrentActor` for audit attribution and
+select workers independently at registration time:
+
+```csharp
+services.AddScoped<ICurrentActor, HostCurrentActor>();
+services.AddCmsifyInfrastructure(configuration, new CmsifyInfrastructureOptions
+{
+    UseHostCurrentActorForAudit = true,
+    Workers = CmsifyWorkers.ScheduledPublishing | CmsifyWorkers.WebhookDispatch
+});
+```
+
+`CmsifyWorkers.None` registers no workers; `CmsifyWorkers.All` is the default.
+The other independent selections are `MediaReconciliation`, `WebhookRetry`,
+`WebhookSecretRotation`, and `WebhookSecretRotationInventoryPreflight`.
+Selections are fixed when services are registered. Operational options still
+configure the selected workers; resolving services does not migrate or seed the
+database. Migration and seeding remain explicit host lifecycle operations.
+
+Audit interception consumes Core's transport-neutral `IAuditActorAccessor`, which
+returns only nullable user/API-client IDs and grants no permissions. Host audit
+mode uses `HostCurrentActorAuditAccessor`; unauthenticated actors yield no IDs,
+including stale IDs. A missing host actor defaults to anonymous, even if HTTP
+actor data exists. Register the host actor in the composition root; default actor
+and audit adapters use `TryAdd` to preserve deliberate host registrations.
+
+Standalone mode uses `HttpAuditActorAccessor`: an authenticated HTTP item takes
+precedence, followed by an authenticated principal's valid API-client claim,
+then `NameIdentifier`, `sub`, and `cmsify_user_id` in that order. The first present
+user claim is parsed, so an invalid higher-priority claim does not fall through.
+No HTTP context yields null attribution. The legacy HTTP-accessor constructor
+of `AuditInterceptor` remains available for direct construction.
+
+Repeated calls with identical infrastructure options and configuration values
+return without adding registrations, workers, option bindings or validators.
+Conflicting options or configuration values throw `InvalidOperationException`;
+the host must choose one composition configuration. Configuration equality here
+includes the full supplied configuration snapshot at each registration call.
+
+This foundation does not qualify a complete embedded engine or SQLite deployment.
+It does not change workspace authorization, host grants, authentication schemes,
+provider selection, migrations, or package versions.
