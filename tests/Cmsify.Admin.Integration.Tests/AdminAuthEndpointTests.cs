@@ -429,6 +429,45 @@ public sealed class AdminAuthEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SessionExpired_ClearsAuthCookieWithoutCallingApiAndRedirectsToLogin()
+    {
+        factory.Responder = _ => AdminAuthTestFactory.JsonOk(SuccessfulLogin());
+        var client = CreateClient();
+        var token = await FetchAntiforgeryTokenAsync(client);
+        using (await client.PostAsync("/admin-auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token,
+            ["email"] = "admin@example.com",
+            ["password"] = "correct",
+            ["returnUrl"] = "/workspaces"
+        }), TestContext.Current.CancellationToken)) { }
+        var apiRequestsBefore = factory.ObservedRequests.Count;
+
+        using var response = await client.GetAsync("/admin-auth/session-expired?returnUrl=%2Fworkspaces%2Fabc", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldBe("/login?error=session-expired&returnUrl=%2Fworkspaces%2Fabc");
+        response.Headers.GetValues("Set-Cookie").ShouldContain(c => c.StartsWith("cmsify.admin.auth=", StringComparison.Ordinal)
+            && c.Contains("expires=Thu, 01 Jan 1970", StringComparison.OrdinalIgnoreCase));
+        factory.ObservedRequests.Count.ShouldBe(apiRequestsBefore);
+    }
+
+    [Theory]
+    [InlineData("https://evil.example/")]
+    [InlineData("//evil.example/")]
+    [InlineData("evil")]
+    [InlineData("")]
+    public async Task SessionExpired_RejectsOpenRedirectReturnUrls(string returnUrl)
+    {
+        var client = CreateClient();
+
+        using var response = await client.GetAsync($"/admin-auth/session-expired?returnUrl={Uri.EscapeDataString(returnUrl)}", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location!.OriginalString.ShouldBe("/login?error=session-expired&returnUrl=%2Fworkspaces");
+    }
+
+    [Fact]
     public async Task RefreshClaims_WithoutCookie_Returns401()
     {
         var client = CreateClient();

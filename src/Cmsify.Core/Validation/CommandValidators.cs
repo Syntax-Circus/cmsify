@@ -132,7 +132,7 @@ public sealed class CreateUserCommandValidator : AbstractValidator<CreateUserCom
     {
         RuleFor(command => command.Email).NotEmpty().EmailAddress().MaximumLength(320);
         RuleFor(command => command.DisplayName).NotEmpty().MaximumLength(200);
-        RuleFor(command => command.TemporaryPassword).NotEmpty().MinimumLength(12);
+        RuleFor(command => command.TemporaryPassword).NotEmpty().MinimumLength(12).Must(PasswordRules.IsValid).WithMessage(PasswordRules.ValidationMessage);
         RuleFor(command => command.TimeZoneId).MaximumLength(100);
     }
 }

@@ -134,6 +134,7 @@ builder.Services.AddScoped<CmsifyClient>(services =>
     var tokenAccessor = services.GetRequiredService<IApiTokenAccessor>();
     var httpContextAccessor = services.GetRequiredService<IHttpContextAccessor>();
     var resiliencePipeline = services.GetRequiredService<HttpRequestResiliencePipeline>();
+    var sessionExpiry = services.GetRequiredService<SessionExpiryHandler>();
     var httpClient = oidcEnabled
         ? services.GetRequiredService<IBlazorCircuitHttpClientFactory>().CreateClient("CmsifyApi")
         : services.GetRequiredService<IHttpClientFactory>().CreateClient("CmsifyApi");
@@ -151,6 +152,9 @@ builder.Services.AddScoped<CmsifyClient>(services =>
         },
         ResponseObserver = async (response, ct) =>
         {
+            // Runs before the SDK maps the response to CmsifyApiException, so the redirect starts before any
+            // page-level catch can show an error toast.
+            sessionExpiry.TryHandleResponse(response);
             if (response.Headers.TryGetValues("X-Session-Expires-At", out var values)
                 && DateTimeOffset.TryParse(values.FirstOrDefault(), out var expiresAt))
             {
@@ -159,6 +163,8 @@ builder.Services.AddScoped<CmsifyClient>(services =>
         }
     }, resiliencePipeline);
 });
+builder.Services.AddScoped<SessionExpiryHandler>();
+builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler>(sp => sp.GetRequiredService<SessionExpiryHandler>());
 builder.Services.AddScoped<BrowserStorage>();
 builder.Services.AddScoped<BrowserDownloads>();
 builder.Services.AddScoped<IApiTokenAccessor, ApiTokenAccessor>();

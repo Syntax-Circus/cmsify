@@ -17,12 +17,14 @@ public static class AdminAuthEndpoints
     public const string LogoutPath = "/admin-auth/logout";
     public const string RefreshClaimsPath = "/admin-auth/refresh-claims";
     public const string OidcLoginPath = "/admin-auth/oidc-login";
+    public const string SessionExpiredPath = "/admin-auth/session-expired";
 
     public static IEndpointRouteBuilder MapAdminAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost(LoginPath, LoginAsync);
         endpoints.MapPost(LogoutPath, LogoutAsync);
         endpoints.MapGet(OidcLoginPath, OidcLoginAsync);
+        endpoints.MapGet(SessionExpiredPath, SessionExpiredAsync);
         endpoints.MapPost(RefreshClaimsPath, (Delegate)RefreshClaimsAsync).DisableAntiforgery();
         var environmentName = endpoints.ServiceProvider.GetRequiredService<IHostEnvironment>().EnvironmentName;
         var configuredRunId = endpoints.ServiceProvider.GetRequiredService<IConfiguration>()["Admin:ReleaseSmokeRunId"];
@@ -131,6 +133,32 @@ public static class AdminAuthEndpoints
             }
         }
 
+        var isOidcSession = await ClearLocalSessionAsync(context, ct);
+        if (isOidcSession)
+        {
+            await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme, new AuthenticationProperties
+            {
+                RedirectUri = "/login"
+            });
+            return Results.Empty;
+        }
+
+        return Results.Redirect("/login");
+    }
+
+    /// <summary>
+    /// Ends the local admin session when the API session token inside the still-valid cookie is dead.
+    /// Does not call the API. Signing out via GET is acceptable since it only ends the caller's own session.
+    /// </summary>
+    private static async Task<IResult> SessionExpiredAsync(HttpContext context, string? returnUrl, CancellationToken ct)
+    {
+        await ClearLocalSessionAsync(context, ct);
+        return Results.Redirect($"/login?error=session-expired&returnUrl={Uri.EscapeDataString(NormalizeReturnUrl(returnUrl))}");
+    }
+
+    /// <summary>Evicts the OIDC token cache entry (OIDC sessions) and clears the cookie. Returns whether the session was OIDC.</summary>
+    private static async Task<bool> ClearLocalSessionAsync(HttpContext context, CancellationToken ct)
+    {
         var isOidcSession = string.Equals(context.User.FindFirstValue(CmsifyAuthClaims.OidcSession), "true", StringComparison.OrdinalIgnoreCase);
         if (isOidcSession)
         {
@@ -143,16 +171,7 @@ public static class AdminAuthEndpoints
             }
         }
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        if (isOidcSession)
-        {
-            await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme, new AuthenticationProperties
-            {
-                RedirectUri = "/login"
-            });
-            return Results.Empty;
-        }
-
-        return Results.Redirect("/login");
+        return isOidcSession;
     }
 
     private static async Task<IResult> RefreshClaimsAsync(HttpContext context)

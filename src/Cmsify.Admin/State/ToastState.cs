@@ -1,6 +1,6 @@
 namespace Cmsify.Admin.State;
 
-public sealed class ToastState
+public sealed class ToastState(Cmsify.Admin.Auth.SessionExpiryHandler? sessionExpiry = null)
 {
     public event Action? Changed;
 
@@ -12,7 +12,16 @@ public sealed class ToastState
 
     public void Success(string message) => Show(message, "success");
 
-    public void Danger(string message) => Show(message, "danger");
+    // Once the session-expired redirect is under way, error toasts caused by the dead session are noise.
+    public void Danger(string message)
+    {
+        if (sessionExpiry?.HasFired == true)
+        {
+            return;
+        }
+
+        Show(message, "danger");
+    }
 
     public void Clear()
     {

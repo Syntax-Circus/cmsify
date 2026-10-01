@@ -2,6 +2,7 @@ using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Core.Validation;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -61,6 +62,11 @@ public sealed class UsersController : ControllerBase
         if (validation is not null)
         {
             return validation;
+        }
+
+        if (!PasswordRules.IsValid(request.TemporaryPassword))
+        {
+            return this.InvalidPasswordError();
         }
 
         var hash = BCrypt.Net.BCrypt.HashPassword(request.TemporaryPassword, configuration.GetValue("Auth:BcryptCost", 12));
@@ -129,6 +135,11 @@ public sealed class UsersController : ControllerBase
         }
 
         var user = await dbContext.Users.FirstAsync(candidate => candidate.Id == id, ct);
+        if (!PasswordRules.IsValid(request.TemporaryPassword))
+        {
+            return this.InvalidPasswordError();
+        }
+
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.TemporaryPassword, configuration.GetValue("Auth:BcryptCost", 12));
         user.MustChangePassword = true;
         user.UpdatedAt = DateTimeOffset.UtcNow;

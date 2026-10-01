@@ -1,5 +1,6 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
+using Cmsify.Core.Validation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
@@ -32,6 +33,11 @@ public sealed class DbSeeder : IDbSeeder
         {
             var adminEmail = configuration["Seed:Admin:Email"] ?? "admin@localhost";
             var adminPassword = configuration["Seed:Admin:Password"];
+            if (!string.IsNullOrWhiteSpace(adminPassword) && !PasswordRules.IsValid(adminPassword))
+            {
+                throw new InvalidOperationException($"Seed:Admin:Password is invalid. {PasswordRules.ValidationMessage}");
+            }
+
             var passwordHash = !string.IsNullOrWhiteSpace(adminPassword)
                 ? BCrypt.Net.BCrypt.HashPassword(adminPassword, configuration.GetValue("Auth:BcryptCost", 12))
                 : configuration["Seed:Admin:PasswordHash"];
