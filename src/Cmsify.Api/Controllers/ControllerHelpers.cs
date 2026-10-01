@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cmsify.Core.Validation;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cmsify.Api.Controllers;
@@ -64,6 +65,9 @@ internal static class ControllerHelpers
         result.ContentTypes.Add("application/problem+json");
         return result;
     }
+
+    public static ObjectResult InvalidPasswordError(this ControllerBase controller)
+        => controller.Error(StatusCodes.Status400BadRequest, CmsifyError.ValidationFailed, "Invalid password", PasswordRules.ValidationMessage);
 
     public static JsonElement? Clone(this JsonElement? element) => element?.Clone();
 }

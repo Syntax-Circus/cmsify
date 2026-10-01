@@ -1,4 +1,7 @@
+@using System.Net
+@using Cmsify.Admin.Auth
 @using Cmsify.Admin.State
+@using SyntaxCircus.Cmsify
 @inject AuthState Auth
 @inject NavigationManager Navigation
 @inject UserPreferencesState Preferences
@@ -19,15 +22,23 @@
     {
         ready = false;
         await Auth.InitializeAsync();
+        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
         if (Auth.IsAuthenticated)
         {
-            await Preferences.InitializeAsync();
+            try
+            {
+                await Preferences.InitializeAsync();
+            }
+            catch (CmsifyApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                RedirectToSessionExpired(path);
+                return;
+            }
         }
         else
         {
             await Preferences.InitializeThemeAsync();
         }
-        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
         var isLogin = path.Equals("/login", StringComparison.OrdinalIgnoreCase);
         var isChangePassword = path.Equals("/account/change-password", StringComparison.OrdinalIgnoreCase);
 
@@ -55,7 +66,15 @@
             return;
         }
 
-        await Workspace.InitializeAsync(userId);
+        try
+        {
+            await Workspace.InitializeAsync(userId);
+        }
+        catch (CmsifyApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            RedirectToSessionExpired(path);
+            return;
+        }
 
         if (TryGetWorkspaceId(path, out var workspaceId) && !await Workspace.SelectAvailableAsync(workspaceId))
         {
@@ -66,6 +85,14 @@
 
         ready = true;
     }
+
+    // The cookie is still valid but the API session token inside it is dead. The cookie must be cleared
+    // server-side (even /login goes through this guard), so hand off to the session-expired endpoint.
+    private void RedirectToSessionExpired(string path) =>
+        Navigation.NavigateTo(
+            $"{AdminAuthEndpoints.SessionExpiredPath}?returnUrl={Uri.EscapeDataString(path)}",
+            forceLoad: true,
+            replace: true);
 
     private static bool TryGetWorkspaceId(string path, out Guid workspaceId)
     {

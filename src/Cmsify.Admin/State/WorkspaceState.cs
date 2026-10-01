@@ -30,11 +30,11 @@ public sealed class WorkspaceState
             return;
         }
 
-        initializedForUserId = userId;
         Current = null;
 
         var page = await RequireAsync(cmsify.Workspaces.ListAsync(ct: ct));
         Available = page.Items;
+        initializedForUserId = userId;
 
         var savedWorkspaceId = await storage.GetAsync<Guid?>(StorageArea, StorageKey(userId));
         var selected = savedWorkspaceId.HasValue
