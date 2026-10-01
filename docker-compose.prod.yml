@@ -1,5 +1,6 @@
 services:
   postgres:
+    networks: [cmsify]
     image: postgres:17@sha256:67f41722b7a8cbdb868a44a4995c846eddfdc2973bccb291ce937dce88ad5675
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cmsify}
@@ -15,6 +16,9 @@ services:
       retries: 10
 
   api:
+    networks:
+      cmsify:
+        aliases: [cmsify-api]
     image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-api:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:d82c8333b3b6cf8a479858bdbe63a304bcca66fa2be2b22ada7ea099863e5301
     env_file:
       - ${CMSIFY_API_KEYRING_ENV_FILE:?CMSIFY_API_KEYRING_ENV_FILE is required}
@@ -131,6 +135,7 @@ services:
       retries: 12
 
   admin:
+    networks: [cmsify]
     image: ${CMSIFY_IMAGE_PREFIX:-syntaxcircus}/cmsify-admin:${CMSIFY_VERSION:?CMSIFY_VERSION is required}@sha256:476d21907c1b5583d95dd04cad815dc582a531a5eb1f0795dd04c35ff9e4cf6e
     ports:
       - "127.0.0.1:${CMSIFY_ADMIN_PORT:-5001}:8080"
@@ -138,7 +143,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       AllowedHosts: ${AllowedHosts:-*}
-      Admin__ApiBaseUrl: http://api:8080
+      Admin__ApiBaseUrl: http://cmsify-api:8080
       Admin__OidcProviderName: ${Admin__OidcProviderName:-Authentik}
       Admin__Auth__Session__SlidingWindowMinutes: ${Admin__Auth__Session__SlidingWindowMinutes:-60}
       Admin__Auth__Session__MaxLifetimeHours: ${Admin__Auth__Session__MaxLifetimeHours:-24}
@@ -172,6 +177,12 @@ services:
       - admin_data_protection_keys:/var/cmsify/admin-keys
       - admin_logs:/app/.local/logs
     restart: unless-stopped
+
+networks:
+  # Private network for this stack. Don't rely on generic service names ("api") across shared networks:
+  # Docker resolves a name over every network the caller is on, so attaching the admin to a shared network
+  # (e.g. an external "backend") makes "api" round-robin across every project's "api" service.
+  cmsify:
 
 volumes:
   postgres_data:
