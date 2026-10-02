@@ -2,6 +2,7 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Infrastructure.Persistence.Providers;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -10,11 +11,13 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
 {
     private readonly CmsifyDbContext dbContext;
     private readonly ICurrentActor currentActor;
+    private readonly ITemplatePublicationQueries _publicationQueries;
 
     public TemplateVersionRepository(CmsifyDbContext dbContext, ICurrentActor currentActor)
     {
         this.dbContext = dbContext;
         this.currentActor = currentActor;
+        _publicationQueries = TemplatePublicationQueries.Create(dbContext);
     }
 
     public async Task<TemplateVersionDto?> GetAsync(Guid id, CancellationToken ct = default) =>
@@ -119,15 +122,18 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
 
     public async Task<TemplateVersionDto> PublishAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
+        // Archive, publish and move the template pointer together. Existing callers
+        // may already own the transaction; they retain its commit/rollback ownership.
+        await using var transaction = dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(ct)
+            : null;
         var entity = await Scope(dbContext.TemplateVersions).FirstAsync(version => version.Id == id, ct);
         if (entity.Status != TemplateVersionStatus.Draft)
         {
             throw new InvalidOperationException("Only draft template versions can be published.");
         }
 
-        await dbContext.TemplateVersions
-            .Where(version => version.TemplateId == entity.TemplateId && version.Status == TemplateVersionStatus.Published)
-            .ExecuteUpdateAsync(updates => updates.SetProperty(version => version.Status, TemplateVersionStatus.Archived), ct);
+        await _publicationQueries.ArchivePublishedVersionsAsync(entity.TemplateId, ct);
 
         entity.Status = TemplateVersionStatus.Published;
         entity.PublishedAt = DateTimeOffset.UtcNow;
@@ -137,6 +143,7 @@ public sealed class TemplateVersionRepository : ITemplateVersionRepository
         template.UpdatedAt = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return entity.ToDto();
     }
 

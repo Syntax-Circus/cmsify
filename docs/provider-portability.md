@@ -43,9 +43,30 @@ also encodes PostgreSQL search syntax and needs a separate semantic review.
   PostgreSQL migration snapshot. Full contention/restart tests remain required.
 - A four-worker, independent-connection SQLite file test claims a due version
   exactly once. Broader load and forced-restart qualification still remain.
-- Known remaining concurrency gap: bulk `ExecuteUpdateAsync` paths bypass tracked
-  version preparation (including template archival). SQLite token advancement for
-  those paths must be implemented before repository-wide ETag parity is claimed.
+- `TemplateVersionRepository.PublishAsync` now uses infrastructure-only template
+  publication queries. SQLite archives the selected template's published versions
+  and advances their shadow `xmin`/`row_version` in one bulk statement. Its write
+  transaction guards against `uint.MaxValue` before updating, and publication,
+  archival and the current-version pointer commit together. An exhausted token
+  fails with `OverflowException`; it cannot wrap or leave partial archival when
+  the repository owns the transaction. Existing caller-owned transactions retain
+  their commit/rollback responsibility. PostgreSQL keeps its status-only update
+  and database-generated `xmin`.
+- Real file-backed SQLite and migrated PostgreSQL repository tests cover stale
+  saves, another template and older archived versions. SQLite exhaustion tests
+  cover a mixed set of published versions and rollback when the later tracked
+  draft/template save overflows. Both providers also verify caller-owned
+  transactions: successful publication remains uncommitted, a later tracked
+  unique-constraint failure leaves the transaction with the caller, and caller
+  rollback restores version status/tokens, the draft and template pointer.
+  Tracked-save generation is unchanged; no operation-level savepoint is promised.
+- Remaining mapped-token bulk gaps: standalone API template publication/package
+  import archival (`TemplatesController`, `PackagesController`), content version
+  translation/identity propagation (`ContentController`), API client last-use
+  touches (`CmsifyOpaqueBearerAuthenticationHandler`), and endpoint secret rotation
+  (`WebhookSecretRotationProcessor`). These are not corrected by the repository
+  fix; standalone registration still selects PostgreSQL. Other bulk writes need
+  their own provider qualification before repository-wide ETag parity is claimed.
 - Still unsupported: SQLite migrations/registration, remaining workers' SQL,
   API ILike queries, search parity and complete-engine qualification. Do not expose
   SQLite as a deployment option yet or replace PostgreSQL migrations with EnsureCreated.
