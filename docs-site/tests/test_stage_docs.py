@@ -34,6 +34,8 @@ class RewriteLinksTests(unittest.TestCase):
                 "[upgrade section](../tests/upgrade/README.md#build-and-rehearse-an-exact-candidate)",
                 "[workflow](../.github/workflows/upgrade-rollback.yml)",
                 "[keyring](../docker-compose.prod.keyring.env.example)",
+                "[provider qualification](provider-portability.md)",
+                "[engine evidence](evidence/2026-10-02-engine-packages.md)",
             ]
         )
 
@@ -45,6 +47,8 @@ class RewriteLinksTests(unittest.TestCase):
         self.assertIn("https://github.com/Syntax-Circus/cmsify/blob/main/docs/release-runbook.md", rewritten)
         self.assertIn("https://github.com/Syntax-Circus/cmsify/blob/main/tests/upgrade/fixtures/v0.1.3/manifest.json", rewritten)
         self.assertIn("https://github.com/Syntax-Circus/cmsify/tree/main/tests/upgrade", rewritten)
+        self.assertIn("](https://github.com/Syntax-Circus/cmsify/blob/main/docs/provider-portability.md)", rewritten)
+        self.assertIn("](https://github.com/Syntax-Circus/cmsify/blob/main/docs/evidence/2026-10-02-engine-packages.md)", rewritten)
 
 
 if __name__ == "__main__":

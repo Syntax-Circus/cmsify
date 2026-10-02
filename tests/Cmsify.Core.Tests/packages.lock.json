@@ -243,7 +243,7 @@
           "xunit.v3.runner.common": "[4.0.1]"
         }
       },
-      "cmsify.core": {
+      "SyntaxCircus.Cmsify.Core": {
         "type": "Project",
         "dependencies": {
           "FluentValidation": "[12.1.1, )",

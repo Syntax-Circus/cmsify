@@ -412,7 +412,7 @@
           "System.Composition.Runtime": "9.0.0"
         }
       },
-      "cmsify.core": {
+      "SyntaxCircus.Cmsify.Core": {
         "type": "Project",
         "dependencies": {
           "FluentValidation": "[12.1.1, )",

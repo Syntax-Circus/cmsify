@@ -65,6 +65,8 @@ Keep `CMSIFY_API_TOKEN` in a server-only secret namespace. The existing examples
 
 ## .NET client and NuGet packages
 
+For hosts that need direct engine assemblies instead of HTTP clients, see [engine NuGet packages and qualification](engine-packages.md). Core and Infrastructure retain AGPL-3.0-or-later and PostgreSQL defaults; complete embedded-engine and SQLite deployment qualification remain incomplete.
+
 The first-party .NET SDK is split into two packages so API hosts and consumers share the same wire contracts:
 
 - `SyntaxCircus.Cmsify.Contracts` — request/response records, enums, pagination, and JSON options.

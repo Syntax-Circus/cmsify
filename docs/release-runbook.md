@@ -14,6 +14,8 @@ dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
 
 Add a dated `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` — `scripts/release/validate-release-tag.mjs` refuses the tag without one (an `## [Unreleased]` placeholder does not count).
 
+Before the first release containing `SyntaxCircus.Cmsify.Core` and `SyntaxCircus.Cmsify.Infrastructure`, verify that NuGet ownership/reservation and trusted-publisher scope permit both IDs. The two engine packages retain AGPL-3.0-or-later; the existing SDK/contracts/components package licenses remain unchanged. This registry prerequisite requires maintainer verification and is not proven by local packing.
+
 ## Tag and let the pipeline run
 
 ```powershell
@@ -24,7 +26,7 @@ git push origin vX.Y.Z
 `publish-cmsify.yml` runs three jobs:
 
 1. **`resolve`** — validates the tag and changelog entry, resolves the version and source SHA.
-2. **`build-test-and-package`** — builds and tests the .NET solution, packs the five NuGet packages and the npm SDK package, builds both Docker images locally, and smoke-tests them together against a real PostgreSQL container (`docker run` + `curl` against `/health/ready` for the API, `/login` for Admin). Nothing is pushed, signed, or published in this job — if the smoke test fails, nothing downstream runs and no image has touched a registry.
+2. **`build-test-and-package`** — builds and tests the .NET solution, packs seven NuGet packages (Core, Infrastructure, Contracts, Client, DistributedCaching, Components and Theme) and the npm SDK package, qualifies the two engine `.nupkg` files in a clean consumer against real PostgreSQL, builds both Docker images locally, and smoke-tests them together (`docker run` + `curl` against `/health/ready` for the API, `/login` for Admin). Nothing is pushed, signed, or published in this job — if qualification or smoke tests fail, promotion cannot run. See [engine package qualification](engine-packages.md) for the exact gate and limitations.
 3. **`promote`** (`environment: release`, requires manual approval) — pushes both smoke-tested images to Docker Hub (plus `:latest` for a stable release), signs them with Cosign, generates an SBOM for each with Syft, publishes the NuGet packages and npm package via trusted OIDC publishing, and creates the GitHub Release with the SBOMs attached.
 
 Approve the `release` environment deployment in the Actions run when you're satisfied the smoke test passed and the build looks right. Nothing publishes anywhere until that approval.

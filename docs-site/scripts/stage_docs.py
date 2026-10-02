@@ -15,6 +15,7 @@ GUIDES = (
     "getting-started.md",
     "authentication-and-authorization.md",
     "integrating.md",
+    "engine-packages.md",
     "content-modeling.md",
     "content-components-and-choice-sets.md",
     "packages.md",
@@ -38,6 +39,8 @@ def extract_configuration(readme: str) -> str:
 def rewrite_links(text: str) -> str:
     replacements = {
         "(docs/provider-portability.md)": f"({REPOSITORY_URL}/blob/main/docs/provider-portability.md)",
+        "(provider-portability.md)": f"({REPOSITORY_URL}/blob/main/docs/provider-portability.md)",
+        "(evidence/2026-10-02-engine-packages.md)": f"({REPOSITORY_URL}/blob/main/docs/evidence/2026-10-02-engine-packages.md)",
         "(.env.example)": f"({REPOSITORY_URL}/blob/main/.env.example)",
         "../README.md#configuration": "configuration.md",
         "../sdk/typescript/README.md": "sdk/typescript.md",
