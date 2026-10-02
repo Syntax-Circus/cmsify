@@ -31,7 +31,10 @@ public static class ContentEditSupport
         field.CompositionMode == CompositionMode.Inline &&
         (field.TemplateId.HasValue || field.IsOpen || field.AllowedTypes.Any(a => a.AllowedTemplateId.HasValue));
 
-    public static async Task LoadPickListsAsync(CmsifyClient client, Guid workspaceId, IEnumerable<TemplateFieldResponse> fields, Dictionary<Guid, PickListResponse> into)
+    public static Task LoadPickListsAsync(CmsifyClient client, Guid workspaceId, IEnumerable<TemplateFieldResponse> fields, Dictionary<Guid, PickListResponse> into) =>
+        LoadPickListsAsync(new CmsifyClientContentEditorDataSource(client), workspaceId, fields, into);
+
+    public static async Task LoadPickListsAsync(IContentEditorDataSource dataSource, Guid workspaceId, IEnumerable<TemplateFieldResponse> fields, Dictionary<Guid, PickListResponse> into, CancellationToken ct = default)
     {
         var bindings = fields
             .Where(field => field.PrimitiveType == PrimitiveType.PickList)
@@ -44,34 +47,25 @@ public static class ContentEditSupport
 
         // Fire every distinct pick-list revision lookup concurrently rather than one at a time.
         var lookups = bindings
-            .Select(binding => (RevisionId: binding.Item2, Task: client.PickLists.GetRevisionAsync(workspaceId, binding.Item1, binding.Item2)))
+            .Select(binding => (RevisionId: binding.Item2, Task: dataSource.GetPickListRevisionAsync(workspaceId, binding.Item1, binding.Item2, ct)))
             .ToList();
 
-        try
-        {
-            await Task.WhenAll(lookups.Select(l => l.Task));
-        }
-        catch (CmsifyApiException)
-        {
-        }
+        await Task.WhenAll(lookups.Select(l => l.Task));
 
         foreach (var (revisionId, task) in lookups)
         {
-            try
+            var pickList = await task;
+            if (pickList is not null)
             {
-                var pickList = await task;
-                if (pickList is not null)
-                {
-                    into[revisionId] = pickList;
-                }
-            }
-            catch (CmsifyApiException)
-            {
+                into[revisionId] = pickList;
             }
         }
     }
 
-    public static async Task LoadReferenceOptionsAsync(CmsifyClient client, Guid workspaceId, IEnumerable<TemplateFieldResponse> fields, Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> into)
+    public static Task LoadReferenceOptionsAsync(CmsifyClient client, Guid workspaceId, IEnumerable<TemplateFieldResponse> fields, Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> into) =>
+        LoadReferenceOptionsAsync(new CmsifyClientContentEditorDataSource(client), workspaceId, fields, into);
+
+    public static async Task LoadReferenceOptionsAsync(IContentEditorDataSource dataSource, Guid workspaceId, IEnumerable<TemplateFieldResponse> fields, Dictionary<Guid, IReadOnlyList<ContentItemSummaryResponse>> into, CancellationToken ct = default)
     {
         var templateIds = fields
             .SelectMany(field => field.AllowedTypes.Where(a => a.AllowedTemplateId.HasValue).Select(a => a.AllowedTemplateId!.Value)
@@ -83,13 +77,13 @@ public static class ContentEditSupport
         // Every distinct referenced template's option list is independent of the others - fetch
         // them all concurrently instead of one at a time.
         var lookups = templateIds
-            .Select(templateId => (TemplateId: templateId, Task: client.Content.ListAsync(workspaceId, null, templateId, null, null, null)))
+            .Select(templateId => (TemplateId: templateId, Task: dataSource.ListReferenceOptionsAsync(workspaceId, templateId, ct)))
             .ToList();
         await Task.WhenAll(lookups.Select(l => l.Task));
 
         foreach (var (templateId, task) in lookups)
         {
-            into[templateId] = task.Result?.Items ?? [];
+            into[templateId] = await task;
         }
     }
 

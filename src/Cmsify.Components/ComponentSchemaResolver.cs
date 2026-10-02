@@ -8,8 +8,13 @@ public static class ComponentSchemaResolver
     // call's own dictionary up front), never mutated, so passing the same seed into several
     // concurrently-running calls (e.g. sibling Inline children loaded via Task.WhenAll) is safe -
     // each call still owns and mutates only its own private dictionary.
-    public static async Task<Dictionary<Guid, ComponentResponse>> ResolveAsync(
+    public static Task<Dictionary<Guid, ComponentResponse>> ResolveAsync(
         CmsifyClient client, Guid workspaceId, IEnumerable<Guid> rootComponentIds, CancellationToken ct = default,
+        IReadOnlyDictionary<Guid, ComponentResponse>? seed = null) =>
+        ResolveAsync(new Client.CmsifyClientContentEditorDataSource(client), workspaceId, rootComponentIds, ct, seed);
+
+    public static async Task<Dictionary<Guid, ComponentResponse>> ResolveAsync(
+        IContentEditorDataSource dataSource, Guid workspaceId, IEnumerable<Guid> rootComponentIds, CancellationToken ct = default,
         IReadOnlyDictionary<Guid, ComponentResponse>? seed = null)
     {
         var resolved = seed is null ? new Dictionary<Guid, ComponentResponse>() : new Dictionary<Guid, ComponentResponse>(seed);
@@ -23,7 +28,7 @@ public static class ComponentSchemaResolver
 
         while (layer.Count > 0)
         {
-            var lookups = layer.Select(id => (Id: id, Task: FetchOrNullAsync(client, workspaceId, id, ct))).ToList();
+            var lookups = layer.Select(id => (Id: id, Task: dataSource.GetComponentAsync(workspaceId, id, ct))).ToList();
             await Task.WhenAll(lookups.Select(l => l.Task));
 
             var nextLayer = new List<Guid>();
@@ -50,23 +55,5 @@ public static class ComponentSchemaResolver
         }
 
         return resolved;
-    }
-
-    // GetAsync returns null for a genuinely empty response, but the real CmsifyClient throws
-    // CmsifyApiException for any non-success status (e.g. a 404 for a deleted/inaccessible
-    // component) rather than returning null - both are treated the same way here: an unresolvable
-    // schema is a normal, renderable state, not something that should abort resolution of the other
-    // ids. Wrapping the fetch per-id like this (rather than around the whole Task.WhenAll) is what
-    // lets one failing id fail privately without cancelling the rest of its layer.
-    private static async Task<ComponentResponse?> FetchOrNullAsync(CmsifyClient client, Guid workspaceId, Guid componentId, CancellationToken ct)
-    {
-        try
-        {
-            return await client.Components.GetAsync(workspaceId, componentId, ct);
-        }
-        catch (CmsifyApiException)
-        {
-            return null;
-        }
     }
 }
