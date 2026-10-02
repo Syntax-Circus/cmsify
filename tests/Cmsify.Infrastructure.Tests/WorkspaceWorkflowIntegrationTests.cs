@@ -3,6 +3,7 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Core.Workspaces;
+using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Infrastructure.Extensions;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -225,6 +226,66 @@ public sealed class WorkspaceWorkflowIntegrationTests : IAsyncLifetime
         var audit = await db.AuditLogs.SingleAsync(log => log.EntityId == created.Id && log.Action == AuditAction.Updated, Ct);
         audit.ActorApiClientId.ShouldBe(apiActor.ApiClientId);
         audit.ActorUserId.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ReusedScope_AfterInterveningWriterAcceptsFreshRevision(bool delete, bool staleFirst)
+    {
+        using var provider = Provider();
+        var created = await CreateAsync(provider);
+        var unrelated = await CreateAsync(provider);
+        using var firstScope = provider.CreateScope();
+        var services = firstScope.ServiceProvider;
+        var firstDb = services.GetRequiredService<CmsifyDbContext>();
+        var unrelatedTracked = await firstDb.Workspaces.SingleAsync(item => item.Id == unrelated.Id, Ct);
+        var firstUpdate = (await services.GetRequiredService<IWorkspacesUpdateRequestHandler>()
+            .HandleAsync(new(created.Id, "First scope", created.Slug, null, created.Revision), Ct)).Value;
+        WorkspaceOutput otherUpdate;
+        using (var otherScope = provider.CreateScope())
+            otherUpdate = (await otherScope.ServiceProvider.GetRequiredService<IWorkspacesUpdateRequestHandler>()
+                .HandleAsync(new(created.Id, "Other writer", created.Slug, null, firstUpdate.Revision), Ct)).Value;
+
+        unrelatedTracked.Description = "Pending unrelated change";
+        firstDb.ChangeTracker.DetectChanges();
+        if (staleFirst)
+        {
+            // Exercise the repository's early revision-conflict return, not just handler prechecks.
+            var mutations = services.GetRequiredService<IWorkspaceMutationRepository>();
+            var error = delete
+                ? (await mutations.DeleteAsync(created.Id, created.Revision, _actor.UserId!.Value, Ct)).Errors[0]
+                : (await mutations.UpdateAsync(new(created.Id, "Stale", created.Slug, null), created.Revision, Ct)).Errors[0];
+            error.Kind.ShouldBe(ResultErrorKind.Conflict);
+            firstDb.Entry(unrelatedTracked).State.ShouldBe(EntityState.Modified);
+            using var afterStaleScope = provider.CreateScope();
+            var afterStaleDb = afterStaleScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            (await afterStaleDb.Workspaces.SingleAsync(item => item.Id == created.Id, Ct)).UpdatedAt.UtcTicks.ShouldBe(otherUpdate.Revision);
+            (await afterStaleDb.AuditLogs.CountAsync(log => log.EntityId == created.Id, Ct)).ShouldBe(3);
+            (await afterStaleDb.WebhookOutboxEvents.CountAsync(evt => evt.EntityId == created.Id, Ct)).ShouldBe(2);
+        }
+
+        var fresh = (await services.GetRequiredService<IWorkspacesGetRequestHandler>().HandleAsync(new(created.Id), Ct)).Value;
+        fresh.Revision.ShouldBe(otherUpdate.Revision);
+        var succeeded = delete
+            ? (await services.GetRequiredService<IWorkspacesDeleteRequestHandler>().HandleAsync(new(created.Id, fresh.Revision), Ct)).IsSuccess
+            : (await services.GetRequiredService<IWorkspacesUpdateRequestHandler>().HandleAsync(new(created.Id, "Fresh retry", created.Slug, null, fresh.Revision), Ct)).IsSuccess;
+        succeeded.ShouldBeTrue();
+        firstDb.ChangeTracker.Entries<Workspace>().Single(entry => entry.Entity.Id == unrelated.Id).Entity.ShouldBeSameAs(unrelatedTracked);
+        firstDb.Entry(unrelatedTracked).State.ShouldBe(EntityState.Unchanged);
+
+        using var verificationScope = provider.CreateScope();
+        var db = verificationScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        var stored = await db.Workspaces.IgnoreQueryFilters().SingleAsync(item => item.Id == created.Id, Ct);
+        stored.IsDeleted.ShouldBe(delete);
+        stored.UpdatedAt.UtcTicks.ShouldBeGreaterThan(otherUpdate.Revision);
+        stored.DeletedByUserId.ShouldBe(delete ? _actor.UserId : null);
+        stored.Name.ShouldBe(delete ? "Other writer" : "Fresh retry");
+        (await db.AuditLogs.CountAsync(log => log.EntityId == created.Id, Ct)).ShouldBe(4);
+        (await db.WebhookOutboxEvents.CountAsync(evt => evt.EntityId == created.Id, Ct)).ShouldBe(delete ? 2 : 3);
+        (await db.Workspaces.SingleAsync(item => item.Id == unrelated.Id, Ct)).Description.ShouldBe("Pending unrelated change");
     }
 
     private async Task<WorkspaceOutput> CreateAsync(ServiceProvider provider)

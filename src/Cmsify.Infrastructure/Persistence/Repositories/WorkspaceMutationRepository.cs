@@ -19,8 +19,7 @@ public sealed class WorkspaceMutationRepository(
     {
         var trackedBefore = dbContext.ChangeTracker.Entries().Select(entry => entry.Entity).ToHashSet(ReferenceEqualityComparer.Instance);
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        var entity = await dbContext.Workspaces.ScopeWorkspacesToReadableActor(dbContext, actor)
-            .FirstOrDefaultAsync(workspace => workspace.Id == command.Id, cancellationToken);
+        var entity = await LoadCurrentAsync(command.Id, cancellationToken);
         if (entity is null) return Result<WorkspaceDto>.Failure(_notFound);
         if (entity.UpdatedAt.UtcTicks != expectedRevision) return Result<WorkspaceDto>.Failure(_conflict);
         try
@@ -54,8 +53,7 @@ public sealed class WorkspaceMutationRepository(
     {
         var trackedBefore = dbContext.ChangeTracker.Entries().Select(entry => entry.Entity).ToHashSet(ReferenceEqualityComparer.Instance);
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        var entity = await dbContext.Workspaces.ScopeWorkspacesToReadableActor(dbContext, actor)
-            .FirstOrDefaultAsync(workspace => workspace.Id == id, cancellationToken);
+        var entity = await LoadCurrentAsync(id, cancellationToken);
         if (entity is null) return Result.Failure(_notFound);
         if (entity.UpdatedAt.UtcTicks != expectedRevision) return Result.Failure(_conflict);
         var revision = WorkspaceRevision.Next(entity.UpdatedAt);
@@ -79,6 +77,16 @@ public sealed class WorkspaceMutationRepository(
             DiscardMutation(entity, trackedBefore);
             throw;
         }
+    }
+
+    private Task<Workspace?> LoadCurrentAsync(Guid id, CancellationToken cancellationToken)
+    {
+        // A tracking query otherwise reuses cached values and xmin from an earlier operation.
+        // Replace only the mutation target; the scoped query still enforces visibility and soft-delete filters.
+        var tracked = dbContext.ChangeTracker.Entries<Workspace>().SingleOrDefault(entry => entry.Entity.Id == id);
+        if (tracked is not null) tracked.State = EntityState.Detached;
+        return dbContext.Workspaces.ScopeWorkspacesToReadableActor(dbContext, actor)
+            .FirstOrDefaultAsync(workspace => workspace.Id == id, cancellationToken);
     }
 
     private void DiscardMutation(Workspace workspace, HashSet<object> trackedBefore)
