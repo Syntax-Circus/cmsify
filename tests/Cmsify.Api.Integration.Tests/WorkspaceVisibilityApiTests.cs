@@ -138,6 +138,88 @@ public sealed class WorkspaceVisibilityApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
+    [Fact]
+    public async Task WorkspaceMutations_ReuseReturnedETagsAndPreserveRevisionValidationOrdering()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var login = await LoginAsync(client, "admin@example.test", "change-this-temporary-password");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+        var body = new SyntaxCircus.Cmsify.Contracts.WorkspaceRequest("HTTP workspace", $"http-{Guid.NewGuid():N}", null);
+        using var created = await client.PostAsJsonAsync("/api/v1/workspaces", body, ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var workspace = (await created.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.WorkspaceDto>(ct))!;
+        Assert.True(workspace.CanWrite);
+        Assert.EndsWith($"/api/v1/workspaces/{workspace.Id}", created.Headers.Location!.ToString());
+        var initialEtag = created.Headers.ETag!.ToString();
+        var etag = initialEtag;
+        for (var index = 0; index < 2; index++)
+        {
+            using var update = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{workspace.Id}")
+            {
+                Content = JsonContent.Create(body with { Name = $"HTTP update {index}" })
+            };
+            update.Headers.TryAddWithoutValidation("If-Match", etag);
+            using var response = await client.SendAsync(update, ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var updated = (await response.Content.ReadFromJsonAsync<SyntaxCircus.Cmsify.Contracts.WorkspaceDto>(ct))!;
+            Assert.Equal($"\"{updated.UpdatedAt.UtcTicks}\"", response.Headers.ETag!.ToString());
+            Assert.NotEqual(etag, response.Headers.ETag!.ToString());
+            etag = response.Headers.ETag!.ToString();
+        }
+        using (var stale = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{workspace.Id}")
+        {
+            Content = JsonContent.Create(body with { Slug = "INVALID" })
+        })
+        {
+            stale.Headers.TryAddWithoutValidation("If-Match", initialEtag);
+            using var response = await client.SendAsync(stale, ct);
+            Assert.Equal(HttpStatusCode.PreconditionFailed, response.StatusCode);
+        }
+        using (var invalid = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{workspace.Id}")
+        {
+            Content = JsonContent.Create(body with { Slug = "INVALID" })
+        })
+        {
+            invalid.Headers.TryAddWithoutValidation("If-Match", etag);
+            using var response = await client.SendAsync(invalid, ct);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>(ct);
+            Assert.Equal("Invalid workspace", problem!.Title);
+            Assert.Equal(Cmsify.Core.Domain.ValueObjects.SlugRules.ValidationMessage, problem.Detail);
+        }
+        using var delete = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/workspaces/{workspace.Id}");
+        delete.Headers.TryAddWithoutValidation("If-Match", etag);
+        using var deleted = await client.SendAsync(delete, ct);
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+    }
+
+    [Fact]
+    public async Task AdminWithReadOnlyGrant_HidesMutationsAndCannotCreateWorkspace()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (grantedId, _) = await SeedRestrictedUserAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var user = await db.Users.SingleAsync(user => user.Email == "reader@example.test", ct);
+            user.Role = UserRole.Admin;
+            await db.SaveChangesAsync(ct);
+        }
+        var login = await LoginAsync(client, "reader@example.test", "reader-password");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+        var invalidBody = new SyntaxCircus.Cmsify.Contracts.WorkspaceRequest("Workspace", "INVALID", null);
+        using var updated = await client.PutAsJsonAsync($"/api/v1/workspaces/{grantedId}", invalidBody, ct);
+        using var deleted = await client.DeleteAsync($"/api/v1/workspaces/{grantedId}", ct);
+        using var created = await client.PostAsJsonAsync("/api/v1/workspaces", invalidBody, ct);
+        Assert.Equal(HttpStatusCode.NotFound, updated.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, deleted.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, created.StatusCode);
+    }
+
     private static async Task<(Guid GrantedWorkspaceId, Guid HiddenWorkspaceId)> SeedRestrictedUserAsync(WebApplicationFactory<Program> factory)
     {
         using var scope = factory.Services.CreateScope();

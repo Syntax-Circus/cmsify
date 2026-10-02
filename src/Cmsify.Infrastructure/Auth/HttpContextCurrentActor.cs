@@ -6,12 +6,12 @@ namespace Cmsify.Infrastructure.Auth;
 
 public sealed class HttpContextCurrentActor : ICurrentActor
 {
-    private readonly IHttpContextAccessor httpContextAccessor;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
-    public HttpContextCurrentActor(IHttpContextAccessor httpContextAccessor) => this.httpContextAccessor = httpContextAccessor;
+    public HttpContextCurrentActor(IHttpContextAccessor? httpContextAccessor = null) => _httpContextAccessor = httpContextAccessor;
 
     private ICurrentActor Current =>
-        httpContextAccessor.HttpContext?.Items[CurrentActorHttpContextKeys.ItemName] as ICurrentActor
+        _httpContextAccessor?.HttpContext?.Items[CurrentActorHttpContextKeys.ItemName] as ICurrentActor
         ?? CurrentActorInfo.Anonymous;
 
     public Guid? UserId => Current.UserId;

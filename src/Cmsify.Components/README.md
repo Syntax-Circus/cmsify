@@ -28,6 +28,43 @@ If you'd rather compose the pieces yourself (for example, to drive field values 
 
 Add this to your app's `<head>` (in `App.razor` or equivalent). This is easy to miss — it is exactly the bug this note exists to prevent.
 
+## Direct inline editor lookups
+
+`ContentEditForm`, `FieldEditor`, and `InlineChildContentEditor` accept an optional
+`IContentEditorDataSource DataSource` for template get/list, immutable pick-list
+revision, content-reference options and component-schema lookups. Supply the same
+source with `WorkspaceId` at the root form; it is forwarded through recursive
+inline forms. An explicit `DataSource` takes precedence over `Client`. Existing
+SDK-only callers retain the `CmsifyClient` parameter and use
+`Client.CmsifyClientContentEditorDataSource`; supplying neither renders a warning.
+
+```razor
+<ContentEditForm TemplateVersion="@templateVersion" FieldValues="@fieldValues"
+                 DataSource="@editorDataSource" WorkspaceId="@workspaceId"
+                 FieldValueChanged="OnFieldChanged" OnSave="SaveAsync" />
+```
+
+The interface uses existing presentation DTOs and `CancellationToken`, without
+HTTP, SDK or EF types. Missing records use null/empty lookup results; unexpected
+failures and cancellation propagate. The SDK adapter retains existing API-failure
+policy: unavailable component schemas and pick-list revisions remain unresolved;
+template and content-reference API failures propagate. Its existing candidate
+and reference list bounds remain 100 and 20 respectively; this seam does not
+change pagination behavior.
+
+Lookups may run concurrently (sibling inline children, allowed-template candidates,
+pick-list/reference batches and each component graph layer). An embedded source
+must open and dispose its own operation scope and named handler for each call,
+resolve the current host actor there, and never retain a DbContext for a Blazor
+circuit or share one context across parallel calls.
+
+This is a transport-free **editor lookup** seam. The SDK smart panels and
+`ContentEditSupport.LoadInlineChildInstanceAsync` / `SaveInlineFieldAsync` still
+load and persist content through `CmsifyClient`, including version/ETag handling,
+asset loading and child deletion. Direct content persistence and reusable Admin
+routes remain separate extraction work. The direct-source bUnit fixtures prove
+presentation behavior, not database qualification or full embedded Admin parity.
+
 ## Extensibility: FieldTemplateOverrides
 
 `FieldEditor`, `ContentEditForm`, and `ContentEditPanel` all accept an optional `FieldTemplateOverrides` parameter:

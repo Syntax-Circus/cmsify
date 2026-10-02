@@ -7,5 +7,6 @@
 
   <ItemGroup>
     <PackageReference Include="FluentValidation" />
+    <PackageReference Include="SyntaxCircus.Common" />
   </ItemGroup>
 </Project>

@@ -538,7 +538,8 @@
       "cmsify.core": {
         "type": "Project",
         "dependencies": {
-          "FluentValidation": "[12.1.1, )"
+          "FluentValidation": "[12.1.1, )",
+          "SyntaxCircus.Common": "[0.1.3, )"
         }
       },
       "cmsify.infrastructure": {
@@ -708,6 +709,12 @@
           "BouncyCastle.Cryptography": "2.7.0",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
         }
+      },
+      "SyntaxCircus.Common": {
+        "type": "CentralTransitive",
+        "requested": "[0.1.3, )",
+        "resolved": "0.1.3",
+        "contentHash": "lEAI3tWVQp/PxyGLEEMh/Oip4OvIABO5Yi46S4mGZ3VKdfQ2m+BhsTtxCLdirFMzl8FxR2Bzi4IDX/fH2QqdpQ=="
       },
       "SyntaxCircus.EntityFrameworkCore.Postgres": {
         "type": "CentralTransitive",

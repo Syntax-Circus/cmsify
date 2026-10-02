@@ -1,12 +1,8 @@
 using Cmsify.Api.Auth;
-using Cmsify.Core.Domain.Enums;
-using Cmsify.Core.Domain.ValueObjects;
-using Cmsify.Core.Interfaces.Repositories;
-using Cmsify.Core.Interfaces.Services;
-using Cmsify.Core.Domain.Entities;
+using Cmsify.Core.Workspaces;
 using Microsoft.AspNetCore.Mvc;
-using System.Text.Json;
-using Cmsify.Infrastructure.Persistence;
+using System.Globalization;
+using SyntaxCircus.Common;
 using SyntaxCircus.Cmsify.Contracts;
 using ContractWorkspaceDto = SyntaxCircus.Cmsify.Contracts.WorkspaceDto;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
@@ -19,139 +15,77 @@ namespace Cmsify.Api.Controllers;
 [RequireRole(UserRole.Reader)]
 public sealed class WorkspacesController : ControllerBase
 {
-    private readonly IWorkspaceRepository workspaceRepository;
-    private readonly ICurrentActor currentActor;
-    private readonly IWorkspaceAuthorizationService workspaceAuthorization;
-    private readonly IWebhookOutbox webhookOutbox;
-    private readonly CmsifyDbContext dbContext;
-
-    public WorkspacesController(IWorkspaceRepository workspaceRepository, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox, CmsifyDbContext dbContext)
-    {
-        this.workspaceRepository = workspaceRepository;
-        this.currentActor = currentActor;
-        this.workspaceAuthorization = workspaceAuthorization;
-        this.webhookOutbox = webhookOutbox;
-        this.dbContext = dbContext;
-    }
-
     [HttpGet]
-    public async Task<ActionResult<SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractWorkspaceDto>>> List([FromQuery] PaginationQuery pagination, CancellationToken ct = default)
+    public async Task<ActionResult<PagedResponse<ContractWorkspaceDto>>> List([FromQuery] PaginationQuery pagination,
+        [FromServices] IWorkspacesListRequestHandler handler, CancellationToken ct = default)
     {
-        if (!ControllerHelpers.TryOffset(pagination.Page, pagination.PageSize, out var offset))
-        {
-            var countResult = await workspaceRepository.ListAsync(new PageRequest(0, 1), ct);
-            return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractWorkspaceDto>([], countResult.TotalCount, pagination.Page, pagination.PageSize));
-        }
-
-        var result = await workspaceRepository.ListAsync(new PageRequest(offset, pagination.PageSize), ct);
-        var workspaces = new List<ContractWorkspaceDto>(result.Items.Count);
-        foreach (var workspace in result.Items)
-        {
-            workspaces.Add(await WithCapabilitiesAsync(workspace, ct));
-        }
-
-        return Ok(new SyntaxCircus.Cmsify.Contracts.PagedResponse<ContractWorkspaceDto>(workspaces, result.TotalCount, pagination.Page, pagination.PageSize));
+        var result = await handler.HandleAsync(new(pagination.Page, pagination.PageSize), ct);
+        if (result.IsFailure) return Failure(result.Errors);
+        var page = result.Value;
+        return Ok(new PagedResponse<ContractWorkspaceDto>(page.Items.Select(ToContract).ToArray(), page.TotalCount, page.Page, page.PageSize));
     }
 
     [HttpPost]
     [RequireRole(UserRole.Admin)]
-    public async Task<ActionResult<ContractWorkspaceDto>> Create(WorkspaceRequest request, CancellationToken ct)
+    public async Task<ActionResult<ContractWorkspaceDto>> Create(WorkspaceRequest request,
+        [FromServices] IWorkspacesCreateRequestHandler handler, CancellationToken ct)
     {
-        if (!currentActor.IsSuperAdmin)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden);
-        }
-
-        if (!SlugRules.IsValid(request.Slug))
-        {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid workspace", SlugRules.ValidationMessage);
-        }
-
-        var workspace = await workspaceRepository.CreateAsync(new CreateWorkspaceCommand(request.Name, request.Slug, request.Description), ct);
-        Response.Headers.ETag = ToETag(workspace);
-        return CreatedAtAction(nameof(Get), new { id = workspace.Id }, await WithCapabilitiesAsync(workspace, ct));
+        var result = await handler.HandleAsync(new(request.Name, request.Slug, request.Description), ct);
+        if (result.IsFailure) return Failure(result.Errors);
+        var workspace = result.Value;
+        Response.Headers.ETag = ETag(workspace.Revision);
+        return CreatedAtAction(nameof(Get), new { id = workspace.Id }, ToContract(workspace));
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<ContractWorkspaceDto>> Get(Guid id, CancellationToken ct)
+    public async Task<ActionResult<ContractWorkspaceDto>> Get(Guid id,
+        [FromServices] IWorkspacesGetRequestHandler handler, CancellationToken ct)
     {
-        var workspace = await workspaceRepository.GetAsync(id, ct);
-        if (workspace is null)
-        {
-            return NotFound();
-        }
-
-        Response.Headers.ETag = ToETag(workspace);
-        return Ok(await WithCapabilitiesAsync(workspace, ct));
+        var result = await handler.HandleAsync(new(id), ct);
+        if (result.IsFailure) return Failure(result.Errors);
+        Response.Headers.ETag = ETag(result.Value.Revision);
+        return Ok(ToContract(result.Value));
     }
 
     [HttpPut("{id:guid}")]
     [RequireRole(UserRole.Admin)]
-    public async Task<ActionResult<ContractWorkspaceDto>> Update(Guid id, WorkspaceRequest request, CancellationToken ct)
+    public async Task<ActionResult<ContractWorkspaceDto>> Update(Guid id, WorkspaceRequest request,
+        [FromServices] IWorkspacesUpdateRequestHandler handler, CancellationToken ct)
     {
-        var existing = await workspaceRepository.GetAsync(id, ct);
-        if (existing is null)
-        {
-            return NotFound();
-        }
-
-        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(id, ct))
-        {
-            return NotFound();
-        }
-
-        if (!IfMatchMatches(existing))
-        {
-            return StatusCode(StatusCodes.Status412PreconditionFailed);
-        }
-
-        if (!SlugRules.IsValid(request.Slug))
-        {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid workspace", SlugRules.ValidationMessage);
-        }
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        var workspace = await workspaceRepository.UpdateAsync(new UpdateWorkspaceCommand(id, request.Name, request.Slug, request.Description), ct);
-        var occurredAt = DateTimeOffset.UtcNow;
-        webhookOutbox.Enqueue("workspace.updated", id, id, JsonSerializer.SerializeToElement(new { workspaceId = id, workspace.Name, workspace.Slug }), occurredAt);
-        await dbContext.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        Response.Headers.ETag = ToETag(workspace);
-        return Ok(await WithCapabilitiesAsync(workspace, ct));
+        var result = await handler.HandleAsync(new(id, request.Name, request.Slug, request.Description, ExpectedRevision()), ct);
+        if (result.IsFailure) return Failure(result.Errors);
+        Response.Headers.ETag = ETag(result.Value.Revision);
+        return Ok(ToContract(result.Value));
     }
 
     [HttpDelete("{id:guid}")]
     [RequireRole(UserRole.Admin)]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Delete(Guid id, [FromServices] IWorkspacesDeleteRequestHandler handler, CancellationToken ct)
     {
-        var existing = await workspaceRepository.GetAsync(id, ct);
-        if (existing is null)
-        {
-            return NotFound();
-        }
-
-        if (!await workspaceAuthorization.CanWriteWorkspaceAsync(id, ct))
-        {
-            return NotFound();
-        }
-
-        if (!IfMatchMatches(existing))
-        {
-            return StatusCode(StatusCodes.Status412PreconditionFailed);
-        }
-
-        await workspaceRepository.SoftDeleteAsync(id, currentActor.UserId!.Value, ct);
-        return NoContent();
+        var result = await handler.HandleAsync(new(id, ExpectedRevision()), ct);
+        return result.IsFailure ? Failure(result.Errors) : NoContent();
     }
 
-    private bool IfMatchMatches(Cmsify.Core.Interfaces.Repositories.WorkspaceDto workspace)
+    private long? ExpectedRevision()
     {
-        var ifMatch = Request.Headers.IfMatch.ToString();
-        return !string.IsNullOrWhiteSpace(ifMatch) && string.Equals(ifMatch, ToETag(workspace), StringComparison.Ordinal);
+        var header = Request.Headers.IfMatch.ToString();
+        if (header.Length < 2 || header[0] != '"' || header[^1] != '"') return null;
+        return long.TryParse(header.AsSpan(1, header.Length - 2), NumberStyles.None, CultureInfo.InvariantCulture, out var revision)
+            && string.Equals(header, ETag(revision), StringComparison.Ordinal) ? revision : null;
     }
 
-    private static string ToETag(Cmsify.Core.Interfaces.Repositories.WorkspaceDto workspace) => $"\"{workspace.UpdatedAt.UtcTicks}\"";
+    private static string ETag(long revision) => $"\"{revision.ToString(CultureInfo.InvariantCulture)}\"";
+    private static ContractWorkspaceDto ToContract(WorkspaceOutput workspace) =>
+        new(workspace.Id, workspace.Name, workspace.Slug, workspace.Description, workspace.CreatedAt, workspace.UpdatedAt, workspace.CanWrite);
 
-    private async Task<ContractWorkspaceDto> WithCapabilitiesAsync(Cmsify.Core.Interfaces.Repositories.WorkspaceDto workspace, CancellationToken ct) =>
-        workspace.ToContract(await workspaceAuthorization.CanWriteWorkspaceAsync(workspace.Id, ct));
+    private ActionResult Failure(IReadOnlyList<ResultError> errors) => errors[0].Kind switch
+    {
+        ResultErrorKind.Unauthenticated => StatusCode(StatusCodes.Status401Unauthorized),
+        ResultErrorKind.Forbidden => StatusCode(StatusCodes.Status403Forbidden),
+        ResultErrorKind.NotFound => NotFound(),
+        ResultErrorKind.Conflict => StatusCode(StatusCodes.Status412PreconditionFailed),
+        ResultErrorKind.Validation => this.Error(StatusCodes.Status422UnprocessableEntity,
+            "validation-failed", "Invalid workspace", errors[0].Message),
+        _ => throw new InvalidOperationException("Unexpected workspace workflow outcome.")
+    };
 }

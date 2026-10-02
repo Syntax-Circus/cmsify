@@ -25,6 +25,8 @@ public sealed class WorkspaceRepository : IWorkspaceRepository
     public async Task<WorkspaceDto> CreateAsync(CreateWorkspaceCommand command, CancellationToken ct = default)
     {
         var entity = new Workspace { Name = command.Name, Slug = command.Slug, Description = command.Description };
+        entity.CreatedAt = WorkspaceRevision.Normalize(entity.CreatedAt);
+        entity.UpdatedAt = WorkspaceRevision.Normalize(entity.UpdatedAt);
         dbContext.Workspaces.Add(entity);
         await dbContext.SaveChangesAsync(ct);
         return entity.ToDto();
