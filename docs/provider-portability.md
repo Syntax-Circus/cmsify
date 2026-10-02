@@ -104,3 +104,47 @@ includes the full supplied configuration snapshot at each registration call.
 This foundation does not qualify a complete embedded engine or SQLite deployment.
 It does not change workspace authorization, host grants, authentication schemes,
 provider selection, migrations, or package versions.
+
+## Direct workspace workflows
+
+Infrastructure composition registers Core's five `IWorkspaces*RequestHandler`
+interfaces (`List`, `Create`, `Get`, `Update`, `Delete`) in `Cmsify.Core.Workspaces`.
+Hosts call `HandleAsync` with application-owned request records and their scoped
+`ICurrentActor`; no HTTP context, SDK, local session or second identity authority
+is required. Expected failures use public `SyntaxCircus.Common` **0.1.3** results.
+This qualification covers workspaces only; other management workflows still use
+their existing entry points.
+
+Anonymous actors are denied. Mutations require `Admin`; creation additionally
+requires super-admin. Reads preserve existing workspace scope and write capability.
+Updates/deletion hide inaccessible or non-writable IDs as not-found. A host can
+supply existing workspace scope or super-admin authority; registration creates
+no grants. Deletion requires a user subject for soft-delete attribution, so an
+actor without one receives an expected forbidden result.
+
+```csharp
+// Inject IWorkspacesUpdateRequestHandler into the host entry point as updateWorkspace.
+var result = await updateWorkspace.HandleAsync(new WorkspacesUpdateRequest(
+        workspace.Id, "New name", workspace.Slug, workspace.Description,
+        workspace.Revision), cancellationToken);
+```
+
+Update and delete requests carry nullable expected revisions (UTC ticks), while
+HTTP retains exact quoted-tick ETag/If-Match parsing. Outputs include workspace
+data, `Revision`, and `CanWrite`; list output includes page, page size and total.
+The returned revision can be used immediately for another mutation. Workspace
+creation and revision-checked mutations normalize timestamps to PostgreSQL
+microseconds, and every successful mutation advances the revision by at least
+one microsecond even when the clock has not advanced. Missing/stale revisions
+are conflicts. Existing name/slug/description command constraints apply after
+authorization and, on update, resource visibility and revision checks.
+
+`IWorkspaceMutationRepository` is limited to atomic revision-checked update and
+delete. Infrastructure uses the loaded `xmin` token inside a transaction;
+concurrent losers return conflict. Update persists the existing
+`workspace.updated` outbox payload and audit with the workspace, or none of them.
+Deletion atomically soft-deletes with actor attribution. The PostgreSQL integration
+suite verifies successive updates, actual outbox constraint failure rollback and
+two gated contenders for one revision (update/update and update/delete), plus
+external subject audit with empty local user/session tables. SQLite remains
+unqualified for deployment as described above.

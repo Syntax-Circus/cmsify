@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Cmsify.Core.Workspaces;
 
 namespace Cmsify.Infrastructure.Extensions;
 
@@ -80,6 +81,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<SecretProtectionOptions>, SecretProtectionOptionsValidator>();
         services.AddSingleton<ISecretProtector, AesSecretProtector>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
+        services.AddScoped<IWorkspaceMutationRepository, WorkspaceMutationRepository>();
+        services.AddScoped<IWorkspacesListRequestHandler, WorkspacesListRequestHandler>();
+        services.AddScoped<IWorkspacesCreateRequestHandler, WorkspacesCreateRequestHandler>();
+        services.AddScoped<IWorkspacesGetRequestHandler, WorkspacesGetRequestHandler>();
+        services.AddScoped<IWorkspacesUpdateRequestHandler, WorkspacesUpdateRequestHandler>();
+        services.AddScoped<IWorkspacesDeleteRequestHandler, WorkspacesDeleteRequestHandler>();
         services.AddScoped<ITemplateRepository, TemplateRepository>();
         services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();
         services.AddScoped<IMediaAssetRepository, MediaAssetRepository>();

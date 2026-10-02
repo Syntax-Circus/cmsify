@@ -818,11 +818,6 @@
         "resolved": "10.2.3",
         "contentHash": "nthWONRs/FJ4yyG206g1cC52WEG8EqrjuMWjGdR+5XG7lbjFto6NqcI9EMICgVFom/UivIjUVwI76ZHbHwTPfQ=="
       },
-      "SyntaxCircus.Common": {
-        "type": "Transitive",
-        "resolved": "0.1.3",
-        "contentHash": "lEAI3tWVQp/PxyGLEEMh/Oip4OvIABO5Yi46S4mGZ3VKdfQ2m+BhsTtxCLdirFMzl8FxR2Bzi4IDX/fH2QqdpQ=="
-      },
       "System.CodeDom": {
         "type": "Transitive",
         "resolved": "6.0.0",
@@ -957,7 +952,8 @@
       "cmsify.core": {
         "type": "Project",
         "dependencies": {
-          "FluentValidation": "[12.1.1, )"
+          "FluentValidation": "[12.1.1, )",
+          "SyntaxCircus.Common": "[0.1.3, )"
         }
       },
       "cmsify.infrastructure": {
@@ -1208,6 +1204,12 @@
           "Serilog.Sinks.Console": "6.1.1",
           "Serilog.Sinks.File": "7.0.0"
         }
+      },
+      "SyntaxCircus.Common": {
+        "type": "CentralTransitive",
+        "requested": "[0.1.3, )",
+        "resolved": "0.1.3",
+        "contentHash": "lEAI3tWVQp/PxyGLEEMh/Oip4OvIABO5Yi46S4mGZ3VKdfQ2m+BhsTtxCLdirFMzl8FxR2Bzi4IDX/fH2QqdpQ=="
       },
       "SyntaxCircus.DotEnv": {
         "type": "CentralTransitive",

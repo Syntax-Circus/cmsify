@@ -2,6 +2,8 @@ using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using SyntaxCircus.Cmsify.Contracts;
+using Cmsify.Core.Workspaces;
+using Shouldly;
 
 namespace Cmsify.Api.Integration.Tests;
 
@@ -82,8 +84,28 @@ public sealed class ContractOwnershipTests
         }
     }
 
+    [Fact]
+    public void PayloadGuard_ExcludesOnlyExplicitServicesAndRejectsBoundApplicationShapes()
+    {
+        var mixed = typeof(PayloadProbe).GetMethod(nameof(PayloadProbe.Mixed))!;
+        var rejected = GetPayloadTypes(mixed).Where(type => !IsAllowedPayloadType(type)).ToArray();
+        rejected.ShouldBe([typeof(WorkspacesCreateRequest), typeof(WorkspaceOutput)]);
+        var undecorated = typeof(PayloadProbe).GetMethod(nameof(PayloadProbe.Undecorated))!;
+        GetPayloadTypes(undecorated).Where(type => !IsAllowedPayloadType(type))
+            .ShouldBe([typeof(IWorkspacesCreateRequestHandler)]);
+    }
+
+    private sealed class PayloadProbe
+    {
+        public static Task<ActionResult<WorkspaceOutput>> Mixed(WorkspacesCreateRequest body,
+            [FromServices] IWorkspacesCreateRequestHandler handler) => throw new NotSupportedException();
+        public static void Undecorated(IWorkspacesCreateRequestHandler handler) { }
+    }
+
     private static IEnumerable<Type> GetPayloadTypes(MethodInfo method) =>
-        method.GetParameters().SelectMany(parameter => FlattenPayloadType(parameter.ParameterType))
+        method.GetParameters()
+            .Where(parameter => parameter.GetCustomAttribute<FromServicesAttribute>() is null)
+            .SelectMany(parameter => FlattenPayloadType(parameter.ParameterType))
             .Concat(FlattenPayloadType(method.ReturnType));
 
     private static IEnumerable<Type> FlattenPayloadType(Type type)
