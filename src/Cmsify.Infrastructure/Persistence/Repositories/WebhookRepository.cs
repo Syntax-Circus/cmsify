@@ -2,6 +2,7 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.BackgroundServices;
+using Cmsify.Infrastructure.Persistence.Providers;
 using Cmsify.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -17,6 +18,7 @@ public sealed class WebhookRepository : IWebhookRepository
     private readonly ICurrentActor currentActor;
     private readonly ISecretProtector secretProtector;
     private readonly string[] configuredKeyIds;
+    private readonly IWebhookQueries queries;
 
     public WebhookRepository(CmsifyDbContext dbContext, ICurrentActor currentActor, ISecretProtector secretProtector, IOptions<SecretProtectionOptions> options)
     {
@@ -24,6 +26,7 @@ public sealed class WebhookRepository : IWebhookRepository
         this.currentActor = currentActor;
         this.secretProtector = secretProtector;
         configuredKeyIds = options.Value.EncryptionKeys.Keys.ToArray();
+        queries = WebhookQueries.Create(dbContext);
     }
 
     public async Task<WebhookEndpointDto?> GetEndpointAsync(Guid id, CancellationToken ct = default) =>
@@ -123,16 +126,7 @@ public sealed class WebhookRepository : IWebhookRepository
     {
         ValidateClaimArguments(workerId, leaseDuration, limit);
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        var logs = await dbContext.WebhookDeliveryLogs
-            .FromSqlInterpolated($"""
-                SELECT * FROM webhook_delivery_logs
-                WHERE NOT is_delivered AND NOT is_failed AND next_retry_at <= {now} AND (lease_expires_at IS NULL OR lease_expires_at <= {now})
-                  AND EXISTS (SELECT 1 FROM webhook_endpoints endpoint WHERE endpoint.id = webhook_delivery_logs.webhook_endpoint_id AND endpoint.is_active AND NOT endpoint.is_deleted)
-                ORDER BY next_retry_at
-                FOR UPDATE SKIP LOCKED
-                LIMIT {limit}
-                """)
-            .ToListAsync(ct);
+        var logs = await queries.LockPendingDeliveriesAsync(now, limit, ct);
 
         if (logs.Count == 0)
         {
@@ -189,13 +183,7 @@ public sealed class WebhookRepository : IWebhookRepository
     {
         ValidateClaimArguments(workerId, leaseDuration, limit);
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        var events = await dbContext.WebhookOutboxEvents.FromSqlInterpolated($"""
-            SELECT * FROM webhook_outbox_events
-            WHERE processed_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at <= {now})
-            ORDER BY occurred_at, id
-            FOR UPDATE SKIP LOCKED
-            LIMIT {limit}
-            """).ToListAsync(ct);
+        var events = await queries.LockPendingOutboxEventsAsync(now, limit, ct);
 
         var reclaimed = new Dictionary<Guid, bool>();
         foreach (var evt in events)
@@ -220,15 +208,9 @@ public sealed class WebhookRepository : IWebhookRepository
     public async Task<bool> MaterializeOutboxEventAsync(ClaimedWebhookOutboxEventDto claim, DateTimeOffset now, CancellationToken ct = default)
     {
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        // The lock is held through intent creation and completion.  A reclaimer
-        // uses SKIP LOCKED, so it cannot replace this claim after it is fenced.
-        var evt = await dbContext.WebhookOutboxEvents.FromSqlInterpolated($"""
-            SELECT * FROM webhook_outbox_events
-            WHERE id = {claim.Id} AND processed_at IS NULL
-              AND lease_owner = {claim.LeaseOwner} AND lease_token = {claim.LeaseToken}
-              AND lease_expires_at > {now}
-            FOR UPDATE
-            """).SingleOrDefaultAsync(ct);
+        // Hold the provider's lock/reservation through intent creation and completion,
+        // so a reclaimer cannot replace the claim after it has been fenced.
+        var evt = await queries.LockOwnedOutboxEventAsync(claim, now, ct);
         if (evt is null)
         {
             await transaction.RollbackAsync(ct);
