@@ -19,6 +19,16 @@ jobs:
         run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
       - name: Run full test suite
         run: dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Pack and qualify the engine as an isolated consumer
+        run: |
+          VERSION=0.0.0-package-test
+          dotnet build src/Cmsify.Infrastructure/Cmsify.Infrastructure.csproj --configuration Release --no-restore -p:CmsifyReleaseBuild=true -p:Version="$VERSION"
+          dotnet pack src/Cmsify.Core/Cmsify.Core.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$GITHUB_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
+          dotnet pack src/Cmsify.Infrastructure/Cmsify.Infrastructure.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$GITHUB_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
+          node scripts/release/verify-engine-packages.mjs --packages artifacts/nuget --version "$VERSION" --source-sha "$GITHUB_SHA"
       - name: Collect raw coverage
         if: github.event_name != 'pull_request'
         run: dotnet test Cmsify.slnx --configuration Release --no-build --coverage --coverage-output-format cobertura --results-directory artifacts/coverage --verbosity minimal
