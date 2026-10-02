@@ -36,7 +36,7 @@ public static class ServiceCollectionExtensions
             ?.ImplementationInstance as InfrastructureRegistration;
         if (existing is not null)
         {
-            if (existing.Options != options || !existing.Settings.SequenceEqual(settings))
+            if (existing.Options != options || !existing.Settings.SequenceEqual(settings, ConfigurationEntryComparer.Instance))
                 throw new InvalidOperationException("AddCmsifyInfrastructure was called with conflicting options or configuration settings.");
             return services;
         }
@@ -166,4 +166,17 @@ public static class ServiceCollectionExtensions
     }
 
     private sealed record InfrastructureRegistration(CmsifyInfrastructureOptions Options, KeyValuePair<string, string?>[] Settings);
+
+    private sealed class ConfigurationEntryComparer : IEqualityComparer<KeyValuePair<string, string?>>
+    {
+        internal static readonly ConfigurationEntryComparer Instance = new();
+
+        public bool Equals(KeyValuePair<string, string?> left, KeyValuePair<string, string?> right)
+            => StringComparer.OrdinalIgnoreCase.Equals(left.Key, right.Key)
+                && StringComparer.Ordinal.Equals(left.Value, right.Value);
+
+        public int GetHashCode(KeyValuePair<string, string?> entry)
+            => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(entry.Key),
+                entry.Value is null ? 0 : StringComparer.Ordinal.GetHashCode(entry.Value));
+    }
 }

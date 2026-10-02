@@ -63,6 +63,36 @@ public sealed class InfrastructureRegistrationTests
     }
 
     [Fact]
+    public void RepeatedRegistration_AcceptsEquivalentDifferentlyCasedKeysWithoutChangingServices()
+    {
+        var services = Services();
+        var configuration = Configuration();
+        services.AddCmsifyInfrastructure(configuration);
+        var descriptors = services.ToArray();
+        var equivalent = new ConfigurationBuilder().AddInMemoryCollection(configuration.AsEnumerable()
+            .Select(entry => new KeyValuePair<string, string?>(entry.Key.ToUpperInvariant(), entry.Value))).Build();
+
+        services.AddCmsifyInfrastructure(equivalent);
+
+        services.ShouldBe(descriptors);
+    }
+
+    [Fact]
+    public void RepeatedRegistration_RejectsDifferentlyCasedValuesWithoutChangingServices()
+    {
+        var services = Services();
+        var configuration = Configuration();
+        services.AddCmsifyInfrastructure(configuration);
+        var descriptors = services.ToArray();
+        var different = Configuration();
+        different["Secrets:ActiveKeyId"] = "TEST";
+
+        Should.Throw<InvalidOperationException>(() => services.AddCmsifyInfrastructure(different));
+
+        services.ShouldBe(descriptors);
+    }
+
+    [Fact]
     public void HostAudit_WithoutHostActorFailsClosed()
     {
         var services = Services();
