@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-10-02
+
+### Added
+
+- Opt-in host-owned audit attribution and independently selectable background workers for embedded hosts. Repeated infrastructure registration is idempotent; conflicting options or configuration are rejected.
+- Five transport-neutral workspace handlers shared by direct callers and the existing HTTP API, with application-owned authorization and atomic PostgreSQL revision, audit and outbox persistence.
+- `IContentEditorDataSource` for direct nested-editor lookups without calling the CMS API. Explicit data sources take precedence throughout recursive forms; existing SDK consumers, callbacks and editing safeguards remain supported.
+
+### Fixed
+
+- Workspace updates and deletes refresh tracked values and concurrency tokens before revision checks, allowing a reused scope to accept the current revision after another writer changes the workspace.
+- Equivalent infrastructure configuration keys are compared case-insensitively while configuration values retain exact comparison.
+
+### Changed
+
+- **PostgreSQL remains the default for standalone applications and published Docker containers.** Host audit attribution is opt-in; existing registration retains HTTP auditing and all six workers. Public API contracts and ETag behavior are preserved.
+- This release establishes embedding foundations, not complete embedded CMS or SQLite deployment support. Remaining workflows, direct editor persistence, reusable Admin routing, host grants/circuit revocation and full provider qualification remain separate work.
+- Expanded regression coverage for direct handlers, real-provider concurrency and rollback, recursive editor behavior, host registration and application boundaries. The final pre-merge solution run passed 1,129 tests with no failures or skips; TypeScript and strict documentation checks also passed.
+
 ## [0.7.8] - 2026-10-01
 
 ### Fixed
