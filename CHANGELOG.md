@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-02
+
+### Fixed
+
+- SQLite webhook outbox claims, delivery claims and owned-event materialization now use provider-aware queries inside repository-owned writer-reserving transactions, preserving lease fencing, bounded batches and atomic delivery creation.
+
+### Added
+
+- Real file-backed SQLite and migrated PostgreSQL regressions for competing claims, eligibility and ordering, lease expiry and stale-token rejection, deduplication, rollback/retry and bounded query counts.
+
+### Changed
+
+- Webhook selection and locking queries are isolated within Infrastructure. PostgreSQL SQL, mappings, migrations and standalone/Docker defaults remain unchanged; Core entities and public contracts remain provider-neutral.
+- This bounded repository fix does not establish complete SQLite deployment support. Production migrations/registration, webhook secret rotation, media reconciliation, other bulk-update paths and JSON/search remain separate qualification gates.
+
 ## [0.8.1] - 2026-10-02
 
 ### Fixed
