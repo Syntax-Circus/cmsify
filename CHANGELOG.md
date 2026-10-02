@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-02
+
+### Added
+
+- Reusable `SyntaxCircus.Cmsify.Core` and `SyntaxCircus.Cmsify.Infrastructure` NuGet packages for the existing .NET 10 engine. Both retain AGPL-3.0-or-later, existing assembly names and namespaces, and include license, README and source metadata.
+- Isolated NuGet-only consumer validation on pull requests, main and before release promotion. The gate verifies package contents and dependencies, all 17 PostgreSQL migrations, all five direct workspace handlers, optimistic concurrency, persistence/outbox and scoped host auditing without CMS HTTP calls or local credentials.
+- Engine package usage and qualification documentation, including first-publication ownership and trusted-publisher prerequisites.
+
+### Changed
+
+- Release packing and version-conflict checks now cover seven NuGet packages, including both engine packages. Existing SDK, contracts, components and theme licensing is unchanged.
+- PostgreSQL and standalone/Docker runtime defaults remain unchanged. Package qualification covers the bounded PostgreSQL workspace/audit path; complete embedding, all workflows/workers and SQLite deployment remain separate qualification gates.
+
+### Fixed
+
+- Included the engine package guide in public documentation staging/navigation, with regression coverage for repository-only links.
+
 ## [0.7.10] - 2026-10-02
 
 ### Fixed
