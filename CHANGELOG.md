@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-02
+
+### Fixed
+
+- SQLite template publication now advances archived versions' concurrency tokens atomically with their status, preventing stale tracked saves from overwriting archival. Provider-specific mutation queries remain in Infrastructure; Core entities and public contracts are unchanged.
+- Repository-owned template publication now commits archival, draft publication and the current-version pointer together, rolling back on failure. Exhausted SQLite revision tokens fail without wrapping or leaving partial archival. Caller-owned transactions retain their own commit/rollback responsibility.
+
+### Added
+
+- Real SQLite and migrated PostgreSQL regression coverage for stale writes, affected-set scoping, token exhaustion, rollback and caller-owned transaction behavior.
+
+### Changed
+
+- PostgreSQL remains the default for standalone applications and published Docker containers; its generated concurrency tokens, mappings and migration history are unchanged. This bounded repository fix does not establish complete SQLite deployment support: other bulk-update paths, worker SQL, migrations/registration and search parity remain qualification gates.
+
 ## [0.8.0] - 2026-10-02
 
 ### Added
