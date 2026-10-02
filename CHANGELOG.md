@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-10-02
+
+### Fixed
+
+- Stabilized the pinned-webhook TLS identity tests on shared CI runners by replacing their one-second handshake deadline with a bounded test-only connection budget and cancellation-aware server cleanup. Production transport timeouts, address pinning, and certificate validation are unchanged.
+- Added delayed-handshake coverage for successful original-host SNI validation and wrong-host certificate rejection; the rejection test now explicitly verifies an authentication failure.
+
 ## [0.7.9] - 2026-10-02
 
 ### Added

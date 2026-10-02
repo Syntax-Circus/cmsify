@@ -6,11 +6,16 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.BackgroundServices;
+using Shouldly;
 
 namespace Cmsify.Infrastructure.Tests;
 
 public sealed class PinnedWebhookTransportTests
 {
+    // These tests verify TLS identity, not handshake latency on a shared CI runner.
+    private static readonly TimeSpan TlsConnectTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan TlsTestTimeout = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task SendAsync_RejectsMissingPins_BeforeConnecting()
     {
@@ -124,48 +129,71 @@ public sealed class PinnedWebhookTransportTests
         Assert.Equal(2, connector.CallCount);
     }
 
-    [Fact]
-    public async Task SendAsync_ConnectsPinnedSocketWhileUsingOriginalHostForTlsSniAndValidation()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1500)]
+    public async Task SendAsync_ConnectsPinnedSocketWhileUsingOriginalHostForTlsSniAndValidation(int handshakeDelayMilliseconds)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TlsTestTimeout);
         using var certificate = CreateCertificate("hooks.example.test");
         using var listener = StartListener();
         var uri = new Uri($"https://hooks.example.test:{GetPort(listener)}/hook");
         var observedServerName = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var server = ServeTlsResponseAsync(listener, certificate, observedServerName, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-        using var handler = PinnedWebhookTransport.CreateHandler(new SocketWebhookConnector(), TimeSpan.FromSeconds(1));
+        var server = ServeTlsResponseAsync(listener, certificate, observedServerName, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", handshakeDelayMilliseconds, deadline.Token);
+        using var handler = PinnedWebhookTransport.CreateHandler(new SocketWebhookConnector(), TlsConnectTimeout);
         // Test-only trust seam: production handler deliberately keeps the platform's normal validation callback.
         handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, errors) =>
             (errors & SslPolicyErrors.RemoteCertificateNameMismatch) == 0;
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback));
 
-        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        try
+        {
+            using var response = await client.SendAsync(request, deadline.Token);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("hooks.example.test", await observedServerName.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
-        await server;
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+            (await observedServerName.Task.WaitAsync(deadline.Token)).ShouldBe("hooks.example.test");
+            await server;
+        }
+        finally
+        {
+            await deadline.CancelAsync();
+            _ = await Record.ExceptionAsync(() => server);
+        }
     }
 
-    [Fact]
-    public async Task SendAsync_RejectsCertificateForWrongOriginalHost()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1500)]
+    public async Task SendAsync_RejectsCertificateForWrongOriginalHost(int handshakeDelayMilliseconds)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TlsTestTimeout);
         using var certificate = CreateCertificate("other.example.test");
         using var listener = StartListener();
         var uri = new Uri($"https://hooks.example.test:{GetPort(listener)}/hook");
         var observedServerName = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var server = ServeTlsResponseAsync(listener, certificate, observedServerName, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-        using var handler = PinnedWebhookTransport.CreateHandler(new SocketWebhookConnector(), TimeSpan.FromSeconds(1));
+        var server = ServeTlsResponseAsync(listener, certificate, observedServerName, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", handshakeDelayMilliseconds, deadline.Token);
+        using var handler = PinnedWebhookTransport.CreateHandler(new SocketWebhookConnector(), TlsConnectTimeout);
         handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, errors) =>
             (errors & SslPolicyErrors.RemoteCertificateNameMismatch) == 0;
         using var client = new HttpClient(handler);
         using var request = CreatePinnedRequest(uri, CreateValidated(uri, IPAddress.Loopback));
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(request, TestContext.Current.CancellationToken));
-
-        Assert.Equal("hooks.example.test", await observedServerName.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
-        // Depending on platform and socket timing, the rejected client handshake reaches the server as either
-        // a TLS exception or a clean EOF. Both are valid after the client rejection and SNI are verified above.
-        _ = await Record.ExceptionAsync(() => server);
+        try
+        {
+            var exception = await Should.ThrowAsync<HttpRequestException>(() => client.SendAsync(request, deadline.Token));
+            exception.InnerException.ShouldBeOfType<AuthenticationException>();
+            (await observedServerName.Task.WaitAsync(deadline.Token)).ShouldBe("hooks.example.test");
+        }
+        finally
+        {
+            // The rejected handshake can reach the server as a TLS exception or a clean EOF.
+            // Cancel and observe the server even when a client assertion fails.
+            await deadline.CancelAsync();
+            _ = await Record.ExceptionAsync(() => server);
+        }
     }
 
     [Fact]
@@ -277,13 +305,15 @@ public sealed class PinnedWebhookTransportTests
         return false;
     }
 
-    private static async Task ServeTlsResponseAsync(TcpListener listener, X509Certificate2 certificate, TaskCompletionSource<string?> observedServerName, string response)
+    private static async Task ServeTlsResponseAsync(TcpListener listener, X509Certificate2 certificate, TaskCompletionSource<string?> observedServerName, string response, int handshakeDelayMilliseconds, CancellationToken ct)
     {
         try
         {
-            using var socket = await listener.AcceptTcpClientAsync();
+            using var socket = await listener.AcceptTcpClientAsync(ct);
             await using var networkStream = socket.GetStream();
             await using var tlsStream = new SslStream(networkStream, leaveInnerStreamOpen: false);
+            // Model runner scheduling delays without turning identity checks into latency assertions.
+            await Task.Delay(handshakeDelayMilliseconds, ct);
             await tlsStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
             {
                 ServerCertificateSelectionCallback = (_, hostName) =>
@@ -292,9 +322,9 @@ public sealed class PinnedWebhookTransportTests
                     return certificate;
                 },
                 EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
-            });
-            await ReadHeadersAsync(tlsStream);
-            await tlsStream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(response));
+            }, ct);
+            await ReadHeadersAsync(tlsStream, ct);
+            await tlsStream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(response), ct);
         }
         catch (Exception exception)
         {
@@ -303,13 +333,13 @@ public sealed class PinnedWebhookTransportTests
         }
     }
 
-    private static async Task<bool> ReadHeadersAsync(Stream stream)
+    private static async Task<bool> ReadHeadersAsync(Stream stream, CancellationToken ct = default)
     {
         var received = new List<byte>();
         var buffer = new byte[1];
         while (received.Count < 16_384)
         {
-            var read = await stream.ReadAsync(buffer);
+            var read = await stream.ReadAsync(buffer, ct);
             if (read == 0)
             {
                 return false;
