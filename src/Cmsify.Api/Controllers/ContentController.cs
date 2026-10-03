@@ -263,6 +263,7 @@ public sealed class ContentController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", SlugRules.ValidationMessage);
         }
 
+        await using var writeScope = await ContentIdentityWriteScope.BeginAsync(dbContext, ct);
         var content = await LoadContentForEditAsync(workspaceId, id, ct);
         if (content is null)
         {
@@ -304,11 +305,13 @@ public sealed class ContentController : ControllerBase
 
         if (identityChanged)
         {
-            await PropagateItemIdentityToVersionsAsync(content, ct);
+            await dbContext.PropagateContentIdentityAsync(content, ct);
         }
 
         Response.Headers.ETag = ControllerHelpers.ETag(content.UpdatedAt);
-        return Ok(await ToItemDetailResponseAsync(content.Id, ct));
+        var response = await ToItemDetailResponseAsync(content.Id, ct);
+        await writeScope.CompleteAsync(ct);
+        return Ok(response);
     }
 
     [HttpDelete("{id:guid}")]
@@ -347,6 +350,7 @@ public sealed class ContentController : ControllerBase
             return NotFound();
         }
 
+        await using var writeScope = await ContentIdentityWriteScope.BeginAsync(dbContext, ct);
         var source = await BaseContentQuery(workspaceId).FirstOrDefaultAsync(content => content.Id == id, ct);
         var target = await BaseContentQuery(workspaceId).FirstOrDefaultAsync(content => content.Id == request.TargetContentItemId, ct);
         if (source is null || target is null)
@@ -360,9 +364,7 @@ public sealed class ContentController : ControllerBase
         await dbContext.SaveChangesAsync(ct);
         // Versions carry a denormalized copy of the item's translation group; delivery-side
         // translation filtering reads that copy, so it has to follow the item.
-        await dbContext.ContentVersions
-            .Where(version => version.ContentItemId == source.Id || version.ContentItemId == target.Id)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(version => version.TranslationGroupId, groupId), ct);
+        await dbContext.LinkContentVersionTranslationsAsync(source.Id, target.Id, groupId, ct);
         var translations = await BaseContentQuery(workspaceId).AsNoTracking()
             .Where(content => content.TranslationGroupId == groupId)
             .OrderBy(content => content.LocaleCode)
@@ -373,6 +375,7 @@ public sealed class ContentController : ControllerBase
             responses.Add(await ToItemSummaryResponseAsync(translation, ct));
         }
 
+        await writeScope.CompleteAsync(ct);
         return Ok(responses);
     }
 
@@ -971,27 +974,6 @@ public sealed class ContentController : ControllerBase
         return await BaseContentQuery(workspaceId)
             .Include(content => content.Tags)
             .FirstOrDefaultAsync(content => content.Id == id, ct);
-    }
-
-    /// <summary>
-    /// Pushes the item's identity fields down onto every one of its versions.
-    /// <see cref="ContentVersion"/> keeps denormalized copies of <c>Slug</c>, <c>LocaleCode</c> and
-    /// <c>TranslationGroupId</c>, and the delivery/query paths (by-slug resolution, translation-group
-    /// filtering) read the version's copy rather than the item's, so a rename that is not propagated
-    /// leaves the item resolvable only at its old slug. <c>Tags</c> is deliberately excluded: it is a
-    /// per-version snapshot of the tags at the time that version was created, not a live mirror.
-    /// </summary>
-    private Task<int> PropagateItemIdentityToVersionsAsync(ContentItem content, CancellationToken ct)
-    {
-        var slug = content.Slug;
-        var localeCode = content.LocaleCode;
-        var translationGroupId = content.TranslationGroupId;
-        return dbContext.ContentVersions
-            .Where(version => version.ContentItemId == content.Id)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(version => version.Slug, slug)
-                .SetProperty(version => version.LocaleCode, localeCode)
-                .SetProperty(version => version.TranslationGroupId, translationGroupId), ct);
     }
 
     private async Task<ContentVersion?> LoadVersionForEditAsync(Guid workspaceId, Guid contentItemId, int versionNumber, CancellationToken ct)
