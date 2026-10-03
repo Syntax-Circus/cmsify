@@ -60,10 +60,10 @@ also encodes PostgreSQL search syntax and needs a separate semantic review.
   unique-constraint failure leaves the transaction with the caller, and caller
   rollback restores version status/tokens, the draft and template pointer.
   Tracked-save generation is unchanged; no operation-level savepoint is promised.
-- Remaining mapped-token bulk gaps: content version
-  translation/identity propagation (`ContentController`), API client last-use
-  touches (`CmsifyOpaqueBearerAuthenticationHandler`). These are not corrected by the repository
-  fix; standalone registration still selects PostgreSQL. Other bulk writes need
+- The content translation/identity bulk gap is repaired by the bounded source
+  increment below. API client last-use touches
+  (`CmsifyOpaqueBearerAuthenticationHandler`) remain open; standalone registration
+  still selects PostgreSQL. Other bulk writes need
   their own provider qualification before repository-wide ETag parity is claimed.
 - Still unsupported: SQLite migrations/registration, remaining workers' SQL,
   API ILike queries, search parity and complete-engine qualification. Do not expose
@@ -123,6 +123,52 @@ SQLite migrations/registration, other mapped-token bulk paths, search, crash
 recovery and complete-engine qualification remain open. This unreleased source
 increment does not change the Puppies Plus public 0.8.4 package evidence or
 enable SQLite deployment.
+
+## Bounded content translation and identity integrity repair
+
+The `feature/sqlite-content-identity-integrity` source increment routes the
+legacy `ContentController.Update` identity propagation and `LinkTranslation`
+version-group update through narrow Infrastructure context extensions and
+internal provider strategies. PostgreSQL retains its field-only bulk assignments
+and database-generated `xmin`. SQLite guards the exact affected version set
+against `uint.MaxValue` inside a writer-reserving transaction and advances the
+mapped revision in the same statement as the identity update. No historical
+version materialization is introduced by these operations.
+
+`ContentIdentityWriteScope` begins before mutable database reads and completes
+after item/tag/outbox saves, version propagation and response reads. Both paths
+are atomic on late bulk failure, cancellation or selected-token exhaustion.
+Caller transactions retain commit ownership; the operation uses a savepoint,
+rolls back with a noncancelled token and restores the caller's tracked checkpoint
+so a later save cannot replay failed changes. The existing publication/import
+checkpoint mechanics were extracted once into internal `LegacyWriteScope`;
+the released `TemplatePublicationWriteScope` name and public signatures remain.
+Neither scope is an application unit-of-work framework.
+
+The exact affected sets and existing group selection remain unchanged: Update
+propagates slug, locale and group only when identity changed; LinkTranslation
+updates source/target versions only, selecting source group, then target group,
+then a new group. Version tags remain immutable snapshots. Version statuses,
+field values, timestamps, publication windows and lease state are untouched.
+Update retains its existing event; LinkTranslation adds no event. Routes,
+authorization, DTOs, If-Match and error mapping are unchanged.
+
+`ContentIdentityControllerTests` execute the actual controller methods against
+file-backed SQLite and migrated PostgreSQL using independent contexts. Tests
+cover stale version rejection, exact SQLite increments, unaffected item/workspace
+rows, exhaustion, late exceptions/cancellation, caller commit ownership, loaded
+tag graphs and Added/Modified intent surviving rollback and subsequent save,
+unchanged-identity updates, group selection and current HTTP error outcomes.
+At 32 historical source versions, count assertions require one bulk update and
+no materialization beyond the existing response builders' version reads. These
+are query/materialization bounds, not latency claims. The existing template
+archival controller regressions validate the shared-scope extraction.
+
+This bounded legacy persistence repair does not introduce application handlers,
+change Core contracts, mappings, migrations, registration defaults or packages,
+or qualify SQLite deployment. SQLite `EnsureCreated` remains test-only.
+Production SQLite migrations/registration, API-client last-use writes, search,
+crash recovery and complete engine qualification remain open.
 
 ## Bounded webhook secret-rotation repair
 
