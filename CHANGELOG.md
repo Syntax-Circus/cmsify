@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-03
+
+### Fixed
+
+- API template publication and package-import archival now reuse provider-aware Infrastructure queries, advancing SQLite concurrency revisions atomically with status changes and rejecting stale tracked saves. Exhausted revisions fail without partial archival.
+- Package imports now commit all database changes together, including earlier picklist and component saves. Publication and import failures roll back their operation; caller-owned transactions retain commit ownership through savepoints, and tracked caller state is restored so a later save cannot replay failed operation writes.
+
+### Added
+
+- Real file-backed SQLite and migrated PostgreSQL controller regressions for stale writes, revision exhaustion, late-save rollback, multi-template imports, caller transaction ownership and tracker reuse, and bounded archival queries.
+
+### Changed
+
+- PostgreSQL archival SQL, generated concurrency tokens, standalone/Docker defaults, schema/migrations, Core contracts and API wire contracts remain unchanged.
+- This bounded API persistence repair does not establish complete SQLite deployment support. Production migrations/registration, other bulk-write paths, JSON/search, complete embedded workflows and deployment/recovery qualification remain separate gates.
+
 ## [0.8.4] - 2026-10-03
 
 ### Fixed
