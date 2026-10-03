@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-10-03
+
+### Fixed
+
+- SQLite media reconciliation now uses provider-aware queries for deletion intents, stale uploads and orphan-scan checkpoints. Selection and fenced updates retain repository-owned writer-reserving transactions, bounded batches and live-asset ownership protection.
+- Raw SQLite timestamp parameters and inserts now use the model's UTC-tick representation, preserving eligibility, lease expiry, retry scheduling and checkpoint timestamps.
+
+### Added
+
+- File-backed SQLite regression coverage for competing claims, owner/token/expiry fencing, atomic rollback, bounded materialization, deduplication, retry and cursor persistence, GUID/time roundtrips, stale-write protection and synthetic processor ownership checks.
+
+### Changed
+
+- Media-reconciliation SQL is isolated within Infrastructure. PostgreSQL SQL and standalone/Docker defaults, schema/migrations, public contracts, registration and processor behavior remain unchanged.
+- This bounded fix does not establish complete SQLite deployment support. Production migrations/registration, other API/bulk paths, JSON/search, full load/crash/backup recovery and actual storage-provider recovery remain separate qualification gates.
+
 ## [0.8.3] - 2026-10-03
 
 ### Fixed
