@@ -63,13 +63,37 @@ also encodes PostgreSQL search syntax and needs a separate semantic review.
 - Remaining mapped-token bulk gaps: standalone API template publication/package
   import archival (`TemplatesController`, `PackagesController`), content version
   translation/identity propagation (`ContentController`), API client last-use
-  touches (`CmsifyOpaqueBearerAuthenticationHandler`), and endpoint secret rotation
-  (`WebhookSecretRotationProcessor`). These are not corrected by the repository
+  touches (`CmsifyOpaqueBearerAuthenticationHandler`). These are not corrected by the repository
   fix; standalone registration still selects PostgreSQL. Other bulk writes need
   their own provider qualification before repository-wide ETag parity is claimed.
 - Still unsupported: SQLite migrations/registration, remaining workers' SQL,
   API ILike queries, search parity and complete-engine qualification. Do not expose
   SQLite as a deployment option yet or replace PostgreSQL migrations with EnsureCreated.
+
+## Bounded webhook secret-rotation repair
+
+The `feature/sqlite-secret-rotation-portability` source increment makes
+`WebhookSecretRotationProcessor.RotateBatchAsync` and `CountRemainingAsync`
+portable through Infrastructure query strategies. The processor still owns its
+transaction, crypto orchestration, counters and sanitized logging. PostgreSQL
+retains its existing SQL and defaults.
+
+SQLite reserves the writer before selecting a bounded batch and holds it through
+the conditional original-secret updates and commit. Rotation increments the
+mapped `row_version` atomically, rejects an exhausted selected token before any
+batch writes, and stores timestamps in the existing UTC-tick representation.
+Counts are aggregated and ordered in the database using only existing bounded
+version/configured-key labels. Raw ciphertext is not returned by the count query.
+
+Real file-backed SQLite tests use independent connections and cover plaintext
+preservation, legacy/old-key rewrap, active-prefix exclusion, soft deletion,
+cursor/batch bounds, fresh-context resume, invalid/canceled work, sanitized
+decrypt failures, competing writers, conditional-update skips, stale tracked
+saves, token exhaustion and database-failure rollback. Existing migrated
+PostgreSQL rotation and worker-lifecycle tests remain in the focused regression.
+Fresh-context resume is not process-crash durability evidence. SQLite
+`EnsureCreated` is test-only; this increment adds no migrations, provider
+registration, encryption format/key changes or deployment qualification.
 
 ## Verification checkpoint
 

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
+using Cmsify.Infrastructure.Persistence.Providers;
 using Cmsify.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -33,6 +34,7 @@ public sealed class WebhookSecretRotationProcessor(
 {
     private const int MaximumBatchSize = 500;
     private readonly SecretProtectionOptions options = options.Value;
+    private readonly IWebhookSecretRotationQueries _queries = WebhookSecretRotationQueries.Create(dbContext);
 
     public async Task<SecretRotationBatchResult> RotateBatchAsync(Guid? afterId, CancellationToken ct = default)
     {
@@ -41,17 +43,7 @@ public sealed class WebhookSecretRotationProcessor(
         var cursor = afterId ?? Guid.Empty;
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        var endpoints = await dbContext.WebhookEndpoints
-            .FromSqlInterpolated($"""
-                SELECT *, xmin FROM webhook_endpoints
-                WHERE id > {cursor}
-                  AND LEFT(secret, length({activePrefix})) <> {activePrefix}
-                ORDER BY id
-                FOR UPDATE SKIP LOCKED
-                LIMIT {batchSize}
-                """)
-            .IgnoreQueryFilters()
-            .ToListAsync(ct);
+        var endpoints = await _queries.LockCandidatesAsync(cursor, activePrefix, batchSize, ct);
 
         var rotated = 0;
         var skipped = 0;
@@ -62,11 +54,7 @@ public sealed class WebhookSecretRotationProcessor(
             try
             {
                 var rewrappedCiphertext = secretProtector.Protect(secretProtector.Unprotect(originalCiphertext));
-                var updated = await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-                    UPDATE webhook_endpoints
-                    SET secret = {rewrappedCiphertext}, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = {endpoint.Id} AND secret = {originalCiphertext}
-                    """, ct);
+                var updated = await _queries.UpdateSecretAsync(endpoint.Id, originalCiphertext, rewrappedCiphertext, ct);
                 if (updated == 1)
                 {
                     rotated++;
@@ -102,27 +90,7 @@ public sealed class WebhookSecretRotationProcessor(
     {
         var activePrefix = $"v2.{options.ActiveKeyId}.";
         var configuredKeyIds = options.EncryptionKeys.Keys.ToArray();
-        return await dbContext.Database.SqlQuery<SecretCiphertextCount>($"""
-            SELECT
-                CASE
-                    WHEN secret LIKE 'v1.%' THEN 'v1'
-                    WHEN secret LIKE 'v2.%' THEN 'v2'
-                    ELSE 'unknown'
-                END AS version,
-                CASE
-                    WHEN secret LIKE 'v1.%' THEN 'legacy'
-                    WHEN secret LIKE 'v2.%'
-                         AND split_part(secret, '.', 2) = ANY({configuredKeyIds})
-                         AND split_part(secret, '.', 2) <> {options.ActiveKeyId}
-                        THEN split_part(secret, '.', 2)
-                    ELSE 'unknown'
-                END AS key_id,
-                COUNT(*) AS count
-            FROM webhook_endpoints
-            WHERE LEFT(secret, length({activePrefix})) <> {activePrefix}
-            GROUP BY 1, 2
-            ORDER BY 1, 2
-            """).ToListAsync(ct);
+        return await _queries.CountRemainingAsync(activePrefix, options.ActiveKeyId, configuredKeyIds, ct);
     }
 
     private static int ValidateBatchSize(int batchSize) => batchSize is >= 1 and <= MaximumBatchSize
