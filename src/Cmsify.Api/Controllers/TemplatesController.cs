@@ -301,6 +301,7 @@ public sealed class TemplatesController : ControllerBase
     [RequireRole(UserRole.TemplateAdmin)]
     public async Task<ActionResult<TemplateVersionResponse>> Publish(Guid workspaceId, Guid id, int versionNumber, CancellationToken ct)
     {
+        await using var writeScope = await TemplatePublicationWriteScope.BeginAsync(dbContext, ct);
         var version = await FindVersionAsync(workspaceId, id, versionNumber, requireWrite: true, tracking: true, ct);
         if (version is null)
         {
@@ -312,10 +313,7 @@ public sealed class TemplatesController : ControllerBase
             return this.Error(StatusCodes.Status409Conflict, "conflict", "Only draft versions can be published");
         }
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        await dbContext.TemplateVersions
-            .Where(candidate => candidate.TemplateId == id && candidate.Status == TemplateVersionStatus.Published)
-            .ExecuteUpdateAsync(updates => updates.SetProperty(candidate => candidate.Status, TemplateVersionStatus.Archived), ct);
+        await dbContext.ArchivePublishedTemplateVersionsAsync(id, ct);
 
         version.Status = TemplateVersionStatus.Published;
         version.PublishedAt = DateTimeOffset.UtcNow;
@@ -330,7 +328,7 @@ public sealed class TemplatesController : ControllerBase
             JsonSerializer.SerializeToElement(new { templateId = id, templateVersionId = version.Id, versionNumber = version.VersionNumber, workspaceId }),
             DateTimeOffset.UtcNow);
         await dbContext.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        await writeScope.CompleteAsync(ct);
         return Ok(ToVersionResponse(version));
     }
 

@@ -60,8 +60,7 @@ also encodes PostgreSQL search syntax and needs a separate semantic review.
   unique-constraint failure leaves the transaction with the caller, and caller
   rollback restores version status/tokens, the draft and template pointer.
   Tracked-save generation is unchanged; no operation-level savepoint is promised.
-- Remaining mapped-token bulk gaps: standalone API template publication/package
-  import archival (`TemplatesController`, `PackagesController`), content version
+- Remaining mapped-token bulk gaps: content version
   translation/identity propagation (`ContentController`), API client last-use
   touches (`CmsifyOpaqueBearerAuthenticationHandler`). These are not corrected by the repository
   fix; standalone registration still selects PostgreSQL. Other bulk writes need
@@ -69,6 +68,61 @@ also encodes PostgreSQL search syntax and needs a separate semantic review.
 - Still unsupported: SQLite migrations/registration, remaining workers' SQL,
   API ILike queries, search parity and complete-engine qualification. Do not expose
   SQLite as a deployment option yet or replace PostgreSQL migrations with EnsureCreated.
+
+## Bounded API template archival integrity repair
+
+The `feature/sqlite-api-template-archival` source increment routes both
+`TemplatesController.Publish` and package import's template archival through
+the Infrastructure `ArchivePublishedTemplateVersionsAsync` context extension.
+It reuses the existing internal template-publication queries. SQLite archives
+and increments mapped revisions in the same bulk statement, after guarding the
+entire selected published set against `uint.MaxValue` inside the write
+transaction. PostgreSQL retains its status-only SQL and generated `xmin`.
+No Core repository contract, host/DI default, mapping or migration changes.
+
+The API publication and import operations use the narrowly scoped Infrastructure
+`TemplatePublicationWriteScope`. Publication begins before loading mutable
+state. Import begins after manifest-only validation and before database reads;
+its earlier picklist/revision and component saves now participate in the same
+transaction as template archival, new versions and final current pointers.
+Only successful final save completes the scope. Error returns, exceptions and
+cancellation roll back the operation. This whole-import transaction correction
+is intentional: the previous sequence could commit related rows before returning
+a later conflict or failure.
+
+An owned scope commits its transaction. A caller-owned transaction uses a unique
+operation savepoint, retaining caller commit ownership and earlier work; a caller
+transaction without savepoint support is rejected before operation writes.
+Failure cleanup uses a non-cancelled token. A private tracker checkpoint restores
+preexisting current/original scalar values using configured EF value comparers,
+navigation contents, states and modified/temporary flags, and detaches only
+operation-introduced entries after normal relationship change detection.
+This prevents a later unrelated caller save from replaying rolled-back import
+writes. It is bounded to Cmsify's present flat scalar properties and CLR
+reference/collection navigations, not a general EF snapshot framework. The
+repository's existing caller rollback contract remains unchanged.
+
+`TemplateArchivalControllerTests` execute actual production publication and JSON
+import methods with independent file-backed SQLite contexts and PostgreSQL
+Testcontainers with actual migrations. They cover stale rejection, exact SQLite
+revision increments, unaffected archived/draft/other-template rows, new and
+existing template imports, mixed-set and later-template exhaustion, later
+tracked-save exhaustion, final constraint/concurrency/cancellation failures,
+rollback after earlier related saves, unresolved/invalid component resolutions,
+outbox preservation, caller rollback/commit ownership and caller tracker reuse.
+With 34 selected published versions, SQLite tests require one bulk update per
+template and zero historical version materialization (only the publication
+target draft is materialized). These are blocking count assertions, not latency
+claims. Scoped SQLite `EnsureCreated` is a test adaptation, not production host
+registration or migration evidence. Existing HTTP authorization/error tests
+remain part of the API regression suite.
+
+This is a bounded legacy persistence repair, not a controller workflow extraction
+or proof of Puppies Plus handler architecture. Full application extraction,
+SQLite migrations/registration, other mapped-token bulk paths, search, crash
+recovery and complete-engine qualification remain open. This unreleased source
+increment does not change the Puppies Plus public 0.8.4 package evidence or
+enable SQLite deployment.
 
 ## Bounded webhook secret-rotation repair
 
