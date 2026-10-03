@@ -11,6 +11,12 @@
 
 Cmsify is a headless CMS with composable, versioned templates, built with .NET 10, PostgreSQL, EF Core, and a Blazor admin UI. It exposes a versioned HTTP API and a first-party TypeScript client for server-side applications.
 
+PostgreSQL remains the default. Bounded SQLite source tests now cover webhook
+secret rotation and database-side remaining counts, including atomic revision
+advancement and stale-save rejection. SQLite migrations/registration, search,
+other bulk paths and complete deployment qualification remain open; see
+[provider portability](docs/provider-portability.md).
+
 > **No support guaranteed.** Cmsify is published as-is and maintained on a best-effort basis. Issues and pull requests are welcome, but there is no SLA or guaranteed support response.
 
 ## Published artifacts
