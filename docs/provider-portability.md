@@ -61,8 +61,8 @@ also encodes PostgreSQL search syntax and needs a separate semantic review.
   rollback restores version status/tokens, the draft and template pointer.
   Tracked-save generation is unchanged; no operation-level savepoint is promised.
 - The content translation/identity bulk gap is repaired by the bounded source
-  increment below. API client last-use touches
-  (`CmsifyOpaqueBearerAuthenticationHandler`) remain open; standalone registration
+  increment below. API-client last-use touches now use the bounded Infrastructure
+  repair below; standalone registration
   still selects PostgreSQL. Other bulk writes need
   their own provider qualification before repository-wide ETag parity is claimed.
 - Still unsupported: SQLite migrations/registration, remaining workers' SQL,
@@ -167,8 +167,55 @@ archival controller regressions validate the shared-scope extraction.
 This bounded legacy persistence repair does not introduce application handlers,
 change Core contracts, mappings, migrations, registration defaults or packages,
 or qualify SQLite deployment. SQLite `EnsureCreated` remains test-only.
-Production SQLite migrations/registration, API-client last-use writes, search,
+Production SQLite migrations/registration, remaining bulk writes, search,
 crash recovery and complete engine qualification remain open.
+
+## Bounded API-client last-use integrity repair
+
+The `feature/sqlite-api-client-touch-integrity` source increment keeps the
+authentication helper's recent-caller-snapshot fast path and delegates only
+persistence to Infrastructure's `TouchApiClientLastUsedIfDueAsync` context
+extension and internal provider strategies. Credential verification, token
+identifiers, grants, actor construction, options/clamping, HTTP outcomes and
+user-session touches retain their existing behavior. No Core contract, DI,
+mapping, migration, registration default or public wire change is introduced.
+
+Both providers preserve query filters and the exact ID plus null-or-LastUsedAt
+<= now-minus-interval database predicate, including threshold equality, missing
+rows, stale caller snapshots and delayed older touches. LastUsedAt receives the
+caller's timestamp using existing provider conversion; there is no new
+active/expiry check in persistence. PostgreSQL retains its conditional set-based
+LastUsedAt assignment and database-generated xmin without an added transaction.
+
+SQLite reserves its writer before the exact due-set overflow guard and assigns
+LastUsedAt plus the mapped uint revision in one update. An exhausted selected
+due row rejects without mutation or wrapping; unrelated, filtered and not-due
+rows cannot block a valid touch. The operation commits/disposes only a transaction
+it created. A caller transaction retains ownership and uses an operation-local
+savepoint; a zero-row mapped update reserves the writer even when that caller
+started a deferred transaction. Failure/cancellation rollback uses a noncancelled
+token, preserving earlier caller work. No tracked save, entity materialization,
+tracker checkpoint/reset or stale-token reload occurs. A caller already holding
+a stale SQLite read snapshot can still receive the provider's ordinary busy
+snapshot error; this repair adds no transaction retry policy.
+
+`ApiClientTouchProviderTests` execute the actual authentication helper with
+independent file-backed SQLite contexts and PostgreSQL using actual migrations.
+They cover stale-save rejection, due/null/equality/recent/missing/delayed and
+soft-deleted rows, other workspaces and untouched scalar fields, exact affected
+counts, one eligible competing touch per interval, owned/caller transactions,
+deferred caller writer reservation, caller pending tracked intent, exhaustion,
+nonzero-offset instants and injected post-update failure/cancellation rollback.
+One eligible helper touch issues one LastUsedAt bulk update and materializes no
+entity. `ApiClientTouchConcurrencyTests` retains existing PostgreSQL/user-session
+controls and adds actual HTTP success, same-interval throttling and invalid
+credential rejection with fresh-context timestamp/token readback.
+
+This is unreleased, bounded last-use source evidence. SQLite EnsureCreated is
+test-only; standalone HTTP registration remains PostgreSQL. Full authentication
+handler extraction, production SQLite migrations/registration, remaining bulk
+paths, search, workload/crash recovery and complete-engine qualification stay
+open. Puppies Plus published-package evidence remains 0.8.6.
 
 ## Bounded webhook secret-rotation repair
 
