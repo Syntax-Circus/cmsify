@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-03
+
+### Fixed
+
+- SQLite webhook secret rotation now uses provider-aware selection, conditional updates and server-side grouped counts. Rotation reserves the writer before selecting a bounded batch and preserves cursor semantics, transaction ownership and sanitized diagnostics.
+- SQLite secret updates now advance endpoint concurrency revisions atomically with ciphertext and timestamps, rejecting stale tracked saves. Exhausted revisions fail before batch writes; database failures roll back the batch without partial rotation.
+
+### Added
+
+- File-backed SQLite regression coverage for legacy/old-key rewrapping, active-key exclusion, soft-deleted endpoints, cursor resume, competing rotators, conditional updates, revision exhaustion, rollback and sanitized count/diagnostic labels.
+
+### Changed
+
+- Secret-rotation SQL is isolated within Infrastructure. PostgreSQL SQL, standalone/Docker defaults, schema/migrations, public contracts, encryption formats and key handling remain unchanged.
+- This bounded fix does not establish complete SQLite deployment support. Production migrations/registration, media reconciliation, other API/bulk paths, JSON/search and full load/recovery remain separate qualification gates.
+
 ## [0.8.2] - 2026-10-02
 
 ### Fixed
