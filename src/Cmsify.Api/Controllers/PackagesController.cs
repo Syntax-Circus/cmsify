@@ -146,6 +146,8 @@ public sealed class PackagesController : ControllerBase
             return this.Error(StatusCodes.Status422UnprocessableEntity, CmsifyError.ValidationFailed, "Package manifest is invalid", extensions: new Dictionary<string, object?> { ["errors"] = validationErrors });
         }
 
+        // Include early related saves and all read-modify-write state in the import.
+        await using var writeScope = await TemplatePublicationWriteScope.BeginAsync(dbContext, ct);
         var templatePackageVersions = await dbContext.Templates.AsNoTracking()
             .Where(template => template.WorkspaceId == workspaceId
                 && template.PackageNamespace == manifest.PackageNamespace
@@ -431,9 +433,7 @@ public sealed class PackagesController : ControllerBase
             };
 
             AddStructure(version, packageTemplate, templatesBySlug, componentIdBySlug, picklistIdBySlug, picklistRevisionIdBySlug);
-            await dbContext.TemplateVersions
-                .Where(candidate => candidate.TemplateId == template.Id && candidate.Status == TemplateVersionStatus.Published)
-                .ExecuteUpdateAsync(updates => updates.SetProperty(candidate => candidate.Status, TemplateVersionStatus.Archived), ct);
+            await dbContext.ArchivePublishedTemplateVersionsAsync(template.Id, ct);
 
             dbContext.TemplateVersions.Add(version);
             template.UpdatedAt = DateTimeOffset.UtcNow;
@@ -449,6 +449,7 @@ public sealed class PackagesController : ControllerBase
         }
 
         await dbContext.SaveChangesAsync(ct);
+        await writeScope.CompleteAsync(ct);
         return Ok(new PackageImportResponse(manifest.PackageNamespace, manifest.Id, manifest.Version, imported, [], [], importedPickLists, importedComponents));
     }
 
