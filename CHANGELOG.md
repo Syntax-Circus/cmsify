@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-10-03
+
+### Fixed
+
+- Content identity and translation-link propagation now use provider-aware Infrastructure queries, advancing SQLite concurrency revisions atomically with version identity changes and rejecting stale tracked saves. Exhausted revisions fail without partial updates.
+- Content updates and translation linking now commit related item, tag, outbox and version writes together. Late failures and cancellation roll back the operation; caller-owned transactions retain commit ownership through savepoints, and restored tracked state prevents a later save from replaying failed writes.
+
+### Added
+
+- Real file-backed SQLite and migrated PostgreSQL controller regressions for stale writes, revision exhaustion, affected-set scoping, late-write rollback, caller transaction ownership and tracker reuse, and bounded set-based propagation.
+
+### Changed
+
+- Content identity and template publication scopes share internal transaction/checkpoint mechanics while preserving the released template scope API. Existing translation group selection and version tag snapshots remain unchanged.
+- PostgreSQL behavior and standalone/Docker defaults, schema/migrations, Core contracts and API wire contracts remain unchanged. This bounded repair does not establish complete SQLite deployment support; production migrations/registration, JSON/search, other write paths and full workflow/recovery qualification remain separate gates.
+
 ## [0.8.5] - 2026-10-03
 
 ### Fixed
