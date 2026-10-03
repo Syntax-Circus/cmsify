@@ -95,6 +95,35 @@ Fresh-context resume is not process-crash durability evidence. SQLite
 `EnsureCreated` is test-only; this increment adds no migrations, provider
 registration, encryption format/key changes or deployment qualification.
 
+## Bounded media reconciliation repair
+
+The `feature/sqlite-media-reconciliation-portability` source increment separates
+`MediaReconciliationRepository` SQL into Infrastructure-only provider queries.
+PostgreSQL retains its existing locking SQL; repository contracts, processor
+behavior, mappings, migrations and registration defaults are unchanged.
+
+SQLite's repository-owned non-deferred write transaction reserves the writer
+before deletion/stale-upload/checkpoint selection and holds it through tracked
+state changes and commit. Claim batches retain database limits and their existing
+eligibility, order, owner/token/expiry fences and retry counters. Raw orphan and
+checkpoint inserts use the mapped GUID parameter representation and UTC ticks,
+with the existing pending-intent and provider/prefix conflict predicates.
+Intent/checkpoint entities have no mapped concurrency revision; asset updates
+remain tracked and advance `row_version` through the existing save hooks.
+
+Real file-backed SQLite tests cover independent held-selection competition,
+nonempty disjoint claims, exact lease expiry/reclaim, stale claims, retry/backoff,
+stale upload state/enqueue rollback on an injected database failure, orphan
+deduplication and completed history, nonzero-offset timestamp/nontrivial GUID
+roundtrips, checkpoint pagination/resume/reset and bounded materialization.
+Synthetic processor cycles retain newly owned blobs and persist retry and scan
+progress. Existing migrated PostgreSQL media tests remain in the regression.
+
+This is bounded repository/processor evidence, not full SQLite deployment or
+all-worker support. `EnsureCreated` remains test-only. Production SQLite
+migrations/registration, broader workload/crash recovery, search parity and
+consistent blob/database backup qualification remain open.
+
 ## Verification checkpoint
 
 Full solution: `rtk proxy dotnet test --solution Cmsify.slnx --configuration Release
