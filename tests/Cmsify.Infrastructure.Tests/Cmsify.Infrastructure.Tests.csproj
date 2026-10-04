@@ -9,7 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Fixtures\SqliteUpgrade\**\*.cs" />
+    <ProjectReference Include="..\Cmsify.Sqlite.MigrationProbe\Cmsify.Sqlite.MigrationProbe.csproj" />
     <ProjectReference Include="..\..\src\Cmsify.Infrastructure\Cmsify.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Cmsify.Infrastructure.Sqlite\Cmsify.Infrastructure.Sqlite.csproj" />
   </ItemGroup>
 
   <ItemGroup>

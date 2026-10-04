@@ -12,7 +12,6 @@ using Cmsify.Infrastructure.Security;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using SyntaxCircus.EntityFrameworkCore.Postgres;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Cmsify.Core.Workspaces;
 
@@ -24,10 +23,22 @@ public static class ServiceCollectionExtensions
         => services.AddCmsifyInfrastructure(configuration, new CmsifyInfrastructureOptions());
 
     public static IServiceCollection AddCmsifyInfrastructure(this IServiceCollection services, IConfiguration configuration, CmsifyInfrastructureOptions options)
+        => services.AddCmsifyInfrastructure(configuration, options, new PostgresCmsifyDatabaseProvider());
+
+    public static IServiceCollection AddCmsifyInfrastructure(this IServiceCollection services, IConfiguration configuration,
+        CmsifyInfrastructureOptions options, CmsifyDatabaseProvider databaseProvider)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(databaseProvider);
+        var providerName = databaseProvider.ProviderName;
+        var migratorType = databaseProvider.MigratorType;
+        if (string.IsNullOrWhiteSpace(providerName))
+            throw new ArgumentException("A database provider name is required.", nameof(databaseProvider));
+        if (migratorType is null || !migratorType.IsClass || migratorType.IsAbstract || migratorType.ContainsGenericParameters
+            || !typeof(ICmsifyDatabaseMigrator).IsAssignableFrom(migratorType))
+            throw new ArgumentException("The provider migrator must be a concrete ICmsifyDatabaseMigrator type.", nameof(databaseProvider));
         if ((options.Workers & ~CmsifyWorkers.All) != CmsifyWorkers.None)
             throw new ArgumentOutOfRangeException(nameof(options), "Unknown Cmsify worker selection.");
 
@@ -36,8 +47,9 @@ public static class ServiceCollectionExtensions
             ?.ImplementationInstance as InfrastructureRegistration;
         if (existing is not null)
         {
-            if (existing.Options != options || !existing.Settings.SequenceEqual(settings, ConfigurationEntryComparer.Instance))
-                throw new InvalidOperationException("AddCmsifyInfrastructure was called with conflicting options or configuration settings.");
+            if (existing.ProviderType != databaseProvider.GetType() || existing.ProviderName != providerName
+                || existing.Options != options || !existing.Settings.SequenceEqual(settings, ConfigurationEntryComparer.Instance))
+                throw new InvalidOperationException("AddCmsifyInfrastructure was called with conflicting provider, options or configuration settings.");
             return services;
         }
 
@@ -47,6 +59,9 @@ public static class ServiceCollectionExtensions
         {
             throw new InvalidOperationException("Connection string 'Cmsify' is required.");
         }
+
+        // Validate provider configuration before adding any service descriptors, without opening a database.
+        databaseProvider.Configure(new DbContextOptionsBuilder<CmsifyDbContext>(), connectionString);
 
         if (options.UseHostCurrentActorForAudit)
         {
@@ -61,13 +76,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<AuditInterceptor>(provider => new AuditInterceptor(provider.GetRequiredService<IAuditActorAccessor>()));
         services.AddDbContext<CmsifyDbContext>((serviceProvider, options) =>
         {
-            options.UseNpgsql(connectionString, npgsqlOptions =>
-                    npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
-                .UseSyntaxCircusSnakeCaseNamingConvention();
+            databaseProvider.Configure(options, connectionString);
             options.AddInterceptors(serviceProvider.GetRequiredService<AuditInterceptor>());
         });
         services.AddScoped<IDbSeeder, DbSeeder>();
-        services.AddScoped<ICmsifyDatabaseMigrator, CmsifyDatabaseMigrator>();
+        services.AddScoped(typeof(ICmsifyDatabaseMigrator), migratorType);
         services.AddScoped<ITemplateGraphValidator, TemplateGraphValidator>();
         services.AddScoped<IContentValidator, ContentValidator>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
@@ -161,11 +174,12 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecretProtectionOptions>>(),
                 provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookSecretRotationInventoryPreflightService>>()));
 
-        services.AddSingleton(new InfrastructureRegistration(options, settings));
+        services.AddSingleton(new InfrastructureRegistration(options, settings, databaseProvider.GetType(), providerName));
         return services;
     }
 
-    private sealed record InfrastructureRegistration(CmsifyInfrastructureOptions Options, KeyValuePair<string, string?>[] Settings);
+    private sealed record InfrastructureRegistration(CmsifyInfrastructureOptions Options, KeyValuePair<string, string?>[] Settings,
+        Type ProviderType, string ProviderName);
 
     private sealed class ConfigurationEntryComparer : IEqualityComparer<KeyValuePair<string, string?>>
     {

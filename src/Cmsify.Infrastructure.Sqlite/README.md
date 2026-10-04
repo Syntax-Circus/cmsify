@@ -1,0 +1,46 @@
+# Cmsify SQLite infrastructure
+
+Optional SQLite registration for embedded .NET 10 hosts, licensed under AGPL-3.0-or-later.
+
+See the [embedded SQLite guide](https://github.com/Syntax-Circus/cmsify/blob/main/docs/integrations/embedded-sqlite.md)
+for an executable host example, explicit initialization, deployment constraints,
+backup rollback and abandoned-lock recovery. This package is released in lockstep
+with Core and Infrastructure. Local candidate checks do not establish publication
+or full SQLite qualification; JSON query/search, complete workers, production
+backup/blob recovery and supported-version upgrades remain separate gates.
+
+Reference `SyntaxCircus.Cmsify.Infrastructure.Sqlite` and import
+`Cmsify.Infrastructure.Sqlite.Extensions`. Register with
+`services.AddCmsifySqliteInfrastructure(configuration)` or pass the common
+`CmsifyInfrastructureOptions` to select workers and host audit identity.
+The default remains all six workers and HTTP actor audit, matching PostgreSQL.
+
+Set `ConnectionStrings:Cmsify` to `Data Source=/local/persistent/cmsify.db`.
+Only local persistent file data sources are supported. Memory and URI data sources
+are rejected. Foreign keys are enabled; explicit `Foreign Keys=False` is rejected.
+The default timeout is 30 seconds; an explicit caller timeout is preserved.
+Registration and context resolution do not create a database, run migrations,
+seed data or change journal mode. Identical registration is a no-op; provider,
+configuration or common-option conflicts fail before changing registrations.
+
+SQLite migration is schema-only and will not provision a workspace or administrator.
+Explicit initialization with the existing `IDbSeeder` is a separate operator step.
+
+Run `host.MigrateCmsifyDatabaseAsync()` as a controlled deployment step before
+workers or traffic. The package owns `__CmsifyMigrationsHistory`; its columns are
+`migration_id` and `product_version` under the provider-neutral snake-case convention.
+SQLite retains its native EF migration history service and locking. PostgreSQL's
+history naming and service remain unchanged.
+
+Migration rejects unmanaged CMS tables, malformed or unknown/gapped CMS history,
+and tables missing from the last applied migration's model. Host tables and host
+migration histories are retained. These ownership and table-presence checks are
+not an exhaustive schema integrity audit. Schema/history are read in one transaction;
+the transaction ends before EF acquires its migration lock and re-reads history.
+Concurrent migrators must run identical application versions. Controlled deployment
+must prohibit simultaneous different-version migrators and external schema edits.
+
+Design-time commands must select this project as both project and startup project:
+`dotnet ef migrations list --project src/Cmsify.Infrastructure.Sqlite --startup-project src/Cmsify.Infrastructure.Sqlite --context CmsifyDbContext`.
+The factory defaults to the development-only `cmsify.design-time.db` file. Pass an
+explicit connection string after `--` to select a different local development file.

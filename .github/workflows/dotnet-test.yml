@@ -25,9 +25,11 @@ jobs:
       - name: Pack and qualify the engine as an isolated consumer
         run: |
           VERSION=0.0.0-package-test
-          dotnet build src/Cmsify.Infrastructure/Cmsify.Infrastructure.csproj --configuration Release --no-restore -p:CmsifyReleaseBuild=true -p:Version="$VERSION"
+          dotnet build src/Cmsify.Infrastructure.Sqlite/Cmsify.Infrastructure.Sqlite.csproj --configuration Release --no-restore -p:CmsifyReleaseBuild=true -p:Version="$VERSION"
           dotnet pack src/Cmsify.Core/Cmsify.Core.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$GITHUB_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
           dotnet pack src/Cmsify.Infrastructure/Cmsify.Infrastructure.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$GITHUB_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
+          dotnet pack src/Cmsify.Infrastructure.Sqlite/Cmsify.Infrastructure.Sqlite.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$GITHUB_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
+          node --test scripts/release/engine-package-graph.test.mjs
           node scripts/release/verify-engine-packages.mjs --packages artifacts/nuget --version "$VERSION" --source-sha "$GITHUB_SHA"
       - name: Collect raw coverage
         if: github.event_name != 'pull_request'
