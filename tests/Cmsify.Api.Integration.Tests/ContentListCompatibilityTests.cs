@@ -340,17 +340,23 @@ public sealed class ContentListCompatibilityTests : IAsyncLifetime
         miss.LocaleCode = "en-US";
         miss.TranslationGroupId = Guid.NewGuid();
         miss.TemplateVersionId = otherVersion.Id;
+        var zebraOnly = Owner(fixture, "zebra-only");
+        zebraOnly.LocaleCode = "en-US";
+        zebraOnly.TemplateVersionId = otherVersion.Id;
         var alpha = new Tag { WorkspaceId = fixture.WorkspaceId, Name = "alpha" };
         var zebra = new Tag { WorkspaceId = fixture.WorkspaceId, Name = "zebra" };
         match.Tags.Add(new ContentItemTag { ContentItemId = match.Id, TagId = zebra.Id });
         match.Tags.Add(new ContentItemTag { ContentItemId = match.Id, TagId = alpha.Id });
         miss.Tags.Add(new ContentItemTag { ContentItemId = miss.Id, TagId = alpha.Id });
-        fixture.Db.AddRange(match, miss, alpha, zebra);
+        zebraOnly.Tags.Add(new ContentItemTag { ContentItemId = zebraOnly.Id, TagId = zebra.Id });
+        fixture.Db.AddRange(match, miss, zebraOnly, alpha, zebra);
         await fixture.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
         foreach (var filter in new[] { $"templateVersionId={fixture.TemplateVersion.Id}", $"templateId={fixture.TemplateVersion.TemplateId}",
-                     "localeCode=en", $"translationGroupId={match.TranslationGroupId}", "slug=exact", "tags=zebra",
+                     "localeCode=en", $"translationGroupId={match.TranslationGroupId}", "slug=exact",
                      "tags=%20ZEBRA%20,alpha,alpha,,%20" })
             Assert.Equal(new[] { match.Id }, Ids(await fixture.ListAsync(filter)));
+        Assert.Equal(new[] { match.Id, miss.Id }.Order(), Ids(await fixture.ListAsync("tags=alpha")).Order());
+        Assert.Equal(new[] { match.Id, zebraOnly.Id }.Order(), Ids(await fixture.ListAsync("tags=zebra")).Order());
         var item = Assert.Single((await fixture.ListAsync("slug=exact")).GetProperty("items").EnumerateArray());
         Assert.Equal(new[] { "alpha", "zebra" }, Strings(item.GetProperty("tags")));
         Assert.Equal(0, item.GetProperty("versionCount").GetInt32());
