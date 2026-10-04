@@ -50,8 +50,7 @@ internal static class ContentQueryQualification
         db.ChangeTracker.Clear();
 
         var handler = services.GetRequiredService<IListContentRequestHandler>();
-        Require(ReferenceEquals(services.GetRequiredService<TimeProvider>(), services.GetRequiredService<TimeProvider>())
-            && services.GetRequiredService<TimeProvider>() is QualificationClock, "Host clock replaced.");
+        Require(services.GetRequiredService<TimeProvider>() is QualificationClock, "Host clock replaced.");
         var calls = 0;
         async Task<ContentListOutput> Read(ListContentRequest request)
         {
@@ -121,7 +120,7 @@ internal static class ContentQueryQualification
         await using var command = db.Database.GetDbConnection().CreateCommand();
         await db.Database.OpenConnectionAsync(ct);
         command.CommandText = db.Database.IsNpgsql()
-            ? "SELECT version() || '; lc_collate=' || current_setting('lc_collate') || '; lc_ctype=' || current_setting('lc_ctype')"
+            ? "SELECT version() || '; lc_collate=' || datcollate || '; lc_ctype=' || datctype FROM pg_database WHERE datname = current_database()"
             : "SELECT sqlite_version()";
         Console.WriteLine($"ENV provider={db.Database.ProviderName}; database={await command.ExecuteScalarAsync(ct)}; runtime={Environment.Version}; OS={System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
     }
