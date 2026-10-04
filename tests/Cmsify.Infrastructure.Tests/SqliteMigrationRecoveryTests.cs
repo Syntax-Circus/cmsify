@@ -7,6 +7,51 @@ namespace Cmsify.Infrastructure.Tests;
 public sealed class SqliteMigrationRecoveryTests
 {
     [Fact]
+    public async Task CompletedCapture_PreservesElapsedTimeThroughRepeatedFinishAndDisposal()
+    {
+        await using var fixture = new MigrationProcesses();
+        var child = fixture.Start("fixture-init");
+        (await child.Finish()).ShouldBe(0);
+        var resultPath = Path.Combine(child.Checkpoints, "result.log");
+        var firstResult = await File.ReadAllTextAsync(resultPath, TestContext.Current.CancellationToken);
+        var firstOutput = child.Output;
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        (await child.Finish()).ShouldBe(0);
+        await child.DisposeAsync();
+        (await File.ReadAllTextAsync(resultPath, TestContext.Current.CancellationToken)).ShouldBe(firstResult);
+        (await File.ReadAllTextAsync(Path.Combine(child.Checkpoints, "output.log"), TestContext.Current.CancellationToken)).ShouldBe(firstOutput);
+    }
+
+    [Fact]
+    public async Task RelativeCheckpoint_IsRejectedWithoutFilesystemSideEffects()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "cmsify-invalid-checkpoint-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var start = new ProcessStartInfo("dotnet") { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "Cmsify.Sqlite.MigrationProbe.dll"));
+        foreach (var argument in new[] { "migrate", "--database", Path.Combine(directory, "fixture.db"), "--checkpoint", "relative-checkpoint" }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        bound.CancelAfter(TimeSpan.FromSeconds(20));
+        try { await process.WaitForExitAsync(bound.Token); }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: false);
+                using var cleanupBound = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await process.WaitForExitAsync(cleanupBound.Token);
+            }
+        }
+        process.ExitCode.ShouldNotBe(0);
+        (await stdout + await stderr).ShouldContain("Checkpoint path must be absolute.");
+        Directory.GetFileSystemEntries(directory).ShouldBeEmpty();
+        Directory.Delete(directory);
+    }
+
+    [Fact]
     public async Task UpgradeRebuild_PreservesRowsAndConstraints()
     {
         await using var fixture = new MigrationProcesses();
@@ -176,6 +221,7 @@ internal sealed class MigrationChild : IAsyncDisposable
     private readonly Task<string> _stderr;
     private readonly Stopwatch _watch = Stopwatch.StartNew();
     private bool _disposed;
+    private bool _captured;
     public string Output { get; private set; } = "";
     public MigrationChild(string operation, string database, string checkpoints, string mode)
     {
@@ -217,9 +263,12 @@ internal sealed class MigrationChild : IAsyncDisposable
     }
     private async Task Capture()
     {
+        _watch.Stop();
+        if (_captured) return;
         Output = await _stdout + await _stderr;
         File.WriteAllText(Path.Combine(Checkpoints, "output.log"), Output);
         File.WriteAllText(Path.Combine(Checkpoints, "result.log"), $"PID={Process.Id}; exit={Process.ExitCode}; elapsed_ms={_watch.ElapsedMilliseconds}");
+        _captured = true;
     }
     public async ValueTask DisposeAsync()
     {

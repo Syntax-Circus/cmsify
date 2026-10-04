@@ -30,6 +30,7 @@ try
     var checkpoint = Array.IndexOf(args, "--checkpoint") >= 0 ? Option("--checkpoint")
         : operation == "migrate" ? Path.Combine(Path.GetTempPath(), "cmsify-probe-" + Guid.NewGuid().ToString("N"))
         : throw new ArgumentException("Fixture operations require --checkpoint.");
+    if (!Path.IsPathFullyQualified(checkpoint)) throw new ArgumentException("Checkpoint path must be absolute.");
     Directory.CreateDirectory(checkpoint);
     var modePath = Path.Combine(checkpoint, "mode");
     var mode = File.Exists(modePath) ? File.ReadAllText(modePath) : "normal";
