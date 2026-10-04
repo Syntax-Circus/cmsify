@@ -134,7 +134,6 @@ public sealed class ContentListQueryRepositoryTests
         Pair("duration", (a,b) => { b.EffectiveStartAt = At.AddHours(-2); b.EffectiveEndAt = At.AddHours(2); }, false);
         Pair("publication", (a,b) => { a.PublishedAt = At.AddDays(1); }, false);
         Pair("version", (a,b) => { }, true);
-        Pair("null", (a,b) => { b.PublishedAt = null; }, false);
         Pair("ticks", (a,b) => { a.EffectiveStartAt = b.EffectiveStartAt = At; a.EffectiveEndAt = At.AddTicks(100); b.EffectiveEndAt = At.AddTicks(110); }, false);
         Pair("literal", (a,b) => { a.EffectiveStartAt = b.EffectiveStartAt = At; a.EffectiveEndAt = At.AddTicks(10); b.EffectiveEndAt = At.AddTicks(11); }, !sqlite);
         Pair("extreme", (a,b) => { a.EffectiveStartAt = b.EffectiveStartAt = new(2,1,1,0,0,0,TimeSpan.Zero);
@@ -153,6 +152,60 @@ public sealed class ContentListQueryRepositoryTests
         Assert.Single((await Read(f, boundary, at: At.ToOffset(TimeSpan.FromHours(5)))).Items);
         Assert.Empty((await Read(f, boundary, at: At.AddHours(1))).Items);
         Assert.Empty((await Read(f, boundary, at: At.AddTicks(-100))).Items);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NullablePublicationPreservesDifferentOrdinaryAndResolvedWinners(bool sqlite)
+    {
+        await using var f = await ContentListQueryFixtures.Create(sqlite); await using var seed = f.Context();
+        var owner = f.Item("live-owner");
+        var dated = f.Version(owner, 1, At.AddHours(-1), At.AddHours(1));
+        dated.PublishedAt = At; dated.Slug = "dated-snapshot"; dated.LocaleCode = "en"; dated.Tags = ["dated-tag"];
+        var undated = f.Version(owner, 2, At.AddHours(-1), At.AddHours(1));
+        undated.PublishedAt = null; undated.Slug = "null-snapshot"; undated.LocaleCode = "fr"; undated.Tags = ["undated-tag"];
+        seed.AddRange(owner, dated, undated); await seed.SaveChangesAsync(Ct);
+        if (!sqlite)
+        {
+            // Focused baseline SQL characterization: released resolved ranking used
+            // bare DESC (PostgreSQL NULLS FIRST), unlike ordinary .NET selection.
+            await using var command = seed.Database.GetDbConnection().CreateCommand();
+            await seed.Database.OpenConnectionAsync(Ct);
+            command.CommandText = "SELECT id FROM content_versions WHERE content_item_id = @owner ORDER BY CASE WHEN effective_start_at IS NOT NULL AND effective_end_at IS NOT NULL THEN 0 ELSE 1 END, (effective_end_at - effective_start_at), published_at DESC, version_number DESC LIMIT 1";
+            var parameter = command.CreateParameter(); parameter.ParameterName = "owner"; parameter.Value = owner.Id; command.Parameters.Add(parameter);
+            Assert.Equal(undated.Id, (Guid)(await command.ExecuteScalarAsync(Ct))!);
+        }
+        var r = new ListContentRequest(f.Workspace.Id);
+        var ordinary = Assert.Single((await Read(f, r)).Items).CurrentlyServingVersion!;
+        Assert.Equal(dated.Id, ordinary.Id); Assert.Equal("dated-snapshot", ordinary.Slug);
+        Assert.Equal("en", ordinary.LocaleCode); Assert.Equal(new[] { "dated-tag" }, ordinary.Tags); Assert.Equal(At, ordinary.PublishedAt);
+        var resolved = Assert.Single((await Read(f, r with { Resolve = true })).Items);
+        Assert.Equal("null-snapshot", resolved.Slug); Assert.Equal("fr", resolved.LocaleCode);
+        Assert.Equal(new[] { "undated-tag" }, resolved.Tags); Assert.Equal(default(DateTimeOffset), resolved.CreatedAt);
+        Assert.Equal(default(DateTimeOffset), resolved.UpdatedAt);
+        await Check(f, r with { Resolve = true, Q = "dated-snapshot" }, [], 0);
+        await Check(f, r with { Resolve = true, Q = "null-snapshot" }, [owner.Id], 1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ActualNullPageSortKeysFollowPostgresPlacement(bool sqlite, bool resolve = false)
+    {
+        await using var f = await ContentListQueryFixtures.Create(sqlite); await using var seed = f.Context();
+        var dated = f.Item("dated"); var undated = f.Item("placeholder"); undated.Slug = null;
+        var a = f.Version(dated, 1); a.PublishedAt = At;
+        var n = f.Version(undated, 1); n.PublishedAt = null;
+        seed.AddRange(dated, undated, a, n); await seed.SaveChangesAsync(Ct);
+        foreach (var descending in new[] { false, true })
+        {
+            var r = new ListContentRequest(f.Workspace.Id, Resolve: resolve, SortBy: resolve ? "publishedAt" : "slug", SortDesc: descending, PageSize: 1);
+            await Check(f, r, [descending ? undated.Id : dated.Id], 2);
+            await Check(f, r with { Page = 2 }, [descending ? dated.Id : undated.Id], 2, offset: 1);
+        }
     }
 
     [Theory]

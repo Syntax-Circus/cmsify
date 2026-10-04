@@ -142,7 +142,7 @@ public sealed class ContentListQueryFeasibilityTests(ITestOutputHelper output)
         publishedNewer.PublishedAt = _start.AddDays(-1);
         context.AddRange(tiedItem, highVersionNoPublication, publishedOlder, publishedNewer);
         await context.SaveChangesAsync(Ct);
-        Assert.Equal(publishedNewer.Id, await WinnerAt(fixture, tiedItem.Id, _start));
+        Assert.Equal(highVersionNoPublication.Id, await WinnerAt(fixture, tiedItem.Id, _start));
 
         foreach (var startOnly in new[] { true, false })
         {
@@ -236,7 +236,7 @@ public sealed class ContentListQueryFeasibilityTests(ITestOutputHelper output)
 
     private async Task<Guid> WinnerAt(ContentListQueryFixtures fixture, Guid owner, DateTimeOffset asOf)
     {
-        const string sql = "SELECT id FROM content_versions WHERE content_item_id=@owner AND status='Published' AND ((effective_start_at IS NULL AND effective_end_at IS NULL) OR (effective_start_at <= @at AND @at < effective_end_at)) ORDER BY CASE WHEN effective_start_at IS NOT NULL AND effective_end_at IS NOT NULL THEN 0 ELSE 1 END, (effective_end_at-effective_start_at), published_at DESC NULLS LAST, version_number DESC LIMIT 1";
+        const string sql = "SELECT id FROM content_versions WHERE content_item_id=@owner AND status='Published' AND ((effective_start_at IS NULL AND effective_end_at IS NULL) OR (effective_start_at <= @at AND @at < effective_end_at)) ORDER BY CASE WHEN effective_start_at IS NOT NULL AND effective_end_at IS NOT NULL THEN 0 ELSE 1 END, (effective_end_at-effective_start_at), published_at DESC NULLS FIRST, version_number DESC LIMIT 1";
         return Assert.Single(await Read(fixture, sql, r => GuidValue(r, 0), ("owner", owner), ("at", fixture.Sqlite ? asOf.UtcTicks : asOf)));
     }
 

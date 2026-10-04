@@ -99,6 +99,29 @@ internal static class ContentQueryQualification
         Require((await Read(request with { Resolve = true, AsOf = QualificationClock.At.AddHours(1), Q = fallback.Slug }))
             .Items.Single().Slug == fallback.Slug, "AsOf/end-exclusive serving boundary differs.");
 
+        // Add nullable keys only after the existing two-owner assertions above.
+        var nullOwner = new ContentItem { WorkspaceId = workspace.Id, TemplateVersionId = templateVersion.Id, Slug = null };
+        var dated = Version(nullOwner, 1, "dated-snapshot"); dated.Tags = ["dated-tag"];
+        dated.EffectiveStartAt = QualificationClock.At.AddHours(-1); dated.EffectiveEndAt = QualificationClock.At.AddHours(1);
+        var undated = Version(nullOwner, 2, "null-snapshot"); undated.PublishedAt = null; undated.Tags = ["undated-tag"];
+        undated.EffectiveStartAt = dated.EffectiveStartAt; undated.EffectiveEndAt = dated.EffectiveEndAt;
+        db.AddRange(nullOwner, dated, undated); await db.SaveChangesAsync(ct); db.ChangeTracker.Clear();
+        item = (await Read(request with { SortBy = "slug", SortDesc = true, PageSize = 1 })).Items.Single();
+        serving = item.CurrentlyServingVersion;
+        Require(item.Id == nullOwner.Id && serving is not null && serving.Id == dated.Id
+            && serving.Tags.SequenceEqual(new[] { "dated-tag" }), "Ordinary null slug/publication winner differs.");
+        Require((await Read(request with { SortBy = "slug", SortDesc = false, PageSize = 1, Page = 3 })).Items.Single().Id == nullOwner.Id,
+            "Ordinary ascending null slug placement differs.");
+        item = (await Read(request with { Resolve = true, SortBy = "publishedAt", PageSize = 1 })).Items.Single();
+        Require(item.Id == nullOwner.Id && item.Slug == "null-snapshot" && item.Tags.SequenceEqual(new[] { "undated-tag" })
+            && item.CreatedAt == default && item.UpdatedAt == default, "Resolved null publication winner/sort differs.");
+        Require((await Read(request with { Resolve = true, SortBy = "publishedAt", SortDesc = false, PageSize = 1, Page = 3 })).Items.Single().Id == nullOwner.Id,
+            "Resolved ascending null publication placement differs.");
+        Require((await Read(request with { Resolve = true, Q = "dated-snapshot" })).TotalCount == 0,
+            "Resolved Q chose dated loser instead of null-publication winner.");
+        Require((await Read(request with { Resolve = true, Q = "null-snapshot" })).Items.Single().Id == nullOwner.Id,
+            "Resolved Q rejected null-publication winner.");
+
         foreach (var resolve in new[] { false, true })
         {
             await using var anonymousScope = root.CreateAsyncScope();
@@ -116,7 +139,7 @@ internal static class ContentQueryQualification
         Require(!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Cmsify.Api"), "API assembly loaded.");
         Require(!await db.Users.AnyAsync(ct) && !await db.UserSessions.AnyAsync(ct) && !await db.ApiClients.AnyAsync(ct),
             "Content workflow required local credentials.");
-        Console.WriteLine($"PASS {calls} packaged direct content-query calls: ordinary/resolved snapshots, exact all-tags, Q/ranking/wildcards, paging, fixed clock/AsOf and denial; HTTP requests={http.Requests}; no API assembly/local credentials.");
+        Console.WriteLine($"PASS {calls} packaged direct content-query calls: ordinary/resolved snapshots, exact all-tags, Q/ranking/wildcards, nullable winners/sorts, paging, fixed clock/AsOf and denial; HTTP requests={http.Requests}; no API assembly/local credentials.");
         await using var command = db.Database.GetDbConnection().CreateCommand();
         await db.Database.OpenConnectionAsync(ct);
         command.CommandText = db.Database.IsNpgsql()

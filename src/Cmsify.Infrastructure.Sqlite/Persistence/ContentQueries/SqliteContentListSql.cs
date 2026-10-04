@@ -46,7 +46,7 @@ internal sealed class SqliteContentListSql
         var tags = Tags(request.Tags);
         foreach (var tag in tags)
             predicates.Add("EXISTS (SELECT 1 FROM json_each(v.tags) tag WHERE tag.type = 'text' AND tag.value = " + Parameter(tag) + " COLLATE BINARY)");
-        var winners = Rank(predicates);
+        var winners = Rank(predicates, resolved: true);
         if (!string.IsNullOrWhiteSpace(request.Q))
             winners += " AND COALESCE(w.slug, '') LIKE " + Parameter("%" + Escape(request.Q) + "%") + " ESCAPE '\\'";
         return winners;
@@ -55,7 +55,7 @@ internal sealed class SqliteContentListSql
     {
         var predicates = Candidates(at);
         predicates.Add(ids.Length == 0 ? "0 = 1" : "v.content_item_id IN (" + string.Join(", ", ids.Select(id => Parameter(id))) + ")");
-        return Rank(predicates);
+        return Rank(predicates, resolved: false);
     }
     private List<string> Candidates(DateTimeOffset at)
     {
@@ -63,10 +63,12 @@ internal sealed class SqliteContentListSql
         return ["v.status = 'Published'", "EXISTS (SELECT 1 FROM content_items owner WHERE owner.id = v.content_item_id AND owner.is_deleted = 0)",
             "((v.effective_start_at IS NULL AND v.effective_end_at IS NULL) OR (v.effective_start_at <= " + time + " AND " + time + " < v.effective_end_at))"];
     }
-    private static string Rank(List<string> predicates) =>
+    // Preserve the released mode difference: resolved PostgreSQL SQL chose null
+    // publication first, whereas ordinary .NET serving selection chose it last.
+    private static string Rank(List<string> predicates, bool resolved) =>
         "SELECT w.* FROM content_versions w JOIN (SELECT v.id, ROW_NUMBER() OVER (PARTITION BY v.content_item_id ORDER BY " +
         "CASE WHEN v.effective_start_at IS NOT NULL AND v.effective_end_at IS NOT NULL THEN 0 ELSE 1 END, " +
-        "(v.effective_end_at - v.effective_start_at), v.published_at DESC NULLS LAST, v.version_number DESC) AS winner_rank " +
+        "(v.effective_end_at - v.effective_start_at), v.published_at DESC NULLS " + (resolved ? "FIRST" : "LAST") + ", v.version_number DESC) AS winner_rank " +
         "FROM content_versions v WHERE " + string.Join(" AND ", predicates) + ") ranked ON ranked.id = w.id WHERE ranked.winner_rank = 1";
     private void Identity(List<string> predicates, ListContentRequest request, string alias)
     {

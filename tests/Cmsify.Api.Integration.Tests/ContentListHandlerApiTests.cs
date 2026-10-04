@@ -38,12 +38,14 @@ public sealed class ContentListHandlerApiTests
         using var client = await factory.CreateSeededClientAsync();
         var templateId = Guid.NewGuid();
         var translationId = Guid.NewGuid();
-        var instant = Uri.EscapeDataString(time.ToString("O"));
-        var response = await client.GetAsync(factory.Url($"q=%20needle%25_&templateVersionId={item.TemplateVersionId}&templateId={templateId}&status=Published&localeCode=en&translationGroupId={translationId}&slug=item-slug&tags=alpha,beta&createdAfter={instant}&createdBefore={instant}&publishedAfter={instant}&publishedBefore={instant}&resolve=true&asOf={instant}&sortBy=slug&sortDesc=false&page=2&pageSize=13"), TestContext.Current.CancellationToken);
+        var createdAfter = time.AddDays(-4); var createdBefore = time.AddDays(-3);
+        var publishedAfter = time.AddDays(-2); var publishedBefore = time.AddDays(-1); var asOf = time;
+        static string Encode(DateTimeOffset value) => Uri.EscapeDataString(value.ToString("O"));
+        var response = await client.GetAsync(factory.Url($"q=%20needle%25_&templateVersionId={item.TemplateVersionId}&templateId={templateId}&status=Published&localeCode=en&translationGroupId={translationId}&slug=item-slug&tags=alpha,beta&createdAfter={Encode(createdAfter)}&createdBefore={Encode(createdBefore)}&publishedAfter={Encode(publishedAfter)}&publishedBefore={Encode(publishedBefore)}&resolve=true&asOf={Encode(asOf)}&sortBy=slug&sortDesc=false&page=2&pageSize=13"), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(new ListContentRequest(factory.WorkspaceId, " needle%_", item.TemplateVersionId, templateId,
-            Cmsify.Core.Domain.Enums.ContentStatus.Published, "en", translationId, "item-slug", "alpha,beta", time, time, time, time,
-            true, time, "slug", false, 2, 13), Assert.Single(handler.Requests));
+            Cmsify.Core.Domain.Enums.ContentStatus.Published, "en", translationId, "item-slug", "alpha,beta", createdAfter, createdBefore, publishedAfter, publishedBefore,
+            true, asOf, "slug", false, 2, 13), Assert.Single(handler.Requests));
         Assert.Single(handler.Tokens);
         Assert.True(handler.Tokens[0].CanBeCanceled);
         var actual = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
@@ -60,15 +62,16 @@ public sealed class ContentListHandlerApiTests
     }
 
     [Theory]
-    [InlineData(ResultErrorKind.Unauthenticated, 401)]
-    [InlineData(ResultErrorKind.Forbidden, 403)]
-    [InlineData(ResultErrorKind.NotFound, 404)]
-    [InlineData(ResultErrorKind.Validation, 400)]
-    [InlineData(ResultErrorKind.Conflict, 409)]
-    [InlineData(ResultErrorKind.Failure, 500)]
-    public async Task ExpectedFailuresMapAtTransport(ResultErrorKind kind, int status)
+    [InlineData(ResultErrorKind.Unauthenticated, 401, "unauthenticated", "Unauthorized", null)]
+    [InlineData(ResultErrorKind.Forbidden, 403, "forbidden", "Forbidden", null)]
+    [InlineData(ResultErrorKind.NotFound, 404, "not-found", "Not Found", null)]
+    [InlineData(ResultErrorKind.Validation, 400, "validation-failed", "Invalid pagination", "Safe detail")]
+    [InlineData(ResultErrorKind.Conflict, 409, "conflict", "Conflict", "Safe detail")]
+    [InlineData(ResultErrorKind.Failure, 500, "internal-server-error", "Internal Server Error", null)]
+    public async Task ExpectedFailuresMapAtTransport(ResultErrorKind kind, int status, string code, string title, string? detail)
     {
-        var handler = new RecordingHandler(Result<ContentListOutput>.Failure(new("test", "Safe detail", kind)));
+        var message = kind == ResultErrorKind.Failure ? "private internal detail" : "Safe detail";
+        var handler = new RecordingHandler(Result<ContentListOutput>.Failure(new("test", message, kind)));
         await using var factory = new ContentListSqliteFactory(handler);
         using var client = await factory.CreateSeededClientAsync();
         using var response = await client.GetAsync(factory.Url(""), TestContext.Current.CancellationToken);
@@ -76,6 +79,10 @@ public sealed class ContentListHandlerApiTests
         Assert.Single(handler.Requests);
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(status, problem.GetProperty("status").GetInt32());
+        Assert.Equal("https://cmsify.dev/errors/" + code, problem.GetProperty("type").GetString());
+        Assert.Equal(title, problem.GetProperty("title").GetString());
+        Assert.Equal(detail, problem.TryGetProperty("detail", out var actualDetail) ? actualDetail.GetString() : null);
+        if (kind == ResultErrorKind.Failure) Assert.DoesNotContain(message, problem.GetRawText(), StringComparison.Ordinal);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType!.MediaType);
         Assert.Equal(factory.Url("").Split('?')[0], problem.GetProperty("instance").GetString());
         Assert.True(problem.TryGetProperty("traceId", out _));

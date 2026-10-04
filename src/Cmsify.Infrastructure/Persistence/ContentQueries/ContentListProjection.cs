@@ -19,7 +19,8 @@ internal static class ContentListProjection
         var ordered = request.SortBy switch
         {
             ContentListRules.UpdatedAtSort => request.SortDesc ? items.OrderByDescending(x => x.UpdatedAt) : items.OrderBy(x => x.UpdatedAt),
-            ContentListRules.SlugSort => request.SortDesc ? items.OrderByDescending(x => x.Slug) : items.OrderBy(x => x.Slug),
+            ContentListRules.SlugSort when request.SortDesc => items.OrderBy(x => x.Slug == null ? 0 : 1).ThenByDescending(x => x.Slug),
+            ContentListRules.SlugSort => items.OrderBy(x => x.Slug == null ? 1 : 0).ThenBy(x => x.Slug),
             _ => request.SortDesc ? items.OrderByDescending(x => x.CreatedAt) : items.OrderBy(x => x.CreatedAt)
         };
         // Left joins deliberately retain owners with unavailable templates; the released
@@ -68,8 +69,10 @@ internal static class ContentListProjection
                 .ThenByDescending(x => x.Version.Slug).ThenBy(x => x.Version.ContentItemId),
             ContentListRules.SlugSort => joined.OrderBy(x => x.Version.Slug == null ? 0 : 1)
                 .ThenBy(x => x.Version.Slug).ThenBy(x => x.Version.ContentItemId),
-            _ when request.SortDesc => joined.OrderByDescending(x => x.Version.PublishedAt).ThenBy(x => x.Version.ContentItemId),
-            _ => joined.OrderBy(x => x.Version.PublishedAt).ThenBy(x => x.Version.ContentItemId)
+            _ when request.SortDesc => joined.OrderBy(x => x.Version.PublishedAt == null ? 0 : 1)
+                .ThenByDescending(x => x.Version.PublishedAt).ThenBy(x => x.Version.ContentItemId),
+            _ => joined.OrderBy(x => x.Version.PublishedAt == null ? 1 : 0)
+                .ThenBy(x => x.Version.PublishedAt).ThenBy(x => x.Version.ContentItemId)
         };
         var rows = await ordered.Skip(offset).Take(request.PageSize).Select(x => new ContentListItemOutput(
             x.Version.ContentItemId, x.Version.TemplateVersionId, x.Name, x.Version.Slug, x.Version.LocaleCode,
