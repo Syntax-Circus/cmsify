@@ -48,6 +48,7 @@ nav:
       - Authentication and authorization: authentication-and-authorization.md
       - Integrating with the API: integrating.md
       - Engine packages and qualification: engine-packages.md
+      - Embedded SQLite hosts: integrations/embedded-sqlite.md
       - Content modeling: content-modeling.md
       - Components and choice sets: content-components-and-choice-sets.md
       - Model packages: packages.md

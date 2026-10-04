@@ -8,4 +8,8 @@ The engine is licensed **AGPL-3.0-or-later**, as specified by the included `LICE
 
 Packaging does not establish complete application embedding or SQLite support. See [engine package qualification](https://github.com/Syntax-Circus/cmsify/blob/main/docs/engine-packages.md) for the measured scope, required host configuration and remaining limitations.
 
+Optional SQLite registration and schema-only migrations are supplied separately by
+`SyntaxCircus.Cmsify.Infrastructure.Sqlite`; see the [embedded SQLite guide](https://github.com/Syntax-Circus/cmsify/blob/main/docs/integrations/embedded-sqlite.md).
+Infrastructure-only consumers retain their PostgreSQL package graph.
+
 Webhook outbox/delivery claim selection and outbox materialization use an Infrastructure-only provider strategy. PostgreSQL retains its row-locking queries; SQLite uses mapped queries inside a non-deferred writer-reserving transaction, so competing SQLite writers wait through lease mutation or materialization commit. Lease owner/token/expiry fencing and atomic delivery intent creation remain repository responsibilities. The file-backed SQLite tests create the schema with `EnsureCreated`; this bounded repository coverage does not qualify SQLite migrations, registration, other webhook workflows, or a complete SQLite deployment.

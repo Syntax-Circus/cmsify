@@ -2,6 +2,13 @@
 
 Optional SQLite registration for embedded .NET 10 hosts, licensed under AGPL-3.0-or-later.
 
+See the [embedded SQLite guide](https://github.com/Syntax-Circus/cmsify/blob/main/docs/integrations/embedded-sqlite.md)
+for an executable host example, explicit initialization, deployment constraints,
+backup rollback and abandoned-lock recovery. This package is released in lockstep
+with Core and Infrastructure. Local candidate checks do not establish publication
+or full SQLite qualification; JSON query/search, complete workers, production
+backup/blob recovery and supported-version upgrades remain separate gates.
+
 Reference `SyntaxCircus.Cmsify.Infrastructure.Sqlite` and import
 `Cmsify.Infrastructure.Sqlite.Extensions`. Register with
 `services.AddCmsifySqliteInfrastructure(configuration)` or pass the common
