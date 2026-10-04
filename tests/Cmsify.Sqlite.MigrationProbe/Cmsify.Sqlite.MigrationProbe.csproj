@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <ProjectReference Include="..\..\src\Cmsify.Infrastructure.Sqlite\Cmsify.Infrastructure.Sqlite.csproj" />
+    <Compile Include="..\Cmsify.Infrastructure.Tests\Fixtures\SqliteUpgrade\**\*.cs" Link="Fixtures\SqliteUpgrade\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

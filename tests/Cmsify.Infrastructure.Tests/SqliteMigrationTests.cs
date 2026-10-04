@@ -18,11 +18,11 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class SqliteMigrationTests : IDisposable
 {
-    private readonly string file = Path.Combine(Path.GetTempPath(), $"cmsify-migration-{Guid.NewGuid():N}.db");
+    private readonly string _file = Path.Combine(Path.GetTempPath(), $"cmsify-migration-{Guid.NewGuid():N}.db");
     private ServiceProvider Provider(string? connection = null)
     {
         var services = SqliteRegistrationTests.Services();
-        services.AddCmsifySqliteInfrastructure(SqliteRegistrationTests.Configuration(connection ?? $"Data Source={file};Pooling=False"),
+        services.AddCmsifySqliteInfrastructure(SqliteRegistrationTests.Configuration(connection ?? $"Data Source={_file};Pooling=False"),
             new() { Workers = CmsifyWorkers.None });
         return services.BuildServiceProvider();
     }
@@ -30,7 +30,7 @@ public sealed class SqliteMigrationTests : IDisposable
         .MigrateAsync(TestContext.Current.CancellationToken);
     private async Task Execute(string sql)
     {
-        await using var connection = new SqliteConnection($"Data Source={file};Pooling=False");
+        await using var connection = new SqliteConnection($"Data Source={_file};Pooling=False");
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
@@ -78,7 +78,7 @@ public sealed class SqliteMigrationTests : IDisposable
         using var provider = Provider();
         using var scope = provider.CreateScope();
         await Migrate(scope.ServiceProvider);
-        await using var connection = new SqliteConnection($"Data Source={file};Pooling=False");
+        await using var connection = new SqliteConnection($"Data Source={_file};Pooling=False");
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT note FROM host_notes";
@@ -98,7 +98,7 @@ public sealed class SqliteMigrationTests : IDisposable
         using var scope = provider.CreateScope();
         var exception = await Should.ThrowAsync<InvalidOperationException>(() => Migrate(scope.ServiceProvider));
         exception.Message.ShouldContain("unmanaged", Case.Insensitive);
-        await using var connection = new SqliteConnection($"Data Source={file};Pooling=False");
+        await using var connection = new SqliteConnection($"Data Source={_file};Pooling=False");
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT name FROM workspaces";
@@ -106,12 +106,21 @@ public sealed class SqliteMigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task UnknownOrGappedHistory_IsRejected()
+    public async Task UnknownHistory_IsRejected()
     {
         await Execute("CREATE TABLE __CmsifyMigrationsHistory (migration_id TEXT NOT NULL PRIMARY KEY, product_version TEXT NOT NULL); INSERT INTO __CmsifyMigrationsHistory VALUES ('99999999999999_Unknown', '10.0.11');");
         using var provider = Provider();
         using var scope = provider.CreateScope();
         (await Should.ThrowAsync<InvalidOperationException>(() => Migrate(scope.ServiceProvider))).Message.ShouldContain("history", Case.Insensitive);
+    }
+
+    [Fact]
+    public void RecognizedMultiversionHistory_WithGap_IsRejectedByProductionPrefixGuard()
+    {
+        string[] known = ["20260101000000_First", "20260102000000_Second", "20260103000000_Third"];
+        Cmsify.Infrastructure.Sqlite.Persistence.SqliteCmsifySchemaGuard.ValidateHistoryPrefix(known, [known[0], known[1]]);
+        Should.Throw<InvalidOperationException>(() => Cmsify.Infrastructure.Sqlite.Persistence.SqliteCmsifySchemaGuard.ValidateHistoryPrefix(known, [known[0], known[2]]))
+            .Message.ShouldContain("gapped");
     }
 
     [Fact]
@@ -212,6 +221,7 @@ public sealed class SqliteMigrationTests : IDisposable
 
     [Theory]
     [InlineData("CREATE TABLE __CmsifyMigrationsHistory (migration_id TEXT NOT NULL, product_version TEXT NOT NULL);")]
+    [InlineData("CREATE TABLE __CmsifyMigrationsHistory (migration_id TEXT NOT NULL, product_version TEXT NOT NULL, PRIMARY KEY (migration_id, product_version));")]
     [InlineData("CREATE TABLE __CmsifyMigrationsHistory (migration_id TEXT NOT NULL PRIMARY KEY, product_version TEXT NOT NULL); INSERT INTO __CmsifyMigrationsHistory VALUES ('known', 'garbage');")]
     [InlineData("CREATE VIEW __CmsifyMigrationsHistory AS SELECT 'known' AS migration_id, '10.0.11' AS product_version;")]
     public async Task MalformedHistoryShapeOrValues_IsRejected(string sql)
@@ -226,12 +236,12 @@ public sealed class SqliteMigrationTests : IDisposable
     public async Task ReadOnlyFile_FailsWithoutReportingSuccess()
     {
         await Execute("CREATE TABLE host_notes (note TEXT);");
-        using var provider = Provider($"Data Source={file};Mode=ReadOnly;Pooling=False");
+        using var provider = Provider($"Data Source={_file};Mode=ReadOnly;Pooling=False");
         using var scope = provider.CreateScope();
         await Should.ThrowAsync<SqliteException>(() => Migrate(scope.ServiceProvider));
     }
 
-    public void Dispose() { File.Delete(file); File.Delete(file + "-wal"); File.Delete(file + "-shm"); }
+    public void Dispose() { File.Delete(_file); File.Delete(_file + "-wal"); File.Delete(_file + "-shm"); }
     private sealed class TestHost(IServiceProvider services) : IHost
     {
         public IServiceProvider Services => services;

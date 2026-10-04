@@ -31,14 +31,14 @@ internal static class SqliteCmsifySchemaGuard
             if (objects.TryGetValue(SqliteCmsifyDbContextOptions.MigrationsHistoryTable, out var historyType))
             {
                 if (historyType != "table") throw MalformedHistory();
-                var columns = new Dictionary<string, (string Type, bool Required, bool Primary)>(StringComparer.OrdinalIgnoreCase);
+                var columns = new Dictionary<string, (string Type, bool Required, long PrimaryOrdinal)>(StringComparer.OrdinalIgnoreCase);
                 await using (var command = Command(connection, transaction, "PRAGMA table_info(\"__CmsifyMigrationsHistory\")"))
                 await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
                     while (await reader.ReadAsync(cancellationToken)) columns.Add(reader.GetString(1),
-                        (reader.GetString(2), reader.GetInt64(3) != 0, reader.GetInt64(5) == 1));
+                        (reader.GetString(2), reader.GetInt64(3) != 0, reader.GetInt64(5)));
                 if (columns.Count != 2
-                    || !columns.TryGetValue("migration_id", out var id) || id.Type != "TEXT" || !id.Required || !id.Primary
-                    || !columns.TryGetValue("product_version", out var version) || version.Type != "TEXT" || !version.Required || version.Primary)
+                    || !columns.TryGetValue("migration_id", out var id) || id.Type != "TEXT" || !id.Required || id.PrimaryOrdinal != 1
+                    || !columns.TryGetValue("product_version", out var version) || version.Type != "TEXT" || !version.Required || version.PrimaryOrdinal != 0)
                     throw MalformedHistory();
                 await using (var command = Command(connection, transaction,
                     "SELECT \"migration_id\", \"product_version\" FROM \"__CmsifyMigrationsHistory\" ORDER BY \"migration_id\""))
@@ -55,9 +55,7 @@ internal static class SqliteCmsifySchemaGuard
             if (applied.Count == 0 && ownedTables.Any(objects.ContainsKey))
                 throw new InvalidOperationException("Unmanaged Cmsify SQLite schema detected. Restore a migration-managed backup or use a fresh database; automatic schema adoption is unsupported.");
             var known = context.Database.GetMigrations().ToArray();
-            if (known.Length == 0) throw new InvalidOperationException("No Cmsify SQLite migrations are available in the selected migration assembly.");
-            if (applied.Count > known.Length || !applied.SequenceEqual(known.Take(applied.Count), StringComparer.Ordinal))
-                throw new InvalidOperationException("Cmsify SQLite migration history is unknown or gapped. Use compatible application binaries or restore a verified backup; automatic downgrade is unsupported.");
+            ValidateHistoryPrefix(known, applied);
             if (applied.Count > 0)
             {
                 var assembly = context.GetService<IMigrationsAssembly>();
@@ -76,6 +74,13 @@ internal static class SqliteCmsifySchemaGuard
         {
             if (closeConnection) await connection.CloseAsync();
         }
+    }
+
+    internal static void ValidateHistoryPrefix(IReadOnlyList<string> known, IReadOnlyList<string> applied)
+    {
+        if (known.Count == 0) throw new InvalidOperationException("No Cmsify SQLite migrations are available in the selected migration assembly.");
+        if (applied.Count > known.Count || !applied.SequenceEqual(known.Take(applied.Count), StringComparer.Ordinal))
+            throw new InvalidOperationException("Cmsify SQLite migration history is unknown or gapped. Use compatible application binaries or restore a verified backup; automatic downgrade is unsupported.");
     }
 
     private static DbCommand Command(DbConnection connection, DbTransaction transaction, string sql)
