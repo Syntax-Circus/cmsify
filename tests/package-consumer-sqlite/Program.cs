@@ -32,7 +32,9 @@ foreach (var assembly in new[] { "Core", "Infrastructure", "Infrastructure.Sqlit
     if (args[2].Length > 0) Require((string?)repository.Attribute("commit") == args[2], "Source commit metadata differs.");
     var loaded = Assembly.Load($"Cmsify.{assembly}");
     var informational = loaded.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-    Require(args[2].Length > 0 ? informational == $"{args[1]}+{args[2]}" : informational?.Split('+')[0] == args[1], "Assembly informational version/source differs.");
+    Require(args[2].Length > 0
+        ? informational == $"{args[1]}+{args[2]}" || informational == $"{args[1]}+{args[2]}.{args[2]}"
+        : informational?.Split('+')[0] == args[1], "Assembly informational version/source differs.");
     Require(loaded.GetName().Version == new Version(args[1].Split('-')[0] + ".0"), "Assembly version differs.");
     if (assembly != "Core")
     {
