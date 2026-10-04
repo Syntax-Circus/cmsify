@@ -58,6 +58,7 @@ def rewrite_links(text: str) -> str:
         "../tests/upgrade/README.md": f"{REPOSITORY_URL}/tree/main/tests/upgrade",
         "../.github/workflows/upgrade-rollback.yml": f"{REPOSITORY_URL}/blob/main/.github/workflows/upgrade-rollback.yml",
         "../../docs/integrating.md": "../integrating.md",
+        "../../src/Cmsify.Infrastructure.Sqlite/README.md": f"{REPOSITORY_URL}/blob/main/src/Cmsify.Infrastructure.Sqlite/README.md",
         "../src/Cmsify.Components/README.md": "components.md",
         "../src/Cmsify.Components.Theme/README.md": "components-theme.md",
         "../../examples": f"{REPOSITORY_URL}/tree/main/examples",
