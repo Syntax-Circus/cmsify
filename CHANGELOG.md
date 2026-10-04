@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-10-03
+
+### Added
+
+- Optional `SyntaxCircus.Cmsify.Infrastructure.Sqlite` NuGet package with explicit `AddCmsifySqliteInfrastructure` registration for file-backed embedded hosts. Registration performs no database I/O and rejects conflicting provider configuration.
+- Separate SQLite migration baseline, snapshot and design-time factory, with a schema-only migrator that validates migration history and expected table presence before applying migrations. Workspace/admin seeding remains an explicit host operation; abandoned native EF migration locks require documented manual recovery.
+- SQLite process contention, cancellation, bounded crash recovery, backup-restore and generated table-rebuild upgrade fixtures, plus isolated PostgreSQL/SQLite package-consumer and release-provenance checks on Windows and Linux.
+- Embedded SQLite integration documentation covering registration, migration ownership, recovery and qualification limits.
+
+### Fixed
+
+- CI now builds the optional SQLite package and its dependencies with the candidate version before packing, ensuring package assembly metadata matches the version and source under verification.
+
+### Changed
+
+- Infrastructure exposes a narrow provider composition seam while preserving existing PostgreSQL registration, migrations, seeding and standalone/Docker defaults. PostgreSQL consumers gain no SQLite dependencies; the optional SQLite package still transitively references existing PostgreSQL infrastructure dependencies.
+- This opt-in package does not establish complete SQLite production qualification. JSON/search, full workflow/auth/worker/bulk/load parity, deployment backup/blob/permission recovery and arbitrary crash windows remain separate gates; upgrade fixtures do not represent a prior released SQLite version.
+
 ## [0.8.7] - 2026-10-03
 
 ### Fixed
