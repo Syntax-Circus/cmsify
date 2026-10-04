@@ -14,6 +14,14 @@ SPEC.loader.exec_module(STAGE_DOCS)
 
 
 class RewriteLinksTests(unittest.TestCase):
+    def test_sqlite_readme_link_targets_repository_and_preserves_fragment(self) -> None:
+        source = "[bounded predicates](../../src/Cmsify.Infrastructure.Sqlite/README.md#bounded-json-string-predicates)"
+
+        self.assertEqual(
+            "[bounded predicates](https://github.com/Syntax-Circus/cmsify/blob/main/src/Cmsify.Infrastructure.Sqlite/README.md#bounded-json-string-predicates)",
+            STAGE_DOCS.rewrite_links(source),
+        )
+
     def test_changelog_provider_portability_link_targets_repository(self) -> None:
         source = "[provider portability](docs/provider-portability.md)"
 
