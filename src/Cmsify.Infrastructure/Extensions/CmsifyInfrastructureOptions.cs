@@ -14,7 +14,7 @@ public enum CmsifyWorkers
         | WebhookSecretRotation | WebhookSecretRotationInventoryPreflight
 }
 
-/// <summary>Registration-time host integration choices; PostgreSQL remains the persistence provider.</summary>
+/// <summary>Registration-time host integration choices shared by the selected database provider.</summary>
 public sealed record CmsifyInfrastructureOptions
 {
     public bool UseHostCurrentActorForAudit { get; init; }

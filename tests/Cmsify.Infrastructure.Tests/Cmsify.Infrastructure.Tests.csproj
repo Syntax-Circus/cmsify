@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cmsify.Infrastructure\Cmsify.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Cmsify.Infrastructure.Sqlite\Cmsify.Infrastructure.Sqlite.csproj" />
   </ItemGroup>
 
   <ItemGroup>
