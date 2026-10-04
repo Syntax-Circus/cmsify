@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-10-04
+
+### Added
+
+- Bounded native SQLite translation for `JsonElement.GetProperty(string).GetString()` predicates on nested objects, with parameterized property names and 34 focused provider regression cases.
+
+### Fixed
+
+- Unsupported SQLite JSON members, computed roots and projection aliases are rejected explicitly; null property names and non-string terminal values are also rejected.
+- Corrected the staged SQLite README link while preserving its anchor.
+
+### Changed
+
+- Clarified that SQLite remains optional and PostgreSQL remains the standalone/container default. No entity schema, public API or dependency change; this does not qualify generic JSON translation or production SQLite support.
+
 ## [0.8.9] - 2026-10-04
 
 ### Added
