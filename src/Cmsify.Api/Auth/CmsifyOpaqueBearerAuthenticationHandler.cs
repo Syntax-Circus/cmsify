@@ -129,9 +129,7 @@ public sealed class CmsifyOpaqueBearerAuthenticationHandler(
             return Task.CompletedTask;
         }
 
-        return dbContext.ApiClients
-            .Where(c => c.Id == clientId && (!c.LastUsedAt.HasValue || c.LastUsedAt.Value <= now - touchInterval))
-            .ExecuteUpdateAsync(setters => setters.SetProperty(c => c.LastUsedAt, now), ct);
+        return dbContext.TouchApiClientLastUsedIfDueAsync(clientId, now, touchInterval, ct);
     }
 
     internal static string[] GetApiTokenIdentifierCandidates(string token)

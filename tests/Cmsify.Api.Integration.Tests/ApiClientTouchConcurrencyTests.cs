@@ -5,6 +5,9 @@ using Cmsify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using System.Net;
+using System.Net.Http.Headers;
 using Testcontainers.PostgreSql;
 
 namespace Cmsify.Api.Integration.Tests;
@@ -31,6 +34,47 @@ public sealed class ApiClientTouchConcurrencyTests : IAsyncLifetime
     {
         await postgres.DisposeAsync();
         ClearEnvironment();
+    }
+
+    [Fact]
+    public async Task HttpAuthentication_ValidClientTouchesOnceAndInvalidCredentialDoesNotTouch()
+    {
+        const string token = "cmsify_touch_wiring_valid_secret";
+        await using var factory = CreateFactory().WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configuration) =>
+            configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:ApiClientTouchIntervalSeconds"] = "3600" })));
+        Guid id;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var client = new ApiClient
+            {
+                Name = "HTTP touch", TokenIdentifier = "touch_wiring", TokenHash = BCrypt.Net.BCrypt.HashPassword(token, 4),
+                Role = UserRole.Reader, WorkspaceId = await context.Workspaces.Select(workspace => workspace.Id).FirstAsync(TestContext.Current.CancellationToken),
+                CreatedByUserId = await context.Users.Select(user => user.Id).FirstAsync(TestContext.Current.CancellationToken)
+            };
+            context.Add(client);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            id = client.Id;
+        }
+        using var http = factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        (await http.GetAsync("/api/v1/workspaces", TestContext.Current.CancellationToken)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        var first = await ReadAsync();
+        first.LastUsedAt.ShouldNotBeNull();
+        (await http.GetAsync("/api/v1/workspaces", TestContext.Current.CancellationToken)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        var repeated = await ReadAsync();
+        repeated.ShouldBe(first);
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "cmsify_touch_wiring_wrong_secret");
+        (await http.GetAsync("/api/v1/workspaces", TestContext.Current.CancellationToken)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await ReadAsync()).ShouldBe(first);
+
+        async Task<(DateTimeOffset? LastUsedAt, uint Token)> ReadAsync()
+        {
+            using var scope = factory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var persisted = await context.ApiClients.SingleAsync(client => client.Id == id, TestContext.Current.CancellationToken);
+            return (persisted.LastUsedAt, context.Entry(persisted).Property<uint>("xmin").CurrentValue);
+        }
     }
 
     [Fact]
