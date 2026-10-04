@@ -37,7 +37,9 @@ They are neither cast into strings nor silently returned as null. PostgreSQL's
 existing native text extraction remains unchanged and can return text for those
 kinds; this package does not promise mixed-kind parity. Typed getters, array
 indexing/enumeration, bare `GetProperty`, root `GetString`, and other `JsonElement`
-methods fail explicitly during query compilation. Property names must be non-null.
+methods fail explicitly during query compilation. A null property-name parameter
+raises a native SQLite error containing `Cmsify SQLite GetProperty requires a non-null name`;
+the actual string name `"null"` remains supported.
 There is no automatic client evaluation fallback. This bounded translation does
 not establish generic JSON-query support, JSON indexing, performance guarantees,
 or complete provider qualification.

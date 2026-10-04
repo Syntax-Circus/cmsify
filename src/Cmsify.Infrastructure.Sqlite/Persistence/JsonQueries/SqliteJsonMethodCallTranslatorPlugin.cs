@@ -16,6 +16,7 @@ internal sealed class SqliteJsonMethodCallTranslatorPlugin(ISqlExpressionFactory
         private static readonly MethodInfo _getProperty = typeof(JsonElement).GetMethod(nameof(JsonElement.GetProperty), [typeof(string)])!;
         private static readonly MethodInfo _getString = typeof(JsonElement).GetMethod(nameof(JsonElement.GetString), Type.EmptyTypes)!;
         private const string UnsupportedValuePath = "Cmsify SQLite GetString supports only JSON strings or null";
+        private const string NullPropertyNamePath = "Cmsify SQLite GetProperty requires a non-null name";
 
         public SqlExpression? Translate(SqlExpression? instance, MethodInfo method, IReadOnlyList<SqlExpression> arguments,
             IDiagnosticsLogger<DbLoggerCategory.Query> logger)
@@ -25,7 +26,9 @@ internal sealed class SqliteJsonMethodCallTranslatorPlugin(ISqlExpressionFactory
             {
                 // JSON-quote each name as data, rather than interpolating it into SQL or a raw path.
                 var name = sql.ApplyDefaultTypeMapping(arguments[0]);
-                var path = sql.Add(sql.Constant("$."), Function("json_quote", [name]));
+                var path = sql.Case(
+                    [new CaseWhenClause(sql.IsNull(name), Function("json_extract", [sql.Constant("null"), sql.Constant(NullPropertyNamePath)]))],
+                    sql.Add(sql.Constant("$."), Function("json_quote", [name])));
                 var value = Function("json_extract", [instance, path]);
                 // Keep JSON strings quoted between traversal steps. Otherwise a string containing
                 // serialized JSON could incorrectly be traversed as an object on the next step.

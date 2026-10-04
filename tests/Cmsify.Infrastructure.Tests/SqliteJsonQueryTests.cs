@@ -105,6 +105,23 @@ public sealed class SqliteJsonQueryTests(ITestOutputHelper output)
         fixture.Commands.ShouldBeEmpty();
     }
 
+    // json_quote(NULL) is the text "null", not an object property name.
+    [Fact]
+    public async Task NullPropertyNameParameter_IsRejectedButLiteralNullNameWorks()
+    {
+        await using var fixture = await Fixture.Create(true);
+        await fixture.Seed("{\"null\":\"hit\"}", "{\"null\":\"other\"}");
+        string? name = null;
+        var error = await Should.ThrowAsync<SqliteException>(() => fixture.Context.TemplateFields.CountAsync(row =>
+            row.FieldConfig!.Value.GetProperty(name!).GetString() == "hit", TestContext.Current.CancellationToken));
+        error.Message.ShouldContain("Cmsify SQLite GetProperty requires a non-null name");
+        name = "null";
+        (await fixture.Context.TemplateFields.CountAsync(row => row.FieldConfig!.Value.GetProperty(name).GetString() == "hit",
+            TestContext.Current.CancellationToken)).ShouldBe(1);
+        (await fixture.Context.TemplateFields.CountAsync(row => row.FieldConfig!.Value.GetProperty("null").GetString() == "hit",
+            TestContext.Current.CancellationToken)).ShouldBe(1);
+    }
+
     // Casting a number or object into a string would silently broaden SQLite's supported scope.
     [Theory]
     [InlineData("42")]
