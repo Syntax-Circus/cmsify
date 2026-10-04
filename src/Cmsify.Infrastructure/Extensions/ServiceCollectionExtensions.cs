@@ -14,6 +14,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Cmsify.Core.Workspaces;
+using Cmsify.Core.ContentQueries;
+using Cmsify.Infrastructure.Persistence.ContentQueries;
 
 namespace Cmsify.Infrastructure.Extensions;
 
@@ -34,6 +36,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(databaseProvider);
         var providerName = databaseProvider.ProviderName;
         var migratorType = databaseProvider.MigratorType;
+        var contentListRepositoryType = databaseProvider.ContentListQueryRepositoryType ?? typeof(UnsupportedContentListQueryRepository);
         if (string.IsNullOrWhiteSpace(providerName))
             throw new ArgumentException("A database provider name is required.", nameof(databaseProvider));
         if (migratorType is null || !migratorType.IsClass || migratorType.IsAbstract || migratorType.ContainsGenericParameters
@@ -41,6 +44,9 @@ public static class ServiceCollectionExtensions
             throw new ArgumentException("The provider migrator must be a concrete ICmsifyDatabaseMigrator type.", nameof(databaseProvider));
         if ((options.Workers & ~CmsifyWorkers.All) != CmsifyWorkers.None)
             throw new ArgumentOutOfRangeException(nameof(options), "Unknown Cmsify worker selection.");
+        if (!contentListRepositoryType.IsClass || contentListRepositoryType.IsAbstract || contentListRepositoryType.ContainsGenericParameters
+            || !typeof(IContentListQueryRepository).IsAssignableFrom(contentListRepositoryType))
+            throw new ArgumentException("The provider content-list repository must be a concrete IContentListQueryRepository type.", nameof(databaseProvider));
 
         var settings = configuration.AsEnumerable().OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase).ToArray();
         var existing = services.FirstOrDefault(descriptor => descriptor.ServiceType == typeof(InfrastructureRegistration))
@@ -48,6 +54,7 @@ public static class ServiceCollectionExtensions
         if (existing is not null)
         {
             if (existing.ProviderType != databaseProvider.GetType() || existing.ProviderName != providerName
+                || existing.ContentListRepositoryType != contentListRepositoryType
                 || existing.Options != options || !existing.Settings.SequenceEqual(settings, ConfigurationEntryComparer.Instance))
                 throw new InvalidOperationException("AddCmsifyInfrastructure was called with conflicting provider, options or configuration settings.");
             return services;
@@ -96,6 +103,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<IWorkspaceMutationRepository, WorkspaceMutationRepository>();
         services.AddScoped<IWorkspacesListRequestHandler, WorkspacesListRequestHandler>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IListContentRequestHandler, ListContentRequestHandler>();
+        services.AddScoped(typeof(IContentListQueryRepository), contentListRepositoryType);
         services.AddScoped<IWorkspacesCreateRequestHandler, WorkspacesCreateRequestHandler>();
         services.AddScoped<IWorkspacesGetRequestHandler, WorkspacesGetRequestHandler>();
         services.AddScoped<IWorkspacesUpdateRequestHandler, WorkspacesUpdateRequestHandler>();
@@ -174,12 +184,12 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecretProtectionOptions>>(),
                 provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookSecretRotationInventoryPreflightService>>()));
 
-        services.AddSingleton(new InfrastructureRegistration(options, settings, databaseProvider.GetType(), providerName));
+        services.AddSingleton(new InfrastructureRegistration(options, settings, databaseProvider.GetType(), providerName, contentListRepositoryType));
         return services;
     }
 
     private sealed record InfrastructureRegistration(CmsifyInfrastructureOptions Options, KeyValuePair<string, string?>[] Settings,
-        Type ProviderType, string ProviderName);
+        Type ProviderType, string ProviderName, Type ContentListRepositoryType);
 
     private sealed class ConfigurationEntryComparer : IEqualityComparer<KeyValuePair<string, string?>>
     {

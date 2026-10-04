@@ -7,6 +7,7 @@ internal sealed class SqliteCmsifyDatabaseProvider : CmsifyDatabaseProvider
 {
     public override string ProviderName => "Microsoft.EntityFrameworkCore.Sqlite";
     public override Type MigratorType => typeof(SqliteCmsifyDatabaseMigrator);
+    public override Type? ContentListQueryRepositoryType => typeof(ContentQueries.SqliteContentListQueryRepository);
     public override void Configure(DbContextOptionsBuilder options, string connectionString)
         => SqliteCmsifyDbContextOptions.Configure(options, connectionString);
 }
