@@ -101,9 +101,18 @@ public sealed class ContentListQueryRepositoryTests
             r with { LocaleCode = "de" }, r with { TranslationGroupId = group }, r with { Slug = "needle" },
             r with { Tags = "zebra" }, r with { PublishedBefore = At.AddDays(-1) } })
             Assert.Equal("needle", Assert.Single((await Read(f, vector)).Items).Slug);
-        await Check(f, r with { PublishedAfter = At }, [owner.Id], 1);
         await Check(f, r with { Q = "needle" }, [], 0); await Check(f, r with { Q = "winner" }, [owner.Id], 1);
         await Check(f, r with { Status = ContentStatus.Archived }, [], 0, commands: 0);
+        // The better bounded candidate is older. Applying PublishedAfter only after
+        // ranking would discard it without selecting the newer default fallback.
+        winner.PublishedAt = At.AddDays(-1); fallback.PublishedAt = At;
+        await seed.SaveChangesAsync(Ct);
+        Assert.Equal("winner", Assert.Single((await Read(f, r)).Items).Slug);
+        var probe = new Probe();
+        var filtered = await Read(f, r with { PublishedAfter = At }, probe: probe);
+        Assert.Equal("needle", Assert.Single(filtered.Items).Slug);
+        Assert.Equal(owner.Id, filtered.Items[0].Id); Assert.Equal(1, filtered.TotalCount);
+        Assert.Equal(2, probe.Commands.Count); Assert.Equal(0, probe.Writes);
     }
 
     [Theory]
@@ -244,7 +253,8 @@ public sealed class ContentListQueryRepositoryTests
         foreach(var resolved in new[] { false,true })
         {
             var small=new Probe(); var large=new Probe(); var r=new ListContentRequest(f.Workspace.Id,Resolve:resolved,PageSize:1);
-            var one=await Read(f,r,probe:small); var hundred=await Read(f,r with { PageSize=100 },probe:large);
+            var one=await Read(f,r,probe:small,measurementHistory:history);
+            var hundred=await Read(f,r with { PageSize=100 },probe:large,measurementHistory:history);
             Assert.Single(one.Items); Assert.Equal(100,hundred.Items.Count); Assert.Equal(100,one.TotalCount); Assert.Equal(100,hundred.TotalCount);
             Assert.Equal(small.Commands.Count,large.Commands.Count); Assert.Equal(resolved?2:4,large.Commands.Count);
             Assert.Equal(0,small.Writes); Assert.Equal(0,large.Writes); Assert.Empty(large.Tracked);
@@ -379,11 +389,27 @@ public sealed class ContentListQueryRepositoryTests
         Assert.Equal(unordered?ids.Order().ToArray():ids,unordered?page.Items.Select(x=>x.Id).Order().ToArray():page.Items.Select(x=>x.Id).ToArray());
         Assert.Equal(total,page.TotalCount); Assert.Equal(commands??(r.Resolve?2:4),probe.Commands.Count); Assert.Equal(0,probe.Writes);
     }
-    private static async Task<ContentListPage> Read(ContentListQueryFixtures f,ListContentRequest r,int? offset=0,DateTimeOffset? at=null,Probe? probe=null)
+    private static async Task<ContentListPage> Read(ContentListQueryFixtures f,ListContentRequest r,int? offset=0,DateTimeOffset? at=null,Probe? probe=null,
+        int? measurementHistory=null)
     {
         probe??=new(); await using var db=new CmsifyDbContext(new DbContextOptionsBuilder<CmsifyDbContext>(f.Options).AddInterceptors(probe).Options);
         IContentListQueryRepository repository=f.Sqlite?new SqliteContentListQueryRepository(db):new PostgresContentListQueryRepository(db);
-        var c=new ContentListCriteria(r,at??At,offset); var page=r.Resolve?await repository.ListResolvedAsync(c,Ct):await repository.ListItemsAsync(c,Ct);
+        var c=new ContentListCriteria(r,at??At,offset);
+        // Measure only the awaited runtime repository operation: all content commands,
+        // connection opens, EF translation, interception and DTO materialization.
+        // Fixture/migration/seed, context/criteria construction and disposal are outside.
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var page=r.Resolve?await repository.ListResolvedAsync(c,Ct):await repository.ListItemsAsync(c,Ct);
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
+        if (measurementHistory is { } history)
+            TestContext.Current.TestOutputHelper?.WriteLine("MEASUREMENT: " + System.Text.Json.JsonSerializer.Serialize(new
+            {
+                provider = f.Sqlite ? "Sqlite" : "Postgres",
+                processCulture = CultureInfo.DefaultThreadCurrentCulture?.Name ?? CultureInfo.CurrentCulture.Name,
+                mode = r.Resolve ? "resolved" : "ordinary", ownerCount = 100, versionsPerOwner = history,
+                pageSize = r.PageSize, offset, commands = probe.Commands.Count, returnedRows = page.Items.Count,
+                versionRows = probe.VersionRows, writes = probe.Writes, elapsedMilliseconds = elapsed.TotalMilliseconds
+            }));
         probe.Tracked.AddRange(db.ChangeTracker.Entries().Select(x=>x.Entity)); return page;
     }
     private sealed class Probe:DbCommandInterceptor
