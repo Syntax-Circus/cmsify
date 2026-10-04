@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-10-04
+
+### Added
+
+- Directly callable `IListContentRequestHandler` and immutable Core-owned request/result contracts for ordinary and resolved content listing, with actor/role checks, workspace authorization, pagination validation and cancellation support.
+- Provider-aware PostgreSQL and opt-in SQLite content-list repositories with parameterized server-side filtering, tag membership, winner selection, counting and paging. Ordinary summaries use bounded projections rather than loading version histories.
+- Baseline compatibility, provider/culture, nullable ordering, API mapping and isolated package-consumer coverage on Windows and Linux, including exact candidate metadata and negative package-resolution checks.
+
+### Changed
+
+- The existing content-list HTTP endpoint delegates to the engine handler while preserving wire contracts, authorization/model-validation ordering, error conventions, snapshots, wildcard behavior and mode-specific nullable ranking and page ordering.
+- Content listing captures one request-time instant for serving selection, removing per-row clock drift; ordinary listing continues to ignore `AsOf`, while resolved listing honors an explicit value.
+- PostgreSQL remains the default for standalone/Docker deployments; SQLite remains an optional package. No schema, migration, index or dependency-version change, and PostgreSQL consumers gain no SQLite assets.
+- This extraction qualifies the authenticated ordinary/resolved list workflow within the documented native collation and timestamp-precision envelope, not general JSON LINQ translation, all embedded workflows or complete SQLite production/load/recovery support.
+
 ## [0.8.8] - 2026-10-03
 
 ### Added
