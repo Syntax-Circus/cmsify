@@ -113,7 +113,9 @@ await using (var restarted = BuildHost())
     Require(hidden.IsFailure && hidden.Errors[0].Kind == ResultErrorKind.NotFound, "Deleted workspace visible.");
     var db = services.GetRequiredService<CmsifyDbContext>();
     Require((await db.Workspaces.IgnoreQueryFilters().SingleAsync(ct)).IsDeleted, "Soft deletion lost.");
-    Require(await db.AuditLogs.CountAsync(ct) == 3 && !await db.Users.AnyAsync(ct), "Audit/no-credentials invariant failed.");
+    var audit = await db.AuditLogs.Where(log => log.EntityId == workspaceId).ToListAsync(ct);
+    Require(audit.Count == 3 && audit.All(log => log.ActorUserId == actorId && log.ActorApiClientId is null), "Workspace audit invariant failed.");
+    Require(!await db.Users.AnyAsync(ct) && !await db.UserSessions.AnyAsync(ct) && !await db.ApiClients.AnyAsync(ct), "Unexpected local credentials.");
 }
 Console.WriteLine("PASS SQLite native migration, no seed, idempotent restart, workspace CRUD, stale rejection and host audit.");
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
