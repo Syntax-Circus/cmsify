@@ -120,6 +120,13 @@ This is candidate evidence only: released 0.8.8 lacks the public contract. Nativ
 SQLite LIKE retains its measured Unicode/case differences from PostgreSQL; generic
 JSON LINQ translation, full embedding and production qualification remain open.
 
+Source SQLite registration now supports a bounded native JSON string-predicate
+shape: one or more `GetProperty(string)` object traversals ending in `GetString()`.
+See the [SQLite package README](../../src/Cmsify.Infrastructure.Sqlite/README.md#bounded-json-string-predicates)
+for parameterization, missing/null semantics, explicit mixed-kind errors and
+unsupported expressions. This is source evidence, not a public-release adoption
+claim; broader JSON queries and full provider qualification remain open.
+
 Design-time commands select the SQLite project as both project and startup project:
 
 ```powershell

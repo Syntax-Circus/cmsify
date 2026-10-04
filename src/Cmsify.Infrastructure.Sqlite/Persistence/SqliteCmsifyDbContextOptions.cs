@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Cmsify.Infrastructure.Sqlite.Persistence.JsonQueries;
 
 namespace Cmsify.Infrastructure.Sqlite.Persistence;
 
@@ -28,5 +30,7 @@ internal static class SqliteCmsifyDbContextOptions
             // Use the provider-neutral convention: the PostgreSQL wrapper replaces
             // migration history services and would override SQLite's migration lock.
             .UseSnakeCaseNamingConvention();
+        ((IDbContextOptionsBuilderInfrastructure)options).AddOrUpdateExtension(new SqliteJsonOptionsExtension());
+        options.AddInterceptors(SqliteJsonQueryInterceptor.Instance);
     }
 }
