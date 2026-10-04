@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-10-03
+
+### Fixed
+
+- API-client last-use updates now use provider-aware Infrastructure persistence. SQLite advances the concurrency revision atomically with LastUsedAt, preventing stale tracked saves from overwriting usage updates; exhausted revisions reject only a selected due row without wrapping or partial writes.
+- SQLite usage updates reserve the writer before the exhaustion check and roll back on failure or cancellation. Caller-owned transactions retain commit ownership through savepoints, without saving or modifying unrelated tracked state.
+
+### Added
+
+- Real file-backed SQLite and migrated PostgreSQL regressions for stale writes, throttle boundaries, competing touches, revision exhaustion, deferred caller transactions, rollback/cancellation and untouched fields, plus HTTP authentication and usage-throttling coverage.
+
+### Changed
+
+- Existing authentication rules, recent-snapshot throttling, conditional touch predicates, timestamps and user-session behavior remain unchanged. PostgreSQL behavior and standalone/Docker defaults, schema/migrations, Core contracts and API wire contracts are unchanged.
+- This bounded persistence repair does not establish complete SQLite deployment support. Production migrations/registration, search and full workflow/performance/recovery qualification remain separate gates; caller transactions with stale SQLite read snapshots retain normal busy/snapshot errors.
+
 ## [0.8.6] - 2026-10-03
 
 ### Fixed
