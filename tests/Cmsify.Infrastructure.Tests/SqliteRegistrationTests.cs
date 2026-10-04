@@ -45,19 +45,6 @@ public sealed class SqliteRegistrationTests
         File.Exists(file).ShouldBeFalse();
     }
 
-    [Fact]
-    public async Task IntermediateMigrator_FailsClosedWithoutCreatingFile()
-    {
-        var file = Path.Combine(Path.GetTempPath(), $"cmsify-registration-{Guid.NewGuid():N}.db");
-        var services = Services();
-        services.AddCmsifySqliteInfrastructure(Configuration($"Data Source={file}"), new() { Workers = CmsifyWorkers.None });
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        await Should.ThrowAsync<NotSupportedException>(() => scope.ServiceProvider.GetRequiredService<ICmsifyDatabaseMigrator>()
-            .MigrateAsync(TestContext.Current.CancellationToken));
-        File.Exists(file).ShouldBeFalse();
-    }
-
     [Theory]
     [InlineData("", typeof(InvalidOperationException))]
     [InlineData("Data Source=", typeof(ArgumentException))]

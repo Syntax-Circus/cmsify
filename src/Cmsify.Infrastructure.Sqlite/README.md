@@ -19,4 +19,21 @@ configuration or common-option conflicts fail before changing registrations.
 SQLite migration is schema-only and will not provision a workspace or administrator.
 Explicit initialization with the existing `IDbSeeder` is a separate operator step.
 
-This intermediate source increment is not publishable: the migrator fails closed until the migration baseline is implemented.
+Run `host.MigrateCmsifyDatabaseAsync()` as a controlled deployment step before
+workers or traffic. The package owns `__CmsifyMigrationsHistory`; its columns are
+`migration_id` and `product_version` under the provider-neutral snake-case convention.
+SQLite retains its native EF migration history service and locking. PostgreSQL's
+history naming and service remain unchanged.
+
+Migration rejects unmanaged CMS tables, malformed or unknown/gapped CMS history,
+and tables missing from the last applied migration's model. Host tables and host
+migration histories are retained. These ownership and table-presence checks are
+not an exhaustive schema integrity audit. Schema/history are read in one transaction;
+the transaction ends before EF acquires its migration lock and re-reads history.
+Concurrent migrators must run identical application versions. Controlled deployment
+must prohibit simultaneous different-version migrators and external schema edits.
+
+Design-time commands must select this project as both project and startup project:
+`dotnet ef migrations list --project src/Cmsify.Infrastructure.Sqlite --startup-project src/Cmsify.Infrastructure.Sqlite --context CmsifyDbContext`.
+The factory defaults to the development-only `cmsify.design-time.db` file. Pass an
+explicit connection string after `--` to select a different local development file.

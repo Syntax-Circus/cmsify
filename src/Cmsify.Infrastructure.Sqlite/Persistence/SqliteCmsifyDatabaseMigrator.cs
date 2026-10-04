@@ -1,11 +1,18 @@
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Sqlite.Persistence;
 
-public sealed class SqliteCmsifyDatabaseMigrator : ICmsifyDatabaseMigrator
+/// <summary>Applies SQLite schema migrations only; initialization via IDbSeeder is an explicit, separate operation.</summary>
+public sealed class SqliteCmsifyDatabaseMigrator(CmsifyDbContext context) : ICmsifyDatabaseMigrator
 {
-    public SqliteCmsifyDatabaseMigrator(CmsifyDbContext context) => ArgumentNullException.ThrowIfNull(context);
-    public Task MigrateAsync(CancellationToken cancellationToken = default)
-        => throw new NotSupportedException("SQLite migrations are not available in this intermediate source increment. Do not publish this build.");
+    private readonly CmsifyDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
+
+    public async Task MigrateAsync(CancellationToken cancellationToken = default)
+    {
+        await SqliteCmsifySchemaGuard.ValidateAsync(_context, cancellationToken);
+        // Guard's read transaction has ended. EF re-reads history under its provider migration lock.
+        await _context.Database.MigrateAsync(cancellationToken);
+    }
 }

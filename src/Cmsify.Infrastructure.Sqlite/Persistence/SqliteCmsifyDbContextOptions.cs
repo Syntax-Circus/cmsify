@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using SyntaxCircus.EntityFrameworkCore.Postgres;
 
 namespace Cmsify.Infrastructure.Sqlite.Persistence;
 
@@ -26,6 +25,8 @@ internal static class SqliteCmsifyDbContextOptions
                 .MigrationsAssembly(typeof(SqliteCmsifyDatabaseProvider).Assembly.GetName().Name)
                 .MigrationsHistoryTable(MigrationsHistoryTable)
                 .UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
-            .UseSyntaxCircusSnakeCaseNamingConvention();
+            // Use the provider-neutral convention: the PostgreSQL wrapper replaces
+            // migration history services and would override SQLite's migration lock.
+            .UseSnakeCaseNamingConvention();
     }
 }
