@@ -60,7 +60,9 @@ WebApplication BuildHost()
     });
     builder.Logging.ClearProviders();
     builder.Host.UseDefaultServiceProvider(options => { options.ValidateOnBuild = true; options.ValidateScopes = true; });
-    builder.Services.AddScoped<ICurrentActor>(_ => new CurrentActorInfo(actorId, null, UserRole.Admin, null, true, true));
+    builder.Services.AddScoped<ActorScope>();
+    builder.Services.AddScoped<ICurrentActor>(services => services.GetRequiredService<ActorScope>().Actor);
+    builder.Services.AddSingleton<TimeProvider>(new QualificationClock());
     var options = new CmsifyInfrastructureOptions { UseHostCurrentActorForAudit = true, Workers = CmsifyWorkers.None };
     builder.Services.AddCmsifySqliteInfrastructure(builder.Configuration, options);
     var count = builder.Services.Count;
@@ -78,6 +80,7 @@ await using (var app = BuildHost())
     await app.MigrateCmsifyDatabaseAsync(ct);
     await using var scope = app.Services.CreateAsyncScope();
     var services = scope.ServiceProvider;
+    SetActor(services, actorId);
     var db = services.GetRequiredService<CmsifyDbContext>();
     Require(db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite", "Wrong provider.");
     Require(!db.Database.HasPendingModelChanges(), "Model differs from snapshot.");
@@ -105,6 +108,7 @@ await using (var restarted = BuildHost())
     await restarted.MigrateCmsifyDatabaseAsync(ct);
     await using var scope = restarted.Services.CreateAsyncScope();
     var services = scope.ServiceProvider;
+    SetActor(services, actorId);
     var list = Success(await services.GetRequiredService<IWorkspacesListRequestHandler>().HandleAsync(new(), ct));
     Require(list.TotalCount == 1 && list.Items.Single().Id == workspaceId && list.Items.Single().Name == "Updated SQLite", "Restart changed data.");
     var read = Success(await services.GetRequiredService<IWorkspacesGetRequestHandler>().HandleAsync(new(workspaceId), ct));
@@ -116,7 +120,12 @@ await using (var restarted = BuildHost())
     var audit = await db.AuditLogs.Where(log => log.EntityId == workspaceId).ToListAsync(ct);
     Require(audit.Count == 3 && audit.All(log => log.ActorUserId == actorId && log.ActorApiClientId is null), "Workspace audit invariant failed.");
     Require(!await db.Users.AnyAsync(ct) && !await db.UserSessions.AnyAsync(ct) && !await db.ApiClients.AnyAsync(ct), "Unexpected local credentials.");
+    await ContentQueryQualification.RunAsync(restarted.Services, SetActor, ct);
 }
 Console.WriteLine("PASS SQLite native migration, no seed, idempotent restart, workspace CRUD, stale rejection and host audit.");
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 static T Success<T>(Result<T> result) { Require(result.IsSuccess, "Direct handler failed."); return result.Value; }
+static void SetActor(IServiceProvider services, Guid id)
+    => services.GetRequiredService<ActorScope>().Actor = id == Guid.Empty ? CurrentActorInfo.Anonymous
+        : new CurrentActorInfo(id, null, UserRole.Admin, null, true, true);
+sealed class ActorScope { public CurrentActorInfo Actor { get; set; } = CurrentActorInfo.Anonymous; }

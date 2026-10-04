@@ -1,7 +1,6 @@
 using Cmsify.Api;
 using Cmsify.Api.Auth;
 using Cmsify.Api.HealthChecks;
-using Cmsify.Api.Queries;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
@@ -84,7 +83,6 @@ builder.Services.AddProblemDetails(options =>
 });
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentActor, HttpContextCurrentActor>();
-builder.Services.AddScoped<IResolvedContentListQuery, ResolvedContentListQuery>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddCors(options =>
 {

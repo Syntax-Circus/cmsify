@@ -53,6 +53,7 @@ builder.Logging.ClearProviders();
 builder.Host.UseDefaultServiceProvider(options => { options.ValidateOnBuild = true; options.ValidateScopes = true; });
 builder.Services.AddScoped<ActorScope>();
 builder.Services.AddScoped<ICurrentActor>(services => services.GetRequiredService<ActorScope>().Actor);
+builder.Services.AddSingleton<TimeProvider>(new QualificationClock());
 var options = new CmsifyInfrastructureOptions { UseHostCurrentActorForAudit = true, Workers = CmsifyWorkers.None };
 builder.Services.AddCmsifyInfrastructure(builder.Configuration, options);
 var registrationCount = builder.Services.Count;
@@ -112,9 +113,11 @@ await using (var scope = app.Services.CreateAsyncScope())
     Require(!await db.Users.AnyAsync(ct) && !await db.UserSessions.AnyAsync(ct) && !await db.ApiClients.AnyAsync(ct), "Host workflow unexpectedly required local credentials.");
 }
 Console.WriteLine("PASS clean-package direct workspace create/get/list/update/delete, revision rejection, PostgreSQL persistence/outbox and isolated host audit without HTTP/local credentials.");
+await ContentQueryQualification.RunAsync(app.Services, SetActor, ct);
 
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 static T Success<T>(Result<T> result) { Require(result.IsSuccess, "Direct handler failed."); return result.Value; }
 static void SetActor(IServiceProvider services, Guid id)
-    => services.GetRequiredService<ActorScope>().Actor = new CurrentActorInfo(id, null, UserRole.Admin, null, true, true);
+    => services.GetRequiredService<ActorScope>().Actor = id == Guid.Empty ? CurrentActorInfo.Anonymous
+        : new CurrentActorInfo(id, null, UserRole.Admin, null, true, true);
 sealed class ActorScope { public CurrentActorInfo Actor { get; set; } = CurrentActorInfo.Anonymous; }

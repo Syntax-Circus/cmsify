@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Cmsify.Api.Auth;
-using Cmsify.Api.Queries;
+using Cmsify.Core.ContentQueries;
+using SyntaxCircus.Common;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Domain.ValueObjects;
@@ -32,11 +33,10 @@ public sealed class ContentController : ControllerBase
     private readonly IContentLifecycleService lifecycleService;
     private readonly IContentPublishingService publishingService;
     private readonly ICurrentActor currentActor;
-    private readonly IResolvedContentListQuery resolvedContentListQuery;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IWebhookOutbox webhookOutbox;
 
-    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IServiceProvider serviceProvider, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox)
+    public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox)
     {
         this.dbContext = dbContext;
         this.contentValidator = contentValidator;
@@ -44,7 +44,6 @@ public sealed class ContentController : ControllerBase
         this.lifecycleService = lifecycleService;
         this.publishingService = publishingService;
         this.currentActor = currentActor;
-        resolvedContentListQuery = serviceProvider.GetRequiredService<IResolvedContentListQuery>();
         this.workspaceAuthorization = workspaceAuthorization;
         this.webhookOutbox = webhookOutbox;
     }
@@ -52,109 +51,23 @@ public sealed class ContentController : ControllerBase
     // ---------- Item-level actions ----------
 
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query, CancellationToken ct)
+    public async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> List(Guid workspaceId, [FromQuery] ContentListQuery query,
+        [FromServices] IListContentRequestHandler handler, CancellationToken ct)
     {
-        if (!await workspaceAuthorization.CanReadWorkspaceAsync(workspaceId, ct))
+        var result = await handler.HandleAsync(query.ToRequest(workspaceId), ct);
+        if (result.IsFailure)
         {
-            return NotFound();
-        }
-
-        if (query.Resolve)
-        {
-            return await ListResolvedAsync(workspaceId, query, ct);
-        }
-
-        var items = BaseContentQuery(workspaceId).AsNoTracking();
-
-        if (query.TemplateVersionId.HasValue)
-        {
-            items = items.Where(content => content.TemplateVersionId == query.TemplateVersionId.Value);
-        }
-
-        if (query.TemplateId.HasValue)
-        {
-            items = items.Where(content => dbContext.TemplateVersions.Any(version => version.Id == content.TemplateVersionId && version.TemplateId == query.TemplateId.Value));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.LocaleCode))
-        {
-            items = items.Where(content => content.LocaleCode == query.LocaleCode);
-        }
-
-        if (query.TranslationGroupId.HasValue)
-        {
-            items = items.Where(content => content.TranslationGroupId == query.TranslationGroupId.Value);
-        }
-
-        // Status and publication windows live on versions, not items, so the item-level list
-        // interprets these filters as "this item has at least one version matching".
-        if (query.Status.HasValue)
-        {
-            var status = query.Status.Value.ToCore();
-            items = items.Where(content => dbContext.ContentVersions.Any(version => version.ContentItemId == content.Id && version.Status == status));
-        }
-
-        if (query.PublishedAfter.HasValue)
-        {
-            items = items.Where(content => dbContext.ContentVersions.Any(version => version.ContentItemId == content.Id && version.PublishedAt >= query.PublishedAfter.Value));
-        }
-
-        if (query.PublishedBefore.HasValue)
-        {
-            items = items.Where(content => dbContext.ContentVersions.Any(version => version.ContentItemId == content.Id && version.PublishedAt <= query.PublishedBefore.Value));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Slug))
-        {
-            items = items.Where(content => content.Slug == query.Slug);
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Tags))
-        {
-            var tags = query.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(NormalizeTag).ToArray();
-            foreach (var tag in tags)
+            return result.Errors[0].Kind switch
             {
-                items = items.Where(content => dbContext.ContentItemTags.Any(join => join.ContentItemId == content.Id && dbContext.Tags.Any(candidate => candidate.Id == join.TagId && candidate.Name == tag && !candidate.IsDeleted)));
-            }
+                ResultErrorKind.Unauthenticated => StatusCode(StatusCodes.Status401Unauthorized),
+                ResultErrorKind.Forbidden => StatusCode(StatusCodes.Status403Forbidden),
+                ResultErrorKind.NotFound => NotFound(),
+                ResultErrorKind.Validation => this.Error(StatusCodes.Status400BadRequest, CmsifyError.ValidationFailed, "Invalid pagination", result.Errors[0].Message),
+                ResultErrorKind.Conflict => this.Error(StatusCodes.Status409Conflict, CmsifyError.Conflict, "Conflict", result.Errors[0].Message),
+                _ => this.Error(StatusCodes.Status500InternalServerError, CmsifyError.InternalServerError, "Internal Server Error")
+            };
         }
-
-        if (query.CreatedAfter.HasValue)
-        {
-            items = items.Where(content => content.CreatedAt >= query.CreatedAfter.Value);
-        }
-
-        if (query.CreatedBefore.HasValue)
-        {
-            items = items.Where(content => content.CreatedAt <= query.CreatedBefore.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Q))
-        {
-            items = items.Where(content => EF.Functions.ILike(content.Slug ?? string.Empty, $"%{query.Q}%")
-                || dbContext.ContentVersions.Any(version => version.ContentItemId == content.Id && version.FieldValues.Any(value => value.TextValue != null && EF.Functions.ILike(value.TextValue, $"%{query.Q}%"))));
-        }
-
-        items = query.SortBy switch
-        {
-            "updatedAt" => query.SortDesc ? items.OrderByDescending(content => content.UpdatedAt) : items.OrderBy(content => content.UpdatedAt),
-            "slug" => query.SortDesc ? items.OrderByDescending(content => content.Slug) : items.OrderBy(content => content.Slug),
-            _ => query.SortDesc ? items.OrderByDescending(content => content.CreatedAt) : items.OrderBy(content => content.CreatedAt)
-        };
-
-        var total = await items.CountAsync(ct);
-        if (!ControllerHelpers.TryOffset(query.Page, query.PageSize, out var offset))
-        {
-            return Ok(new PagedResponse<ContentItemSummaryResponse>([], total, query.Page, query.PageSize));
-        }
-
-        var pageItems = await items.Skip(offset).Take(ControllerHelpers.Limit(query.PageSize)).ToListAsync(ct);
-        var responses = new List<ContentItemSummaryResponse>();
-        foreach (var item in pageItems)
-        {
-            responses.Add(await ToItemSummaryResponseAsync(item, ct));
-        }
-
-        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, query.Page, query.PageSize));
+        return Ok(result.Value.ToResponse());
     }
 
     [HttpPost]
@@ -413,19 +326,6 @@ public sealed class ContentController : ControllerBase
         }
 
         return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, total, pagination.Page, pagination.PageSize));
-    }
-
-    private async Task<ActionResult<PagedResponse<ContentItemSummaryResponse>>> ListResolvedAsync(Guid workspaceId, ContentListQuery query, CancellationToken ct)
-    {
-        var asOf = query.AsOf ?? DateTimeOffset.UtcNow;
-        var page = await resolvedContentListQuery.ExecuteAsync(workspaceId, query, asOf, ct);
-        var responses = page.Items
-            .Select(row => new ContentItemSummaryResponse(
-                row.ContentItemId, row.TemplateVersionId, row.TemplateName, row.Slug, row.LocaleCode,
-                row.TranslationGroupId, row.Tags, row.PublishedAt, row.PublishedAt, 1, null,
-                row.TemplateSlug))
-            .ToList();
-        return Ok(new PagedResponse<ContentItemSummaryResponse>(responses, page.TotalCount, query.Page, query.PageSize));
     }
 
     // ---------- Version-level CRUD ----------

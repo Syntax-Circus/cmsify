@@ -38,6 +38,14 @@ The executable verifies the packed assembly files, repository/commit metadata, R
 SQLite's separate executable validates all three packages and assembly versions,
 real migrations with owned history/no seed, foreign keys and a second host's
 idempotent migration/repository CRUD, audit and stale-write checks using native SQLite.
+Both executables also resolve `Cmsify.Core.ContentQueries.IListContentRequestHandler`
+and execute ordinary and resolved content lists with an explicit host actor and
+fixed `TimeProvider`. The shared fixture asserts item versus serving snapshots,
+exact all-tag membership, wildcard differences, candidate filtering before ranking,
+Q after winner selection, paging/counts, AsOf and authorization denial. HTTP
+diagnostics must record zero requests and the Cmsify API assembly must remain absent;
+the host is never started. Database fixture setup uses the packaged context after
+real migrations; each content workflow enters through the registered handler.
 Docker and public NuGet access are required by the default gate. The runner removes
 only its uniquely named container and own temporary directory. For isolated Linux
 orchestration, `CMSIFY_CONSUMER_POSTGRES` may supply a caller-owned disposable test
@@ -57,10 +65,10 @@ node scripts/release/verify-engine-packages.mjs --packages artifacts/engine-cand
 
 ## Remaining qualification
 
-This gate qualifies packaging and the bounded PostgreSQL workspace/host-audit path. It does not qualify complete application embedding, every content/template/media/authentication workflow, background-worker behavior in a consumer host, upgrade/rollback, restart durability, contention or capacity. Existing source tests and experiments remain evidence for their own scope; they are not substitutes for package-consumer qualification.
+This gate qualifies packaging, bounded workspace/host-audit paths and direct ordinary/resolved content-query behavior on each provider. It does not qualify complete application embedding, every content/template/media/authentication workflow, background-worker behavior in a consumer host, upgrade/rollback, general restart durability, contention or capacity. Existing source tests and experiments remain evidence for their own scope; they are not substitutes for package-consumer qualification.
 
 Optional SQLite registration and real schema-only migrations now have a separate
-candidate gate. Full deployment qualification remains open: JSON queries, search,
+candidate gate. Full deployment qualification remains open: generic JSON queries,
 broader repository workflows, bulk concurrency, full workers/load and production
 backup recovery are separate gates. No earlier supported SQLite release exists
 for a supported-version upgrade; synthetic source fixtures cover their own scope.
@@ -69,3 +77,21 @@ See [measured qualification evidence](evidence/2026-10-02-engine-packages.md) fo
 original PostgreSQL checkpoint. Before optional-package publication, a maintainer
 must verify NuGet ownership/reservation and trusted-publisher scope permit the
 SQLite ID. Local checks do not satisfy that registry prerequisite or change settings.
+
+## Local content-query candidate
+
+`0.8.9-query.1` is a local verification identifier, not a release decision or
+publication claim. Build and pack it from a committed source snapshot using the
+commands above with that version and the actual source SHA, then run the verifier
+on Windows and pinned Linux SDK 10.0.400. Candidate feeds/caches/logs stay ignored.
+Released `0.8.8` cannot supply the new `Cmsify.Core.ContentQueries` public contract;
+building the same consumer against those package bytes is a required compile
+negative, distinct from missing/wrong candidates failing isolated restore or metadata.
+
+The tested text envelope retains PostgreSQL en_US.utf8 ILIKE versus native SQLite
+LIKE differences for accented case and Turkish I. Ordinary Q uses provider LIKE
+wildcards; resolved Q escapes literals. Resolved tag membership uses actual mapped
+snapshot tags, not a generic JsonElement LINQ predicate. The separate generic JSON
+translation failure remains open. Mapped PostgreSQL microseconds tie literal 10/11
+tick spans where SQLite preserves the difference; common 100/110 tick spans
+discriminate both. Finite near-extreme dates do not qualify PostgreSQL infinity.
