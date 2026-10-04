@@ -12,4 +12,10 @@ Optional SQLite registration and schema-only migrations are supplied separately 
 `SyntaxCircus.Cmsify.Infrastructure.Sqlite`; see the [embedded SQLite guide](https://github.com/Syntax-Circus/cmsify/blob/main/docs/integrations/embedded-sqlite.md).
 Infrastructure-only consumers retain their PostgreSQL package graph.
 
+Registration supplies `IListContentRequestHandler` and PostgreSQL content-list
+queries for ordinary item metadata and resolved serving snapshots. Register a
+scoped host actor and optionally `TimeProvider` before composition. Local candidate
+`0.8.9-query.1` consumer checks cover both modes, tags, Q, paging and denial without
+an API host; candidate evidence does not claim publication or generic JSON parity.
+
 Webhook outbox/delivery claim selection and outbox materialization use an Infrastructure-only provider strategy. PostgreSQL retains its row-locking queries; SQLite uses mapped queries inside a non-deferred writer-reserving transaction, so competing SQLite writers wait through lease mutation or materialization commit. Lease owner/token/expiry fencing and atomic delivery intent creation remain repository responsibilities. The file-backed SQLite tests create the schema with `EnsureCreated`; this bounded repository coverage does not qualify SQLite migrations, registration, other webhook workflows, or a complete SQLite deployment.

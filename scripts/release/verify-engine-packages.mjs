@@ -61,6 +61,7 @@ try {
   mkdirSync(consumerDirectory);
   consumerEnv = { ...env, NUGET_PACKAGES: join(consumerDirectory, 'packages'), NUGET_HTTP_CACHE_PATH: join(consumerDirectory, 'http-cache'), NUGET_SCRATCH: join(consumerDirectory, 'scratch'), DOTNET_CLI_HOME: join(consumerDirectory, 'dotnet-home') };
   copyFileSync(join(consumerFixture, 'Program.cs'), join(consumerDirectory, 'Program.cs'));
+  copyFileSync(join(fixture, 'ContentQueryQualification.cs'), join(consumerDirectory, 'ContentQueryQualification.cs'));
   writeFileSync(join(consumerDirectory, project),
     readFileSync(join(consumerFixture, project), 'utf8').replaceAll('__PACKAGE_VERSION__', version));
   writeFileSync(join(consumerDirectory, 'NuGet.Config'), `<?xml version="1.0" encoding="utf-8"?>

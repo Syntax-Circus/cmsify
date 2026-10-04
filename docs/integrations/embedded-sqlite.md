@@ -103,10 +103,22 @@ prove a deployed-version upgrade path or arbitrary crash-window safety.
 The clean candidate consumer proves packaged registration, native Windows/Linux
 amd64 loading, real schema-only migration, idempotent restart and bounded workspace
 CRUD/audit/stale-revision behavior. It does not qualify every repository, JSON
-query translation, packaged search, full workers, authentication, capacity or
+query translation, full workers, authentication, capacity or
 production recovery. JSON storage round trips do not establish JSON query/search
 parity. Full SQLite qualification remains open. See [engine packages](../engine-packages.md)
 and [provider portability](../provider-portability.md).
+
+The local `0.8.9-query.1` candidate additionally exposes the registered
+`Cmsify.Core.ContentQueries.IListContentRequestHandler` for ordinary and resolved
+content lists in process. Supply a scoped host `ICurrentActor`; optionally register
+a host `TimeProvider` before infrastructure (the default is `TimeProvider.System`).
+Use `ListContentRequest(workspaceId, Resolve: true, AsOf: instant)` to evaluate
+serving snapshots; ordinary mode uses the clock and item metadata/live tag links.
+The package consumer checks both modes, actual snapshot all-tag membership,
+provider-specific Q behavior, paging and denial without starting a Cmsify API.
+This is candidate evidence only: released 0.8.8 lacks the public contract. Native
+SQLite LIKE retains its measured Unicode/case differences from PostgreSQL; generic
+JSON LINQ translation, full embedding and production qualification remain open.
 
 Design-time commands select the SQLite project as both project and startup project:
 

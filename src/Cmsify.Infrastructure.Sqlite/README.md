@@ -6,8 +6,14 @@ See the [embedded SQLite guide](https://github.com/Syntax-Circus/cmsify/blob/mai
 for an executable host example, explicit initialization, deployment constraints,
 backup rollback and abandoned-lock recovery. This package is released in lockstep
 with Core and Infrastructure. Local candidate checks do not establish publication
-or full SQLite qualification; JSON query/search, complete workers, production
+or full SQLite qualification; generic JSON queries, complete workers, production
 backup/blob recovery and supported-version upgrades remain separate gates.
+
+Local candidate `0.8.9-query.1` adds provider-specific ordinary/resolved content
+queries through the registered `Cmsify.Core.ContentQueries.IListContentRequestHandler`.
+It qualifies actual snapshot all-tag membership, measured native LIKE semantics,
+fixed host clock/AsOf, paging and denial in a package-only host. Released 0.8.8 lacks
+this public contract; generic JSON LINQ translation remains a separate open gap.
 
 Reference `SyntaxCircus.Cmsify.Infrastructure.Sqlite` and import
 `Cmsify.Infrastructure.Sqlite.Extensions`. Register with
