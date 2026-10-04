@@ -19,7 +19,14 @@ var count = await db.TemplateFields.CountAsync(row => row.FieldConfig.HasValue
     && row.FieldConfig.Value.GetProperty("name").GetString() == expected);
 ```
 
-Chained object properties, constant or parameterized names, and parameterized
+Traversal roots must be direct mapped `JsonElement`/`JsonElement?` properties on
+direct query entity parameters, accessed by a CLR member or `EF.Property` with a constant mapped
+property name. Computed roots (for example, deserializing a string column), aliases
+and arbitrary JSON-producing expressions are unsupported. JSON-producing non-EF
+methods, JsonDocument members, JSON casts and construction of mapped entities with
+JSON properties are rejected in queries, including composed projection aliases.
+Chained object properties,
+constant or parameterized names, and parameterized
 comparison values are supported. Names are JSON-quoted SQL values, including
 Unicode, empty names, quotes, backslashes, dots and brackets; names never become
 SQL fragments. Filtering and aggregates execute in SQLite. Each traversal step
@@ -37,7 +44,10 @@ They are neither cast into strings nor silently returned as null. PostgreSQL's
 existing native text extraction remains unchanged and can return text for those
 kinds; this package does not promise mixed-kind parity. Typed getters, array
 indexing/enumeration, bare `GetProperty`, root `GetString`, and other `JsonElement`
-methods fail explicitly during query compilation. A null property-name parameter
+methods and member projections such as `ValueKind` fail explicitly during query
+compilation before SQL executes. Whole mapped JSON values, including nullable
+values, still round trip normally; inspecting them explicitly after materialization
+is a separate caller operation. A null property-name parameter
 raises a native SQLite error containing `Cmsify SQLite GetProperty requires a non-null name`;
 the actual string name `"null"` remains supported.
 There is no automatic client evaluation fallback. This bounded translation does

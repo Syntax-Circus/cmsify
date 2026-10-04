@@ -122,6 +122,119 @@ public sealed class SqliteJsonQueryTests(ITestOutputHelper output)
             TestContext.Current.CancellationToken)).ShouldBe(1);
     }
 
+    // EF must not materialize a JSON column to evaluate an unsupported member projection.
+    [Fact]
+    public async Task UnsupportedJsonMemberProjection_IsRejectedBeforeCommand()
+    {
+        await using var fixture = await Fixture.Create(true);
+        await fixture.Seed("{\"name\":\"hit\"}");
+        fixture.Commands.Clear();
+        var error = await Record.ExceptionAsync(() => fixture.Context.TemplateFields
+            .Select(row => row.FieldConfig!.Value.ValueKind).ToListAsync(TestContext.Current.CancellationToken));
+        output.WriteLine(error?.ToString() ?? "Projection completed without rejection.");
+        output.WriteLine("Executed commands: " + fixture.Commands.Count);
+        error.ShouldBeOfType<NotSupportedException>();
+        fixture.Commands.ShouldBeEmpty();
+    }
+
+    // An untranslatable traversal root must not turn the whole projection into CLR code.
+    [Fact]
+    public async Task JsonTraversalFromDeserializedColumn_IsRejectedBeforeCommand()
+    {
+        await using var fixture = await Fixture.Create(true);
+        await fixture.Seed("{\"name\":\"hit\"}");
+        var field = await fixture.Context.TemplateFields.SingleAsync(TestContext.Current.CancellationToken);
+        field.Label = "{\"name\":\"hit\"}";
+        await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        fixture.Commands.Clear();
+        await Should.ThrowAsync<NotSupportedException>(() => fixture.Context.TemplateFields
+            .Select(row => JsonSerializer.Deserialize<JsonElement>(row.Label, (JsonSerializerOptions?)null)
+                .GetProperty("name").GetString()).ToListAsync(TestContext.Current.CancellationToken));
+        fixture.Commands.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task JsonTraversalFromConstructedEntity_IsRejectedBeforeCommand()
+    {
+        await using var fixture = await Fixture.Create(true);
+        await fixture.Seed("{\"name\":\"hit\"}");
+        var field = await fixture.Context.TemplateFields.SingleAsync(TestContext.Current.CancellationToken);
+        field.Label = "{\"name\":\"hit\"}";
+        await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        fixture.Commands.Clear();
+        await Should.ThrowAsync<NotSupportedException>(() => fixture.Context.TemplateFields
+            .Select(row => new TemplateField
+            {
+                Key = row.Key, Label = row.Label,
+                FieldConfig = JsonSerializer.Deserialize<JsonElement>(row.Label, (JsonSerializerOptions?)null)
+            }.FieldConfig!.Value.GetProperty("name").GetString()).ToListAsync(TestContext.Current.CancellationToken));
+        fixture.Commands.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ComposedComputedEntityJsonTraversal_IsRejectedBeforeCommand()
+    {
+        await using var fixture = await Fixture.Create(true);
+        await fixture.Seed("{\"name\":\"hit\"}");
+        var field = await fixture.Context.TemplateFields.SingleAsync(TestContext.Current.CancellationToken);
+        field.Label = "{\"name\":\"hit\"}";
+        await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        fixture.Commands.Clear();
+        var error = await Record.ExceptionAsync(() => fixture.Context.TemplateFields
+            .Select(row => new TemplateField
+            {
+                Key = row.Key, Label = row.Label,
+                FieldConfig = JsonSerializer.Deserialize<JsonElement>(row.Label, (JsonSerializerOptions?)null)
+            }).Select(alias => alias.FieldConfig!.Value.GetProperty("name").GetString())
+            .ToListAsync(TestContext.Current.CancellationToken));
+        output.WriteLine(error?.ToString() ?? "Projection completed without rejection.");
+        output.WriteLine("Executed commands: " + fixture.Commands.Count);
+        error.ShouldBeOfType<NotSupportedException>();
+        fixture.Commands.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task JsonProducingMethodProjection_IsRejectedBeforeCommand()
+    {
+        await using var fixture = await Fixture.Create(true);
+        await fixture.Seed("{\"name\":\"hit\"}");
+        var field = await fixture.Context.TemplateFields.SingleAsync(TestContext.Current.CancellationToken);
+        field.Label = "{\"name\":\"hit\"}";
+        await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        fixture.Commands.Clear();
+        var error = await Record.ExceptionAsync(() => fixture.Context.TemplateFields
+            .Select(row => JsonSerializer.Deserialize<JsonElement>(row.Label, (JsonSerializerOptions?)null))
+            .ToListAsync(TestContext.Current.CancellationToken));
+        output.WriteLine(error?.ToString() ?? "Projection completed without rejection.");
+        output.WriteLine("Executed commands: " + fixture.Commands.Count);
+        error.ShouldBeOfType<NotSupportedException>();
+        fixture.Commands.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task WholeJsonColumnsAndEfPropertyTraversal_RemainServerSupported()
+    {
+        await using var fixture = await Fixture.Create(true);
+        await fixture.Seed("{\"name\":\"hit\"}", "null", null);
+        var documents = await fixture.Context.TemplateFields.OrderBy(row => row.Key).Select(row => row.FieldConfig)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        documents[0]!.Value.GetProperty("name").GetString().ShouldBe("hit");
+        documents[1]!.Value.ValueKind.ShouldBe(JsonValueKind.Null);
+        documents[2].HasValue.ShouldBeFalse();
+        var nonNullDocuments = await fixture.Context.TemplateFields.OrderBy(row => row.Key)
+            .Where(row => row.FieldConfig.HasValue).Select(row => row.FieldConfig!.Value)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        nonNullDocuments.Select(document => document.ValueKind).ShouldBe([JsonValueKind.Object, JsonValueKind.Null]);
+        var name = "name";
+        fixture.Commands.Clear();
+        (await fixture.Context.TemplateFields.CountAsync(row => EF.Property<JsonElement?>(row, nameof(TemplateField.FieldConfig))!.Value
+            .GetProperty(name).GetString() == "hit", TestContext.Current.CancellationToken)).ShouldBe(1);
+        fixture.Commands.ShouldHaveSingleItem();
+        fixture.Commands[0].ShouldContain("WHERE");
+        output.WriteLine(fixture.Commands[0]);
+        output.WriteLine(JsonSerializer.Serialize(fixture.Parameters.Last()));
+    }
+
     // Casting a number or object into a string would silently broaden SQLite's supported scope.
     [Theory]
     [InlineData("42")]
