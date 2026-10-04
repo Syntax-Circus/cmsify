@@ -1,6 +1,5 @@
 using System.Data.Common;
 using Cmsify.Api.Controllers;
-using Cmsify.Api.Queries;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Persistence;
@@ -340,10 +339,9 @@ public sealed class ContentIdentityControllerTests
     {
         var authorization = Substitute.For<IWorkspaceAuthorizationService>();
         authorization.CanWriteWorkspaceAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(allowed);
-        var services = new ServiceCollection().AddSingleton<IResolvedContentListQuery>(new ResolvedContentListQuery(context)).BuildServiceProvider();
         var controller = new ContentController(context, Substitute.For<IContentValidator>(), Substitute.For<IContentSearchVectorBuilder>(),
             Substitute.For<IContentLifecycleService>(), Substitute.For<IContentPublishingService>(), CurrentActorInfo.Anonymous,
-            services, authorization, new EfWebhookOutbox(context))
+            authorization, new EfWebhookOutbox(context))
         { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
         controller.Request.Headers.IfMatch = "\"639028224000000000\""; // 2026-01-01 UTC, legacy accepted ETag
         return controller;

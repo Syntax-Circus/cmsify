@@ -1040,6 +1040,13 @@
           "UUIDNext": "[4.2.4, )"
         }
       },
+      "SyntaxCircus.Cmsify.Infrastructure.Sqlite": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.11, )",
+          "SyntaxCircus.Cmsify.Infrastructure": "[0.0.0-local, )"
+        }
+      },
       "AWSSDK.S3": {
         "type": "CentralTransitive",
         "requested": "[4.0.102.2, )",
