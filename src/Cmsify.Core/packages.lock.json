@@ -10,9 +10,9 @@
       },
       "SyntaxCircus.Common": {
         "type": "Direct",
-        "requested": "[0.1.3, )",
-        "resolved": "0.1.3",
-        "contentHash": "lEAI3tWVQp/PxyGLEEMh/Oip4OvIABO5Yi46S4mGZ3VKdfQ2m+BhsTtxCLdirFMzl8FxR2Bzi4IDX/fH2QqdpQ=="
+        "requested": "[0.1.4, )",
+        "resolved": "0.1.4",
+        "contentHash": "y7T8W3goy/1rDZO0wM5U7DV/S3015HQREfECiprQcThT/JjAO2Ialcu10HelhxC2RFbF6NRjyGZo01+B9Oaeig=="
       }
     }
   }
