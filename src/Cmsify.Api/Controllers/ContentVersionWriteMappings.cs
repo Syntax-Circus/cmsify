@@ -22,9 +22,17 @@ internal static class ContentVersionWriteMappings
         return new(null);
     }
 
-    public static ContentVersionFieldInput ToFieldInput(ContentFieldValueRequest field) =>
-        new(field.FieldId, field.Order, field.ValueKind.ToCore(), field.TextValue, field.BoolValue,
+    public static ContentVersionFieldInput ToFieldInput(ContentFieldValueRequest field)
+    {
+        // MVC accepts null elements and undefined numeric enum values. Preserve them
+        // until field processing so resource/state/revision/template decisions stay first.
+        if (field is null) return null!;
+        var kind = Enum.IsDefined(field.ValueKind)
+            ? field.ValueKind.ToCore()
+            : (Cmsify.Core.Domain.Enums.ValueKind)(int)field.ValueKind;
+        return new(field.FieldId, field.Order, kind, field.TextValue, field.BoolValue,
             field.MediaAssetId, field.FileAssetId, field.ChildContentItemId, field.JsonValue?.Clone());
+    }
 
     public static ContentVersionDetailResponse ToResponse(ContentVersionDetailOutput version) =>
         new(version.Id, version.ContentItemId, version.VersionNumber, version.Status.ToContract(),

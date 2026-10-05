@@ -62,7 +62,7 @@ public sealed class ContentVersionFieldWriter(CmsifyDbContext dbContext, IConten
                 ContentVersionId = version.Id,
                 FieldId = input.FieldId,
                 Order = orders[inputIndex],
-                ValueKind = input.ValueKind,
+                ValueKind = RequireValueKind(input.ValueKind),
                 TextValue = input.TextValue,
                 DisplayLabel = displayLabel,
                 BoolValue = input.BoolValue,
@@ -98,6 +98,10 @@ public sealed class ContentVersionFieldWriter(CmsifyDbContext dbContext, IConten
 
         return await ValidateAsync(version, templateVersion, ct);
     }
+
+    private static ValueKind RequireValueKind(ValueKind value) => Enum.IsDefined(value)
+        ? value
+        : throw new ArgumentOutOfRangeException(nameof(value), value, null);
 
     private static Guid? GetPickListId(TemplateField field)
     {

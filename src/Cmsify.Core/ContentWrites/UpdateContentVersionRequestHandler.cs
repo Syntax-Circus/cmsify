@@ -29,7 +29,9 @@ public sealed class UpdateContentVersionRequestHandler(IContentVersionEditReposi
         if (request.EffectiveStartAt.HasValue && request.EffectiveStartAt >= request.EffectiveEndAt)
             return Failure(ContentVersionWriteErrors.InvalidEffectiveRange,
                 "effectiveStartAt must be before effectiveEndAt.", ResultErrorKind.Validation);
-        var fields = Array.AsReadOnly(request.Fields.Select(field => field with { JsonValue = field.JsonValue?.Clone() }).ToArray());
+        var fields = Array.AsReadOnly(request.Fields.Select(field => field is null
+            ? null!
+            : field with { JsonValue = field.JsonValue?.Clone() }).ToArray());
         var prepared = await session.PrepareAsync(new(request.EffectiveStartAt, request.EffectiveEndAt, fields), actor.UserId, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (prepared.IsFailure) return Result<UpdatedContentVersionOutput>.Failure(prepared.Errors[0], prepared.Errors.Skip(1).ToArray());

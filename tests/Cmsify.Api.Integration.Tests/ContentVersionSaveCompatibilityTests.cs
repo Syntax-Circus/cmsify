@@ -186,6 +186,67 @@ public sealed class ContentVersionSaveCompatibilityTests : IAsyncLifetime
         (await read.ContentVersionFieldValues.AsNoTracking().CountAsync(f => f.ContentVersionId == seed.VersionId, TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
+    public static IEnumerable<object[]> MalformedFieldCases()
+    {
+        foreach (var input in new[] { "unknown-kind", "null-element", "unknown-before-null" })
+        foreach (var scenario in new[] { "missing-item", "hidden-workspace", "published", "revision", "range-pair", "range-order", "template", "reached" })
+            yield return [input, scenario];
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedFieldCases))]
+    public async Task SaveMalformedFieldsRetainsBaselineHttpPrecedence(string input, string scenario)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = await LoginAsync(factory);
+        var seed = await SeedAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var version = await db.ContentVersions.SingleAsync(v => v.Id == seed.VersionId, ct);
+            if (scenario == "published") version.Status = CoreStatus.Published;
+            if (scenario == "template") (await db.TemplateVersions.SingleAsync(t => t.Id == version.TemplateVersionId, ct)).IsDeleted = true;
+            db.ApiClients.Add(new ApiClient { Name = "Malformed-field Editor", Role = Cmsify.Core.Domain.Enums.UserRole.Editor,
+                WorkspaceId = seed.WorkspaceId, CreatedByUserId = await db.Users.Select(u => u.Id).FirstAsync(ct),
+                TokenHash = BCrypt.Net.BCrypt.HashPassword("cmsify_malformed_field_editor", 4) });
+            await db.SaveChangesAsync(ct);
+        }
+        client.DefaultRequestHeaders.Authorization = new("Bearer", "cmsify_malformed_field_editor");
+        var workspace = scenario == "hidden-workspace" ? Guid.NewGuid() : seed.WorkspaceId;
+        var item = scenario == "missing-item" ? Guid.NewGuid() : seed.ItemId;
+        var kind = new ContentFieldValueRequest(seed.FieldId, 0, (ValueKind)999, null, null, null, null, null, null);
+        ContentFieldValueRequest[] fields = input switch { "unknown-kind" => [kind], "null-element" => [null!], _ => [kind, null!] };
+        var start = DateTimeOffset.Parse("2026-12-01T00:00:00Z");
+        var body = new UpdateContentVersionRequest(scenario.StartsWith("range-", StringComparison.Ordinal) ? start : null,
+            scenario == "range-order" ? start : null, fields);
+        var revision = scenario == "revision" ? "\"0\"" : await RevisionAsync(factory, seed);
+        using var response = await SaveAsync(client, $"/api/v1/workspaces/{workspace}/content/{item}/versions/1", revision, body);
+        var (status, title, detail, code) = scenario switch
+        {
+            "missing-item" or "hidden-workspace" => (404, "Not Found", (string?)null, "not-found"),
+            "published" => (409, "Only Draft, Review, or Approved versions can be edited", null, "conflict"),
+            "revision" => (412, "Concurrency mismatch", null, "concurrency-mismatch"),
+            "range-pair" => (422, "Invalid effective range", "Provide both effectiveStartAt and effectiveEndAt, or neither.", "validation-failed"),
+            "range-order" => (422, "Invalid effective range", "effectiveStartAt must be before effectiveEndAt.", "validation-failed"),
+            "template" => (422, "Content validation failed", "Template version is unavailable.", "validation-failed"),
+            _ when input == "unknown-kind" => (400, (string?)null, "Specified argument was out of the range of valid values. (Parameter 'value')" + Environment.NewLine + "Actual value was 999.", "bad-request"),
+            _ => (500, null, "An unexpected error occurred.", "internal-server-error")
+        };
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+        Console.WriteLine($"MALFORMED {input}/{scenario}: {(int)response.StatusCode} {problem}");
+        ((int)response.StatusCode).ShouldBe(status);
+        if (title is null) problem.TryGetProperty("title", out _).ShouldBeFalse();
+        else problem.GetProperty("title").GetString().ShouldBe(title);
+        if (detail is null) problem.TryGetProperty("detail", out _).ShouldBeFalse();
+        else problem.GetProperty("detail").GetString().ShouldBe(detail);
+        problem.GetProperty("type").GetString().ShouldBe("https://cmsify.dev/errors/" + code);
+        using var readScope = factory.Services.CreateScope();
+        var read = readScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        (await read.ContentVersionFieldValues.Where(f => f.ContentVersionId == seed.VersionId).Select(f => f.TextValue).SingleAsync(ct)).ShouldBe("original");
+        (await read.WebhookOutboxEvents.CountAsync(e => e.EntityId == seed.ItemId, ct)).ShouldBe(0);
+    }
+
     private sealed record Seed(Guid WorkspaceId, Guid ItemId, Guid VersionId, Guid FieldId)
     {
         public string Url => $"/api/v1/workspaces/{WorkspaceId}/content/{ItemId}/versions/1";

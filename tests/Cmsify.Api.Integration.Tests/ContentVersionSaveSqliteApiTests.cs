@@ -28,6 +28,53 @@ namespace Cmsify.Api.Integration.Tests;
 // SQLite remains opt-in. The identical HTTP/direct matrix also runs against real PostgreSQL.
 public sealed class ContentVersionSaveSqliteApiTests
 {
+    [Theory]
+    [MemberData(nameof(ContentVersionSaveCompatibilityTests.MalformedFieldCases), MemberType = typeof(ContentVersionSaveCompatibilityTests))]
+    public async Task SaveMalformedFieldsRetainsBaselineHttpPrecedenceOnMigratedSqlite(string input, string scenario)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new ContentVersionSaveFactory(true);
+        using var client = await factory.CreateSeededClientAsync();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var version = await db.ContentVersions.SingleAsync(v => v.Id == factory.VersionId, ct);
+            if (scenario == "published") version.Status = CoreStatus.Published;
+            if (scenario == "template") (await db.TemplateVersions.SingleAsync(t => t.Id == version.TemplateVersionId, ct)).IsDeleted = true;
+            await db.SaveChangesAsync(ct);
+        }
+        var workspace = scenario == "hidden-workspace" ? Guid.NewGuid() : factory.WorkspaceId;
+        var item = scenario == "missing-item" ? Guid.NewGuid() : factory.ItemId;
+        var kind = new ContentFieldValueRequest(factory.TextFieldId, 0, (ValueKind)999, null, null, null, null, null, null);
+        ContentFieldValueRequest[] fields = input switch { "unknown-kind" => [kind], "null-element" => [null!], _ => [kind, null!] };
+        var start = DateTimeOffset.Parse("2026-12-01T00:00:00Z");
+        var body = new WireRequest(scenario.StartsWith("range-", StringComparison.Ordinal) ? start : null, scenario == "range-order" ? start : null, fields);
+        var revision = scenario == "revision" ? "\"0\"" : "\"63902822400000000\"";
+        using var response = await SaveAsync(client, $"/api/v1/workspaces/{workspace}/content/{item}/versions/1", revision, body);
+        var (status, title, detail, code) = scenario switch
+        {
+            "missing-item" or "hidden-workspace" => (404, "Not Found", (string?)null, "not-found"),
+            "published" => (409, "Only Draft, Review, or Approved versions can be edited", null, "conflict"),
+            "revision" => (412, "Concurrency mismatch", null, "concurrency-mismatch"),
+            "range-pair" => (422, "Invalid effective range", "Provide both effectiveStartAt and effectiveEndAt, or neither.", "validation-failed"),
+            "range-order" => (422, "Invalid effective range", "effectiveStartAt must be before effectiveEndAt.", "validation-failed"),
+            "template" => (422, "Content validation failed", "Template version is unavailable.", "validation-failed"),
+            _ when input == "unknown-kind" => (400, (string?)null, "Specified argument was out of the range of valid values. (Parameter 'value')" + Environment.NewLine + "Actual value was 999.", "bad-request"),
+            _ => (500, null, "An unexpected error occurred.", "internal-server-error")
+        };
+        ((int)response.StatusCode).ShouldBe(status);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+        if (title is null) problem.TryGetProperty("title", out _).ShouldBeFalse();
+        else problem.GetProperty("title").GetString().ShouldBe(title);
+        if (detail is null) problem.TryGetProperty("detail", out _).ShouldBeFalse();
+        else problem.GetProperty("detail").GetString().ShouldBe(detail);
+        problem.GetProperty("type").GetString().ShouldBe("https://cmsify.dev/errors/" + code);
+        using var readScope = factory.Services.CreateScope();
+        var read = readScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        (await read.ContentVersionFieldValues.Where(f => f.ContentVersionId == factory.VersionId).Select(f => f.TextValue).SingleAsync(ct)).ShouldBe("original");
+        (await read.WebhookOutboxEvents.CountAsync(e => e.EntityId == factory.ItemId, ct)).ShouldBe(0);
+    }
+
     private static readonly JsonSerializerOptions _json = CmsifyJsonOptions.Create();
 
     [Fact]

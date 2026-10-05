@@ -13,7 +13,7 @@ namespace Cmsify.Infrastructure.Tests;
 public sealed class ContentVersionDetailProjectorTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private static readonly DateTimeOffset At = new(2026, 10, 5, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _at = new(2026, 10, 5, 12, 0, 0, TimeSpan.Zero);
 
     [Theory]
     [InlineData(false, 1)]
@@ -46,7 +46,7 @@ public sealed class ContentVersionDetailProjectorTests
             }
         }
         await db.SaveChangesAsync(Ct); probe.Count = 0;
-        var output = await new ContentVersionDetailProjector(db).ProjectAsync(root, At, true, Ct);
+        var output = await new ContentVersionDetailProjector(db).ProjectAsync(root, _at, true, Ct);
         var baselineQueryCount = 10;
         var extractedQueryCount = probe.Count;
         Assert.Equal(baselineQueryCount, extractedQueryCount);
@@ -56,7 +56,7 @@ public sealed class ContentVersionDetailProjectorTests
         Assert.Null(node.Fields[0].Child);
         Assert.NotNull(node.Fields[0].ChildContentItemId);
         probe.Count = 0;
-        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, At, false, Ct);
+        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, _at, false, Ct);
         Assert.Equal(2, probe.Count);
         Assert.All(output.Fields, value => Assert.Null(value.Child));
         Assert.All(output.Fields, value => Assert.NotNull(value.ChildContentItemId));
@@ -76,7 +76,7 @@ public sealed class ContentVersionDetailProjectorTests
             var item = f.Item("json"); var version = f.Version(item, 1);
             version.FieldValues.Add(new() { ContentVersionId = version.Id, FieldId = field.Id, ValueKind = ValueKind.Link, JsonValue = document.RootElement });
             db.AddRange(field, item, version); await db.SaveChangesAsync(Ct);
-            output = await new ContentVersionDetailProjector(db).ProjectAsync(version, At, false, Ct);
+            output = await new ContentVersionDetailProjector(db).ProjectAsync(version, _at, false, Ct);
         }
         var outputJson = Assert.Single(output.Fields).JsonValue!.Value;
         Assert.Equal("retained", outputJson.GetProperty("value").GetString());
@@ -90,13 +90,13 @@ public sealed class ContentVersionDetailProjectorTests
         await using var f = await ContentListQueryFixtures.Create(sqlite); await using var db = f.Context();
         var field = new TemplateField { TemplateVersionId = f.TemplateVersion.Id, Key = "child", Label = "Child", TemplateId = f.TemplateVersion.TemplateId };
         var item = f.Item("root"); var root = f.Version(item, 1);
-        var childItem = f.Item("unavailable"); var child = f.Version(childItem, 1, At.AddDays(1), At.AddDays(2));
+        var childItem = f.Item("unavailable"); var child = f.Version(childItem, 1, _at.AddDays(1), _at.AddDays(2));
         root.FieldValues.Add(new() { ContentVersionId = root.Id, FieldId = field.Id, ValueKind = ValueKind.ChildContent, ChildContentItemId = childItem.Id });
         db.AddRange(field, item, root, childItem, child); await db.SaveChangesAsync(Ct);
-        var output = await new ContentVersionDetailProjector(db).ProjectAsync(root, At, true, Ct);
+        var output = await new ContentVersionDetailProjector(db).ProjectAsync(root, _at, true, Ct);
         Assert.Null(Assert.Single(output.Fields).Child);
         child.EffectiveStartAt = null; child.EffectiveEndAt = null; child.Status = ContentStatus.Archived; await db.SaveChangesAsync(Ct);
-        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, At, true, Ct);
+        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, _at, true, Ct);
         Assert.Null(Assert.Single(output.Fields).Child);
     }
 
@@ -109,20 +109,20 @@ public sealed class ContentVersionDetailProjectorTests
         var earlier = new TemplateField { TemplateVersionId = f.TemplateVersion.Id, Key = "early", Label = "Early", Order = 1, PrimitiveType = PrimitiveType.Text };
         var later = new TemplateField { TemplateVersionId = f.TemplateVersion.Id, Key = "child", Label = "Child", Order = 2, TemplateId = f.TemplateVersion.TemplateId };
         var item = f.Item("root"); var root = f.Version(item, 1); var childItem = f.Item("winner");
-        var fallback = f.Version(childItem, 9); fallback.PublishedAt = At.AddDays(1);
-        var wide = f.Version(childItem, 3, At.AddDays(-3), At.AddDays(3)); wide.PublishedAt = At;
-        var narrow = f.Version(childItem, 2, At.AddHours(-1), At.AddHours(1)); narrow.PublishedAt = At.AddDays(-1);
+        var fallback = f.Version(childItem, 9); fallback.PublishedAt = _at.AddDays(1);
+        var wide = f.Version(childItem, 3, _at.AddDays(-3), _at.AddDays(3)); wide.PublishedAt = _at;
+        var narrow = f.Version(childItem, 2, _at.AddHours(-1), _at.AddHours(1)); narrow.PublishedAt = _at.AddDays(-1);
         root.FieldValues.Add(new() { ContentVersionId = root.Id, FieldId = later.Id, Order = 0, ValueKind = ValueKind.ChildContent, ChildContentItemId = childItem.Id });
         root.FieldValues.Add(new() { ContentVersionId = root.Id, FieldId = earlier.Id, Order = 7, ValueKind = ValueKind.Text, TextValue = "second" });
         root.FieldValues.Add(new() { ContentVersionId = root.Id, FieldId = earlier.Id, Order = 3, ValueKind = ValueKind.Text, TextValue = "first" });
         db.AddRange(earlier, later, item, root, childItem, fallback, wide, narrow); await db.SaveChangesAsync(Ct);
-        var output = await new ContentVersionDetailProjector(db).ProjectAsync(root, At, true, Ct);
+        var output = await new ContentVersionDetailProjector(db).ProjectAsync(root, _at, true, Ct);
         Assert.Equal(new[] { "early", "early", "child" }, output.Fields.Select(x => x.Key));
         Assert.Equal(new[] { "first", "second" }, output.Fields.Take(2).Select(x => x.TextValue));
         Assert.Equal(narrow.Id, output.Fields[2].Child!.Id);
-        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, At.AddHours(1), true, Ct);
+        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, _at.AddHours(1), true, Ct);
         Assert.Equal(wide.Id, output.Fields[2].Child!.Id);
-        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, At.AddDays(3), true, Ct);
+        output = await new ContentVersionDetailProjector(db).ProjectAsync(root, _at.AddDays(3), true, Ct);
         Assert.Equal(fallback.Id, output.Fields[2].Child!.Id);
     }
 

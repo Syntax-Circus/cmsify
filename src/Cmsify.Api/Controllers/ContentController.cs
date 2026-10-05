@@ -38,8 +38,8 @@ public sealed class ContentController : ControllerBase
     private readonly ICurrentActor currentActor;
     private readonly IWorkspaceAuthorizationService workspaceAuthorization;
     private readonly IWebhookOutbox webhookOutbox;
-    private readonly ContentVersionFieldWriter fieldWriter;
-    private readonly ContentVersionDetailProjector detailProjector;
+    private readonly ContentVersionFieldWriter _fieldWriter;
+    private readonly ContentVersionDetailProjector _detailProjector;
 
     public ContentController(CmsifyDbContext dbContext, IContentValidator contentValidator, IContentSearchVectorBuilder searchVectorBuilder, IContentLifecycleService lifecycleService, IContentPublishingService publishingService, ICurrentActor currentActor, IWorkspaceAuthorizationService workspaceAuthorization, IWebhookOutbox webhookOutbox, ContentVersionFieldWriter? fieldWriter = null, ContentVersionDetailProjector? detailProjector = null)
     {
@@ -51,8 +51,8 @@ public sealed class ContentController : ControllerBase
         this.currentActor = currentActor;
         this.workspaceAuthorization = workspaceAuthorization;
         this.webhookOutbox = webhookOutbox;
-        this.fieldWriter = fieldWriter ?? new ContentVersionFieldWriter(dbContext, contentValidator);
-        this.detailProjector = detailProjector ?? new ContentVersionDetailProjector(dbContext);
+        _fieldWriter = fieldWriter ?? new ContentVersionFieldWriter(dbContext, contentValidator);
+        _detailProjector = detailProjector ?? new ContentVersionDetailProjector(dbContext);
     }
 
     // ---------- Item-level actions ----------
@@ -882,10 +882,10 @@ public sealed class ContentController : ControllerBase
     }
 
     private Task<string?> ApplyVersionFieldValuesAsync(ContentVersion version, TemplateVersion templateVersion, IReadOnlyList<ContentFieldValueRequest> fields, CancellationToken ct) =>
-        fieldWriter.ApplyAsync(version, templateVersion, fields.Select(ContentVersionWriteMappings.ToFieldInput).ToList(), ct);
+        _fieldWriter.ApplyAsync(version, templateVersion, fields.Select(ContentVersionWriteMappings.ToFieldInput).ToList(), ct);
 
     private Task<string?> ValidatePickListValuesAsync(ContentVersion version, TemplateVersion templateVersion, CancellationToken ct) =>
-        fieldWriter.ValidateAsync(version, templateVersion, ct);
+        _fieldWriter.ValidateAsync(version, templateVersion, ct);
 
     private async Task<ContentItemSummaryResponse> ToItemSummaryResponseAsync(ContentItem content, CancellationToken ct)
     {
@@ -969,7 +969,7 @@ public sealed class ContentController : ControllerBase
             version.CreatedAt, version.UpdatedAt);
 
     private async Task<ContentVersionDetailResponse> ToVersionDetailResponseAsync(ContentVersion version, DateTimeOffset asOf, bool expandChildren = true, CancellationToken ct = default) =>
-        ContentVersionWriteMappings.ToResponse(await detailProjector.ProjectAsync(version, asOf, expandChildren, ct));
+        ContentVersionWriteMappings.ToResponse(await _detailProjector.ProjectAsync(version, asOf, expandChildren, ct));
 
     private void EnqueueContentEvent(string eventType, ContentItem content, ContentVersion? version)
     {
