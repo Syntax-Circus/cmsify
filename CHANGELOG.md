@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.11] - 2026-10-05
+
+### Added
+
+- Directly callable `IUpdateContentVersionRequestHandler` with Core-owned request/result contracts, actor/workspace authorization, revision checks and cancellation support for embedded content-version saves.
+- Operation-owned edit sessions that isolate caller tracking while preserving scoped audit/interceptor configuration and atomic field, version, parent-search and outbox persistence on PostgreSQL and opt-in SQLite.
+- HTTP compatibility and real-provider regression coverage for error precedence, malformed field inputs, mapped stale writes, rollback, JSON ownership, child projection and failure after durable commit, plus direct-call lifetime documentation.
+
+### Changed
+
+- The existing version-save HTTP endpoint delegates to the embedded handler while preserving routes, wire contracts, ETags, validation order, field replacement, scheduling invalidation and full detail responses. Shared field/projection helpers retain existing behavior for other controller actions.
+- PostgreSQL remains the standalone/container default; SQLite remains optional. No schema, migration, public wire-contract or dependency-version changes. This bounded extraction does not qualify all embedded workflows or complete SQLite production/load/recovery support; post-commit response failures still do not imply rollback or automatic retry.
+
 ## [0.8.10] - 2026-10-04
 
 ### Added
