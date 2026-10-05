@@ -95,7 +95,7 @@ public sealed class ContentVersionSaveCompatibilityTests : IAsyncLifetime
         problem.RootElement.GetProperty("title").GetString().ShouldBe(title);
         if (detail is null) problem.RootElement.TryGetProperty("detail", out _).ShouldBeFalse();
         else problem.RootElement.GetProperty("detail").GetString().ShouldBe(detail);
-        if (code is not null) problem.RootElement.GetProperty("type").GetString().ShouldEndWith(code);
+        if (code is not null) problem.RootElement.GetProperty("type").GetString().ShouldBe("https://cmsify.dev/errors/" + code);
     }
 
     [Theory]
@@ -143,7 +143,7 @@ public sealed class ContentVersionSaveCompatibilityTests : IAsyncLifetime
         {
             using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
             problem.RootElement.GetProperty("title").GetString().ShouldBe("Concurrency mismatch");
-            problem.RootElement.GetProperty("type").GetString().ShouldEndWith("concurrency-mismatch");
+            problem.RootElement.GetProperty("type").GetString().ShouldBe("https://cmsify.dev/errors/concurrency-mismatch");
             problem.RootElement.TryGetProperty("detail", out _).ShouldBeFalse();
         }
     }

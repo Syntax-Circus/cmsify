@@ -1,10 +1,27 @@
+using System.Globalization;
 using Cmsify.Core.ContentWrites;
 using SyntaxCircus.Cmsify.Contracts;
+using WriteRequest = Cmsify.Core.ContentWrites.UpdateContentVersionRequest;
+using WireRequest = SyntaxCircus.Cmsify.Contracts.UpdateContentVersionRequest;
 
 namespace Cmsify.Api.Controllers;
 
 internal static class ContentVersionWriteMappings
 {
+    public static WriteRequest ToWriteRequest(this WireRequest request, Guid workspaceId, Guid itemId,
+        int versionNumber, string revision, bool expandChildren) =>
+        new(workspaceId, itemId, versionNumber, ParseRevision(revision), request.EffectiveStartAt,
+            request.EffectiveEndAt, request.Fields.Select(ToFieldInput).ToList(), expandChildren);
+
+    public static ContentVersionRevisionCondition ParseRevision(string raw)
+    {
+        if (raw.Length >= 3 && raw[0] == '"' && raw[^1] == '"'
+            && long.TryParse(raw.AsSpan(1, raw.Length - 2), NumberStyles.Integer, CultureInfo.InvariantCulture, out var candidate)
+            && string.Equals(raw, $"\"{candidate.ToString(CultureInfo.InvariantCulture)}\"", StringComparison.Ordinal))
+            return new(candidate);
+        return new(null);
+    }
+
     public static ContentVersionFieldInput ToFieldInput(ContentFieldValueRequest field) =>
         new(field.FieldId, field.Order, field.ValueKind.ToCore(), field.TextValue, field.BoolValue,
             field.MediaAssetId, field.FileAssetId, field.ChildContentItemId, field.JsonValue?.Clone());

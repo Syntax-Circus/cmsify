@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Cmsify.Api.Auth;
 using Cmsify.Core.ContentQueries;
+using Cmsify.Core.ContentWrites;
 using SyntaxCircus.Common;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
@@ -20,6 +21,7 @@ using UserRole = Cmsify.Core.Domain.Enums.UserRole;
 using ValueKind = Cmsify.Core.Domain.Enums.ValueKind;
 using ContentListQuery = SyntaxCircus.Cmsify.Contracts.ContentListQuery;
 using PaginationQuery = SyntaxCircus.Cmsify.Contracts.PaginationQuery;
+using UpdateContentVersionRequest = SyntaxCircus.Cmsify.Contracts.UpdateContentVersionRequest;
 
 namespace Cmsify.Api.Controllers;
 
@@ -498,66 +500,31 @@ public sealed class ContentController : ControllerBase
 
     [HttpPut("{id:guid}/versions/{versionNumber:int}")]
     [RequireRole(UserRole.Editor)]
-    public async Task<ActionResult<ContentVersionDetailResponse>> UpdateVersion(Guid workspaceId, Guid id, int versionNumber, UpdateContentVersionRequest request, CancellationToken ct, [FromQuery] bool expandChildren = true)
+    public async Task<ActionResult<ContentVersionDetailResponse>> UpdateVersion(Guid workspaceId, Guid id, int versionNumber, UpdateContentVersionRequest request,
+        [FromServices] IUpdateContentVersionRequestHandler handler, CancellationToken ct, [FromQuery] bool expandChildren = true)
     {
-        var version = await LoadVersionForEditAsync(workspaceId, id, versionNumber, ct);
-        if (version is null)
+        var result = await handler.HandleAsync(request.ToWriteRequest(workspaceId, id, versionNumber,
+            Request.Headers.IfMatch.ToString(), expandChildren), ct);
+        if (result.IsFailure)
         {
-            return NotFound();
+            var error = result.Errors[0];
+            return error.Code switch
+            {
+                ContentVersionWriteErrors.NotEditable => this.Error(StatusCodes.Status409Conflict, CmsifyError.Conflict, "Only Draft, Review, or Approved versions can be edited"),
+                ContentVersionWriteErrors.ConcurrencyMismatch => this.Error(StatusCodes.Status412PreconditionFailed, CmsifyError.ConcurrencyMismatch, "Concurrency mismatch"),
+                ContentVersionWriteErrors.InvalidEffectiveRange => this.Error(StatusCodes.Status422UnprocessableEntity, CmsifyError.ValidationFailed, "Invalid effective range", error.Message),
+                ContentVersionWriteErrors.ContentValidationFailed => this.Error(StatusCodes.Status422UnprocessableEntity, CmsifyError.ValidationFailed, "Content validation failed", error.Message),
+                _ => error.Kind switch
+                {
+                    ResultErrorKind.Unauthenticated => StatusCode(StatusCodes.Status401Unauthorized),
+                    ResultErrorKind.Forbidden => StatusCode(StatusCodes.Status403Forbidden),
+                    ResultErrorKind.NotFound => NotFound(),
+                    _ => this.Error(StatusCodes.Status500InternalServerError, CmsifyError.InternalServerError, "Internal Server Error")
+                }
+            };
         }
-
-        if (version.Status is not (ContentStatus.Draft or ContentStatus.Review or ContentStatus.Approved))
-        {
-            return this.Error(StatusCodes.Status409Conflict, "conflict", "Only Draft, Review, or Approved versions can be edited");
-        }
-
-        if (!this.IfMatchMatches(version.UpdatedAt))
-        {
-            return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
-        }
-
-        if (ValidateEffectiveRange(request.EffectiveStartAt, request.EffectiveEndAt) is { } rangeError)
-        {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Invalid effective range", rangeError);
-        }
-
-        var templateVersion = await LoadTemplateVersionAsync(version.TemplateVersionId, ct);
-        if (templateVersion is null)
-        {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", "Template version is unavailable.");
-        }
-
-        version.EffectiveStartAt = request.EffectiveStartAt;
-        version.EffectiveEndAt = request.EffectiveEndAt;
-        if (await ApplyVersionFieldValuesAsync(version, templateVersion, request.Fields, ct) is { } fieldError)
-        {
-            return this.Error(StatusCodes.Status422UnprocessableEntity, "validation-failed", "Content validation failed", fieldError);
-        }
-
-        // Editing the version invalidates any scheduled publish: clear it so the pre-edit content
-        // can't auto-publish later without going back through review.
-        version.PublishAt = null;
-        version.PublishLeaseOwner = null;
-        version.PublishLeaseToken = null;
-        version.PublishLeaseExpiresAt = null;
-        version.UpdatedAt = DateTimeOffset.UtcNow;
-        version.UpdatedByUserId = currentActor.UserId;
-        var item = await dbContext.ContentItems.FirstAsync(candidate => candidate.Id == id, ct);
-        item.SearchVector = searchVectorBuilder.Build(version, templateVersion);
-        item.UpdatedAt = DateTimeOffset.UtcNow;
-        EnqueueContentEvent("content.version_updated", item, version);
-
-        try
-        {
-            await dbContext.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
-        }
-
-        Response.Headers.ETag = ControllerHelpers.ETag(version.UpdatedAt);
-        return Ok(await ToVersionDetailResponseAsync(version, DateTimeOffset.UtcNow, expandChildren, ct));
+        Response.Headers.ETag = ControllerHelpers.ETag(result.Value.Version.UpdatedAt);
+        return Ok(ContentVersionWriteMappings.ToResponse(result.Value.Version));
     }
 
     [HttpDelete("{id:guid}/versions/{versionNumber:int}")]
