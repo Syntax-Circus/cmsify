@@ -968,12 +968,7 @@ public sealed class ContentController : ControllerBase
     }
 
     private static ContentVersion SelectMostSpecific(IEnumerable<ContentVersion> versions, DateTimeOffset asOf) =>
-        versions
-            .OrderBy(version => version.EffectiveStartAt.HasValue && version.EffectiveEndAt.HasValue ? 0 : 1)
-            .ThenBy(version => version.EffectiveStartAt.HasValue && version.EffectiveEndAt.HasValue ? version.EffectiveEndAt!.Value - version.EffectiveStartAt!.Value : TimeSpan.MaxValue)
-            .ThenByDescending(version => version.PublishedAt)
-            .ThenByDescending(version => version.VersionNumber)
-            .First();
+        ContentVersionDetailProjector.SelectMostSpecific(versions, asOf);
 
     private async Task<ContentVersion?> ResolvePublishedVersionAsync(Guid workspaceId, Guid? contentItemId, string? slug, DateTimeOffset asOf, CancellationToken ct)
     {

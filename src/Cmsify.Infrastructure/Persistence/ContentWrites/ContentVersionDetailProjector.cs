@@ -7,7 +7,7 @@ namespace Cmsify.Infrastructure.Persistence.ContentWrites;
 
 public sealed class ContentVersionDetailProjector(CmsifyDbContext dbContext)
 {
-    private static ContentVersion SelectMostSpecific(IEnumerable<ContentVersion> versions, DateTimeOffset asOf) =>
+    public static ContentVersion SelectMostSpecific(IEnumerable<ContentVersion> versions, DateTimeOffset asOf) =>
         versions
             .OrderBy(version => version.EffectiveStartAt.HasValue && version.EffectiveEndAt.HasValue ? 0 : 1)
             .ThenBy(version => version.EffectiveStartAt.HasValue && version.EffectiveEndAt.HasValue ? version.EffectiveEndAt!.Value - version.EffectiveStartAt!.Value : TimeSpan.MaxValue)
