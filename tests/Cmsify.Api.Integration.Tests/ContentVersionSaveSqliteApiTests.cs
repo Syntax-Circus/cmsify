@@ -28,7 +28,7 @@ namespace Cmsify.Api.Integration.Tests;
 // SQLite remains opt-in. The identical HTTP/direct matrix also runs against real PostgreSQL.
 public sealed class ContentVersionSaveSqliteApiTests
 {
-    private static readonly JsonSerializerOptions Json = CmsifyJsonOptions.Create();
+    private static readonly JsonSerializerOptions _json = CmsifyJsonOptions.Create();
 
     [Fact]
     public async Task SaveActionKeepsTheEntireCheckedInOpenApiContract()
@@ -139,7 +139,7 @@ public sealed class ContentVersionSaveSqliteApiTests
         await factory.ResetAsync(status); // identical stored save inputs and identity, using a fresh scope
         using var response = await SaveAsync(client, factory.Url + query, $"\"{ContentVersionSaveFactory.OriginalAt.UtcTicks}\"", body);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var http = (await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(Json, ct))!;
+        var http = (await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(_json, ct))!;
         ContentVersionSaveAdapterTests.AssertDetail(http, direct.Value.Version);
         response.Headers.ETag!.Tag.ShouldBe("\"63926798400000000\"");
         direct.Value.Revision.ShouldBe(63926798400000000);
@@ -186,7 +186,7 @@ public sealed class ContentVersionSaveSqliteApiTests
 
     internal static async Task<HttpResponseMessage> SaveAsync(HttpClient client, string url, string? header, WireRequest body)
     {
-        using var message = new HttpRequestMessage(HttpMethod.Put, url) { Content = JsonContent.Create(body, options: Json) };
+        using var message = new HttpRequestMessage(HttpMethod.Put, url) { Content = JsonContent.Create(body, options: _json) };
         if (header is not null) message.Headers.TryAddWithoutValidation("If-Match", header).ShouldBeTrue();
         return await client.SendAsync(message, TestContext.Current.CancellationToken);
     }
@@ -199,8 +199,8 @@ internal sealed class ContentVersionSaveFactory(bool sqlite) : WebApplicationFac
     internal static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-10-05T12:00:00Z");
     internal static readonly DateTimeOffset OriginalAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
     internal static readonly TimeProvider Clock = new FixedClock();
-    private readonly string path = Path.Combine(Path.GetTempPath(), $"cmsify-save-task5-{Guid.NewGuid():N}.db");
-    private PostgreSqlContainer? postgres;
+    private readonly string _path = Path.Combine(Path.GetTempPath(), $"cmsify-save-task5-{Guid.NewGuid():N}.db");
+    private PostgreSqlContainer? _postgres;
     internal Guid WorkspaceId { get; } = Guid.NewGuid(); internal Guid ActorId { get; } = Guid.NewGuid();
     internal Guid ItemId { get; } = Guid.NewGuid(); internal Guid VersionId { get; } = Guid.NewGuid();
     internal Guid TextFieldId { get; } = Guid.NewGuid(); internal Guid ChildFieldId { get; } = Guid.NewGuid(); internal Guid ChildItemId { get; } = Guid.NewGuid();
@@ -211,7 +211,7 @@ internal sealed class ContentVersionSaveFactory(bool sqlite) : WebApplicationFac
         builder.UseSetting("Api:SwaggerEnabled", "true");
         builder.ConfigureServices(services =>
         {
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Cmsify"] = sqlite ? $"Data Source={path};Pooling=False" : postgres!.GetConnectionString() }).Build();
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Cmsify"] = sqlite ? $"Data Source={_path};Pooling=False" : _postgres!.GetConnectionString() }).Build();
             var selected = new ServiceCollection();
             if (sqlite) selected.AddCmsifySqliteInfrastructure(configuration, new() { Workers = CmsifyWorkers.None });
             else selected.AddCmsifyInfrastructure(configuration, new() { Workers = CmsifyWorkers.None });
@@ -230,8 +230,8 @@ internal sealed class ContentVersionSaveFactory(bool sqlite) : WebApplicationFac
         var ct = TestContext.Current.CancellationToken;
         if (!sqlite)
         {
-            postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("save_parity").WithUsername("cmsify").WithPassword("cmsify").Build();
-            await postgres.StartAsync(ct);
+            _postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("save_parity").WithUsername("cmsify").WithPassword("cmsify").Build();
+            await _postgres.StartAsync(ct);
         }
         var client = CreateClient();
         using var scope = Services.CreateScope();
@@ -280,8 +280,8 @@ internal sealed class ContentVersionSaveFactory(bool sqlite) : WebApplicationFac
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
-        if (postgres is not null) await postgres.DisposeAsync();
-        foreach (var file in new[] { path, path + "-wal", path + "-shm" }) if (File.Exists(file)) File.Delete(file);
+        if (_postgres is not null) await _postgres.DisposeAsync();
+        foreach (var file in new[] { _path, _path + "-wal", _path + "-shm" }) if (File.Exists(file)) File.Delete(file);
     }
     private sealed class FixedClock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
 }
