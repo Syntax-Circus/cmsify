@@ -12,6 +12,38 @@ Optional SQLite registration and schema-only migrations are supplied separately 
 `SyntaxCircus.Cmsify.Infrastructure.Sqlite`; see the [embedded SQLite guide](https://github.com/Syntax-Circus/cmsify/blob/main/docs/integrations/embedded-sqlite.md).
 Infrastructure-only consumers retain their PostgreSQL package graph.
 
+Registration also supplies the scoped `IUpdateContentVersionRequestHandler` from
+`Cmsify.Core.ContentWrites`. A host can edit an existing Draft, Review or Approved
+version directly, without loading the API assembly:
+
+```csharp
+// Inject IUpdateContentVersionRequestHandler into the host's named use-case handler.
+var result = await updateVersion.HandleAsync(new UpdateContentVersionRequest(
+    workspaceId, itemId, versionNumber, new ContentVersionRevisionCondition(revision),
+    effectiveStartAt, effectiveEndAt,
+    [new ContentVersionFieldInput(fieldId, 0, ValueKind.Text, "Updated title",
+        null, null, null, null, null)], ExpandChildren: false), cancellationToken);
+if (result.IsSuccess)
+    revision = result.Value.Revision;
+```
+
+Supply a scoped host `ICurrentActor` before registration; the handler checks
+authentication, Editor-or-higher permission and workspace write authorization.
+Actor identity is never accepted in the save request. Obtain the numeric revision
+from a prior detail timestamp (`UpdatedAt.UtcTicks / 10`) or successful save output.
+The save fully replaces fields and atomically persists version, parent search and
+the existing single outbox event. It does not dispatch that event.
+
+Each operation constructs and disposes its own context from the existing scoped
+`DbContextOptions<CmsifyDbContext>`, retaining host options and audit interceptors.
+It neither reuses nor clears a caller's tracked changes. Keep the handler and its
+actor/options inside the request scope; do not capture them in a singleton.
+The returned detail is detached and materialized before disposal. Projection or
+cancellation after commit can still fail after the write persisted; there is no
+automatic retry or exactly-once acknowledgement. This bounded save extraction
+does not extract the remaining content lifecycle workflows or establish complete
+provider qualification.
+
 Registration supplies `IListContentRequestHandler` and PostgreSQL content-list
 queries for ordinary item metadata and resolved serving snapshots. Register a
 scoped host actor and optionally `TimeProvider` before composition. Local candidate

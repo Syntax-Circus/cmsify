@@ -133,6 +133,52 @@ public sealed class ContentChildExpansionTests : IAsyncLifetime
         Assert.NotNull(Assert.Single(body.Fields, f => f.Key == "child").Child);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("?expandChildren=false")]
+    public async Task SaveVersion_PreservesDefaultAndDisabledChildExpansion(string query)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var login = await LoginAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+        var seed = await SeedThreeLevelTreeAsync(factory);
+        Guid nameFieldId;
+        Guid childFieldId;
+        DateTimeOffset updatedAt;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var version = await db.ContentVersions.Include(v => v.FieldValues).SingleAsync(v => v.ContentItemId == seed.ParentContentId, TestContext.Current.CancellationToken);
+            version.Status = ContentStatus.Draft;
+            nameFieldId = version.FieldValues.Single(f => f.ValueKind == ValueKind.Text).FieldId;
+            childFieldId = version.FieldValues.Single(f => f.ValueKind == ValueKind.ChildContent).FieldId;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            updatedAt = version.UpdatedAt;
+        }
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/workspaces/{seed.WorkspaceId}/content/{seed.ParentContentId}/versions/1{query}")
+        {
+            Content = JsonContent.Create(new SyntaxCircus.Cmsify.Contracts.UpdateContentVersionRequest(null, null,
+            [
+                new(nameFieldId, 0, SyntaxCircus.Cmsify.Contracts.ValueKind.Text, "Edited parent", null, null, null, null, null),
+                new(childFieldId, 1, SyntaxCircus.Cmsify.Contracts.ValueKind.ChildContent, null, null, null, null, seed.ChildContentId, null)
+            ]), options: ApiJsonOptions)
+        };
+        request.Headers.TryAddWithoutValidation("If-Match", $"\"{updatedAt.UtcTicks / TimeSpan.TicksPerMicrosecond}\"");
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        response.EnsureSuccessStatusCode();
+        var body = (await response.Content.ReadFromJsonAsync<ContentVersionDetailResponse>(ApiJsonOptions, TestContext.Current.CancellationToken))!;
+        var childField = Assert.Single(body.Fields, f => f.Key == "child");
+        Assert.Equal(seed.ChildContentId, childField.ChildContentItemId);
+        if (query.Length == 0)
+        {
+            Assert.NotNull(childField.Child);
+            Assert.Equal(seed.ChildVersionId, childField.Child.Id);
+            Assert.NotNull(Assert.Single(childField.Child.Fields, f => f.Key == "child").Child);
+        }
+        else Assert.Null(childField.Child);
+    }
+
     private static async Task<LoginResponse> LoginAsync(HttpClient client)
     {
         var response = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest("admin@example.test", "change-this-temporary-password"));

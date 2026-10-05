@@ -15,7 +15,9 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Cmsify.Core.Workspaces;
 using Cmsify.Core.ContentQueries;
+using Cmsify.Core.ContentWrites;
 using Cmsify.Infrastructure.Persistence.ContentQueries;
+using Cmsify.Infrastructure.Persistence.ContentWrites;
 
 namespace Cmsify.Infrastructure.Extensions;
 
@@ -90,6 +92,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped(typeof(ICmsifyDatabaseMigrator), migratorType);
         services.AddScoped<ITemplateGraphValidator, TemplateGraphValidator>();
         services.AddScoped<IContentValidator, ContentValidator>();
+        services.AddScoped<ContentVersionFieldWriter>();
+        services.AddScoped<IContentVersionEditRepository, ContentVersionEditRepository>();
+        services.AddScoped<IUpdateContentVersionRequestHandler, UpdateContentVersionRequestHandler>();
+        services.AddScoped<ContentVersionDetailProjector>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
         services.AddScoped<IContentPublishingService, ContentPublishingService>();
