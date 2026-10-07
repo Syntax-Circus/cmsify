@@ -4,6 +4,15 @@ Cmsify's existing `Cmsify.Infrastructure` assembly packaged for .NET 10 hosts. N
 
 Includes PostgreSQL persistence and migrations, repositories, storage registration, audit interception and the existing background services. `AddCmsifyInfrastructure(configuration)` retains PostgreSQL and all Cmsify workers as its defaults. Hosts can use the existing `CmsifyInfrastructureOptions` to select workers and opt into their own scoped `ICurrentActor` for audit.
 
+Infrastructure supplies a scoped `TryAdd` default for
+`IWorkspaceVisibilityScopeProvider`. Register a host implementation before CMS
+composition or explicitly `Replace` it afterward. Workspace repositories resolve
+once per operation and apply Restricted IDs in SQL before retrieval/count/paging
+and mutation lookup. Visibility grants no capabilities, and default `CmsManaged`
+retains the membership subquery. The old public constructor signatures remain;
+DI uses their additive provider-aware overloads. See the engine guide for exact
+registration, failure/revocation semantics and workspace-only limits.
+
 The engine is licensed **AGPL-3.0-or-later**, as specified by the included `LICENSE`. The MIT license of Cmsify's separate SDK and component packages does not apply to the engine.
 
 Packaging does not establish complete application embedding or SQLite support. See [engine package qualification](https://github.com/Syntax-Circus/cmsify/blob/main/docs/engine-packages.md) for the measured scope, required host configuration and remaining limitations.
