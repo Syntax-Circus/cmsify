@@ -114,15 +114,17 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 Console.WriteLine("PASS clean-package direct workspace create/get/list/update/delete, revision rejection, PostgreSQL persistence/outbox and isolated host audit without HTTP/local credentials.");
 await ContentQueryQualification.RunAsync(app.Services, SetActor, ct);
-var humanServices = new ServiceCollection();
-humanServices.AddLogging();
-humanServices.AddSingleton<IConfiguration>(builder.Configuration);
-humanServices.AddSingleton<IHostEnvironment>(app.Environment);
+var humanBuilder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [], EnvironmentName = Environments.Development });
+humanBuilder.Configuration.Sources.Clear();
+humanBuilder.Configuration.AddConfiguration(builder.Configuration);
+humanBuilder.Logging.ClearProviders();
+humanBuilder.Host.UseDefaultServiceProvider(validation => { validation.ValidateScopes = true; validation.ValidateOnBuild = true; });
+var humanServices = humanBuilder.Services;
 WorkspaceVisibilityQualification.RegisterHost(humanServices);
-humanServices.AddCmsifyInfrastructure(builder.Configuration, options);
+humanServices.AddCmsifyInfrastructure(humanBuilder.Configuration, options);
 WorkspaceVisibilityQualification.RegisterCapabilities(humanServices);
-await using (var humanProvider = humanServices.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true }))
-    await WorkspaceVisibilityQualification.RunAsync(humanProvider, supportsRevisionMutations: true, ct);
+await using (var humanApp = humanBuilder.Build())
+    await WorkspaceVisibilityQualification.RunAsync(humanApp.Services, supportsRevisionMutations: true, ct);
 
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 static T Success<T>(Result<T> result) { Require(result.IsSuccess, "Direct handler failed."); return result.Value; }
