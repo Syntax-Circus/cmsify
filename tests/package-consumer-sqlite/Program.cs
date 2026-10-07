@@ -121,6 +121,16 @@ await using (var restarted = BuildHost())
     Require(audit.Count == 3 && audit.All(log => log.ActorUserId == actorId && log.ActorApiClientId is null), "Workspace audit invariant failed.");
     Require(!await db.Users.AnyAsync(ct) && !await db.UserSessions.AnyAsync(ct) && !await db.ApiClients.AnyAsync(ct), "Unexpected local credentials.");
     await ContentQueryQualification.RunAsync(restarted.Services, SetActor, ct);
+    var humanServices = new ServiceCollection();
+    humanServices.AddLogging();
+    humanServices.AddSingleton<IConfiguration>(restarted.Configuration);
+    humanServices.AddSingleton<IHostEnvironment>(restarted.Environment);
+    WorkspaceVisibilityQualification.RegisterHost(humanServices);
+    humanServices.AddCmsifySqliteInfrastructure(restarted.Configuration,
+        new() { UseHostCurrentActorForAudit = true, Workers = CmsifyWorkers.None });
+    WorkspaceVisibilityQualification.RegisterCapabilities(humanServices);
+    await using var humanProvider = humanServices.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
+    await WorkspaceVisibilityQualification.RunAsync(humanProvider, supportsRevisionMutations: true, ct);
 }
 Console.WriteLine("PASS SQLite native migration, no seed, idempotent restart, workspace CRUD, stale rejection and host audit.");
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
