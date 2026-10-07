@@ -37,6 +37,7 @@ jobs:
     env:
       VERSION: ${{ needs.resolve.outputs.version }}
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      LOCKED_ASSETS_TARGET: ${{ github.workspace }}/scripts/qualification/locked-assets.targets
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,14 +51,14 @@ jobs:
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - name: Build, test, and pack the .NET packages
         run: |
-          dotnet restore Cmsify.slnx --locked-mode
+          dotnet restore Cmsify.slnx --locked-mode "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
           # CmsifyReleaseBuild=true here (not just on the later `pack` calls) matters: IsPackable is
           # gated off by default (Directory.Build.props), and --no-build pack can't retroactively
           # compute the Razor SDK's static-web-asset-to-package items for Cmsify.Components/.Theme -
           # those are only wired up when Build itself runs with IsPackable=true. Without this, every
           # published version of those two packages silently ships zero wwwroot/scoped-css content.
-          dotnet build Cmsify.slnx --configuration Release --no-restore -p:Version="$VERSION" -p:InformationalVersion="$VERSION+$SOURCE_SHA" -p:CmsifyReleaseBuild=true
-          dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal
+          dotnet build Cmsify.slnx --configuration Release --no-restore -p:Version="$VERSION" -p:InformationalVersion="$VERSION+$SOURCE_SHA" -p:CmsifyReleaseBuild=true "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
+          dotnet test --solution Cmsify.slnx --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
           mkdir -p artifacts/nuget
           dotnet pack src/Cmsify.Core/Cmsify.Core.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false
           dotnet pack src/Cmsify.Infrastructure/Cmsify.Infrastructure.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$SOURCE_SHA" -p:IncludeSymbols=false

@@ -8,17 +8,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      LOCKED_ASSETS_TARGET: ${{ github.workspace }}/scripts/qualification/locked-assets.targets
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
       - name: Restore locked dependencies
-        run: dotnet restore Cmsify.slnx --locked-mode
+        run: dotnet restore Cmsify.slnx --locked-mode "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
       - name: Build Release binaries
-        run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental
+        run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
       - name: Run full test suite
-        run: dotnet test Cmsify.slnx --configuration Release --no-build --verbosity minimal -p:DisableGitVersionTask=true
+        run: dotnet test --solution Cmsify.slnx --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
@@ -33,7 +35,7 @@ jobs:
           node scripts/release/verify-engine-packages.mjs --packages artifacts/nuget --version "$VERSION" --source-sha "$GITHUB_SHA"
       - name: Collect raw coverage
         if: github.event_name != 'pull_request'
-        run: dotnet test Cmsify.slnx --configuration Release --no-build --coverage --coverage-output-format cobertura --results-directory artifacts/coverage --verbosity minimal
+        run: dotnet test --solution Cmsify.slnx --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET" --coverage --coverage-output-format cobertura --results-directory artifacts/coverage
       - name: Summarize coverage
         if: github.event_name != 'pull_request'
         run: node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md
@@ -60,10 +62,10 @@ jobs:
           retention-days: 14
       - name: Run API capacity invariants
         if: github.event_name != 'pull_request'
-        run: dotnet test tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --filter Category=Capacity
+        run: dotnet test --project tests/Cmsify.Api.Integration.Tests/Cmsify.Api.Integration.Tests.csproj --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET" --filter-trait "Category=Capacity"
       - name: Run Infrastructure capacity invariants
         if: github.event_name != 'pull_request'
-        run: dotnet test tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --filter Category=Capacity
+        run: dotnet test --project tests/Cmsify.Infrastructure.Tests/Cmsify.Infrastructure.Tests.csproj --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET" --filter-trait "Category=Capacity"
       - name: Run .NET client capacity invariants
         if: github.event_name != 'pull_request'
-        run: dotnet test sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj --configuration Release --no-build --filter Category=Capacity
+        run: dotnet test --project sdk/dotnet/tests/SyntaxCircus.Cmsify.Client.Tests/SyntaxCircus.Cmsify.Client.Tests.csproj --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET" --filter-trait "Category=Capacity"
