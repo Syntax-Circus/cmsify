@@ -1,6 +1,7 @@
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Core.Workspaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -33,6 +34,21 @@ internal static class RepositoryHelpers
         return actor.WorkspaceId.HasValue
             ? query.Where(entity => EF.Property<Guid>(entity!, "WorkspaceId") == actor.WorkspaceId.Value)
             : query;
+    }
+
+    internal static IQueryable<Workspace> ApplyWorkspaceVisibility(this IQueryable<Workspace> query,
+        CmsifyDbContext dbContext, ICurrentActor actor, WorkspaceVisibilityScope scope)
+    {
+        if (scope is null)
+            throw new InvalidOperationException("Invalid workspace visibility decision.");
+        return scope.Kind switch
+        {
+            WorkspaceVisibilityScopeKind.CmsManaged => query.ScopeWorkspacesToReadableActor(dbContext, actor),
+            WorkspaceVisibilityScopeKind.Restricted => actor.IsAuthenticated
+                ? query.Where(workspace => scope.WorkspaceIds.Contains(workspace.Id))
+                : query.Where(_ => false),
+            _ => throw new InvalidOperationException("Invalid workspace visibility decision.")
+        };
     }
 
     public static IQueryable<Workspace> ScopeWorkspacesToReadableActor(this IQueryable<Workspace> query, CmsifyDbContext dbContext, ICurrentActor actor)
