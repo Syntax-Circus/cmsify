@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -15,6 +15,9 @@ function option(name) {
 const version = option('--version');
 const sourceSha = option('--source-sha');
 const packages = resolve(option('--packages') ?? 'artifacts/nuget');
+if (process.env.CMSIFY_CONSUMER_POSTGRES && process.env.CMSIFY_CONSUMER_POSTGRES_DISPOSABLE !== '1') {
+  throw new Error('External PostgreSQL must be explicitly disposable and caller-owned; verify its endpoint and ownership before setting CMSIFY_CONSUMER_POSTGRES_DISPOSABLE=1.');
+}
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)
     || (sourceSha && !/^[a-f0-9]{40}$/i.test(sourceSha))) {
   throw new Error('Usage: node scripts/release/verify-engine-packages.mjs --version X.Y.Z[-suffix] [--packages directory] [--source-sha SHA] [--restore-only]');
@@ -36,11 +39,20 @@ const env = {
 };
 let consumerDirectory = staging;
 let consumerEnv = env;
+const protectedValues = process.env.CMSIFY_CONSUMER_POSTGRES ? [process.env.CMSIFY_CONSUMER_POSTGRES] : [];
 function run(command, commandArgs, { capture = false, extraEnv = {} } = {}) {
   const result = spawnSync(command, commandArgs, {
     cwd: consumerDirectory, env: { ...consumerEnv, ...extraEnv }, encoding: 'utf8',
-    stdio: capture ? 'pipe' : 'inherit', timeout: 600_000,
+    stdio: 'pipe', timeout: 600_000,
   });
+  const output = (result.stdout ?? '') + (result.stderr ?? '');
+  if (protectedValues.some(value => output.includes(value))) {
+    throw new Error('Qualification output contained a protected fixture input; output withheld.');
+  }
+  if (!capture) {
+    process.stdout.write(result.stdout ?? '');
+    process.stderr.write(result.stderr ?? '');
+  }
   if (result.error || result.status !== 0) {
     if (capture) process.stderr.write((result.stdout ?? '') + (result.stderr ?? ''));
     throw new Error(`${command} ${commandArgs[0]} failed (${result.status ?? result.error?.message})`);
@@ -62,6 +74,7 @@ try {
   consumerEnv = { ...env, NUGET_PACKAGES: join(consumerDirectory, 'packages'), NUGET_HTTP_CACHE_PATH: join(consumerDirectory, 'http-cache'), NUGET_SCRATCH: join(consumerDirectory, 'scratch'), DOTNET_CLI_HOME: join(consumerDirectory, 'dotnet-home') };
   copyFileSync(join(consumerFixture, 'Program.cs'), join(consumerDirectory, 'Program.cs'));
   copyFileSync(join(fixture, 'ContentQueryQualification.cs'), join(consumerDirectory, 'ContentQueryQualification.cs'));
+  copyFileSync(join(fixture, 'WorkspaceVisibilityQualification.cs'), join(consumerDirectory, 'WorkspaceVisibilityQualification.cs'));
   writeFileSync(join(consumerDirectory, project),
     readFileSync(join(consumerFixture, project), 'utf8').replaceAll('__PACKAGE_VERSION__', version));
   writeFileSync(join(consumerDirectory, 'NuGet.Config'), `<?xml version="1.0" encoding="utf-8"?>
@@ -84,9 +97,16 @@ try {
       // Caller owns this fixture; never create or remove Docker resources on this path.
       extraEnv = { CMSIFY_CONSUMER_POSTGRES: process.env.CMSIFY_CONSUMER_POSTGRES };
     } else if (!sqlite) {
+    const password = randomBytes(32).toString('hex');
+    protectedValues.push(password);
+    const environmentFile = join(staging, 'postgres.env');
+    writeFileSync(environmentFile, '', { mode: 0o600 });
+    if (process.platform === 'win32') {
+      run('icacls', [environmentFile, '/inheritance:r', '/grant:r', `${userInfo().username}:(F)`], { capture: true });
+    }
+    writeFileSync(environmentFile, `POSTGRES_DB=cmsify_consumer\nPOSTGRES_USER=cmsify\nPOSTGRES_PASSWORD=${password}\n`, { mode: 0o600 });
     run('docker', ['run', '--detach', '--rm', '--name', container, '--publish', '127.0.0.1::5432',
-      '--env', 'POSTGRES_DB=cmsify_consumer', '--env', 'POSTGRES_USER=cmsify',
-      '--env', 'POSTGRES_PASSWORD=package-test-only', 'postgres:17-alpine']);
+      '--env-file', environmentFile, 'postgres:17-alpine']);
     containerStarted = true;
     let ready = false;
     for (let attempt = 0; attempt < 60; attempt++) {
@@ -96,8 +116,9 @@ try {
     }
     if (!ready) throw new Error('Disposable PostgreSQL did not become ready in 60 seconds.');
     const port = run('docker', ['port', container, '5432/tcp'], { capture: true }).split(':').at(-1);
-    extraEnv = { CMSIFY_CONSUMER_POSTGRES: `Host=127.0.0.1;Port=${port};Database=cmsify_consumer;Username=cmsify;Password=package-test-only` };
+    extraEnv = { CMSIFY_CONSUMER_POSTGRES: `Host=127.0.0.1;Port=${port};Database=cmsify_consumer;Username=cmsify;Password=${password}` };
     }
+    if (extraEnv.CMSIFY_CONSUMER_POSTGRES) protectedValues.push(extraEnv.CMSIFY_CONSUMER_POSTGRES);
     run('dotnet', ['run', '--project', project, '--configuration', 'Release', '--no-build', '--no-restore',
       '--', feed, version, sourceSha ?? '', licenseHash], { extraEnv });
   }
