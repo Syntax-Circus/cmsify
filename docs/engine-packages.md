@@ -39,6 +39,10 @@ Each workspace get/list/legacy update/soft-delete/revision mutation resolves
 visibility afresh. SQL applies the decision before lookup/count/paging; one list
 uses a single decision for both queries. Handler authentication, role, capability
 checks and creation rules still apply: visibility supplies no write permission.
+The provider must return currently readable workspace IDs. The existing list
+handler requires an authenticated Reader-or-higher actor, uses this readable
+scope and reports each result's `CanWrite`; it does not add a per-row `CanRead`
+capability check. Other existing handler capability checks remain unchanged.
 An already-authorized in-flight write may finish; later operations resolve current
 grants. No distributed transaction with a host grant store is promised.
 
@@ -94,7 +98,12 @@ connection; that path never creates/removes Docker resources. The caller must
 verify the fixture endpoint and its
 private ownership marker before setting `CMSIFY_CONSUMER_POSTGRES_DISPOSABLE=1`;
 without that explicit disposable ownership declaration the runner stops before
-restore or setup. The default runner generates a private environment file and
+restore or setup. External mode also requires the nonempty plaintext scalar
+password in `CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD`, supplied privately in
+the process environment, never command arguments or evidence. This protects
+password-only child output regardless of connection-string quoting or `Pwd`
+aliases; the full connection string is protected separately. Missing scalar
+input stops before any child executes. The default runner generates a private environment file and
 random fixture password, scans child output for protected inputs before emitting
 success or failure logs, and cleans only its own resources. Both consumers also
 build a separate human DI composition for workspace visibility. Humans keep a

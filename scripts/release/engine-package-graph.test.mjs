@@ -31,7 +31,7 @@ test('Consumers reject wrong candidate versions and source project references', 
 test('External PostgreSQL requires explicit disposable ownership before restore or setup', () => {
   const result = spawnSync(process.execPath,
     [fileURLToPath(new URL('./verify-engine-packages.mjs', import.meta.url)), '--version', '0.0.0-package-test'],
-    { encoding: 'utf8', timeout: 10_000, env: { ...process.env, PATH: '', CMSIFY_CONSUMER_POSTGRES: 'Host=unowned.invalid;Database=not_a_fixture', CMSIFY_CONSUMER_POSTGRES_DISPOSABLE: '' } });
+    { encoding: 'utf8', timeout: 10_000, env: { ...process.env, PATH: '', CMSIFY_CONSUMER_POSTGRES: 'Host=unowned.invalid;Database=not_a_fixture', CMSIFY_CONSUMER_POSTGRES_DISPOSABLE: '', CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD: '' } });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /explicitly disposable and caller-owned/);
 });
@@ -47,9 +47,47 @@ for (const status of [0, 1]) {
       catch (error) { console.error(error.message); process.exitCode = 1; }`;
     const protectedInput = 'Host=fixture.invalid;Database=owned_fixture';
     const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script],
-      { encoding: 'utf8', timeout: 10_000, env: { ...process.env, CMSIFY_CONSUMER_POSTGRES: protectedInput, CMSIFY_CONSUMER_POSTGRES_DISPOSABLE: '1' } });
+      { encoding: 'utf8', timeout: 10_000, env: { ...process.env, CMSIFY_CONSUMER_POSTGRES: protectedInput, CMSIFY_CONSUMER_POSTGRES_DISPOSABLE: '1', CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD: 'synthetic-unused-password' } });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /protected fixture input; output withheld/);
     assert.ok(!result.stdout.includes(protectedInput) && !result.stderr.includes(protectedInput));
   });
 }
+for (const [form, connection, password] of [
+  ['Password', 'Host=fixture.invalid;Database=owned_fixture;Password=sentinel-password', 'sentinel-password'],
+  ['quoted Password', 'Host=fixture.invalid;Database=owned_fixture;Password="sentinel;password"', 'sentinel;password'],
+  ['quoted Pwd alias', "Host=fixture.invalid;Database=owned_fixture;Pwd='sentinel''password'", "sentinel'password"],
+]) {
+  for (const status of [0, 1]) {
+    test(`External scalar password is withheld for ${form} (exit ${status})`, () => {
+      const runner = new URL('./verify-engine-packages.mjs', import.meta.url).href;
+      const script = `import cp from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        cp.spawnSync = () => ({ status: ${status}, stdout: process.env.CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD, stderr: '' });
+        syncBuiltinESMExports();
+        process.argv = ['node', 'runner', '--version', '0.0.0-package-test'];
+        try { await import(${JSON.stringify(runner)}); }
+        catch (error) { console.error(error.message); process.exitCode = 1; }`;
+      const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script],
+        { encoding: 'utf8', timeout: 10_000, env: { ...process.env, CMSIFY_CONSUMER_POSTGRES: connection, CMSIFY_CONSUMER_POSTGRES_DISPOSABLE: '1', CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD: password } });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /protected fixture input; output withheld/);
+      assert.ok(!result.stdout.includes(password) && !result.stderr.includes(password));
+    });
+  }
+}
+test('External PostgreSQL fails closed before child execution without a protected scalar password', () => {
+  const runner = new URL('./verify-engine-packages.mjs', import.meta.url).href;
+  const script = `import cp from 'node:child_process';
+    import { syncBuiltinESMExports } from 'node:module';
+    cp.spawnSync = () => ({ status: 1, stdout: 'CHILD_EXECUTED', stderr: '' });
+    syncBuiltinESMExports();
+    process.argv = ['node', 'runner', '--version', '0.0.0-package-test'];
+    try { await import(${JSON.stringify(runner)}); }
+    catch (error) { console.error(error.message); process.exitCode = 1; }`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script],
+    { encoding: 'utf8', timeout: 10_000, env: { ...process.env, CMSIFY_CONSUMER_POSTGRES: 'Host=fixture.invalid;Database=owned_fixture;Password=sentinel-password', CMSIFY_CONSUMER_POSTGRES_DISPOSABLE: '1', CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD: '' } });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /requires CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD/);
+  assert.ok(!result.stdout.includes('CHILD_EXECUTED') && !result.stderr.includes('CHILD_EXECUTED'));
+});

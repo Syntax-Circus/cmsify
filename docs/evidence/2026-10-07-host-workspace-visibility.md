@@ -41,6 +41,13 @@ these candidate checks. `0.0.0-package-test` is the existing nonpublishing ident
 - Node 22.23.3 package graph/ownership/output protection checks: 9/9, zero skips.
   Ownership guard RED then GREEN; protected output guard deliberately disabled
   yields two failures, restored guard passes on both successful/failing children.
+- Independent review found external password-only output was not protected by
+  the full connection-string guard. Synthetic scalar success/failure and
+  missing-input regressions produce RED 9/16 then GREEN 16/16 on Node 22.23.3.
+  External mode now requires a privately supplied nonempty plaintext scalar
+  `CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD`; both scalar and full connection
+  are scanned before emission, and absent scalar input fails before child execution.
+  Quoted Password and Pwd alias connections use the same explicit scalar input.
 
 ## Exact SDK and unchanged lock constraint
 
@@ -93,6 +100,9 @@ to content/template/media/tag/webhook queries, create CMS credential/access rows
 grant write capabilities or change seeding/migrations. Existing operator/content
 consumer setup stays separate from nonprivileged human scope qualification.
 Visibility resolves for each operation; already-authorized writes may finish.
+Hosts supply currently readable IDs. The existing list handler uses authenticated
+Reader-or-higher access and reports per-result `CanWrite`, without a new per-row
+`CanRead` gate; this preserves handler behavior and does not grant writes.
 Count/page snapshots have no new transactional guarantee. Native SQLite checks
 are compatibility evidence, not a production deployment/support claim. Raw logs,
 SDK archives, feeds, caches and fixture secrets remain ignored; protected output

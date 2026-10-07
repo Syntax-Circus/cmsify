@@ -10,6 +10,8 @@ workspace query visibility independently of handler capability authorization.
 The default `CmsManaged` decision retains standalone access behavior. Restricted
 IDs never add SuperAdmin or actor workspace privileges; the seam covers workspace
 repositories only. Hosts resolve current trusted grants for each operation.
+Return currently readable IDs: the existing list handler requires an authenticated
+Reader-or-higher actor and reports `CanWrite`, without a per-row `CanRead` check.
 
 The engine is licensed **AGPL-3.0-or-later**, as specified by the included `LICENSE`. The MIT license of Cmsify's separate SDK and component packages does not apply to the engine.
 

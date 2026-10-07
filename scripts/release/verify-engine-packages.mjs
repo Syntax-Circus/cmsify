@@ -18,6 +18,9 @@ const packages = resolve(option('--packages') ?? 'artifacts/nuget');
 if (process.env.CMSIFY_CONSUMER_POSTGRES && process.env.CMSIFY_CONSUMER_POSTGRES_DISPOSABLE !== '1') {
   throw new Error('External PostgreSQL must be explicitly disposable and caller-owned; verify its endpoint and ownership before setting CMSIFY_CONSUMER_POSTGRES_DISPOSABLE=1.');
 }
+if (process.env.CMSIFY_CONSUMER_POSTGRES && !process.env.CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD) {
+  throw new Error('External PostgreSQL requires CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD containing its plaintext password; supply it privately so scalar child output can be withheld.');
+}
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)
     || (sourceSha && !/^[a-f0-9]{40}$/i.test(sourceSha))) {
   throw new Error('Usage: node scripts/release/verify-engine-packages.mjs --version X.Y.Z[-suffix] [--packages directory] [--source-sha SHA] [--restore-only]');
@@ -39,7 +42,9 @@ const env = {
 };
 let consumerDirectory = staging;
 let consumerEnv = env;
-const protectedValues = process.env.CMSIFY_CONSUMER_POSTGRES ? [process.env.CMSIFY_CONSUMER_POSTGRES] : [];
+// The caller supplies the scalar separately: connection-string quoting and aliases belong to Npgsql.
+const protectedValues = process.env.CMSIFY_CONSUMER_POSTGRES
+  ? [process.env.CMSIFY_CONSUMER_POSTGRES, process.env.CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD] : [];
 function run(command, commandArgs, { capture = false, extraEnv = {} } = {}) {
   const result = spawnSync(command, commandArgs, {
     cwd: consumerDirectory, env: { ...consumerEnv, ...extraEnv }, encoding: 'utf8',
