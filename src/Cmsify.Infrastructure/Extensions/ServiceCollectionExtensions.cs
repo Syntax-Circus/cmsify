@@ -106,6 +106,7 @@ public static class ServiceCollectionExtensions
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<SecretProtectionOptions>, SecretProtectionOptionsValidator>();
         services.AddSingleton<ISecretProtector, AesSecretProtector>();
+        services.TryAddScoped<IWorkspaceVisibilityScopeProvider, CmsManagedWorkspaceVisibilityScopeProvider>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<IWorkspaceMutationRepository, WorkspaceMutationRepository>();
         services.AddScoped<IWorkspacesListRequestHandler, WorkspacesListRequestHandler>();
