@@ -3,14 +3,33 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Core.Workspaces;
+using Cmsify.Infrastructure.Auth;
 using Microsoft.EntityFrameworkCore;
 using SyntaxCircus.Common;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
 
-public sealed class WorkspaceMutationRepository(
-    CmsifyDbContext dbContext, ICurrentActor actor, IWebhookOutbox outbox) : IWorkspaceMutationRepository
+public sealed class WorkspaceMutationRepository : IWorkspaceMutationRepository
 {
+    private readonly CmsifyDbContext dbContext;
+    private readonly ICurrentActor actor;
+    private readonly IWebhookOutbox outbox;
+    private readonly IWorkspaceVisibilityScopeProvider _visibility;
+
+    public WorkspaceMutationRepository(CmsifyDbContext dbContext, ICurrentActor actor, IWebhookOutbox outbox)
+        : this(dbContext, actor, outbox, new CmsManagedWorkspaceVisibilityScopeProvider())
+    {
+    }
+
+    public WorkspaceMutationRepository(CmsifyDbContext dbContext, ICurrentActor actor, IWebhookOutbox outbox,
+        IWorkspaceVisibilityScopeProvider visibility)
+    {
+        this.dbContext = dbContext;
+        this.actor = actor;
+        this.outbox = outbox;
+        _visibility = visibility;
+    }
+
     private const string UpdatedEventType = "workspace.updated";
     private static readonly ResultError _conflict = new("concurrency-mismatch", "Workspace revision has changed.", ResultErrorKind.Conflict);
     private static readonly ResultError _notFound = new("not-found", "Workspace not found.", ResultErrorKind.NotFound);
@@ -79,13 +98,14 @@ public sealed class WorkspaceMutationRepository(
         }
     }
 
-    private Task<Workspace?> LoadCurrentAsync(Guid id, CancellationToken cancellationToken)
+    private async Task<Workspace?> LoadCurrentAsync(Guid id, CancellationToken cancellationToken)
     {
+        var visibility = await _visibility.ResolveAsync(cancellationToken);
         // A tracking query otherwise reuses cached values and xmin from an earlier operation.
         // Replace only the mutation target; the scoped query still enforces visibility and soft-delete filters.
         var tracked = dbContext.ChangeTracker.Entries<Workspace>().SingleOrDefault(entry => entry.Entity.Id == id);
         if (tracked is not null) tracked.State = EntityState.Detached;
-        return dbContext.Workspaces.ScopeWorkspacesToReadableActor(dbContext, actor)
+        return await dbContext.Workspaces.ApplyWorkspaceVisibility(dbContext, actor, visibility)
             .FirstOrDefaultAsync(workspace => workspace.Id == id, cancellationToken);
     }
 
