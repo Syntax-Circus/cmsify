@@ -1,0 +1,8 @@
+<Project>
+  <!-- Exact SDK 10.0.400 defaults to 10.0.11; unchanged upstream Admin lock requests 10.0.12. -->
+  <Target Name="UseLockedAspNetCoreAssets" BeforeTargets="ProcessFrameworkReferences">
+    <ItemGroup>
+      <KnownAspNetCorePack Update="Microsoft.AspNetCore.App.Internal.Assets" AspNetCorePackVersion="10.0.12" />
+    </ItemGroup>
+  </Target>
+</Project>

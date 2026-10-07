@@ -62,7 +62,7 @@ Admin's implicit `Microsoft.AspNetCore.App.Internal.Assets` request is 10.0.11,
 while the unchanged lock requests 10.0.12. SDK bundled props lines 98-100 define
 the implicit version. Qualification uses the SDK's custom import hook
 `CustomAfterMicrosoftCommonTargets` (Microsoft.Common.CurrentVersion.targets:7105)
-and this ignored target, preserving source/locks/package versions:
+and this target, preserving compiled source/locks/package versions:
 
 ```xml
 <Project>
@@ -74,11 +74,19 @@ and this ignored target, preserving source/locks/package versions:
 </Project>
 ```
 
-Pass `-p:CustomAfterMicrosoftCommonTargets=<absolute-ignored-target-path>` for
+The initially ignored target is now tracked unchanged at
+`scripts/qualification/locked-assets.targets` for release and ordinary .NET CI.
+Both copies have SHA-256
+`d8e96e62202728ae251a71bbf3e226f9474108f9f6666dbd6629342f5043ad4b`.
+Pass `-p:CustomAfterMicrosoftCommonTargets=<absolute-target-path>` for
 source locked restore/build/test on both platforms. Locked restore then passes;
 this is an explicit qualification input, not a claim that default SDK 10.0.400
 restore works unmodified. The vulnerability command uses `--no-restore` against
 those validated assets because `dotnet list package` does not accept `-p`.
+The release-readiness correction also uses the actually qualified MTP solution
+command with sequential modules and minimum expected tests of one, replacing
+legacy positional/VSTest CLI forms in release and ordinary source/coverage/capacity
+steps. Registry/promotion/manual approval and package guards remain unchanged.
 
 ## Release handoff and limits
 
