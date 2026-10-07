@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-10-07
+
+### Added
+
+- Scoped `IWorkspaceVisibilityScopeProvider` and immutable `WorkspaceVisibilityScope` contracts for host-owned workspace access, with restricted readable IDs and explicit denial without Cmsify-local credential or membership rows.
+- Database-side visibility filtering before workspace lookup, counting, paging and mutation target selection, with fresh host grants resolved for each operation. Handler authentication, roles and independent write authorization remain required; list providers supply currently readable IDs and results retain per-workspace `CanWrite`.
+- Real PostgreSQL and native SQLite compatibility coverage and separate human-host package consumers for visibility, capability denial, revisions, revocation and persisted host audit/outbox attribution.
+
+### Fixed
+
+- Release and ordinary .NET qualification workflows use the supported Microsoft.Testing.Platform commands and the already-locked ASP.NET Core Assets version with SDK 10.0.400, preserving dependency versions and lockfiles.
+- Package qualification withholds protected fixture values from successful and failing child output. External PostgreSQL fixtures require explicit disposable ownership and a privately supplied plaintext password scalar; absent protection input fails before child execution.
+
+### Changed
+
+- Standalone `CmsManaged` visibility preserves existing membership SQL, API-client and SuperAdmin behavior. Existing repository constructors remain available; scoped registration permits host overrides without changing default composition.
+- The seam covers workspace repositories only. Existing HTTP wire contracts, schema, migrations, seeding, revision concurrency and atomic audit/outbox behavior are unchanged. Visibility grants no write capabilities; already-authorized in-flight writes may finish, and count/page snapshots gain no transactional guarantee.
+- PostgreSQL remains the standalone/container default and SQLite remains optional. Native SQLite sequential workspace compatibility does not establish concurrent-writer parity, complete application embedding or SQLite production/load/recovery support.
+
 ## [0.8.11] - 2026-10-05
 
 ### Added
