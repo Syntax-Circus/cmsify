@@ -12,6 +12,47 @@ Hosts can register a scoped `ICurrentActor` and opt into its audit attribution w
 
 Resolving services does not migrate or seed a database. The host owns that lifecycle. `CmsifyDbContext.Database.MigrateAsync` applies the packaged PostgreSQL migrations; `ICmsifyDatabaseMigrator` also runs the existing seeder. The package qualification uses migrations directly to prove direct host workflows without creating Cmsify-local credentials.
 
+### Host workspace visibility
+
+The additive `Cmsify.Core.Workspaces.IWorkspaceVisibilityScopeProvider` supplies
+workspace query visibility independently of `IWorkspaceAuthorizationService`.
+Register the host's scoped provider before infrastructure composition:
+
+```csharp
+services.AddScoped<IWorkspaceVisibilityScopeProvider, HostWorkspaceVisibility>();
+services.AddCmsifyInfrastructure(configuration,
+    new() { UseHostCurrentActorForAudit = true, Workers = CmsifyWorkers.None });
+// Alternatively, explicitly replace the default after composition:
+services.Replace(ServiceDescriptor.Scoped<IWorkspaceVisibilityScopeProvider, HostWorkspaceVisibility>());
+```
+
+The host implementation resolves trusted current account/session/grants in
+`ResolveAsync(CancellationToken cancellationToken = default)`. Return
+`WorkspaceVisibilityScope.ForWorkspaces(allowedWorkspaceIds)` for initialized,
+authenticated operations and `WorkspaceVisibilityScope.None` for denial or
+missing initialization. IDs are copied, deduplicated and immutable; `Guid.Empty`
+is rejected. A restricted decision remains restricted even for a SuperAdmin or
+an actor with `WorkspaceId`. Anonymous actors cannot use restricted IDs. Null,
+unknown, throwing and cancelled decisions fail without a wider-access fallback.
+
+Each workspace get/list/legacy update/soft-delete/revision mutation resolves
+visibility afresh. SQL applies the decision before lookup/count/paging; one list
+uses a single decision for both queries. Handler authentication, role, capability
+checks and creation rules still apply: visibility supplies no write permission.
+An already-authorized in-flight write may finish; later operations resolve current
+grants. No distributed transaction with a host grant store is promised.
+
+Standalone registration uses a scoped, host-overridable `TryAdd` provider returning
+`CmsManaged`, preserving the existing CMS membership subquery, API-client and
+SuperAdmin behavior. Existing repository constructor signatures remain available
+and use this default; DI selects their new provider-aware overloads.
+
+This contract covers workspace repositories only. Content/template/media/tag/
+webhook queries retain their existing boundaries. Native SQLite compatibility
+covers database-side workspace queries, legacy mutations and sequential revision
+update/stale/delete/audit/outbox paths; it does not establish concurrent SQLite
+writer parity, complete embedding or production deployment support.
+
 ## Repeatable package gate
 
 The release workflow packs eight NuGet packages, including Core, Infrastructure
@@ -49,8 +90,19 @@ real migrations; each content workflow enters through the registered handler.
 Docker and public NuGet access are required by the default gate. The runner removes
 only its uniquely named container and own temporary directory. For isolated Linux
 orchestration, `CMSIFY_CONSUMER_POSTGRES` may supply a caller-owned disposable test
-connection; that path never creates/removes Docker resources. Package bytes, feeds
-and caches remain ignored. `--restore-only` restores and validates both package
+connection; that path never creates/removes Docker resources. The caller must
+verify the fixture endpoint and its
+private ownership marker before setting `CMSIFY_CONSUMER_POSTGRES_DISPOSABLE=1`;
+without that explicit disposable ownership declaration the runner stops before
+restore or setup. The default runner generates a private environment file and
+random fixture password, scans child output for protected inputs before emitting
+success or failure logs, and cleans only its own resources. Both consumers also
+build a separate human DI composition for workspace visibility. Humans keep a
+stable host GUID, no API-client/actor workspace ID and no SuperAdmin privilege;
+packed get/list/paging, independent write denial, revision/audit/outbox/stale/delete
+and reused-context revocation paths execute through the actual packed handlers.
+These sequential SQLite checks do not claim concurrent SQLite writer parity.
+Package bytes, feeds and caches remain ignored. `--restore-only` restores and validates both package
 graphs without builds, metadata execution or database operations; CI runs the full gate.
 
 For a local candidate after locked restore, choose a fresh ignored output directory (incremental pack may retain an earlier package's metadata):
