@@ -25,7 +25,8 @@ public sealed class ContentVersionSaveBoundaryTests
         }
         typeof(UpdateContentVersionRequestHandler).GetConstructors().Single().GetParameters()
             .Select(parameter => parameter.ParameterType).ShouldBe(new[] { typeof(IContentVersionEditRepository),
-                typeof(ICurrentActor), typeof(IWorkspaceAuthorizationService), typeof(TimeProvider) });
+                typeof(ICurrentActor), typeof(IWorkspaceAuthorizationService), typeof(TimeProvider), typeof(IContentVersionResourceGuard) });
+        typeof(UpdateContentVersionRequestHandler).GetConstructors().Single().GetParameters().Last().IsOptional.ShouldBeTrue();
         typeof(IUpdateContentVersionRequestHandler).IsAssignableFrom(typeof(UpdateContentVersionRequestHandler)).ShouldBeTrue();
         typeof(IAsyncDisposable).IsAssignableFrom(typeof(IContentVersionEditSession)).ShouldBeTrue();
     }

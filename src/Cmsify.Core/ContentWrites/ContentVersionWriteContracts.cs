@@ -16,7 +16,10 @@ public sealed record ContentVersionRevisionCondition(long? Candidate)
 public sealed record ContentVersionEditValues(DateTimeOffset? EffectiveStartAt, DateTimeOffset? EffectiveEndAt,
     IReadOnlyList<ContentVersionFieldInput> Fields);
 public sealed record ContentVersionEditSnapshot(Guid Id, Guid ContentItemId, Guid WorkspaceId, int VersionNumber,
-    ContentStatus Status, DateTimeOffset UpdatedAt);
+    ContentStatus Status, DateTimeOffset UpdatedAt)
+{
+    public Guid TemplateVersionId { get; init; }
+}
 public sealed record UpdatedContentVersionOutput(long Revision, ContentVersionDetailOutput Version);
 public sealed record ContentVersionFieldInput(Guid FieldId, int Order, ValueKind ValueKind, string? TextValue,
     bool? BoolValue, Guid? MediaAssetId, Guid? FileAssetId, Guid? ChildContentItemId, JsonElement? JsonValue);

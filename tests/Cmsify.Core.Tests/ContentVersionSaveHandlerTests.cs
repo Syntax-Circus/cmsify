@@ -38,6 +38,24 @@ public sealed class ContentVersionSaveHandlerTests
         new(_time.UtcTicks / 10), null, null, []);
     private UpdateContentVersionRequestHandler Handler() => new(_repository, _actor, _authorization, _clock);
 
+    [Fact]
+    public async Task EmbeddedUpdateUsesActualTemplateIdentity()
+    {
+        var template = Guid.NewGuid();
+        _session.Snapshot = _session.Snapshot with { TemplateVersionId = template };
+        var guard = Substitute.For<IContentVersionResourceGuard>();
+        guard.CanEditAsync(Arg.Any<ContentVersionEditSnapshot>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+        var result = await new UpdateContentVersionRequestHandler(_repository, _actor, _authorization, _clock, guard)
+            .HandleAsync(Request(), TestContext.Current.CancellationToken);
+        result.IsFailure.ShouldBeTrue();
+        result.Errors[0].Code.ShouldBe("forbidden");
+        _calls.ShouldNotContain("prepare");
+        _calls.ShouldNotContain("commit");
+        await guard.Received(1).CanEditAsync(Arg.Is<ContentVersionEditSnapshot>(s => s.TemplateVersionId == template),
+            TestContext.Current.CancellationToken);
+    }
+
     [Theory]
     [InlineData("anonymous", "authentication-required")]
     [InlineData("reader", "forbidden")]

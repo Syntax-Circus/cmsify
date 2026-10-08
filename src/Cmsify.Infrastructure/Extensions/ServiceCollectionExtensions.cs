@@ -95,6 +95,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ContentVersionFieldWriter>();
         services.AddScoped<IContentVersionEditRepository, ContentVersionEditRepository>();
         services.AddScoped<IUpdateContentVersionRequestHandler, UpdateContentVersionRequestHandler>();
+        services.TryAddScoped<Cmsify.Core.ContentWrites.IContentVersionResourceGuard, Cmsify.Core.ContentWrites.UnrestrictedContentVersionResourceGuard>();
+        services.TryAddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedContentAuthorizationService, Cmsify.Core.EmbeddedContent.DenyEmbeddedContentAuthorizationService>();
+        services.TryAddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedTemplateSetupAuthorizationService, Cmsify.Core.EmbeddedContent.DenyEmbeddedTemplateSetupAuthorizationService>();
         services.AddScoped<ContentVersionDetailProjector>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();

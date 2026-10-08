@@ -33,7 +33,7 @@ internal sealed class ContentVersionEditSession : IContentVersionEditSession
         _searchVectorBuilder = searchVectorBuilder;
         _clock = clock;
         Snapshot = new(version.Id, version.ContentItemId, version.WorkspaceId, version.VersionNumber,
-            version.Status, version.UpdatedAt);
+            version.Status, version.UpdatedAt) { TemplateVersionId = version.TemplateVersionId };
     }
 
     public ContentVersionEditSnapshot Snapshot { get; }
