@@ -111,11 +111,29 @@ internal static class EmbeddedContentQualification
         EmbeddedContentWriteOutput newVersion;
         await using(var next = services.CreateAsyncScope())
         {
-            Bind(next.ServiceProvider,new(workspace,fingerprint,schema.TemplateVersionId,item,1,EmbeddedContentOperationKind.VersionCreate,targetVersion:2));
+            Bind(next.ServiceProvider,new(workspace,fingerprint,schema.TemplateVersionId,item,1,EmbeddedContentOperationKind.VersionCreate));
             newVersion = Success(await next.ServiceProvider.GetRequiredService<ICreateEmbeddedContentVersionRequestHandler>()
                 .HandleAsync(new(workspace,item,1,new(updated.Revision),schema.TemplateVersionId,fingerprint,newOperation,Fields(schema,"New draft")),ct));
             Require(newVersion.Receipt.VersionNumber == 2 && newVersion.Version.Version.Status == ContentStatus.Draft,"New version identity/state differs.");
         }
+        var thirdRequest = new CreateEmbeddedContentVersionRequest(workspace,item,1,new(updated.Revision),schema.TemplateVersionId,
+            fingerprint,Guid.NewGuid(),Fields(schema,"Third draft"));
+        await using(var next = services.CreateAsyncScope())
+        {
+            Bind(next.ServiceProvider,new(workspace,fingerprint,schema.TemplateVersionId,item,1,EmbeddedContentOperationKind.VersionCreate));
+            var third = Success(await next.ServiceProvider.GetRequiredService<ICreateEmbeddedContentVersionRequestHandler>().HandleAsync(thirdRequest,ct));
+            Require(third.Receipt.VersionNumber == 3,"Strict source authority allocation differs.");
+            var replay = Success(await next.ServiceProvider.GetRequiredService<ICreateEmbeddedContentVersionRequestHandler>().HandleAsync(thirdRequest,ct));
+            Require(replay.Receipt == third.Receipt,"Strict source authority replay differs.");
+        }
+        var allocated = await Task.WhenAll(Enumerable.Range(0,2).Select(async i =>
+        {
+            await using var next = services.CreateAsyncScope();
+            Bind(next.ServiceProvider,new(workspace,fingerprint,schema.TemplateVersionId,item,1,EmbeddedContentOperationKind.VersionCreate));
+            return Success(await next.ServiceProvider.GetRequiredService<ICreateEmbeddedContentVersionRequestHandler>().HandleAsync(
+                thirdRequest with { OperationKey=Guid.NewGuid(), Fields=Fields(schema,"Concurrent draft " + i) },ct)).Receipt.VersionNumber;
+        }));
+        Require(allocated.Order().SequenceEqual(new[] {4,5}),"Strict source authority concurrent allocation differs.");
         await using(var source = services.CreateAsyncScope())
         {
             Bind(source.ServiceProvider,new(workspace,fingerprint,schema.TemplateVersionId,item,1,EmbeddedContentOperationKind.VersionRead));
@@ -141,8 +159,8 @@ internal static class EmbeddedContentQualification
         await using(var oracle = services.CreateAsyncScope())
         {
             var db = oracle.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-            Require(await db.ContentVersions.CountAsync(v => v.ContentItemId == item,ct) == 2
-                && await db.EmbeddedContentReceipts.CountAsync(r => r.ContentItemId == item,ct) == 2,"Replay/original count differs.");
+            Require(await db.ContentVersions.CountAsync(v => v.ContentItemId == item,ct) == 5
+                && await db.EmbeddedContentReceipts.CountAsync(r => r.ContentItemId == item,ct) == 5,"Replay/original count differs.");
             var audit = await db.AuditLogs.Where(a => a.EntityId == item).ToArrayAsync(ct);
             Require(audit.Length > 0 && audit.All(a => a.ActorUserId == _subject && a.ActorApiClientId is null),"Embedded host GUID audit differs.");
         }
@@ -160,7 +178,7 @@ internal static class EmbeddedContentQualification
     private static void Require(bool condition,string message) { if(!condition) throw new InvalidOperationException(message); }
     private static T Success<T>(Result<T> result) { Require(result.IsSuccess,result.IsFailure ? result.Errors[0].Code : "Failed"); return result.Value; }
     private sealed record Binding(Guid Workspace,string Fingerprint,Guid Template,Guid? Item,int? Version,EmbeddedContentOperationKind? Kind,
-        bool Setup=false,int? targetVersion=null,bool revoked=false);
+        bool Setup=false,bool revoked=false);
     private sealed class Scope
     {
         internal Binding? Current { get; private set; }
@@ -183,7 +201,7 @@ internal static class EmbeddedContentQualification
             && b.Workspace==value.WorkspaceId && b.Fingerprint==value.ContractFingerprint && b.Kind==value.Kind
             && (value.ContractKey=="" || value.ContractKey=="puppies-plus.dog-profile.v1")
             && (value.TemplateVersionId==Guid.Empty || b.Template==value.TemplateVersionId) && b.Item==value.ContentItemId
-            && (value.VersionNumber==null || b.Version==value.VersionNumber || b.targetVersion==value.VersionNumber));
+            && (value.VersionNumber==null || b.Version==value.VersionNumber));
     }
     private sealed class UpdateGuard(Scope scope) : IContentVersionResourceGuard
     {

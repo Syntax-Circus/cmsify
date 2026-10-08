@@ -43,7 +43,11 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
         await EmbeddedOperationLocks.LockAsync(db, $"item:{request.ContentItemId:N}", cancellationToken);
         var receipt = await db.EmbeddedContentReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.WorkspaceId == request.WorkspaceId
             && x.Kind == EmbeddedWriteKind.ItemCreate && x.OperationKey == request.OperationKey, cancellationToken);
-        if (receipt is not null) return await ReplayAsync(db, receipt, request.ContentItemId, hash, authorizeLoaded, cancellationToken);
+        if (receipt is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return await ReadResponseAsync(receipt, request.ContentItemId, hash, authorizeLoaded, cancellationToken);
+        }
         var registration = await db.EmbeddedTemplateRegistrations.AsNoTracking().SingleOrDefaultAsync(x => x.TemplateVersionId == request.TemplateVersionId, cancellationToken);
         if (registration is null || registration.WorkspaceId != request.WorkspaceId || registration.Fingerprint != request.ContractFingerprint)
             return Denied<EmbeddedContentWriteOutput>(EmbeddedContentErrors.TemplateMismatch, ResultErrorKind.Conflict);
@@ -96,7 +100,11 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
         await EmbeddedOperationLocks.LockAsync(db, $"item:{request.ContentItemId:N}", cancellationToken);
         var receipt = await db.EmbeddedContentReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.WorkspaceId == request.WorkspaceId
             && x.Kind == EmbeddedWriteKind.VersionCreate && x.OperationKey == request.OperationKey, cancellationToken);
-        if (receipt is not null) return await ReplayAsync(db, receipt, request.ContentItemId, hash, authorizeLoaded, cancellationToken);
+        if (receipt is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return await ReadResponseAsync(receipt, request.ContentItemId, hash, authorizeLoaded, cancellationToken, request.SourceVersionNumber);
+        }
         var loaded = await LoadAsync(db, request.WorkspaceId, request.ContentItemId, request.SourceVersionNumber,
             request.TemplateVersionId, request.ContractFingerprint, EmbeddedContentOperationKind.VersionCreate, authorizeLoaded, cancellationToken);
         if (loaded.IsFailure) return Result<EmbeddedContentWriteOutput>.Failure(loaded.Errors[0]);
@@ -129,7 +137,7 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        return await OriginalResponseAsync(receipt, authorizeLoaded, cancellationToken);
+        return await OriginalResponseAsync(receipt, authorizeLoaded, cancellationToken, request.SourceVersionNumber);
     }
     public async Task<Result<EmbeddedContentReceiptOutput>> GetEmbeddedContentOperationReceiptAsync(GetEmbeddedContentOperationReceiptRequest request,
         Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded, CancellationToken cancellationToken)
@@ -144,7 +152,8 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
         if (receipt.ContractFingerprint != request.ContractFingerprint)
             return Denied<EmbeddedContentReceiptOutput>("not-found", ResultErrorKind.NotFound);
         var loaded = await LoadAsync(db, request.WorkspaceId, request.ContentItemId, receipt.VersionNumber,
-            receipt.TemplateVersionId, receipt.ContractFingerprint, EmbeddedContentOperationKind.ReceiptRead, authorizeLoaded, cancellationToken);
+            receipt.TemplateVersionId, receipt.ContractFingerprint, EmbeddedContentOperationKind.ReceiptRead, authorizeLoaded, cancellationToken,
+            validateFields: false);
         if (loaded.IsFailure) return Result<EmbeddedContentReceiptOutput>.Failure(loaded.Errors[0]);
         if (loaded.Value.Version.Id != receipt.ContentVersionId) return Denied<EmbeddedContentReceiptOutput>("not-found", ResultErrorKind.NotFound);
         return Result<EmbeddedContentReceiptOutput>.Success(ReceiptOutput(receipt));
@@ -154,7 +163,8 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
     private sealed record Loaded(ContentItem Item, ContentVersion Version, TemplateVersion Schema, EmbeddedTemplateRegistration Registration);
     private async Task<Result<Loaded>> LoadAsync(CmsifyDbContext db, Guid workspaceId, Guid itemId, int versionNumber,
         Guid templateVersionId, string fingerprint, EmbeddedContentOperationKind kind,
-        Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded, CancellationToken cancellationToken)
+        Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded, CancellationToken cancellationToken,
+        bool validateFields = true, int? authorizationSourceVersion = null)
     {
         var item = await db.ContentItems.AsNoTracking().SingleOrDefaultAsync(x => x.Id == itemId
             && x.WorkspaceId == workspaceId && !x.IsDeleted, cancellationToken);
@@ -167,14 +177,18 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
         if (registration is null || registration.WorkspaceId != item.WorkspaceId || item.TemplateVersionId != version.TemplateVersionId
             || version.TemplateVersionId != templateVersionId || registration.Fingerprint != fingerprint)
             return Denied<Loaded>(EmbeddedContentErrors.TemplateMismatch, ResultErrorKind.Conflict);
+        if (authorizationSourceVersion is { } sourceNumber && !await db.ContentVersions.AsNoTracking().AnyAsync(x =>
+            x.ContentItemId == item.Id && x.WorkspaceId == item.WorkspaceId && x.TemplateVersionId == version.TemplateVersionId
+            && x.VersionNumber == sourceNumber, cancellationToken))
+            return Denied<Loaded>("not-found", ResultErrorKind.NotFound);
         if (!await authorizeLoaded(new(kind, item.WorkspaceId, registration.ContractKey, registration.Fingerprint,
-            version.TemplateVersionId, item.Id, version.VersionNumber), cancellationToken))
+            version.TemplateVersionId, item.Id, authorizationSourceVersion ?? version.VersionNumber), cancellationToken))
             return Denied<Loaded>("forbidden", ResultErrorKind.Forbidden);
         var actual = await EmbeddedTemplateRepository.ReadActualAsync(db, registration, fingerprint, cancellationToken);
         if (actual.IsFailure) return Result<Loaded>.Failure(actual.Errors[0]);
         var schema = await db.TemplateVersions.AsNoTracking().Include(x => x.Fields).ThenInclude(x => x.AllowedTypes)
             .SingleAsync(x => x.Id == version.TemplateVersionId, cancellationToken);
-        if (!Enum.IsDefined(version.Status) || !validator.Validate(version, schema).IsValid || !ValidFields(version.FieldValues, schema))
+        if (validateFields && (!Enum.IsDefined(version.Status) || !validator.Validate(version, schema).IsValid || !ValidFields(version.FieldValues, schema)))
             return Denied<Loaded>(EmbeddedContentErrors.Validation, ResultErrorKind.Validation);
         return Result<Loaded>.Success(new(item, version, schema, registration));
     }
@@ -186,7 +200,7 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
             f with { JsonValue = f.JsonValue?.Clone(), Child = null }).ToArray()) };
         return Result<EmbeddedContentVersionOutput>.Success(new(fingerprint, ContentVersionRevisionCondition.Normalize(owned.UpdatedAt), owned));
     }
-    private static bool ValidFields(IEnumerable<ContentVersionFieldValue> fields, TemplateVersion schema)
+    internal static bool ValidFields(IEnumerable<ContentVersionFieldValue> fields, TemplateVersion schema)
     {
         var seen = new HashSet<Guid>();
         foreach (var value in fields)
@@ -220,12 +234,14 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
         receipt.ContentItemId, receipt.Kind, receipt.OperationKey, receipt.VersionNumber, receipt.CommittedRevision,
         receipt.ActorSubject, receipt.CommittedAt);
     private async Task<Result<EmbeddedContentWriteOutput>> ReplayAsync(CmsifyDbContext db, EmbeddedContentReceipt receipt,
-        Guid requestedItem, string hash, Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded, CancellationToken cancellationToken)
+        Guid requestedItem, string hash, Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded,
+        CancellationToken cancellationToken, int? sourceVersionNumber = null)
     {
         // Authorization precedes conflict metadata: a receipt never grants resource access.
         var loaded = await LoadAsync(db, receipt.WorkspaceId, requestedItem, receipt.VersionNumber,
             receipt.TemplateVersionId, receipt.ContractFingerprint, receipt.Kind == EmbeddedWriteKind.ItemCreate
-                ? EmbeddedContentOperationKind.ItemCreate : EmbeddedContentOperationKind.VersionCreate, authorizeLoaded, cancellationToken);
+                ? EmbeddedContentOperationKind.ItemCreate : EmbeddedContentOperationKind.VersionCreate, authorizeLoaded, cancellationToken,
+            authorizationSourceVersion: sourceVersionNumber);
         if (loaded.IsFailure) return Result<EmbeddedContentWriteOutput>.Failure(loaded.Errors[0]);
         if (receipt.ContentItemId != requestedItem || receipt.InputFingerprint != hash)
             return Denied<EmbeddedContentWriteOutput>(EmbeddedContentErrors.OperationConflict, ResultErrorKind.Conflict);
@@ -239,10 +255,16 @@ public sealed class EmbeddedContentRepository(DbContextOptions<CmsifyDbContext> 
         return Result<EmbeddedContentWriteOutput>.Success(new(ReceiptOutput(receipt), projected.Value));
     }
     private async Task<Result<EmbeddedContentWriteOutput>> OriginalResponseAsync(EmbeddedContentReceipt receipt,
-        Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded, CancellationToken cancellationToken)
+        Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded, CancellationToken cancellationToken,
+        int? sourceVersionNumber = null)
+        => await ReadResponseAsync(receipt, receipt.ContentItemId, receipt.InputFingerprint, authorizeLoaded, cancellationToken, sourceVersionNumber);
+
+    private async Task<Result<EmbeddedContentWriteOutput>> ReadResponseAsync(EmbeddedContentReceipt receipt, Guid requestedItem, string hash,
+        Func<EmbeddedContentOperation, CancellationToken, Task<bool>> authorizeLoaded, CancellationToken cancellationToken,
+        int? sourceVersionNumber = null)
     {
         await using var db = new CmsifyDbContext(options);
         await using var read = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
-        return await ReplayAsync(db, receipt, receipt.ContentItemId, receipt.InputFingerprint, authorizeLoaded, cancellationToken);
+        return await ReplayAsync(db, receipt, requestedItem, hash, authorizeLoaded, cancellationToken, sourceVersionNumber);
     }
 }

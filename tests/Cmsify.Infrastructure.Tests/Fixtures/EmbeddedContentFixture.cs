@@ -32,7 +32,7 @@ internal sealed class EmbeddedContentFixture : IAsyncDisposable
             Schema.TemplateVersionId, Schema.Fingerprint, operation ?? Guid.NewGuid(), Fields(text));
     public GetEmbeddedContentVersionRequest ReadRequest(EmbeddedContentWriteOutput source)
         => new(Schema.WorkspaceId, source.Receipt.ContentItemId, source.Receipt.VersionNumber, Schema.TemplateVersionId, Schema.Fingerprint);
-    public static async Task<EmbeddedContentFixture> Create(IInterceptor? observer = null)
+    public static async Task<EmbeddedContentFixture> Create(IInterceptor? observer = null, bool optionalOnly = false)
     {
         var database = await ContentListQueryFixtures.Create(false);
         var fixture = new EmbeddedContentFixture(database);
@@ -43,8 +43,11 @@ internal sealed class EmbeddedContentFixture : IAsyncDisposable
             builder.AddInterceptors(new AuditInterceptor(new HostCurrentActorAuditAccessor(actor)));
             if (observer is not null) builder.AddInterceptors(observer);
             fixture.Options = builder.Options;
+            var contract = EmbeddedTemplateRepositoryTests.Contract();
+            if (optionalOnly) contract = contract with { Fields = Array.AsReadOnly(contract.Fields.Select(f =>
+                f with { IsRequired = false, MinOccurrences = 0 }).ToArray()) };
             var schema = await new EmbeddedTemplateRepository(fixture.Options).EnsureAsync(new(database.Workspace.Id,
-                EmbeddedTemplateRepositoryTests.Contract()), fixture.Actor, (_, _) => Task.FromResult(true), Ct);
+                contract), fixture.Actor, (_, _) => Task.FromResult(true), Ct);
             if (schema.IsFailure) throw new InvalidOperationException(schema.Errors[0].Code);
             fixture.Schema = schema.Value;
             return fixture;
