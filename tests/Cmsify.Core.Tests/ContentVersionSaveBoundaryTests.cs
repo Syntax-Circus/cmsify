@@ -23,10 +23,12 @@ public sealed class ContentVersionSaveBoundaryTests
                 foreach (var parameter in method.GetParameters()) AssertAllowed(parameter.ParameterType);
             }
         }
-        typeof(UpdateContentVersionRequestHandler).GetConstructors().Single().GetParameters()
+        typeof(UpdateContentVersionRequestHandler).GetConstructors().Single(c => c.GetParameters().Length == 5).GetParameters()
             .Select(parameter => parameter.ParameterType).ShouldBe(new[] { typeof(IContentVersionEditRepository),
                 typeof(ICurrentActor), typeof(IWorkspaceAuthorizationService), typeof(TimeProvider), typeof(IContentVersionResourceGuard) });
-        typeof(UpdateContentVersionRequestHandler).GetConstructors().Single().GetParameters().Last().IsOptional.ShouldBeTrue();
+        typeof(UpdateContentVersionRequestHandler).GetConstructors().Single(c => c.GetParameters().Length == 5).GetParameters().Last().IsOptional.ShouldBeTrue();
+        typeof(UpdateContentVersionRequestHandler).GetConstructor([typeof(IContentVersionEditRepository),
+            typeof(ICurrentActor), typeof(IWorkspaceAuthorizationService), typeof(TimeProvider)]).ShouldNotBeNull();
         typeof(IUpdateContentVersionRequestHandler).IsAssignableFrom(typeof(UpdateContentVersionRequestHandler)).ShouldBeTrue();
         typeof(IAsyncDisposable).IsAssignableFrom(typeof(IContentVersionEditSession)).ShouldBeTrue();
     }

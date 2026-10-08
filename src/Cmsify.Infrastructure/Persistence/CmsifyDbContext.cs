@@ -12,6 +12,7 @@ public sealed class CmsifyDbContext : DbContext
     }
 
     public DbSet<Workspace> Workspaces => Set<Workspace>();
+    public DbSet<EmbeddedContent.EmbeddedTemplateRegistration> EmbeddedTemplateRegistrations => Set<EmbeddedContent.EmbeddedTemplateRegistration>();
 
     public DbSet<Template> Templates => Set<Template>();
 

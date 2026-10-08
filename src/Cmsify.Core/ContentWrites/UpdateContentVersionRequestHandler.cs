@@ -6,6 +6,10 @@ public sealed class UpdateContentVersionRequestHandler(IContentVersionEditReposi
     IWorkspaceAuthorizationService authorization, TimeProvider clock,
     IContentVersionResourceGuard? resourceGuard = null) : IUpdateContentVersionRequestHandler
 {
+    public UpdateContentVersionRequestHandler(IContentVersionEditRepository repository, ICurrentActor actor,
+        IWorkspaceAuthorizationService authorization, TimeProvider clock)
+        : this(repository, actor, authorization, clock, null) { }
+
     public async Task<Result<UpdatedContentVersionOutput>> HandleAsync(UpdateContentVersionRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
