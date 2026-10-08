@@ -95,6 +95,17 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ContentVersionFieldWriter>();
         services.AddScoped<IContentVersionEditRepository, ContentVersionEditRepository>();
         services.AddScoped<IUpdateContentVersionRequestHandler, UpdateContentVersionRequestHandler>();
+        services.TryAddScoped<Cmsify.Core.ContentWrites.IContentVersionResourceGuard, Cmsify.Core.ContentWrites.UnrestrictedContentVersionResourceGuard>();
+        services.TryAddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedContentAuthorizationService, Cmsify.Core.EmbeddedContent.DenyEmbeddedContentAuthorizationService>();
+        services.TryAddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedTemplateSetupAuthorizationService, Cmsify.Core.EmbeddedContent.DenyEmbeddedTemplateSetupAuthorizationService>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedTemplateRepository, Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedTemplateRepository>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IEnsureEmbeddedTemplateRequestHandler, Cmsify.Core.EmbeddedContent.EnsureEmbeddedTemplateRequestHandler>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IGetEmbeddedTemplateRequestHandler, Cmsify.Core.EmbeddedContent.GetEmbeddedTemplateRequestHandler>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedContentRepository, Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedContentRepository>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IGetEmbeddedContentVersionRequestHandler, Cmsify.Core.EmbeddedContent.GetEmbeddedContentVersionRequestHandler>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.ICreateEmbeddedContentRequestHandler, Cmsify.Core.EmbeddedContent.CreateEmbeddedContentRequestHandler>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.ICreateEmbeddedContentVersionRequestHandler, Cmsify.Core.EmbeddedContent.CreateEmbeddedContentVersionRequestHandler>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IGetEmbeddedContentOperationReceiptRequestHandler, Cmsify.Core.EmbeddedContent.GetEmbeddedContentOperationReceiptRequestHandler>();
         services.AddScoped<ContentVersionDetailProjector>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();

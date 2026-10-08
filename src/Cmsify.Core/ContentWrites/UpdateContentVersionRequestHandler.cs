@@ -3,8 +3,13 @@ using Cmsify.Core.Domain.Enums;
 using SyntaxCircus.Common;
 namespace Cmsify.Core.ContentWrites;
 public sealed class UpdateContentVersionRequestHandler(IContentVersionEditRepository repository, ICurrentActor actor,
-    IWorkspaceAuthorizationService authorization, TimeProvider clock) : IUpdateContentVersionRequestHandler
+    IWorkspaceAuthorizationService authorization, TimeProvider clock,
+    IContentVersionResourceGuard? resourceGuard = null) : IUpdateContentVersionRequestHandler
 {
+    public UpdateContentVersionRequestHandler(IContentVersionEditRepository repository, ICurrentActor actor,
+        IWorkspaceAuthorizationService authorization, TimeProvider clock)
+        : this(repository, actor, authorization, clock, null) { }
+
     public async Task<Result<UpdatedContentVersionOutput>> HandleAsync(UpdateContentVersionRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -19,6 +24,9 @@ public sealed class UpdateContentVersionRequestHandler(IContentVersionEditReposi
         cancellationToken.ThrowIfCancellationRequested();
         if (session is null)
             return Failure(ContentVersionWriteErrors.NotFound, "Content version not found.", ResultErrorKind.NotFound);
+        if (!await (resourceGuard ?? new UnrestrictedContentVersionResourceGuard()).CanEditAsync(session.Snapshot, cancellationToken))
+            return Failure(ContentVersionWriteErrors.Forbidden, "Permission denied.", ResultErrorKind.Forbidden);
+        cancellationToken.ThrowIfCancellationRequested();
         if (session.Snapshot.Status is not (ContentStatus.Draft or ContentStatus.Review or ContentStatus.Approved))
             return Failure(ContentVersionWriteErrors.NotEditable, "Only Draft, Review, or Approved versions can be edited", ResultErrorKind.Conflict);
         if (!request.Revision.Matches(session.Snapshot.UpdatedAt))

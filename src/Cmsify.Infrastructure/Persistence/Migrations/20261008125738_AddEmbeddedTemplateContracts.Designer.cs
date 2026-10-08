@@ -4,6 +4,7 @@ using System.Text.Json;
 using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using NpgsqlTypes;
 namespace Cmsify.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CmsifyDbContext))]
-    partial class CmsifyDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261008125738_AddEmbeddedTemplateContracts")]
+    partial class AddEmbeddedTemplateContracts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2174,84 +2177,6 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.ToTable("workspaces", (string)null);
                 });
 
-            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedContentReceipt", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("ActorSubject")
-                        .HasColumnType("uuid")
-                        .HasColumnName("actor_subject");
-
-                    b.Property<DateTimeOffset>("CommittedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("committed_at");
-
-                    b.Property<long>("CommittedRevision")
-                        .HasColumnType("bigint")
-                        .HasColumnName("committed_revision");
-
-                    b.Property<Guid>("ContentItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("content_item_id");
-
-                    b.Property<Guid>("ContentVersionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("content_version_id");
-
-                    b.Property<string>("ContractFingerprint")
-                        .IsRequired()
-                        .HasColumnType("char(64)")
-                        .HasColumnName("contract_fingerprint");
-
-                    b.Property<string>("InputFingerprint")
-                        .IsRequired()
-                        .HasColumnType("char(64)")
-                        .HasColumnName("input_fingerprint");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("kind");
-
-                    b.Property<Guid>("OperationKey")
-                        .HasColumnType("uuid")
-                        .HasColumnName("operation_key");
-
-                    b.Property<Guid>("TemplateVersionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("template_version_id");
-
-                    b.Property<int>("VersionNumber")
-                        .HasColumnType("integer")
-                        .HasColumnName("version_number");
-
-                    b.Property<Guid>("WorkspaceId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("workspace_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_embedded_content_receipts");
-
-                    b.HasIndex("ContentItemId")
-                        .HasDatabaseName("ix_embedded_content_receipts_content_item_id");
-
-                    b.HasIndex("ContentVersionId")
-                        .HasDatabaseName("ix_embedded_content_receipts_content_version_id");
-
-                    b.HasIndex("TemplateVersionId")
-                        .HasDatabaseName("ix_embedded_content_receipts_template_version_id");
-
-                    b.HasIndex("WorkspaceId", "Kind", "OperationKey")
-                        .IsUnique()
-                        .HasDatabaseName("ix_embedded_content_receipts_workspace_id_kind_operation_key");
-
-                    b.ToTable("embedded_content_receipts", (string)null);
-                });
-
             modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedTemplateRegistration", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2646,37 +2571,6 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_webhook_subscriptions_webhook_endpoints_webhook_endpoint_id");
-                });
-
-            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedContentReceipt", b =>
-                {
-                    b.HasOne("Cmsify.Core.Domain.Entities.ContentItem", null)
-                        .WithMany()
-                        .HasForeignKey("ContentItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_embedded_content_receipts_content_items_content_item_id");
-
-                    b.HasOne("Cmsify.Core.Domain.Entities.ContentVersion", null)
-                        .WithMany()
-                        .HasForeignKey("ContentVersionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_embedded_content_receipts_content_versions_content_version_");
-
-                    b.HasOne("Cmsify.Core.Domain.Entities.TemplateVersion", null)
-                        .WithMany()
-                        .HasForeignKey("TemplateVersionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_embedded_content_receipts_template_versions_template_versio");
-
-                    b.HasOne("Cmsify.Core.Domain.Entities.Workspace", null)
-                        .WithMany()
-                        .HasForeignKey("WorkspaceId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_embedded_content_receipts_workspaces_workspace_id");
                 });
 
             modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedTemplateRegistration", b =>

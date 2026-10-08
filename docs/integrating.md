@@ -154,3 +154,6 @@ Invoke-RestMethod -Uri "$env:CMSIFY_API_URL/api/v1/workspaces/$env:CMSIFY_WORKSP
 ```
 
 If this fails, inspect the returned ProblemDetails before debugging framework code.
+# Embedded content contracts
+
+For explicitly authorized in-process template/content setup, exact selected drafts and correlated atomic writes, see [embedded content](embedded-content.md). These PostgreSQL-only handlers do not add HTTP endpoints.

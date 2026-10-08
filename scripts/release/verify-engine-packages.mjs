@@ -15,6 +15,8 @@ function option(name) {
 const version = option('--version');
 const sourceSha = option('--source-sha');
 const packages = resolve(option('--packages') ?? 'artifacts/nuget');
+const evidence = option('--evidence') ? resolve(option('--evidence')) : undefined;
+if (evidence && existsSync(evidence)) throw new Error('Evidence destination must be fresh; existing evidence will not be overwritten.');
 if (process.env.CMSIFY_CONSUMER_POSTGRES && process.env.CMSIFY_CONSUMER_POSTGRES_DISPOSABLE !== '1') {
   throw new Error('External PostgreSQL must be explicitly disposable and caller-owned; verify its endpoint and ownership before setting CMSIFY_CONSUMER_POSTGRES_DISPOSABLE=1.');
 }
@@ -23,8 +25,9 @@ if (process.env.CMSIFY_CONSUMER_POSTGRES && !process.env.CMSIFY_CONSUMER_POSTGRE
 }
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)
     || (sourceSha && !/^[a-f0-9]{40}$/i.test(sourceSha))) {
-  throw new Error('Usage: node scripts/release/verify-engine-packages.mjs --version X.Y.Z[-suffix] [--packages directory] [--source-sha SHA] [--restore-only]');
+  throw new Error('Usage: node scripts/release/verify-engine-packages.mjs --version X.Y.Z[-suffix] [--packages directory] [--source-sha SHA] [--restore-only] [--evidence fresh-directory]');
 }
+if (evidence) mkdirSync(evidence, { recursive: true });
 const fixture = resolve(dirname(fileURLToPath(import.meta.url)), '../../tests/package-consumer');
 const licenseHash = createHash('sha256').update(readFileSync(resolve(fixture, '../../LICENSE'))).digest('hex');
 // Outside the checkout: no Directory.Build.*, Directory.Packages.props, source references or repo NuGet settings.
@@ -42,6 +45,7 @@ const env = {
 };
 let consumerDirectory = staging;
 let consumerEnv = env;
+let logSequence = 0;
 // The caller supplies the scalar separately: connection-string quoting and aliases belong to Npgsql.
 const protectedValues = process.env.CMSIFY_CONSUMER_POSTGRES
   ? [process.env.CMSIFY_CONSUMER_POSTGRES, process.env.CMSIFY_CONSUMER_POSTGRES_PROTECTED_PASSWORD] : [];
@@ -54,6 +58,7 @@ function run(command, commandArgs, { capture = false, extraEnv = {} } = {}) {
   if (protectedValues.some(value => output.includes(value))) {
     throw new Error('Qualification output contained a protected fixture input; output withheld.');
   }
+  if (evidence) writeFileSync(join(evidence, `${String(++logSequence).padStart(3, '0')}-${command}-${commandArgs[0].replaceAll(/[^a-zA-Z0-9.-]/g, '_')}.log`), output);
   if (!capture) {
     process.stdout.write(result.stdout ?? '');
     process.stderr.write(result.stderr ?? '');
@@ -80,6 +85,7 @@ try {
   copyFileSync(join(consumerFixture, 'Program.cs'), join(consumerDirectory, 'Program.cs'));
   copyFileSync(join(fixture, 'ContentQueryQualification.cs'), join(consumerDirectory, 'ContentQueryQualification.cs'));
   copyFileSync(join(fixture, 'WorkspaceVisibilityQualification.cs'), join(consumerDirectory, 'WorkspaceVisibilityQualification.cs'));
+  if (!sqlite) copyFileSync(join(fixture, 'EmbeddedContentQualification.cs'), join(consumerDirectory, 'EmbeddedContentQualification.cs'));
   writeFileSync(join(consumerDirectory, project),
     readFileSync(join(consumerFixture, project), 'utf8').replaceAll('__PACKAGE_VERSION__', version));
   writeFileSync(join(consumerDirectory, 'NuGet.Config'), `<?xml version="1.0" encoding="utf-8"?>
@@ -92,9 +98,37 @@ try {
   <fallbackPackageFolders><clear/></fallbackPackageFolders>
 </configuration>`);
   console.log(`Restoring ${sqlite ? 'SQLite' : 'PostgreSQL'} engine ${version} packages in an isolated consumer with an empty cache.`);
-  run('dotnet', ['restore', project, '--configfile', 'NuGet.Config', '--no-cache']);
+  const sdk = run('dotnet', ['--version'], { capture: true });
+  run('dotnet', ['restore', project, '--configfile', 'NuGet.Config', '--no-cache', '--use-lock-file']);
+  run('dotnet', ['restore', project, '--configfile', 'NuGet.Config', '--no-cache', '--locked-mode']);
   const assets = JSON.parse(readFileSync(join(consumerDirectory, 'obj/project.assets.json'), 'utf8'));
   validateGraph(assets, version, sqlite);
+  if (evidence) {
+    const destination = join(evidence, sqlite ? 'sqlite' : 'postgres');
+    mkdirSync(destination);
+    copyFileSync(join(consumerDirectory, 'packages.lock.json'), join(destination, 'packages.lock.json'));
+    copyFileSync(join(consumerDirectory, 'obj/project.assets.json'), join(destination, 'project.assets.json'));
+    const graph = [];
+    for (const [identity, library] of Object.entries(assets.libraries).filter(([, library]) => library.type === 'package')) {
+      const [id, resolvedVersion] = identity.split('/');
+      const cache = join(consumerDirectory, 'packages', id.toLowerCase(), resolvedVersion.toLowerCase());
+      const archive = join(cache, `${id.toLowerCase()}.${resolvedVersion.toLowerCase()}.nupkg`);
+      const nuspec = join(cache, `${id.toLowerCase()}.nuspec`);
+      const owned = join(destination, 'archives', id.toLowerCase(), resolvedVersion.toLowerCase());
+      mkdirSync(owned, { recursive: true });
+      copyFileSync(archive, join(owned, `${id}.${resolvedVersion}.nupkg`));
+      copyFileSync(nuspec, join(owned, `${id}.nuspec`));
+      const metadata = readFileSync(nuspec, 'utf8');
+      graph.push({ id, version: resolvedVersion, archiveSha256: createHash('sha256').update(readFileSync(archive)).digest('hex'),
+        nuspecSha256: createHash('sha256').update(metadata).digest('hex'),
+        license: metadata.match(/<license\b[^>]*>([^<]*)<\/license>/)?.[1] ?? null,
+        licenseUrl: metadata.match(/<licenseUrl>([^<]*)<\/licenseUrl>/)?.[1] ?? null });
+    }
+    writeFileSync(join(destination, 'provenance.json'), JSON.stringify({ sdk, platform: process.platform, architecture: process.arch, sourceSha, version,
+      licenseHash, packages: graph.sort((a, b) => a.id.localeCompare(b.id)) }, null, 2));
+    const vulnerability = run('dotnet', ['list', project, 'package', '--vulnerable', '--include-transitive', '--format', 'json', '--no-restore'], { capture: true });
+    writeFileSync(join(destination, 'vulnerability.json'), vulnerability);
+  }
   if (!args.includes('--restore-only')) {
     run('dotnet', ['build', project, '--configuration', 'Release', '--no-restore']);
     let extraEnv = {};

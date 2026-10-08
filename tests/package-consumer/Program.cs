@@ -126,6 +126,24 @@ WorkspaceVisibilityQualification.RegisterCapabilities(humanServices);
 await using (var humanApp = humanBuilder.Build())
     await WorkspaceVisibilityQualification.RunAsync(humanApp.Services, supportsRevisionMutations: true, ct);
 
+Guid embeddedWorkspace;
+await using (var provision = app.Services.CreateAsyncScope())
+{
+    SetActor(provision.ServiceProvider, actorId);
+    embeddedWorkspace = Success(await provision.ServiceProvider.GetRequiredService<IWorkspacesCreateRequestHandler>()
+        .HandleAsync(new("Embedded package workspace", "embedded-package-workspace", null), ct)).Id;
+}
+var embeddedBuilder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [], EnvironmentName = Environments.Development });
+embeddedBuilder.Configuration.Sources.Clear();
+embeddedBuilder.Configuration.AddConfiguration(builder.Configuration);
+embeddedBuilder.Logging.ClearProviders();
+embeddedBuilder.Host.UseDefaultServiceProvider(validation => { validation.ValidateScopes = true; validation.ValidateOnBuild = true; });
+EmbeddedContentQualification.RegisterHost(embeddedBuilder.Services);
+embeddedBuilder.Services.AddCmsifyInfrastructure(embeddedBuilder.Configuration, options);
+EmbeddedContentQualification.RegisterCapabilities(embeddedBuilder.Services);
+await using (var embeddedApp = embeddedBuilder.Build())
+    await EmbeddedContentQualification.RunAsync(embeddedApp.Services, embeddedWorkspace, ct);
+
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 static T Success<T>(Result<T> result) { Require(result.IsSuccess, "Direct handler failed."); return result.Value; }
 static void SetActor(IServiceProvider services, Guid id)

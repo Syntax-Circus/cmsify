@@ -33,7 +33,8 @@ public sealed class ContentListSqliteApiTests
         using var client = await factory.CreateSeededClientAsync();
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
-        Assert.Single(await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(db.Database.GetMigrations(),
+            await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
         Assert.Empty(await db.Database.GetPendingMigrationsAsync(TestContext.Current.CancellationToken));
         var actor = new CurrentActorInfo(null, factory.ActorId, UserRole.Reader, factory.WorkspaceId, true);
         var authorization = new WorkspaceAuthorizationService(db, actor);

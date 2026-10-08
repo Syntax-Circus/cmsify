@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cmsify.Core.ContentWrites;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Infrastructure.Persistence.EmbeddedContent;
 using Microsoft.EntityFrameworkCore;
 using SyntaxCircus.Common;
 
@@ -33,7 +34,7 @@ internal sealed class ContentVersionEditSession : IContentVersionEditSession
         _searchVectorBuilder = searchVectorBuilder;
         _clock = clock;
         Snapshot = new(version.Id, version.ContentItemId, version.WorkspaceId, version.VersionNumber,
-            version.Status, version.UpdatedAt);
+            version.Status, version.UpdatedAt) { TemplateVersionId = version.TemplateVersionId };
     }
 
     public ContentVersionEditSnapshot Snapshot { get; }
@@ -50,10 +51,14 @@ internal sealed class ContentVersionEditSession : IContentVersionEditSession
             .FirstOrDefaultAsync(version => version.Id == _version.TemplateVersionId && !version.IsDeleted, cancellationToken);
         if (_templateVersion is null)
             return ValidationFailure("Template version is unavailable.");
+        if (!await RegisteredSchemaValidAsync(cancellationToken))
+            return ValidationFailure("Registered embedded template is unavailable or has changed.");
         _version.EffectiveStartAt = values.EffectiveStartAt;
         _version.EffectiveEndAt = values.EffectiveEndAt;
         if (await _fieldWriter.ApplyAsync(_version, _templateVersion, values.Fields, cancellationToken) is { } error)
             return ValidationFailure(error);
+        if (!await RegisteredSchemaValidAsync(cancellationToken, validateValues: true))
+            return ValidationFailure("Registered embedded values are invalid.");
         cancellationToken.ThrowIfCancellationRequested();
         _actorUserId = actorUserId;
         _state = SessionState.Prepared;
@@ -65,6 +70,8 @@ internal sealed class ContentVersionEditSession : IContentVersionEditSession
         RequireState(SessionState.Prepared);
         _state = SessionState.Failed;
         cancellationToken.ThrowIfCancellationRequested();
+        if (!await RegisteredSchemaValidAsync(cancellationToken, validateValues: true))
+            return ValidationFailure("Registered embedded template or values are invalid.");
         _version.PublishAt = null;
         _version.PublishLeaseOwner = null;
         _version.PublishLeaseToken = null;
@@ -120,5 +127,20 @@ internal sealed class ContentVersionEditSession : IContentVersionEditSession
 
     private static Result ValidationFailure(string message) => Result.Failure(new(
         ContentVersionWriteErrors.ContentValidationFailed, message, ResultErrorKind.Validation));
+    private async Task<bool> RegisteredSchemaValidAsync(CancellationToken cancellationToken, bool validateValues = false)
+    {
+        var registration = await _context.EmbeddedTemplateRegistrations.AsNoTracking()
+            .SingleOrDefaultAsync(r => r.TemplateVersionId == _version.TemplateVersionId, cancellationToken);
+        if (registration is null) return true; // Existing unregistered standalone update semantics remain unchanged.
+        if (registration.WorkspaceId != _version.WorkspaceId || !await _context.ContentItems.AsNoTracking().AnyAsync(i =>
+            i.Id == _version.ContentItemId && i.WorkspaceId == registration.WorkspaceId
+            && i.TemplateVersionId == registration.TemplateVersionId && !i.IsDeleted, cancellationToken)) return false;
+        var actual = await EmbeddedTemplateRepository.ReadActualAsync(_context, registration, registration.Fingerprint, cancellationToken);
+        if (actual.IsFailure) return false;
+        if (!validateValues) return true;
+        var schema = await _context.TemplateVersions.AsNoTracking().Include(v => v.Fields).ThenInclude(f => f.AllowedTypes)
+            .SingleAsync(v => v.Id == registration.TemplateVersionId, cancellationToken);
+        return EmbeddedContentRepository.ValidFields(_version.FieldValues, schema);
+    }
     private enum SessionState { Loaded, Prepared, Committed, Failed, Disposed }
 }
