@@ -101,6 +101,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedTemplateRepository, Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedTemplateRepository>();
         services.AddScoped<Cmsify.Core.EmbeddedContent.IEnsureEmbeddedTemplateRequestHandler, Cmsify.Core.EmbeddedContent.EnsureEmbeddedTemplateRequestHandler>();
         services.AddScoped<Cmsify.Core.EmbeddedContent.IGetEmbeddedTemplateRequestHandler, Cmsify.Core.EmbeddedContent.GetEmbeddedTemplateRequestHandler>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IEmbeddedContentRepository, Cmsify.Infrastructure.Persistence.EmbeddedContent.EmbeddedContentRepository>();
+        services.AddScoped<Cmsify.Core.EmbeddedContent.IGetEmbeddedContentVersionRequestHandler, Cmsify.Core.EmbeddedContent.GetEmbeddedContentVersionRequestHandler>();
         services.AddScoped<ContentVersionDetailProjector>();
         services.AddScoped<IFieldConfigValidator, FieldConfigValidator>();
         services.AddScoped<IContentLifecycleService, ContentLifecycleService>();
