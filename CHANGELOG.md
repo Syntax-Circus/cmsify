@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.13] - 2026-10-08
+
+### Added
+
+- Six directly callable embedded template/content handlers with default-deny host authority, immutable bounded Text registrations, exact detached version reads, and correlated atomic item/version writes with durable operation receipts.
+- A compatible registered-content update guard with schema and replacement-value validation. New embedded operations require PostgreSQL; migrations preserve existing SQLite regressions.
+
+### Changed
+
+- HTTP routes, wire contracts and SDKs remain unchanged. Host adapters must follow the documented authority conventions; mixed legacy HTTP/embedded allocation and broader provider, deployment and production qualification remain limited or deferred.
+
+### Deferred
+
+- Wrong-typed setup `maxLength` throws an exception instead of returning `embedded-validation`; it rejects without unauthorized writes.
+
 ## [0.8.12] - 2026-10-07
 
 ### Added
