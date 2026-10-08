@@ -47,6 +47,7 @@ nav:
       - Configuration: configuration.md
       - Authentication and authorization: authentication-and-authorization.md
       - Integrating with the API: integrating.md
+      - Embedded template and content operations: embedded-content.md
       - Engine packages and qualification: engine-packages.md
       - Embedded SQLite hosts: integrations/embedded-sqlite.md
       - Content modeling: content-modeling.md
