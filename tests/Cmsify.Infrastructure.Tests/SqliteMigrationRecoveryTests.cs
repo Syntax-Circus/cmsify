@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using Shouldly;
+using System.Reflection;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Cmsify.Infrastructure.Sqlite.Persistence;
 
 namespace Cmsify.Infrastructure.Tests;
 
@@ -78,11 +81,14 @@ public sealed class SqliteMigrationRecoveryTests
         File.WriteAllText(Path.Combine(second.Checkpoints, "release"), "release");
         (await first.Finish()).ShouldBe(0);
         (await second.Finish()).ShouldBe(0);
-        (await fixture.Scalar("SELECT COUNT(*) FROM __CmsifyMigrationsHistory")).ShouldBe(1L);
+        var expectedMigrations = (long)typeof(SqliteCmsifyDatabaseMigrator).Assembly.GetTypes()
+            .Count(type => type.GetCustomAttribute<MigrationAttribute>() is not null);
+        expectedMigrations.ShouldBeGreaterThan(0);
+        (await fixture.Scalar("SELECT COUNT(*) FROM __CmsifyMigrationsHistory")).ShouldBe(expectedMigrations);
         (await fixture.Scalar("SELECT COUNT(*) FROM workspaces")).ShouldBe(0L);
         await using var repeat = fixture.Start("migrate");
         (await repeat.Finish()).ShouldBe(0);
-        (await fixture.Scalar("SELECT COUNT(*) FROM __CmsifyMigrationsHistory")).ShouldBe(1L);
+        (await fixture.Scalar("SELECT COUNT(*) FROM __CmsifyMigrationsHistory")).ShouldBe(expectedMigrations);
     }
 
     [Fact]

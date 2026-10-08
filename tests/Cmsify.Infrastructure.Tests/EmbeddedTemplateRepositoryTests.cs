@@ -4,11 +4,35 @@ using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.Persistence.EmbeddedContent;
 using Shouldly;
 using Microsoft.EntityFrameworkCore;
+using Cmsify.Infrastructure.Tests.Fixtures;
 
 namespace Cmsify.Infrastructure.Tests;
 
 public sealed class EmbeddedTemplateRepositoryTests
 {
+    [Fact]
+    public async Task RegisteredSchemaMustRemainCurrentPublishedSchema()
+    {
+        await using var fixture=await EmbeddedContentFixture.Create();
+        await using(var db=fixture.Fresh()) { var template=await db.Templates.SingleAsync(x=>x.Id==fixture.Schema.TemplateId,EmbeddedContentFixture.Ct); template.CurrentVersionId=null; await db.SaveChangesAsync(EmbeddedContentFixture.Ct); }
+        var result=await new EmbeddedTemplateRepository(fixture.Options).GetAsync(new(fixture.Schema.WorkspaceId,fixture.Schema.ContractKey,fixture.Schema.Fingerprint),EmbeddedContentFixture.Permit,EmbeddedContentFixture.Ct);
+        result.IsFailure.ShouldBeTrue();
+    }
+    [Fact]
+    public async Task EnsureRepeatPreservesHostAuditAndPublicationOutbox()
+    {
+        await using var fixture = await EmbeddedContentFixture.Create();
+        await using var before = fixture.Fresh();
+        var audit = await before.AuditLogs.ToArrayAsync(EmbeddedContentFixture.Ct);
+        audit.ShouldNotBeEmpty();
+        audit.ShouldAllBe(a => a.ActorUserId == fixture.Actor && a.ActorApiClientId == null);
+        var repeat = await new EmbeddedTemplateRepository(fixture.Options).EnsureAsync(new(fixture.Schema.WorkspaceId,
+            Contract()), fixture.Actor, (_, _) => Task.FromResult(true), EmbeddedContentFixture.Ct);
+        repeat.IsSuccess.ShouldBeTrue();
+        await using var after = fixture.Fresh();
+        (await after.AuditLogs.CountAsync(EmbeddedContentFixture.Ct)).ShouldBe(audit.Length);
+        (await after.WebhookOutboxEvents.CountAsync(EmbeddedContentFixture.Ct)).ShouldBe(1);
+    }
     [Fact]
     public async Task EnsureTwiceReturnsSameIdsWithoutNewAudit()
     {
@@ -22,6 +46,8 @@ public sealed class EmbeddedTemplateRepositoryTests
         second.IsSuccess.ShouldBeTrue();
         second.Value.TemplateVersionId.ShouldBe(first.Value.TemplateVersionId);
         second.Value.Fields[0].FieldId.ShouldBe(first.Value.Fields[0].FieldId);
+        await using var db = fixture.Context();
+        (await db.WebhookOutboxEvents.CountAsync(token)).ShouldBe(1);
     }
 
     internal static EmbeddedTemplateContract Contract() => new("sample.v1", "Sample", "sample-v1", "name", [

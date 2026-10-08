@@ -10,6 +10,15 @@ namespace Cmsify.Core.Tests;
 
 public sealed class EmbeddedTemplateHandlerTests
 {
+    [Fact]
+    public async Task SetupCanceledBeforeRepository()
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cancellation.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(() => new EnsureEmbeddedTemplateRequestHandler(
+            Substitute.For<IEmbeddedTemplateRepository>(), CurrentActorInfo.Anonymous, new DenyEmbeddedTemplateSetupAuthorizationService())
+            .HandleAsync(new(Guid.NewGuid(), null!), cancellation.Token));
+    }
     [Theory]
     [InlineData("anonymous", "authentication-required")]
     [InlineData("workspace", "not-found")]

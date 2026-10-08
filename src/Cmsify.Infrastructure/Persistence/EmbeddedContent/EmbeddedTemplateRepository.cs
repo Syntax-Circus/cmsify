@@ -45,6 +45,9 @@ public sealed class EmbeddedTemplateRepository(DbContextOptions<CmsifyDbContext>
         db.AddRange(template, version, registration);
         await db.SaveChangesAsync(cancellationToken);
         template.CurrentVersionId = version.Id;
+        new EfWebhookOutbox(db).Enqueue("template.version_published", request.WorkspaceId, version.Id,
+            System.Text.Json.JsonSerializer.SerializeToElement(new { templateId = template.Id, templateVersionId = version.Id,
+                versionNumber = version.VersionNumber, workspaceId = request.WorkspaceId }), DateTimeOffset.UtcNow);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Output(registration, version);
@@ -73,9 +76,10 @@ public sealed class EmbeddedTemplateRepository(DbContextOptions<CmsifyDbContext>
         var version = await db.TemplateVersions.AsNoTracking().Include(x => x.Fields).ThenInclude(x => x.AllowedTypes)
             .Include(x => x.Sections).SingleOrDefaultAsync(x => x.Id == registration.TemplateVersionId, cancellationToken);
         if (template is null || template.IsDeleted || template.WorkspaceId != registration.WorkspaceId
+            || template.CurrentVersionId != registration.TemplateVersionId
             || version is null || version.IsDeleted || version.TemplateId != template.Id || version.Status != TemplateVersionStatus.Published
             || version.Sections.Count != 0 || version.Fields.Any(f => f.AllowedTypes.Count != 0 || f.SectionId is not null
-                || f.TemplateId is not null || f.ComponentId is not null || f.PrimitiveType is null || f.FieldConfig is null)
+                || f.TemplateId is not null || f.ComponentId is not null || f.PrimitiveType is null || f.FieldConfig is null || f.HelpText is not null)
             || registration.Fingerprint != expectedFingerprint)
             return Denied(EmbeddedContentErrors.TemplateMismatch, ResultErrorKind.Conflict);
         var actual = new EmbeddedTemplateContract(registration.ContractKey, template.Name, template.Slug, template.TitleFieldKey ?? "",
