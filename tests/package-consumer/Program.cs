@@ -140,6 +140,7 @@ embeddedBuilder.Logging.ClearProviders();
 embeddedBuilder.Host.UseDefaultServiceProvider(validation => { validation.ValidateScopes = true; validation.ValidateOnBuild = true; });
 EmbeddedContentQualification.RegisterHost(embeddedBuilder.Services);
 embeddedBuilder.Services.AddCmsifyInfrastructure(embeddedBuilder.Configuration, options);
+EmbeddedContentQualification.RegisterCapabilities(embeddedBuilder.Services);
 await using (var embeddedApp = embeddedBuilder.Build())
     await EmbeddedContentQualification.RunAsync(embeddedApp.Services, embeddedWorkspace, ct);
 

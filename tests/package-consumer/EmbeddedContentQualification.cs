@@ -8,6 +8,7 @@ using Cmsify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SyntaxCircus.Common;
 
 internal static class EmbeddedContentQualification
@@ -17,13 +18,15 @@ internal static class EmbeddedContentQualification
     {
         services.AddScoped<Scope>();
         services.AddScoped<ICurrentActor>(p => p.GetRequiredService<Scope>().Actor);
-        services.AddScoped<IWorkspaceAuthorizationService, WorkspaceAuthority>();
         services.AddScoped<IEmbeddedContentAuthorizationService, ContentAuthority>();
         services.AddScoped<IEmbeddedTemplateSetupAuthorizationService, SetupAuthority>();
         services.AddScoped<IContentVersionResourceGuard, UpdateGuard>();
         services.AddSingleton<LostResponse>();
         services.AddDbContext<CmsifyDbContext>((p, options) => options.AddInterceptors(p.GetRequiredService<LostResponse>()));
     }
+
+    internal static void RegisterCapabilities(IServiceCollection services)
+        => services.Replace(ServiceDescriptor.Scoped<IWorkspaceAuthorizationService, WorkspaceAuthority>());
 
     internal static async Task RunAsync(IServiceProvider services, Guid workspace, CancellationToken ct)
     {
