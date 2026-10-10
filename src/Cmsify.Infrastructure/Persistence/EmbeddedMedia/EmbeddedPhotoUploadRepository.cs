@@ -85,16 +85,16 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         if (session is null) return Missing();
         var operation = new EmbeddedPhotoOperation(EmbeddedPhotoOperationKind.WriteUpload, session.WorkspaceId, session.AssetId);
         if (actorId == Guid.Empty || !await authorize(operation, cancellationToken)) return Denied();
-        if (session.State is EmbeddedPhotoUploadState.Completed or EmbeddedPhotoUploadState.Failed or EmbeddedPhotoUploadState.Abandoned ||
+        if (session.State is EmbeddedPhotoUploadState.Completed or EmbeddedPhotoUploadState.Abandoned ||
             session.WriteOperationKey.HasValue && session.WriteOperationKey != request.OperationKey) return Conflict();
         if (Settings.UploadDeadline <= TimeSpan.Zero || Settings.UploadDeadline >= Settings.UploadLeaseDuration ||
-            Settings.UploadLeaseDuration > TimeSpan.FromMinutes(10)) throw new InvalidOperationException("Invalid photo upload lease/deadline configuration.");
+            Settings.UploadLeaseDuration > EmbeddedPhotoOptions.MaxUploadLease) throw new InvalidOperationException("Invalid photo upload lease/deadline configuration.");
 
         // Bind the write intent under the same row lock used by claims.
         await using (var tx = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             session = await LockSessionAsync(session.Id, cancellationToken);
-            if (session is null || session.State is EmbeddedPhotoUploadState.Completed or EmbeddedPhotoUploadState.Failed or EmbeddedPhotoUploadState.Abandoned ||
+            if (session is null || session.State is EmbeddedPhotoUploadState.Completed or EmbeddedPhotoUploadState.Abandoned ||
                 session.WriteOperationKey.HasValue && session.WriteOperationKey != request.OperationKey) return Conflict();
             session.WriteOperationKey = request.OperationKey;
             await db.SaveChangesAsync(cancellationToken);
@@ -134,12 +134,23 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
 
     internal async Task<PhotoUploadLease?> TryClaimUploadAsync(Guid sessionId, Guid ownerId, CancellationToken cancellationToken)
     {
+        var snapshot = await db.PhotoUploadSessions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+        if (snapshot is null) return null;
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var asset = await EmbeddedPhotoFences.LockAssetAsync(db, snapshot.AssetId, cancellationToken);
         var session = await LockSessionAsync(sessionId, cancellationToken);
         var now = clock.GetUtcNow();
         if (session is null || ownerId == Guid.Empty || session.WriteOperationKey is null ||
-            session.State is not (EmbeddedPhotoUploadState.Pending or EmbeddedPhotoUploadState.Active) ||
+            session.State is not (EmbeddedPhotoUploadState.Pending or EmbeddedPhotoUploadState.Active or EmbeddedPhotoUploadState.Failed) ||
             session.LeaseExpiresAt > now) return null;
+        if (asset is null || asset.IsDeleted || asset.WorkspaceId != session.WorkspaceId ||
+            asset.BlobState != MediaBlobState.PendingUpload && !(session.State == EmbeddedPhotoUploadState.Failed && asset.BlobState == MediaBlobState.UploadFailed))
+            return null;
+        if (session.State == EmbeddedPhotoUploadState.Failed)
+        {
+            asset.BlobState = MediaBlobState.PendingUpload; asset.BlobStateChangedAt = now; asset.UploadFailedAt = null;
+            session.FailureCode = null;
+        }
         var token = Guid.CreateVersion7();
         session.State = EmbeddedPhotoUploadState.Active;
         session.AttemptGeneration++;

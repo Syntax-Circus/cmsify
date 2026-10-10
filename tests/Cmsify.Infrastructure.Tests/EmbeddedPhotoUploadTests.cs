@@ -15,6 +15,27 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class EmbeddedPhotoUploadTests
 {
+    [Fact]
+    public async Task FailedUnacknowledgedSessionRestartsSameIntentWithNewFence()
+    {
+        await using var h = await Harness.Create(); var begin = h.Begin(3); var repo = h.Repository(h.Db);
+        var session = (await repo.BeginAsync(begin, Actor, Permit, Ct)).Value; var writeKey = Guid.NewGuid();
+        (await repo.WriteAsync(new(h.WorkspaceId, session.SessionId, writeKey, new Source(() => new MemoryStream([1]))),
+            Actor, Permit, Ct)).IsFailure.ShouldBeTrue();
+        (await repo.GetOutcomeAsync(new(h.WorkspaceId, session.SessionId), Actor, Permit, Ct)).Value.State.ShouldBe(EmbeddedPhotoUploadState.Failed);
+        var failedAttempt = await h.Db.PhotoUploadAttempts.SingleAsync(Ct);
+        (await repo.BeginAsync(begin, Actor, Permit, Ct)).Value.SessionId.ShouldBe(session.SessionId);
+        var restart = await repo.WriteAsync(new(h.WorkspaceId, session.SessionId, writeKey,
+            new Source(() => new MemoryStream([1,2,3]))), Actor, Permit, Ct);
+        restart.IsSuccess.ShouldBeTrue(); restart.Value.State.ShouldBe(EmbeddedPhotoUploadState.Completed);
+        (await h.Db.PhotoUploadAttempts.CountAsync(Ct)).ShouldBe(2);
+        (await h.Db.PhotoOriginals.SingleAsync(Ct)).StorageKey.ShouldNotBe(failedAttempt.StorageKey);
+        (await h.Db.PhotoUploadReceipts.CountAsync(Ct)).ShouldBe(1); (await h.Db.PhotoJobs.CountAsync(Ct)).ShouldBe(1);
+        var resend = new Source(() => new MemoryStream([9,9,9]));
+        (await repo.WriteAsync(new(h.WorkspaceId, session.SessionId, writeKey, resend), Actor, Permit, Ct)).IsFailure.ShouldBeTrue();
+        resend.OpenCount.ShouldBe(0);
+    }
+
     private static CancellationToken Ct => EmbeddedPhotoFixture.Ct;
     private static Task<bool> Permit(EmbeddedPhotoOperation _, CancellationToken ct) { ct.ThrowIfCancellationRequested(); return Task.FromResult(true); }
     private static readonly Guid Actor = Guid.NewGuid();

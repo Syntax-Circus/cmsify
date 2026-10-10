@@ -19,6 +19,27 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class EmbeddedPhotoRegistrationTests
 {
+    [Theory]
+    [InlineData(true, 601)]
+    [InlineData(false, 121)]
+    public void StartupRejectsLeasesOutsideRuntimeLimits(bool upload, int seconds)
+    {
+        var services = Services();
+        Should.Throw<ArgumentException>(() => services.AddCmsifyEmbeddedPhotos(o =>
+        { if (upload) o.UploadLeaseDuration = TimeSpan.FromSeconds(seconds); else o.ProcessingLeaseDuration = TimeSpan.FromSeconds(seconds); }));
+    }
+
+    [Fact]
+    public void ExactRuntimeLeaseLimitsAndSharedQueueCursorAreRegistered()
+    {
+        var services = Services();
+        services.AddCmsifyEmbeddedPhotos(o =>
+        { o.UploadLeaseDuration = TimeSpan.FromMinutes(10); o.ProcessingLeaseDuration = TimeSpan.FromMinutes(2); });
+        services.Single(x => x.ServiceType == typeof(EmbeddedPhotoQueueCursor)).Lifetime.ShouldBe(ServiceLifetime.Singleton);
+        using var provider = services.BuildServiceProvider(); using var first = provider.CreateScope(); using var second = provider.CreateScope();
+        first.ServiceProvider.GetRequiredService<EmbeddedPhotoQueueCursor>().ShouldBeSameAs(second.ServiceProvider.GetRequiredService<EmbeddedPhotoQueueCursor>());
+    }
+
     private static ServiceCollection Services(string connection = "Host=localhost;Database=registration_only")
     {
         var services = new ServiceCollection(); services.AddLogging();

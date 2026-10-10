@@ -134,7 +134,7 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
         }
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
-        var assetId = claim.MediaAssetId ?? await EmbeddedPhotoFences.FindAssetForKeyAsync(dbContext, claim.Provider, claim.StorageKey, ct);
+        var assetId = await EmbeddedPhotoFences.FindAssetForKeyAsync(dbContext, claim.Provider, claim.StorageKey, ct) ?? claim.MediaAssetId;
         var asset = assetId.HasValue ? await EmbeddedPhotoFences.LockAssetAsync(dbContext, assetId.Value, ct) : null;
         var intent = await GetFencedIntentAsync(claim, now, ct);
         if (intent is null)
@@ -143,7 +143,8 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
             return DeletionPreparationResult.ClaimLost;
         }
 
-        if (asset is not null && (await EmbeddedPhotoFences.ProtectedAsync(dbContext, asset.Id, ct) ||
+        if (!Cmsify.Infrastructure.Storage.MediaStorageKeys.IsCanonical(intent.StorageKey) ||
+            asset is not null && (await EmbeddedPhotoFences.ProtectedAsync(dbContext, asset.Id, ct) ||
             intent.Reason != "orphan" && asset.BlobState is MediaBlobState.Available or MediaBlobState.Missing or MediaBlobState.PendingUpload ||
             (await EmbeddedPhotoFences.ContentReferencesAsync(dbContext, asset.Id, true, ct)).Count > 0 ||
             asset.PurgeAfter > now))

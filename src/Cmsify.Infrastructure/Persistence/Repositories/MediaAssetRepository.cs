@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using SyntaxCircus.Storage;
+using Cmsify.Infrastructure.Storage;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
 
@@ -38,12 +39,14 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
 
     public async Task<MediaAssetDto?> GetAsync(Guid id, CancellationToken ct = default) =>
         (await dbContext.MediaAssets.AsNoTracking()
+            .GenericMedia(dbContext)
             .Where(asset => asset.BlobState == MediaBlobState.Available)
             .ScopeToActorWorkspace(currentActor)
             .FirstOrDefaultAsync(asset => asset.Id == id, ct))?.ToDto();
 
     public Task<PagedResult<MediaAssetDto>> ListByWorkspaceAsync(Guid workspaceId, PageRequest page, CancellationToken ct = default) =>
         dbContext.MediaAssets.AsNoTracking()
+            .GenericMedia(dbContext)
             .Where(asset => asset.WorkspaceId == workspaceId && asset.BlobState == MediaBlobState.Available)
             .ScopeToActorWorkspace(currentActor)
             .OrderBy(asset => asset.FileName)
@@ -51,7 +54,9 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
 
     public async Task<MediaAssetDto> CreateAsync(CreateMediaAssetCommand command, CancellationToken ct = default)
     {
-        if (command.StorageKey.Replace('\\', '/').TrimStart('/').StartsWith("cmsify/media/photos/", StringComparison.OrdinalIgnoreCase))
+        if (!MediaStorageKeys.IsCanonical(command.StorageKey))
+            throw new InvalidOperationException("Media storage keys must be canonical relative paths.");
+        if (MediaStorageKeys.IsPhoto(command.StorageKey))
             throw new InvalidOperationException("Photo storage keys are reserved for the embedded photo foundation.");
         if (!string.Equals(command.StorageProvider, providerName, StringComparison.OrdinalIgnoreCase))
         {

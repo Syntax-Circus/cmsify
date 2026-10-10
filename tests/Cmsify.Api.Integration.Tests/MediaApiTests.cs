@@ -209,6 +209,31 @@ public sealed class MediaApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WorkspaceApiClientCannotDiscoverOrReadEmbeddedPhotoOriginal()
+    {
+        var storage = new TestStorageProvider();
+        await using var factory = CreateFactory(storage); using var client = factory.CreateClient();
+        var workspaceId = await SeedApiClientAsync(factory);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
+        Guid id;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var photo = NewAsset(workspaceId, "private-phone.heic", MediaBlobState.Available);
+            photo.StorageKey = $"cmsify/media/photos/{workspaceId:N}/{photo.Id:N}/original";
+            storage.ReadResults[photo.StorageKey] = [1,2,3];
+            db.MediaAssets.Add(photo); await db.SaveChangesAsync(TestContext.Current.CancellationToken); id = photo.Id;
+        }
+        var file = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{id}/file", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, file.StatusCode); Assert.Null(storage.LastReadStream);
+        var metadata = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{id}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, metadata.StatusCode);
+        var list = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media", TestContext.Current.CancellationToken);
+        list.EnsureSuccessStatusCode();
+        Assert.DoesNotContain(id.ToString(), await list.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task NonAvailableAssets_AreHiddenFromListGetAndFile()
     {
         await using var factory = CreateFactory();

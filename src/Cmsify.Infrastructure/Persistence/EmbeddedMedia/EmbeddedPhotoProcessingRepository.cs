@@ -18,8 +18,10 @@ internal sealed record PhotoProcessingFailure(bool Deterministic, string Code);
 
 public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, EmbeddedPhotoStorage storage,
     IOptions<EmbeddedPhotoOptions> options, IEmbeddedPhotoProcessorCapability capability,
-    IEmbeddedPhotoProcessingAuthorization jobAuthorization, TimeProvider clock) : IEmbeddedPhotoProcessingRepository
+    IEmbeddedPhotoProcessingAuthorization jobAuthorization, TimeProvider clock, EmbeddedPhotoQueueCursor? queueCursor = null) : IEmbeddedPhotoProcessingRepository
 {
+    private readonly EmbeddedPhotoQueueCursor _queueCursor = queueCursor ?? new();
+    private const int ClaimPageSize = 100;
     private const long SiteClaimLock = 1_967_240_301;
     private EmbeddedPhotoOptions Settings => options.Value;
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)];
@@ -166,15 +168,16 @@ public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, Embedd
         var available = await capability.GetAsync(cancellationToken);
         if (!available.Available || !available.Qualified || available.PolicyId != Settings.PolicyId) return null;
         if (Settings.ProcessingLeaseDuration <= TimeSpan.FromSeconds(EmbeddedPhotoPolicy.DeadlineSeconds) ||
-            Settings.ProcessingLeaseDuration > TimeSpan.FromMinutes(2)) throw new InvalidOperationException("Invalid photo processing lease configuration.");
+            Settings.ProcessingLeaseDuration > EmbeddedPhotoOptions.MaxProcessingLease) throw new InvalidOperationException("Invalid photo processing lease configuration.");
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({SiteClaimLock})", cancellationToken);
         var now = clock.GetUtcNow();
         if (await db.PhotoJobs.AnyAsync(x => x.State == EmbeddedPhotoState.Processing && x.LeaseExpiresAt > now, cancellationToken)) return null;
-        var expired = await db.PhotoJobs.AsNoTracking().Where(x => x.State == EmbeddedPhotoState.Processing && x.LeaseExpiresAt <= now)
-            .OrderBy(x => x.NextAttemptAt).Take(100).ToListAsync(cancellationToken);
+        var expiredCandidates = EligibleJobs(available).Where(x => x.State == EmbeddedPhotoState.Processing && x.LeaseExpiresAt <= now);
+        var expired = await ReadClaimPageAsync(expiredCandidates, true, cancellationToken);
         foreach (var stale in expired)
         {
+            _queueCursor.Advance(stale.NextAttemptAt, stale.Id, true);
             await db.MediaAssets.FromSqlInterpolated($"SELECT *, xmin FROM media_assets WHERE id = {stale.AssetId} FOR UPDATE").IgnoreQueryFilters()
                 .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
             var job = await LockJobAsync(stale.Id, cancellationToken);
@@ -183,10 +186,12 @@ public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, Embedd
             ApplyFailure(job, revision, new(false, EmbeddedPhotoErrors.Timeout), now);
         }
         await db.SaveChangesAsync(cancellationToken);
-        var due = await db.PhotoJobs.AsNoTracking().Where(x => x.State == EmbeddedPhotoState.Queued && x.NextAttemptAt <= now &&
-            x.AutomaticAttemptCount < EmbeddedPhotoPolicy.AutomaticAttempts).OrderBy(x => x.NextAttemptAt).ThenBy(x => x.Id).Take(100).ToListAsync(cancellationToken);
+        var candidates = EligibleJobs(available).Where(x => x.State == EmbeddedPhotoState.Queued && x.NextAttemptAt <= now &&
+            x.AutomaticAttemptCount < EmbeddedPhotoPolicy.AutomaticAttempts);
+        var due = await ReadClaimPageAsync(candidates, false, cancellationToken);
         foreach (var candidate in due)
         {
+            _queueCursor.Advance(candidate.NextAttemptAt, candidate.Id);
             if (!Matches(available, candidate.PolicyId, candidate.ProcessorVersion) || !await AuthorizedAsync(ownerId, candidate, cancellationToken)) continue;
             // Acquire asset first so publication/protection and processing completion share lock order.
             var asset = await db.MediaAssets.FromSqlInterpolated($"SELECT *, xmin FROM media_assets WHERE id = {candidate.AssetId} FOR UPDATE")
@@ -207,6 +212,25 @@ public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, Embedd
                 new(revision.QuarterTurnsClockwise), original.StorageKey, original.Length);
         }
         await tx.CommitAsync(cancellationToken); return null;
+    }
+
+    private IQueryable<PhotoJobRecord> EligibleJobs(EmbeddedPhotoCapability available) =>
+        db.PhotoJobs.AsNoTracking().Where(x => x.PolicyId == available.PolicyId && x.ProcessorVersion == available.ProcessorVersion &&
+            db.MediaAssets.Any(asset => asset.Id == x.AssetId && asset.WorkspaceId == x.WorkspaceId && asset.BlobState == MediaBlobState.Available) &&
+            db.PhotoOriginals.Any(original => original.AssetId == x.AssetId && original.StorageProvider == storage.ProviderName));
+
+    private async Task<List<PhotoJobRecord>> ReadClaimPageAsync(IQueryable<PhotoJobRecord> candidates, bool recovery, CancellationToken ct)
+    {
+        var position = _queueCursor.Read(recovery);
+        var page = position.HasValue ? candidates.Where(x => x.NextAttemptAt > position.Value.Due ||
+            x.NextAttemptAt == position.Value.Due && x.Id.CompareTo(position.Value.Id) > 0) : candidates;
+        var result = await page.OrderBy(x => x.NextAttemptAt).ThenBy(x => x.Id).Take(ClaimPageSize).ToListAsync(ct);
+        if (result.Count == 0 && position.HasValue)
+        {
+            _queueCursor.Reset(recovery);
+            result = await candidates.OrderBy(x => x.NextAttemptAt).ThenBy(x => x.Id).Take(ClaimPageSize).ToListAsync(ct);
+        }
+        return result;
     }
 
     internal Task<bool> AuthorizeLeaseAsync(PhotoJobLease lease, CancellationToken cancellationToken) =>

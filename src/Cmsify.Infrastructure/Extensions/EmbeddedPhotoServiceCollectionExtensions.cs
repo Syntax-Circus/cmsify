@@ -21,10 +21,10 @@ public static class EmbeddedPhotoServiceCollectionExtensions
         if (provider != "Npgsql.EntityFrameworkCore.PostgreSQL") throw new NotSupportedException("Embedded photos require PostgreSQL.");
         var settings = new EmbeddedPhotoOptions(); configure(settings);
         if (string.IsNullOrWhiteSpace(settings.PolicyId) || settings.PolicyId.Length > 100 ||
-            settings.UploadDeadline <= TimeSpan.Zero || settings.UploadDeadline > TimeSpan.FromMinutes(10) ||
-            settings.UploadLeaseDuration <= settings.UploadDeadline || settings.UploadLeaseDuration > TimeSpan.FromHours(1) ||
+            settings.UploadDeadline <= TimeSpan.Zero ||
+            settings.UploadLeaseDuration <= settings.UploadDeadline || settings.UploadLeaseDuration > EmbeddedPhotoOptions.MaxUploadLease ||
             settings.ProcessingLeaseDuration <= TimeSpan.FromSeconds(EmbeddedPhotoPolicy.DeadlineSeconds) ||
-            settings.ProcessingLeaseDuration > TimeSpan.FromHours(1) || settings.PollInterval < TimeSpan.FromSeconds(1) || settings.PollInterval > TimeSpan.FromMinutes(5) ||
+            settings.ProcessingLeaseDuration > EmbeddedPhotoOptions.MaxProcessingLease || settings.PollInterval < TimeSpan.FromSeconds(1) || settings.PollInterval > TimeSpan.FromMinutes(5) ||
             settings.ProcessingEnabled && !settings.Enabled)
             throw new ArgumentException("Invalid embedded photo options.", nameof(configure));
         var snapshot = new Registration(settings.Enabled, settings.ProcessingEnabled, settings.PolicyId, settings.UploadLeaseDuration,
@@ -48,6 +48,7 @@ public static class EmbeddedPhotoServiceCollectionExtensions
         var storageProvider = ServiceCollectionExtensions.RegisteredStorageProvider(services);
         services.TryAddScoped(sp => new EmbeddedPhotoStorage(sp.GetRequiredService<IStorageProvider>(), storageProvider));
         services.TryAddScoped<IEmbeddedPhotoUploadRepository, EmbeddedPhotoUploadRepository>();
+        services.TryAddSingleton<EmbeddedPhotoQueueCursor>();
         services.TryAddScoped<EmbeddedPhotoProcessingRepository>();
         services.TryAddScoped<IEmbeddedPhotoProcessingRepository>(sp => sp.GetRequiredService<EmbeddedPhotoProcessingRepository>());
         services.TryAddScoped<IEmbeddedMediaReferenceRepository, EmbeddedMediaReferenceRepository>();

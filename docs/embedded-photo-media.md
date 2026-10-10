@@ -147,6 +147,28 @@ Common `IsSuccess` alone.
 
 ## Reproduce local qualification
 
+Photo-owned assets are excluded from generic media list/get/file and repository
+discovery, including workspace-authorized API clients. Use the named photo
+read handlers and fresh resource grants; a private original is never made
+readable by the generic workspace grant. Generic adoption requires canonical
+relative storage keys: repeated separators, backslashes, rooted/drive forms,
+dot segments and trailing dot/space aliases are rejected. Physical deletion
+also retains ambiguous keys and resolves photo inventory ownership before a
+generic deletion claim's asset identity.
+
+An unacknowledged Failed upload may be explicitly rewritten with its existing
+session and write operation key after lease revocation/expiry. Restart locks
+the asset before the session, allocates a new attempt key/generation and restores
+only a live failed upload asset. Completed/abandoned/deleted sessions cannot
+resend or resurrect bytes.
+
+Queue claims filter asset/provider/policy/version eligibility before bounded
+100-row paging. A shared host-local cursor advances past denied resources and
+wraps at the end without changing their job state or consuming retry budget.
+Restart resets traversal safely; it does not change durable claim fences.
+Upload leases are at most ten minutes, processing leases at most two minutes;
+startup and runtime share those limits.
+
 ```powershell
 rtk proxy pwsh -NoProfile -File scripts/qualification/Invoke-EmbeddedPhotoQualification.ps1 `
   -PackageVersion <fresh-local-prerelease-version> `
