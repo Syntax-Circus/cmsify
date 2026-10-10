@@ -34,7 +34,16 @@ public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, Embedd
             x => x.AssetId == request.AssetId && x.WorkspaceId == request.WorkspaceId && x.Revision == request.Revision, cancellationToken);
         if (revision is null || !await db.MediaAssets.AnyAsync(x => x.Id == request.AssetId && x.WorkspaceId == request.WorkspaceId, cancellationToken))
             return Missing<EmbeddedPhotoStatus>();
-        return Result<EmbeddedPhotoStatus>.Success(Status(revision));
+        var status = Status(revision);
+        if (revision.State == EmbeddedPhotoState.Ready)
+        {
+            var identity = await db.PhotoManifests.AsNoTracking().Where(x => x.AssetId == request.AssetId &&
+                x.WorkspaceId == request.WorkspaceId && x.Revision == request.Revision)
+                .Select(x => new EmbeddedPhotoManifestIdentity(x.AssetId, x.Revision, x.ManifestSha256)).SingleOrDefaultAsync(cancellationToken);
+            if (identity is null) return Unavailable<EmbeddedPhotoStatus>();
+            status = status with { Manifest = identity };
+        }
+        return Result<EmbeddedPhotoStatus>.Success(status);
     }
 
     public async Task<Result<EmbeddedPhotoStatus>> CreateRevisionAsync(CreateEmbeddedPhotoRevisionRequest request, Guid actorId,

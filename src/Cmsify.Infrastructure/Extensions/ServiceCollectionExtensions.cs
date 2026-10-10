@@ -24,6 +24,11 @@ namespace Cmsify.Infrastructure.Extensions;
 
 public static class ServiceCollectionExtensions
 {
+    internal static string? RegisteredDatabaseProvider(IServiceCollection services) =>
+        (services.FirstOrDefault(x => x.ServiceType == typeof(InfrastructureRegistration))?.ImplementationInstance as InfrastructureRegistration)?.ProviderName;
+    internal static string RegisteredStorageProvider(IServiceCollection services) =>
+        ((services.First(x => x.ServiceType == typeof(InfrastructureRegistration)).ImplementationInstance as InfrastructureRegistration)!
+            .Settings.FirstOrDefault(x => string.Equals(x.Key, "Storage:Provider", StringComparison.OrdinalIgnoreCase)).Value ?? "local").ToLowerInvariant();
     public static IServiceCollection AddCmsifyInfrastructure(this IServiceCollection services, IConfiguration configuration)
         => services.AddCmsifyInfrastructure(configuration, new CmsifyInfrastructureOptions());
 

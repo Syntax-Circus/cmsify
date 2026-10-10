@@ -97,6 +97,19 @@ public sealed class EmbeddedPhotoProcessingTests
     }
 
     [Fact]
+    public async Task ReadyStatusDiscoversExactManifestWithoutCmsSql()
+    {
+        await using var f = await EmbeddedPhotoProcessingFixture.Create(); var asset = await f.Upload();
+        await using var db = f.Context(); var repository = f.Repository(db);
+        (await repository.GetAsync(new(f.WorkspaceId, asset, 1), f.ActorId, Permit, Ct)).Value.Manifest.ShouldBeNull();
+        await f.Worker(db, new CandidateProcessor()).ProcessNextAsync(f.ActorId, Ct);
+        var status = (await repository.GetAsync(new(f.WorkspaceId, asset, 1), f.ActorId, Permit, Ct)).Value;
+        status.Manifest.ShouldNotBeNull();
+        var manifest = (await repository.GetManifestAsync(new(f.WorkspaceId, asset, 1, status.Manifest.ManifestSha256), f.ActorId, Permit, Ct)).Value;
+        manifest.Identity.ShouldBe(status.Manifest);
+    }
+
+    [Fact]
     public async Task OneSiteAttemptAndStaleCompletionAreFenced()
     {
         await using var f = await EmbeddedPhotoProcessingFixture.Create(); var asset = await f.Upload();

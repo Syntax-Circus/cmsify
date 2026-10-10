@@ -13,7 +13,8 @@ public sealed record EmbeddedPhotoVariantDescriptor(string VariantKey, string Co
 public sealed record EmbeddedPhotoSourceMetadata(string Format, int Width, int Height, int BitDepth, string ColorDescription, bool HasAlpha, bool UsedSdrBase);
 public sealed record EmbeddedPhotoUploadReceipt(Guid ReceiptId, string SourceSha256, long Length, int InitialRevision);
 public sealed record EmbeddedPhotoUploadOutcome(Guid WorkspaceId, Guid SessionId, Guid AssetId, Guid OperationKey, EmbeddedPhotoUploadState State, EmbeddedPhotoUploadReceipt? Receipt);
-public sealed record EmbeddedPhotoStatus(Guid WorkspaceId, Guid AssetId, int Revision, string PolicyId, string ProcessorVersion, int RetryGeneration, EmbeddedPhotoState State, string? FailureCode);
+public sealed record EmbeddedPhotoStatus(Guid WorkspaceId, Guid AssetId, int Revision, string PolicyId, string ProcessorVersion, int RetryGeneration, EmbeddedPhotoState State, string? FailureCode,
+    EmbeddedPhotoManifestIdentity? Manifest = null);
 
 public sealed record EmbeddedPhotoManifest
 {
