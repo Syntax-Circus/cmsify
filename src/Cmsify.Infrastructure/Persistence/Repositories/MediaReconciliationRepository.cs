@@ -138,11 +138,7 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
         }
 
         if (string.Equals(intent.Reason, "orphan", StringComparison.Ordinal) &&
-            await dbContext.MediaAssets.IgnoreQueryFilters().AnyAsync(
-                asset => asset.StorageProvider == intent.Provider &&
-                         asset.StorageKey == intent.StorageKey &&
-                         asset.BlobState != MediaBlobState.Deleted,
-                ct))
+            await StorageKeyExistsAsync(intent.Provider, intent.StorageKey, ct))
         {
             intent.CompletedAt = now;
             ClearLease(intent);
@@ -286,10 +282,23 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
         if (asset is not null) await dbContext.SaveChangesAsync(ct);
     }
 
-    public Task<bool> StorageKeyExistsAsync(string provider, string storageKey, CancellationToken ct = default) =>
-        dbContext.MediaAssets.IgnoreQueryFilters().AnyAsync(
+    public async Task<bool> StorageKeyExistsAsync(string provider, string storageKey, CancellationToken ct = default)
+    {
+        if (await dbContext.MediaAssets.IgnoreQueryFilters().AnyAsync(
             asset => asset.StorageProvider == provider && asset.StorageKey == storageKey && asset.BlobState != MediaBlobState.Deleted,
-            ct);
+            ct)) return true;
+
+        // The optional photo model is PostgreSQL-only; legacy SQLite media stays unchanged.
+        if (!dbContext.Database.IsNpgsql()) return false;
+        return await dbContext.PhotoOriginals.AnyAsync(
+                   item => item.StorageProvider == provider && item.StorageKey == storageKey, ct) ||
+               await dbContext.PhotoVariants.AnyAsync(
+                   item => item.StorageProvider == provider && item.StorageKey == storageKey, ct) ||
+               await dbContext.PhotoUploadAttempts.AnyAsync(
+                   item => item.StorageProvider == provider && item.StorageKey == storageKey && item.RetiredAt == null, ct) ||
+               await dbContext.PhotoProcessingAttempts.AnyAsync(
+                   item => item.StorageProvider == provider && item.StorageKey == storageKey && item.RetiredAt == null, ct);
+    }
 
     public async Task EnqueueOrphanDeletionAsync(
         string provider,
