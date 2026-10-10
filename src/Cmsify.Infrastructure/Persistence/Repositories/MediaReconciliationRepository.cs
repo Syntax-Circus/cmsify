@@ -2,6 +2,7 @@ using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence.Providers;
+using Cmsify.Infrastructure.Persistence.EmbeddedMedia;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -32,7 +33,8 @@ public enum DeletionPreparationResult
 {
     ClaimLost,
     Ready,
-    Owned
+    Owned,
+    Retained
 }
 
 public interface IMediaReconciliationRepository
@@ -94,6 +96,8 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
     public async Task<bool> CompleteDeletionAsync(MediaDeletionClaim claim, DateTimeOffset now, CancellationToken ct = default)
     {
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
+        if (claim.MediaAssetId.HasValue)
+            await EmbeddedPhotoFences.LockAssetAsync(dbContext, claim.MediaAssetId.Value, ct);
         var intent = await GetFencedIntentAsync(claim, now, ct);
         if (intent is null)
         {
@@ -130,11 +134,25 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
         }
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
+        var assetId = claim.MediaAssetId ?? await EmbeddedPhotoFences.FindAssetForKeyAsync(dbContext, claim.Provider, claim.StorageKey, ct);
+        var asset = assetId.HasValue ? await EmbeddedPhotoFences.LockAssetAsync(dbContext, assetId.Value, ct) : null;
         var intent = await GetFencedIntentAsync(claim, now, ct);
         if (intent is null)
         {
             await transaction.RollbackAsync(ct);
             return DeletionPreparationResult.ClaimLost;
+        }
+
+        if (asset is not null && (await EmbeddedPhotoFences.ProtectedAsync(dbContext, asset.Id, ct) ||
+            intent.Reason != "orphan" && asset.BlobState is MediaBlobState.Available or MediaBlobState.Missing or MediaBlobState.PendingUpload ||
+            (await EmbeddedPhotoFences.ContentReferencesAsync(dbContext, asset.Id, true, ct)).Count > 0 ||
+            asset.PurgeAfter > now))
+        {
+            intent.NextAttemptAt = now.AddMinutes(5);
+            ClearLease(intent);
+            await dbContext.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return DeletionPreparationResult.Retained;
         }
 
         if (string.Equals(intent.Reason, "orphan", StringComparison.Ordinal) &&
@@ -205,8 +223,10 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
         }
 
         await dbContext.SaveChangesAsync(ct);
+        var abandonedPhotos = await EmbeddedPhotoRetirement.RetireAsync(dbContext, cutoff, now, limit, ct);
+        await dbContext.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return assets.Count;
+        return assets.Count + abandonedPhotos;
     }
 
     public async Task<MediaCheckpointClaim?> ClaimCheckpointAsync(
@@ -291,9 +311,11 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
         // The optional photo model is PostgreSQL-only; legacy SQLite media stays unchanged.
         if (!dbContext.Database.IsNpgsql()) return false;
         return await dbContext.PhotoOriginals.AnyAsync(
-                   item => item.StorageProvider == provider && item.StorageKey == storageKey, ct) ||
+                   item => item.StorageProvider == provider && item.StorageKey == storageKey &&
+                       dbContext.MediaAssets.IgnoreQueryFilters().Any(asset => asset.Id == item.AssetId && asset.BlobState != MediaBlobState.Deleted), ct) ||
                await dbContext.PhotoVariants.AnyAsync(
-                   item => item.StorageProvider == provider && item.StorageKey == storageKey, ct) ||
+                   item => item.StorageProvider == provider && item.StorageKey == storageKey &&
+                       dbContext.MediaAssets.IgnoreQueryFilters().Any(asset => asset.Id == item.AssetId && asset.BlobState != MediaBlobState.Deleted), ct) ||
                await dbContext.PhotoUploadAttempts.AnyAsync(
                    item => item.StorageProvider == provider && item.StorageKey == storageKey && item.RetiredAt == null, ct) ||
                await dbContext.PhotoProcessingAttempts.AnyAsync(

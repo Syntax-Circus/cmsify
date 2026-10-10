@@ -162,13 +162,12 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         StoredPhotoOriginal original, CancellationToken cancellationToken)
     {
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var asset = await EmbeddedPhotoFences.LockAssetAsync(db, lease.AssetId, cancellationToken);
         var session = await LockSessionAsync(lease.SessionId, cancellationToken);
         if (!Owns(session, lease)) return Conflict();
         if (original.StorageKey != lease.StorageKey || original.Provider != storage.ProviderName ||
             original.Length != session!.DeclaredLength || !EmbeddedPhotoPolicy.IsSha256(original.Sha256))
             return Failure(EmbeddedPhotoErrors.Validation, ResultErrorKind.Validation);
-        var asset = await db.MediaAssets.FromSqlInterpolated($"SELECT *, xmin FROM media_assets WHERE id = {lease.AssetId} FOR UPDATE")
-            .SingleOrDefaultAsync(cancellationToken);
         if (asset is null || asset.WorkspaceId != lease.WorkspaceId || asset.BlobState != MediaBlobState.PendingUpload) return Conflict();
         var metadata = await storage.Provider.GetMetadataAsync(original.StorageKey, cancellationToken);
         if (metadata?.SizeBytes != original.Length) return Unavailable();
@@ -211,13 +210,13 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
     private async Task FailUploadAsync(PhotoUploadLease lease, string code, CancellationToken cancellationToken)
     {
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var asset = await EmbeddedPhotoFences.LockAssetAsync(db, lease.AssetId, cancellationToken);
         var session = await LockSessionAsync(lease.SessionId, cancellationToken);
         if (!Owns(session, lease)) return;
         session!.State = EmbeddedPhotoUploadState.Failed;
         session.FailureCode = code;
         session.LeaseOwner = null; session.LeaseToken = null; session.LeaseExpiresAt = null;
-        var asset = await db.MediaAssets.SingleAsync(x => x.Id == lease.AssetId, cancellationToken);
-        if (asset.BlobState == MediaBlobState.PendingUpload) asset.TransitionBlobState(MediaBlobState.UploadFailed, clock.GetUtcNow());
+        if (asset?.BlobState == MediaBlobState.PendingUpload) asset.TransitionBlobState(MediaBlobState.UploadFailed, clock.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
     }

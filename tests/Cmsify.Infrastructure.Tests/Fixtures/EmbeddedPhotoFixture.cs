@@ -18,6 +18,7 @@ internal sealed class EmbeddedPhotoFixture : IAsyncDisposable
     public DbContextOptions<CmsifyDbContext> Options { get; private set; } = null!;
     public Workspace Workspace { get; } = new() { Name = "Photo tests", Slug = "photo-tests" };
     public CmsifyDbContext Context() => new(Options);
+    public string ConnectionString => _postgres.GetConnectionString();
     public static async Task<EmbeddedPhotoFixture> Create(string? migration = null)
     {
         var fixture = new EmbeddedPhotoFixture();

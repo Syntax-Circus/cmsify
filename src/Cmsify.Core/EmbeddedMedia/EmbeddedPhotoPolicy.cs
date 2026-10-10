@@ -8,6 +8,7 @@ public static class EmbeddedPhotoPolicy
     public const string WebpContentType = "image/webp";
     public const int Quality = 80;
     public const int AutomaticAttempts = 3;
+    public const int MaxReferenceManifests = 1000;
     public const int DeadlineSeconds = 30;
     public const long MemoryLimitBytes = 512L * 1024 * 1024;
     public const int PidLimit = 128;

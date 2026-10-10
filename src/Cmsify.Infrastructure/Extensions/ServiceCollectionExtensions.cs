@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Cmsify.Core.Workspaces;
 using Cmsify.Core.ContentQueries;
 using Cmsify.Core.ContentWrites;
+using Cmsify.Core.Media;
 using Cmsify.Infrastructure.Persistence.ContentQueries;
 using Cmsify.Infrastructure.Persistence.ContentWrites;
 
@@ -131,6 +132,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITemplateRepository, TemplateRepository>();
         services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();
         services.AddScoped<IMediaAssetRepository, MediaAssetRepository>();
+        services.AddScoped<IMediaAssetDeletionRepository, MediaAssetDeletionRepository>();
+        services.AddScoped<IDeleteMediaAssetRequestHandler, DeleteMediaAssetRequestHandler>();
         services.AddScoped<ITagRepository, TagRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IApiClientRepository, ApiClientRepository>();

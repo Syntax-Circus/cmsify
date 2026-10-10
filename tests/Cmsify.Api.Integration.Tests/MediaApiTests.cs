@@ -467,7 +467,8 @@ public sealed class MediaApiTests : IAsyncLifetime
         deleteRequest.Headers.TryAddWithoutValidation("If-Match", getResponse.Headers.ETag?.ToString());
         var deleteResponse = await client.SendAsync(deleteRequest, TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.Conflict, deleteResponse.StatusCode);
+        Assert.True(deleteResponse.StatusCode == HttpStatusCode.Conflict,
+            await deleteResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
