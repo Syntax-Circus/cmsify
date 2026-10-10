@@ -174,6 +174,7 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         if (metadata?.SizeBytes != original.Length) return Unavailable();
         if (lease.Authorize is null || !await lease.Authorize(new(EmbeddedPhotoOperationKind.WriteUpload,
             lease.WorkspaceId, lease.AssetId), cancellationToken)) return Denied();
+        if (!Owns(session, lease)) return Conflict();
         var now = clock.GetUtcNow();
         db.PhotoOriginals.Add(new()
         {

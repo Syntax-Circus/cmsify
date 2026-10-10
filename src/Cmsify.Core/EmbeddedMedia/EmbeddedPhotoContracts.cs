@@ -9,6 +9,7 @@ public enum EmbeddedPhotoOperationKind { BeginUpload, WriteUpload, ReadUploadOut
 public sealed record EmbeddedPhotoInstructions(int QuarterTurnsClockwise);
 public sealed record EmbeddedPhotoManifestIdentity(Guid AssetId, int Revision, string ManifestSha256);
 public sealed record EmbeddedPhotoVariantDescriptor(string VariantKey, string ContentType, int Width, int Height, long Length, string Sha256);
+// Dimensions are after orientation and before manual quarter-turns; bit depth is the selected SDR decode.
 public sealed record EmbeddedPhotoSourceMetadata(string Format, int Width, int Height, int BitDepth, string ColorDescription, bool HasAlpha, bool UsedSdrBase);
 public sealed record EmbeddedPhotoUploadReceipt(Guid ReceiptId, string SourceSha256, long Length, int InitialRevision);
 public sealed record EmbeddedPhotoUploadOutcome(Guid WorkspaceId, Guid SessionId, Guid AssetId, Guid OperationKey, EmbeddedPhotoUploadState State, EmbeddedPhotoUploadReceipt? Receipt);

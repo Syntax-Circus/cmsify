@@ -7,11 +7,15 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SyntaxCircus.EntityFrameworkCore.Postgres;
 using SyntaxCircus.Storage;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using SyntaxCircus.Common;
 
 // Disposable synthetic orchestration host. No image decoder or native qualification.
 if (args.Length != 9) return 2;
 var stage = args[0];
-if (stage is not ("after-stage" or "before-receipt" or "after-receipt")) return 2;
+if (stage is not ("after-stage" or "before-receipt" or "after-receipt" or
+    "processing-after-claim" or "processing-during-variants" or "processing-after-manifest")) return 2;
 var root = args[2]; var workspace = Guid.Parse(args[3]); var asset = Guid.Parse(args[4]);
 var operation = Guid.Parse(args[5]); var writeKey = Guid.Parse(args[6]); var actor = Guid.Parse(args[7]);
 var marker = args[8];
@@ -20,6 +24,20 @@ var dbOptions = new DbContextOptionsBuilder<CmsifyDbContext>().UseNpgsql(args[1]
 await using var db = new CmsifyDbContext(dbOptions);
 var provider = new CrashBoundaryStorage(
     new LocalFileStorageProvider(Options.Create(new LocalStorageOptions { RootPath = root })), stage, marker);
+if (stage.StartsWith("processing-", StringComparison.Ordinal))
+{
+    var settings = Options.Create(new EmbeddedPhotoOptions { Enabled = true, ProcessingEnabled = true, PolicyId = "synthetic-photo-v1" });
+    var storage = new EmbeddedPhotoStorage(provider, "local");
+    var processRepository = new EmbeddedPhotoProcessingRepository(db, storage, settings, new SyntheticCapability(),
+        new SyntheticJobAuthorization(), TimeProvider.System);
+    var worker = new EmbeddedPhotoProcessingProcessor(processRepository, storage, new SyntheticProcessor(stage, marker),
+        new SyntheticCapability(), settings, TimeProvider.System);
+    if (!await worker.ProcessNextAsync(actor, CancellationToken.None)) return 6;
+    var manifest = await db.PhotoManifests.SingleAsync();
+    await File.WriteAllTextAsync(Path.Combine(root, "manifest-id"), manifest.ManifestSha256);
+    await CrashBoundaryStorage.PauseAsync(marker);
+    return 7;
+}
 var repository = new EmbeddedPhotoUploadRepository(db, new EmbeddedPhotoStorage(provider, "local"),
     Options.Create(new EmbeddedPhotoOptions { Enabled = true, PolicyId = "synthetic-photo-v1" }),
     new SyntheticCapability(), TimeProvider.System);
@@ -55,7 +73,8 @@ internal sealed class CrashBoundaryStorage(IStorageProvider inner, string stage,
     public async Task<StoredObject> StoreAsync(StoreObjectRequest request, CancellationToken cancellationToken = default)
     {
         var result = await inner.StoreAsync(request, cancellationToken);
-        if (stage == "after-stage") await PauseAsync(marker);
+        if (stage == "after-stage" || stage == "processing-during-variants" && request.Key.Contains("/revisions/", StringComparison.Ordinal))
+            await PauseAsync(marker);
         return result;
     }
     public async Task<StorageObjectMetadata?> GetMetadataAsync(string key, CancellationToken cancellationToken = default)
@@ -69,4 +88,35 @@ internal sealed class CrashBoundaryStorage(IStorageProvider inner, string stage,
     public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => inner.DeleteAsync(key, cancellationToken);
     public Task<StorageObjectPage> ListAsync(ListStorageObjectsRequest request, CancellationToken cancellationToken = default) => inner.ListAsync(request, cancellationToken);
     public Task<string> GetAccessUrlAsync(string key, TimeSpan? expiry = null, CancellationToken cancellationToken = default) => inner.GetAccessUrlAsync(key, expiry, cancellationToken);
+}
+
+internal sealed class SyntheticJobAuthorization : IEmbeddedPhotoProcessingAuthorization
+{
+    public Task<bool> CanExecuteAsync(Guid actorId, EmbeddedPhotoOperation operation, CancellationToken cancellationToken) =>
+        Task.FromResult(actorId != Guid.Empty);
+}
+internal sealed class SyntheticProcessor(string stage, string marker) : IEmbeddedPhotoProcessor
+{
+    public async Task<Result<EmbeddedPhotoCandidate>> ProcessAsync(EmbeddedPhotoProcessingInput input, CancellationToken cancellationToken)
+    {
+        if (stage == "processing-after-claim") await CrashBoundaryStorage.PauseAsync(marker);
+        var variants = EmbeddedPhotoPolicy.RequiredVariants.Select(requirement =>
+        {
+            var fit = EmbeddedPhotoPolicy.Fit(640, 480, requirement.Bound);
+            var bytes = new byte[28];
+            "RIFF"u8.CopyTo(bytes); BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), 20);
+            "WEBPVP8L"u8.CopyTo(bytes.AsSpan(8)); BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), 8);
+            bytes[20] = 0x2f;
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(21), (uint)(fit.Width - 1) | (uint)(fit.Height - 1) << 14);
+            bytes[25] = 1; bytes[26] = 1; bytes[27] = 1;
+            return new EmbeddedPhotoCandidateVariant(new(requirement.VariantKey, EmbeddedPhotoPolicy.WebpContentType,
+                fit.Width, fit.Height, bytes.Length, Convert.ToHexString(SHA256.HashData(bytes))), new SyntheticBytes(bytes));
+        }).ToArray();
+        return Result<EmbeddedPhotoCandidate>.Success(new(new("HEIC", 640, 480, 8, "sRGB", false, true), variants));
+    }
+}
+internal sealed class SyntheticBytes(byte[] bytes) : IEmbeddedPhotoByteSource
+{
+    public ValueTask<Stream> OpenReadAsync(CancellationToken cancellationToken) =>
+        ValueTask.FromResult<Stream>(new MemoryStream(bytes, false));
 }
