@@ -1,5 +1,11 @@
 # SyntaxCircus.Cmsify.Core
 
+Optional `Cmsify.Core.EmbeddedMedia` provides twelve authorized photo handlers,
+detached manifests/status and streaming/processor/retention ports. Ready status
+contains its exact immutable manifest identity. No native decoder is supplied.
+See the [embedded photo contract](https://github.com/Syntax-Circus/cmsify/blob/main/docs/embedded-photo-media.md)
+for host identity, public-read and terminal retention obligations.
+
 Cmsify's existing `Cmsify.Core` assembly packaged for .NET 10 hosts. Namespaces remain `Cmsify.Core.*`.
 
 Contains domain entities and enums, validation, repository/service contracts, direct workspace request handlers and `Cmsify.Core.ContentQueries.IListContentRequestHandler` for ordinary/resolved content lists. Use the matching `SyntaxCircus.Cmsify.Infrastructure` version for Cmsify's PostgreSQL implementations and DI registration. The content-query contract is qualified in local candidate `0.8.9-query.1`; released 0.8.8 does not contain it.

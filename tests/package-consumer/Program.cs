@@ -144,6 +144,9 @@ EmbeddedContentQualification.RegisterCapabilities(embeddedBuilder.Services);
 await using (var embeddedApp = embeddedBuilder.Build())
     await EmbeddedContentQualification.RunAsync(embeddedApp.Services, embeddedWorkspace, ct);
 
+if (Environment.GetEnvironmentVariable("CMSIFY_PHOTO_QUALIFICATION") == "1")
+    await EmbeddedPhotoQualification.RunAsync(app.Services, ct);
+
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 static T Success<T>(Result<T> result) { Require(result.IsSuccess, "Direct handler failed."); return result.Value; }
 static void SetActor(IServiceProvider services, Guid id)
