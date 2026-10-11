@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-10-11
+
+### Fixed
+
+- Include the photo crash-recovery helper in the solution so a clean Release solution build produces the executable required by the process-kill tests. The 0.8.14 certification failed before promotion; no 0.8.14 release assets were published. This release includes the embedded photo foundation and upload-only changes described below.
+
 ## [0.8.14] - 2026-10-11
 
 ### Added
