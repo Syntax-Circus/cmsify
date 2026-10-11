@@ -484,6 +484,14 @@ public sealed class MediaApiTests : IAsyncLifetime
         using var client = factory.CreateClient();
         var workspaceId = await SeedApiClientAsync(factory);
         var assetId = await SeedReferencedMediaAsync(factory, workspaceId);
+        // Referenced Available media must survive a real reconciliation pass.
+        using (var reconciliation = factory.Services.CreateScope())
+            await new MediaReconciliationProcessor(
+                reconciliation.ServiceProvider.GetRequiredService<IMediaReconciliationRepository>(),
+                reconciliation.ServiceProvider.GetRequiredService<SyntaxCircus.Storage.IStorageProvider>(),
+                reconciliation.ServiceProvider.GetRequiredService<IOptions<MediaOperationalOptions>>(), "local",
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<MediaReconciliationProcessor>.Instance)
+                .RunCycleAsync("referenced-media-fixture", DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
 
         var getResponse = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{assetId}", TestContext.Current.CancellationToken);
@@ -688,6 +696,9 @@ public sealed class MediaApiTests : IAsyncLifetime
         dbContext.Templates.Add(template);
         await dbContext.SaveChangesAsync();
         template.CurrentVersionId = version.Id;
+        await using var sourceBytes = new MemoryStream(Encoding.UTF8.GetBytes("referenced"));
+        await scope.ServiceProvider.GetRequiredService<SyntaxCircus.Storage.IStorageProvider>()
+            .StoreAsync(new StoreObjectRequest(asset.StorageKey, sourceBytes, asset.MimeType), TestContext.Current.CancellationToken);
         dbContext.MediaAssets.Add(asset);
         dbContext.ContentItems.Add(content);
         dbContext.ContentVersions.Add(contentVersion);
