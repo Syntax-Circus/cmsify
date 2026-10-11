@@ -70,6 +70,11 @@ public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, Embedd
         if (prior is not null)
             return await authorize(operation, cancellationToken) ? Replay(prior, fingerprint) : Denied<EmbeddedPhotoStatus>();
         if (asset.BlobState != MediaBlobState.Available) return NotReady<EmbeddedPhotoStatus>();
+        // Persisted intake is not eligible for processing enrollment through rotation.
+        // A future explicit enrollment design must reconcile the durable intake hold.
+        if (await db.PhotoUploadSessions.AnyAsync(x => x.AssetId == request.AssetId &&
+            x.WorkspaceId == request.WorkspaceId && x.UploadOnly, cancellationToken))
+            return NotReady<EmbeddedPhotoStatus>();
         var available = await capability.GetAsync(cancellationToken);
         if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId || Settings.PolicyId != request.PolicyId)
             return Unavailable<EmbeddedPhotoStatus>();

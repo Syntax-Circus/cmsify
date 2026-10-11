@@ -54,14 +54,54 @@ repairs uploads or creates probe objects. Reasons are allowlisted:
 Readiness alone does not certify storage write permissions, private serving
 configuration or native safety; establish those during host setup/qualification.
 
+## Private upload-only composition
+
+A host can accept opaque private originals before qualifying a processor. Register
+its current subject/resource authority and CMS infrastructure with `CmsifyWorkers.None`,
+then use `AddCmsifyEmbeddedPhotos(o => { o.Enabled = true; o.UploadOnlyEnabled = true; })`.
+Leave `ProcessingEnabled` false and register no processor or capability. Upload-only
+requires Enabled and rejects ProcessingEnabled; it defaults off.
+
+Apply all packaged migrations, including AddUploadOnlyPhotoIntake,
+PinPhotoUploadSourceDigest and AddPhotoIntakeRetention.
+`IEmbeddedPhotoUploadReadiness.CheckAsync` verifies explicit upload-only settings,
+PostgreSQL schema/column shapes, storage reachability and policy without invoking a
+decoder. The full `IEmbeddedPhotoReadiness` retains its capability prerequisite.
+Neither readiness surface substitutes for the authenticated handlers or host grants.
+
+Supply Begin's init-only `ExpectedSourceSha256` to pin the selected bytes (64 hex
+characters, stored lowercase); omission remains compatible with existing callers.
+Changed keyed intent conflicts, and completion rejects a mismatched streamed hash.
+`GetEmbeddedPhotoUploadIntentRequest(workspace, asset, beginOperationKey)` recovers a
+lost Begin or completion acknowledgement without allocating or opening a source.
+It uses fresh ReadUploadOutcome authority for the exact asset. A denied or uncertain
+lookup must not be interpreted as permission to restart.
+
+Begin persists the mode. Later settings do not enroll the original in processing.
+Revision creation also rejects persisted upload-only originals, even if a capability
+is registered later; explicit enrollment and hold reconciliation remain deferred.
+Upload-only completion atomically commits original, immutable receipt, initial
+revision and an internal durable intake hold. The revision is AwaitingProcessing
+(value 5), ProcessorVersion is null, and no job/manifest exists. Existing enum values
+remain unchanged. The hold has no release API and prevents logical/physical deletion
+regardless of host confirmation or settings changes. Expired unacknowledged attempts
+can retire under the existing fences without deleting an acknowledged original.
+The hold is asset-wide: unsuccessful attempt objects on an asset that later
+completes are conservatively retained too. Cleanup of those extra objects remains
+deferred; account for this storage cost until carefully fenced cleanup is designed.
+
+Originals remain private opaque bytes; receiving them establishes no image-format,
+pixel, orientation, HDR or native-safety qualification. Serve them only through
+authorized original reads with safe attachment headers; use no public static URL.
+
 ## Operations and identity
 
-All twelve named handlers are in `Cmsify.Core.EmbeddedMedia`. They return Common
+All thirteen named handlers are in `Cmsify.Core.EmbeddedMedia`. They return Common
 results and detached records. No HTTP or CMS table access is required:
 
 | Purpose | Handler stem |
 | --- | --- |
-| Reserve, stream, recover upload | BeginEmbeddedPhotoUpload, WriteEmbeddedPhotoUpload, GetEmbeddedPhotoUploadOutcome |
+| Reserve, stream, recover upload | BeginEmbeddedPhotoUpload, WriteEmbeddedPhotoUpload, GetEmbeddedPhotoUploadOutcome, GetEmbeddedPhotoUploadIntent |
 | Read processing state, create immutable rotation, explicitly retry | GetEmbeddedPhoto, CreateEmbeddedPhotoRevision, RetryEmbeddedPhotoProcessing |
 | Read exact immutable manifest | GetEmbeddedPhotoManifest |
 | Protect ordered references, recover result, terminal release | ProtectEmbeddedMediaReferences, GetEmbeddedMediaReferenceOutcome, ReleaseEmbeddedMediaReferences |
@@ -91,7 +131,7 @@ Display names and MIME are hints, never paths or acceptance evidence. The CMS
 counts bytes incrementally, requires exact declared length/EOF, limits input to
 20 MiB, computes SHA-256 and chooses private server-owned attempt keys.
 
-Original/receipt/initial revision/job acknowledgement is one CMS transaction.
+Qualified-mode original/receipt/initial revision/job acknowledgement is one CMS transaction.
 If a response is uncertain, read the upload outcome before any explicit restart.
 Completed uploads refuse another body without opening it. Expired writers cannot
 commit; restart uses a new fence/object. Processing has one leased site attempt,
@@ -187,8 +227,7 @@ readmes, assembly/package/source identities, and applies migrations only to
 owned disposable PostgreSQL. Linux runs on `linux/amd64`.
 The host fixture has no CMS SQL for photo operations or retention intents.
 Its synthetic three-byte input and deliberately incomplete encoded image
-headers test orchestration only. Real process-kill tests live in Infrastructure
-tests. The fixture file journal is disposable demonstration code, not a product
+headers test orchestration only. Real process-kill tests cover Infrastructure and the upload-only package consumer. The fixture file journal is disposable demonstration code, not a product
 retention service or disaster-proof filesystem backup design.
 
 The runner neither publishes packages nor upgrades hosts. Qualify deployment

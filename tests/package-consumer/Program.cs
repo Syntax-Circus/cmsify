@@ -151,8 +151,8 @@ await using (var embeddedApp = embeddedBuilder.Build())
 
 if (Environment.GetEnvironmentVariable("CMSIFY_PHOTO_QUALIFICATION") == "1")
 {
-    await UploadOnlyPhotoQualification.RunAsync(app.Services, ct);
     await EmbeddedPhotoQualification.RunAsync(app.Services, ct);
+    await UploadOnlyPhotoQualification.RunAsync(app.Services, ct);
 }
 
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

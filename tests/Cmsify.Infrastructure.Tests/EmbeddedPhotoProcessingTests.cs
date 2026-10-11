@@ -9,6 +9,25 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class EmbeddedPhotoProcessingTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UploadOnlyOriginalCannotEnrollThroughRevisionAfterSettingsChange(bool changeSettings)
+    {
+        await using var f = await EmbeddedPhotoProcessingFixture.Create();
+        f.Settings.ProcessingEnabled = false; f.Settings.UploadOnlyEnabled = true;
+        var asset = await f.Upload();
+        if (changeSettings) { f.Settings.UploadOnlyEnabled = false; f.Settings.ProcessingEnabled = true; }
+        await using var db = f.Context();
+        var result = await f.Repository(db).CreateRevisionAsync(new(f.WorkspaceId, asset, Guid.NewGuid(),
+            1, new(1), f.Settings.PolicyId), f.ActorId, Permit, Ct);
+        result.IsFailure.ShouldBeTrue("Persisted intake must not enroll through revision creation.");
+        result.Errors[0].Code.ShouldBe(EmbeddedPhotoErrors.NotReady);
+        (await db.PhotoRevisions.CountAsync(Ct)).ShouldBe(1);
+        (await db.PhotoJobs.CountAsync(Ct)).ShouldBe(0);
+        (await db.PhotoRevisions.SingleAsync(Ct)).State.ShouldBe(EmbeddedPhotoState.AwaitingProcessing);
+    }
+
     [Fact]
     public async Task ChangedIntentKeyRacingAcrossAssetsReturnsConflict()
     {

@@ -4,12 +4,68 @@ using Cmsify.Infrastructure.Persistence.Repositories;
 using Cmsify.Infrastructure.Tests.Fixtures;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Options;
+using static Cmsify.Infrastructure.Tests.Fixtures.EmbeddedPhotoProcessingFixture;
 using Shouldly;
 
 namespace Cmsify.Infrastructure.Tests;
 
 public sealed class EmbeddedPhotoSchemaTests
 {
+    [Fact]
+    public async Task PopulatedLegacyPhotosUpgradeAndReplayWithoutModeReinterpretation()
+    {
+        await using var f = await EmbeddedPhotoProcessingFixture.Create();
+        var asset = await f.Upload();
+        Guid pendingAsset = Guid.NewGuid(), pendingKey = Guid.NewGuid();
+        BeginEmbeddedPhotoUploadRequest completedRequest;
+        Guid receiptId, completedSession, jobId;
+        var pendingRequest = new BeginEmbeddedPhotoUploadRequest(f.WorkspaceId, pendingAsset,
+            pendingKey, "legacy-pending.heic", 3, f.Settings.PolicyId);
+        await using (var seed = f.Context())
+        {
+            var session = await seed.PhotoUploadSessions.SingleAsync(x => x.AssetId == asset, Ct);
+            completedRequest = new(f.WorkspaceId, asset, session.OperationKey, session.DisplayFileName,
+                session.DeclaredLength, session.PolicyId);
+            completedSession = session.Id;
+            receiptId = (await seed.PhotoUploadReceipts.SingleAsync(Ct)).Id;
+            jobId = (await seed.PhotoJobs.SingleAsync(Ct)).Id;
+            var repository = new EmbeddedPhotoUploadRepository(seed, f.Storage, Options.Create(f.Settings), f.Capability, f.Time);
+            (await repository.BeginAsync(pendingRequest, f.ActorId, Permit, Ct)).IsSuccess.ShouldBeTrue();
+        }
+        // Remove only the amendment's additive schema in this owned disposable database,
+        // retaining actual qualified-mode sessions, receipt, original, revision and job.
+        await using (var old = f.Context())
+        {
+            await old.GetService<IMigrator>().MigrateAsync("20261010162757_AddEmbeddedPhotoFoundation", Ct);
+            (await old.Database.SqlQuery<int>($"SELECT count(*)::integer AS \"Value\" FROM information_schema.columns WHERE table_name = 'embedded_photo_upload_sessions' AND column_name IN ('upload_only', 'expected_source_sha256')").SingleAsync(Ct)).ShouldBe(0);
+        }
+        await using var upgraded = f.Context();
+        await upgraded.Database.MigrateAsync(Ct);
+        var applied = (await upgraded.Database.GetAppliedMigrationsAsync(Ct)).ToArray();
+        await upgraded.Database.MigrateAsync(Ct);
+        (await upgraded.Database.GetAppliedMigrationsAsync(Ct)).ShouldBe(applied);
+        var sessions = await upgraded.PhotoUploadSessions.AsNoTracking().ToArrayAsync(Ct);
+        sessions.Length.ShouldBe(2);
+        sessions.ShouldAllBe(x => !x.UploadOnly && x.ExpectedSourceSha256 == null && x.ProcessorVersion == "synthetic-only-1");
+        var replay = new EmbeddedPhotoUploadRepository(upgraded, f.Storage, Options.Create(f.Settings), f.Capability, f.Time);
+        var begun = await replay.BeginAsync(completedRequest, f.ActorId, Permit, Ct);
+        begun.IsSuccess.ShouldBeTrue(); begun.Value.SessionId.ShouldBe(completedSession);
+        var recovered = await replay.GetIntentAsync(new(f.WorkspaceId, asset, completedRequest.OperationKey), f.ActorId, Permit, Ct);
+        recovered.Value.Receipt!.ReceiptId.ShouldBe(receiptId);
+        var pending = await replay.BeginAsync(pendingRequest, f.ActorId, Permit, Ct);
+        pending.IsSuccess.ShouldBeTrue();
+        var completed = await replay.WriteAsync(new(f.WorkspaceId, pending.Value.SessionId, Guid.NewGuid(), new Bytes([1,2,3])), f.ActorId, Permit, Ct);
+        completed.IsSuccess.ShouldBeTrue();
+        (await upgraded.PhotoJobs.AnyAsync(x => x.Id == jobId, Ct)).ShouldBeTrue();
+        (await upgraded.PhotoJobs.CountAsync(Ct)).ShouldBe(2);
+        (await upgraded.PhotoUploadReceipts.CountAsync(Ct)).ShouldBe(2);
+        (await upgraded.PhotoRevisions.ToArrayAsync(Ct)).ShouldAllBe(x => x.State == EmbeddedPhotoState.Queued && x.ProcessorVersion == "synthetic-only-1");
+        (await upgraded.Database.SqlQuery<int>($"SELECT count(*)::integer AS \"Value\" FROM embedded_photo_intake_retentions").SingleAsync(Ct)).ShouldBe(0);
+    }
+
     [Fact]
     public async Task FreshUpgradeRepeatKeepsLegacyMediaUnqualified()
     {

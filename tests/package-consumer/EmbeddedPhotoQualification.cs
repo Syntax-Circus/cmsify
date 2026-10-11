@@ -8,6 +8,10 @@ using Cmsify.Core.Workspaces;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Extensions;
 using Cmsify.Infrastructure.Persistence.EmbeddedMedia;
+using Cmsify.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -78,6 +82,7 @@ internal static class EmbeddedPhotoQualification
                 var resend = await fresh.ServiceProvider.GetRequiredService<IWriteEmbeddedPhotoUploadRequestHandler>()
                     .HandleAsync(new(workspace, sessionId, writeKey, new UnopenedSource()), ct);
                 Require(resend.IsFailure, "Completed upload accepted another body.");
+                await UpgradeLegacyPhotos(app.Services, workspace, asset, subjectId, beginKey, sessionId, outcome.Receipt!.ReceiptId, ct);
                 Require(await fresh.ServiceProvider.GetRequiredService<IProcessEmbeddedPhotoQueueRequestHandler>().HandleAsync(new(), ct), "Synthetic processing did not run.");
             }
             EmbeddedPhotoManifest first;
@@ -153,6 +158,45 @@ internal static class EmbeddedPhotoQualification
         }
         finally { await app.StopAsync(CancellationToken.None); }
     }
+    private static async Task UpgradeLegacyPhotos(IServiceProvider services, Guid workspace, Guid asset,
+        Guid actor, Guid beginKey, Guid session, Guid receipt, CancellationToken ct)
+    {
+        var pendingAsset = Guid.NewGuid(); var pendingKey = Guid.NewGuid();
+        await using (var seed = services.CreateAsyncScope())
+        {
+            var subject = seed.ServiceProvider.GetRequiredService<Subject>();
+            subject.Workspace = workspace; subject.Asset = pendingAsset; subject.UserId = actor;
+            Value(await seed.ServiceProvider.GetRequiredService<IBeginEmbeddedPhotoUploadRequestHandler>()
+                .HandleAsync(new(workspace, pendingAsset, pendingKey, "legacy-pending.heic", 3, "synthetic-photo-v1"), ct));
+            var db = seed.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            // Owned disposable fixture: retain populated legacy rows while removing only
+            // amendment schema. Run before upload-only completion creates any intake hold.
+            await db.GetService<IMigrator>().MigrateAsync("20261010162757_AddEmbeddedPhotoFoundation", ct);
+            Require(await db.Database.SqlQuery<int>($"SELECT count(*)::integer AS \"Value\" FROM information_schema.columns WHERE table_name = 'embedded_photo_upload_sessions' AND column_name IN ('upload_only', 'expected_source_sha256')").SingleAsync(ct) == 0, "Legacy schema was not exercised.");
+            await db.Database.MigrateAsync(ct); await db.Database.MigrateAsync(ct);
+            var rows = await db.PhotoUploadSessions.AsNoTracking().Where(x => x.WorkspaceId == workspace).ToArrayAsync(ct);
+            Require(rows.Length == 2 && rows.All(x => !x.UploadOnly && x.ExpectedSourceSha256 is null && x.ProcessorVersion == "synthetic-only-1"), "Upgrade reinterpreted legacy mode/version.");
+        }
+        await using var fresh = services.CreateAsyncScope();
+        var bound = fresh.ServiceProvider.GetRequiredService<Subject>();
+        bound.Workspace = workspace; bound.Asset = asset; bound.UserId = actor;
+        var replay = Value(await fresh.ServiceProvider.GetRequiredService<IBeginEmbeddedPhotoUploadRequestHandler>()
+            .HandleAsync(new(workspace, asset, beginKey, "../phone.heic", 3, "synthetic-photo-v1"), ct));
+        Require(replay.SessionId == session, "Upgrade changed completed session identity.");
+        var recovered = Value(await fresh.ServiceProvider.GetRequiredService<IGetEmbeddedPhotoUploadIntentRequestHandler>()
+            .HandleAsync(new(workspace, asset, beginKey), ct));
+        Require(recovered.Receipt!.ReceiptId == receipt, "Upgrade changed completed receipt identity.");
+        bound.Asset = pendingAsset;
+        var pending = Value(await fresh.ServiceProvider.GetRequiredService<IBeginEmbeddedPhotoUploadRequestHandler>()
+            .HandleAsync(new(workspace, pendingAsset, pendingKey, "legacy-pending.heic", 3, "synthetic-photo-v1"), ct));
+        Value(await fresh.ServiceProvider.GetRequiredService<IWriteEmbeddedPhotoUploadRequestHandler>()
+            .HandleAsync(new(workspace, pending.SessionId, Guid.NewGuid(), new Bytes([1,2,3])), ct));
+        var upgraded = fresh.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        Require(await upgraded.PhotoJobs.CountAsync(x => x.WorkspaceId == workspace, ct) == 2 &&
+            await upgraded.PhotoUploadReceipts.CountAsync(x => x.WorkspaceId == workspace, ct) == 2, "Legacy pending completion lost jobs/receipts.");
+        Console.WriteLine("PASS populated legacy photo schema upgrade/reapply, immutable receipt replay and pending qualified completion.");
+    }
+
     private static T Value<T>(Result<T> result) { Require(result.IsSuccess, result.IsFailure ? result.Errors[0].Code : "success"); return result.Value; }
     private static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
     private sealed class UnopenedSource : IEmbeddedPhotoByteSource
