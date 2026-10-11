@@ -25,9 +25,9 @@ public static class EmbeddedPhotoServiceCollectionExtensions
             settings.UploadLeaseDuration <= settings.UploadDeadline || settings.UploadLeaseDuration > EmbeddedPhotoOptions.MaxUploadLease ||
             settings.ProcessingLeaseDuration <= TimeSpan.FromSeconds(EmbeddedPhotoPolicy.DeadlineSeconds) ||
             settings.ProcessingLeaseDuration > EmbeddedPhotoOptions.MaxProcessingLease || settings.PollInterval < TimeSpan.FromSeconds(1) || settings.PollInterval > TimeSpan.FromMinutes(5) ||
-            settings.ProcessingEnabled && !settings.Enabled)
+            settings.ProcessingEnabled && !settings.Enabled || settings.UploadOnlyEnabled && (!settings.Enabled || settings.ProcessingEnabled))
             throw new ArgumentException("Invalid embedded photo options.", nameof(configure));
-        var snapshot = new Registration(settings.Enabled, settings.ProcessingEnabled, settings.PolicyId, settings.UploadLeaseDuration,
+        var snapshot = new Registration(settings.Enabled, settings.ProcessingEnabled, settings.UploadOnlyEnabled, settings.PolicyId, settings.UploadLeaseDuration,
             settings.UploadDeadline, settings.ProcessingLeaseDuration, settings.PollInterval);
         var previous = services.FirstOrDefault(x => x.ServiceType == typeof(Registration))?.ImplementationInstance as Registration;
         if (previous is not null)
@@ -39,6 +39,7 @@ public static class EmbeddedPhotoServiceCollectionExtensions
         services.Configure<EmbeddedPhotoOptions>(o =>
         {
             o.Enabled = snapshot.Enabled; o.ProcessingEnabled = snapshot.ProcessingEnabled; o.PolicyId = snapshot.PolicyId;
+            o.UploadOnlyEnabled = snapshot.UploadOnlyEnabled;
             o.UploadLeaseDuration = snapshot.UploadLease; o.UploadDeadline = snapshot.UploadDeadline;
             o.ProcessingLeaseDuration = snapshot.ProcessingLease; o.PollInterval = snapshot.Poll;
         });
@@ -54,12 +55,14 @@ public static class EmbeddedPhotoServiceCollectionExtensions
         services.TryAddScoped<IEmbeddedMediaReferenceRepository, EmbeddedMediaReferenceRepository>();
         services.TryAddScoped<IEmbeddedPhotoReadRepository, EmbeddedPhotoReadRepository>();
         services.TryAddScoped<IEmbeddedPhotoReadiness, EmbeddedPhotoReadiness>();
+        services.TryAddScoped<IEmbeddedPhotoUploadReadiness, EmbeddedPhotoUploadReadiness>();
         services.TryAddScoped<IEmbeddedPhotoProcessingAuthorization, EmbeddedPhotoProcessingAuthorization>();
         services.TryAddScoped<IEmbeddedPhotoJobProcessor, EmbeddedPhotoProcessingProcessor>();
         services.TryAddScoped<IProcessEmbeddedPhotoQueueRequestHandler, ProcessEmbeddedPhotoQueueRequestHandler>();
         services.TryAddScoped<IBeginEmbeddedPhotoUploadRequestHandler, BeginEmbeddedPhotoUploadRequestHandler>();
         services.TryAddScoped<IWriteEmbeddedPhotoUploadRequestHandler, WriteEmbeddedPhotoUploadRequestHandler>();
         services.TryAddScoped<IGetEmbeddedPhotoUploadOutcomeRequestHandler, GetEmbeddedPhotoUploadOutcomeRequestHandler>();
+        services.TryAddScoped<IGetEmbeddedPhotoUploadIntentRequestHandler, GetEmbeddedPhotoUploadIntentRequestHandler>();
         services.TryAddScoped<IGetEmbeddedPhotoRequestHandler, GetEmbeddedPhotoRequestHandler>();
         services.TryAddScoped<ICreateEmbeddedPhotoRevisionRequestHandler, CreateEmbeddedPhotoRevisionRequestHandler>();
         services.TryAddScoped<IRetryEmbeddedPhotoProcessingRequestHandler, RetryEmbeddedPhotoProcessingRequestHandler>();
@@ -73,7 +76,7 @@ public static class EmbeddedPhotoServiceCollectionExtensions
         return services;
     }
 
-    private sealed record Registration(bool Enabled, bool ProcessingEnabled, string PolicyId, TimeSpan UploadLease,
+    private sealed record Registration(bool Enabled, bool ProcessingEnabled, bool UploadOnlyEnabled, string PolicyId, TimeSpan UploadLease,
         TimeSpan UploadDeadline, TimeSpan ProcessingLease, TimeSpan Poll);
     private sealed class DeniedAuthorization : IEmbeddedPhotoAuthorizationService
     {

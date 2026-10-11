@@ -46,7 +46,8 @@ public sealed class EmbeddedPhotoContractTests
     [Fact]
     public void BlobAvailabilityAndImageReadinessRemainSeparate()
     {
-        Enum.GetNames<EmbeddedPhotoState>().ShouldBe(new[] { "Queued", "Processing", "Ready", "Rejected", "Failed" });
+        Enum.GetNames<EmbeddedPhotoState>().ShouldBe(new[] { "Queued", "Processing", "Ready", "Rejected", "Failed", "AwaitingProcessing" });
+        Enum.GetValues<EmbeddedPhotoState>().Select(x => (int)x).ShouldBe(new[] { 0, 1, 2, 3, 4, 5 });
         typeof(EmbeddedPhotoState).ShouldNotBe(typeof(Cmsify.Core.Domain.Enums.MediaBlobState));
         typeof(EmbeddedPhotoPolicy).Assembly.GetReferencedAssemblies()
             .Any(x => x.Name!.Contains("Magick", StringComparison.OrdinalIgnoreCase)

@@ -1,6 +1,6 @@
 namespace Cmsify.Core.EmbeddedMedia;
 
-public enum EmbeddedPhotoState { Queued, Processing, Ready, Rejected, Failed }
+public enum EmbeddedPhotoState { Queued, Processing, Ready, Rejected, Failed, AwaitingProcessing = 5 }
 public enum EmbeddedPhotoUploadState { Pending, Active, Completed, Abandoned, Failed }
 public enum EmbeddedMediaReferenceState { Protected, Released }
 public enum EmbeddedMediaRetentionDecision { ReleaseAllowed, Retain, Unknown }
@@ -13,7 +13,7 @@ public sealed record EmbeddedPhotoVariantDescriptor(string VariantKey, string Co
 public sealed record EmbeddedPhotoSourceMetadata(string Format, int Width, int Height, int BitDepth, string ColorDescription, bool HasAlpha, bool UsedSdrBase);
 public sealed record EmbeddedPhotoUploadReceipt(Guid ReceiptId, string SourceSha256, long Length, int InitialRevision);
 public sealed record EmbeddedPhotoUploadOutcome(Guid WorkspaceId, Guid SessionId, Guid AssetId, Guid OperationKey, EmbeddedPhotoUploadState State, EmbeddedPhotoUploadReceipt? Receipt);
-public sealed record EmbeddedPhotoStatus(Guid WorkspaceId, Guid AssetId, int Revision, string PolicyId, string ProcessorVersion, int RetryGeneration, EmbeddedPhotoState State, string? FailureCode,
+public sealed record EmbeddedPhotoStatus(Guid WorkspaceId, Guid AssetId, int Revision, string PolicyId, string? ProcessorVersion, int RetryGeneration, EmbeddedPhotoState State, string? FailureCode,
     EmbeddedPhotoManifestIdentity? Manifest = null);
 
 public sealed record EmbeddedPhotoManifest
@@ -57,9 +57,13 @@ public sealed record EmbeddedMediaReferenceOutcome
 
 public sealed record EmbeddedPhotoReadAuthority(EmbeddedPhotoReadKind Kind, string? ConsumerNamespace = null, Guid? ReferenceKey = null, int? ProtectionRevision = null);
 public sealed record EmbeddedPhotoReadOutput(long Length, string Sha256, string ContentType);
-public sealed record BeginEmbeddedPhotoUploadRequest(Guid WorkspaceId, Guid AssetId, Guid OperationKey, string DisplayFileName, long DeclaredLength, string PolicyId);
+public sealed record BeginEmbeddedPhotoUploadRequest(Guid WorkspaceId, Guid AssetId, Guid OperationKey, string DisplayFileName, long DeclaredLength, string PolicyId)
+{
+    public string? ExpectedSourceSha256 { get; init; }
+}
 public sealed record WriteEmbeddedPhotoUploadRequest(Guid WorkspaceId, Guid SessionId, Guid OperationKey, IEmbeddedPhotoByteSource Source);
 public sealed record GetEmbeddedPhotoUploadOutcomeRequest(Guid WorkspaceId, Guid SessionId);
+public sealed record GetEmbeddedPhotoUploadIntentRequest(Guid WorkspaceId, Guid AssetId, Guid OperationKey);
 public sealed record GetEmbeddedPhotoRequest(Guid WorkspaceId, Guid AssetId, int Revision);
 public sealed record CreateEmbeddedPhotoRevisionRequest(Guid WorkspaceId, Guid AssetId, Guid OperationKey, int ExpectedLatestRevision, EmbeddedPhotoInstructions Instructions, string PolicyId);
 public sealed record RetryEmbeddedPhotoProcessingRequest(Guid WorkspaceId, Guid AssetId, int Revision, Guid OperationKey, int ExpectedRetryGeneration);

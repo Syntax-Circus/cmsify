@@ -19,7 +19,7 @@ public sealed class EmbeddedPhotoSchemaTests
         await using var db = fixture.Context();
         await db.Database.MigrateAsync(EmbeddedPhotoFixture.Ct);
         var first = (await db.Database.GetAppliedMigrationsAsync(EmbeddedPhotoFixture.Ct)).ToArray();
-        first.Last().ShouldEndWith("AddEmbeddedPhotoFoundation");
+        first.ShouldContain(x => x.EndsWith("AddEmbeddedPhotoFoundation", StringComparison.Ordinal));
         await db.Database.MigrateAsync(EmbeddedPhotoFixture.Ct);
         (await db.Database.GetAppliedMigrationsAsync(EmbeddedPhotoFixture.Ct)).ShouldBe(first);
         (await db.PhotoRevisions.CountAsync(EmbeddedPhotoFixture.Ct)).ShouldBe(0);

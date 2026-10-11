@@ -10,6 +10,44 @@ namespace Cmsify.Core.Tests;
 public sealed class EmbeddedPhotoAuthorizationTests
 {
     [Fact]
+    public async Task IntentLookupRequiresExactResourceAndFreshSubject()
+    {
+        var repository = Substitute.For<IEmbeddedPhotoUploadRepository>();
+        var actor = new MutableActor();
+        var workspace = Substitute.For<IWorkspaceAuthorizationService>();
+        workspace.CanReadWorkspaceAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(true);
+        var resource = Substitute.For<IEmbeddedPhotoAuthorizationService>();
+        resource.CanExecuteAsync(Arg.Any<EmbeddedPhotoOperation>(), Arg.Any<CancellationToken>()).Returns(true);
+        Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>>? authorize = null;
+        repository.GetIntentAsync(Arg.Any<GetEmbeddedPhotoUploadIntentRequest>(), Arg.Any<Guid>(),
+            Arg.Do<Func<EmbeddedPhotoOperation,CancellationToken,Task<bool>>>(x => authorize = x), Arg.Any<CancellationToken>())
+            .Returns(Result<EmbeddedPhotoUploadOutcome>.Failure(new("sentinel", "sentinel", ResultErrorKind.NotFound)));
+        var request = new GetEmbeddedPhotoUploadIntentRequest(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        await new GetEmbeddedPhotoUploadIntentRequestHandler(repository, actor, workspace, resource)
+            .HandleAsync(request, TestContext.Current.CancellationToken);
+        authorize.ShouldNotBeNull();
+        var exact = new EmbeddedPhotoOperation(EmbeddedPhotoOperationKind.ReadUploadOutcome, request.WorkspaceId, request.AssetId);
+        (await authorize(exact, TestContext.Current.CancellationToken)).ShouldBeTrue();
+        (await authorize(exact with { AssetId = Guid.NewGuid() }, TestContext.Current.CancellationToken)).ShouldBeFalse();
+        (await authorize(exact with { Kind = EmbeddedPhotoOperationKind.WriteUpload }, TestContext.Current.CancellationToken)).ShouldBeFalse();
+        actor.UserId = Guid.NewGuid();
+        (await authorize(exact, TestContext.Current.CancellationToken)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task IntentLookupDenialDoesNotReachRepository()
+    {
+        var repository = Substitute.For<IEmbeddedPhotoUploadRepository>();
+        var actor = new CurrentActorInfo(null, null, UserRole.Editor, null, true, true);
+        var workspace = Substitute.For<IWorkspaceAuthorizationService>();
+        var resource = Substitute.For<IEmbeddedPhotoAuthorizationService>();
+        var result = await new GetEmbeddedPhotoUploadIntentRequestHandler(repository, actor, workspace, resource)
+            .HandleAsync(new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()), TestContext.Current.CancellationToken);
+        result.Errors[0].Code.ShouldBe("authentication-required");
+        repository.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task MissingActorCannotWriteBodyOrReadOutcomeEvenWithSuperAdminFlag()
     {
         var repository = Substitute.For<IEmbeddedPhotoUploadRepository>();

@@ -32,12 +32,18 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         if (request.WorkspaceId == Guid.Empty || request.AssetId == Guid.Empty || request.OperationKey == Guid.Empty ||
             string.IsNullOrWhiteSpace(request.DisplayFileName) || request.DisplayFileName.Length > 255 ||
             request.DeclaredLength <= 0 || request.DeclaredLength > EmbeddedPhotoPolicy.MaxBytes ||
-            string.IsNullOrWhiteSpace(request.PolicyId) || request.PolicyId.Length > 100)
+            string.IsNullOrWhiteSpace(request.PolicyId) || request.PolicyId.Length > 100 ||
+            request.ExpectedSourceSha256 is { } expected && !EmbeddedPhotoPolicy.IsSha256(expected))
             return Failure(EmbeddedPhotoErrors.Validation, ResultErrorKind.Validation);
-        var available = await capability.GetAsync(cancellationToken);
-        if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId ||
-            Settings.PolicyId != request.PolicyId || string.IsNullOrWhiteSpace(available.ProcessorVersion) ||
-            available.ProcessorVersion.Length > 100) return Unavailable();
+        if (Settings.PolicyId != request.PolicyId || Settings.UploadOnlyEnabled && Settings.ProcessingEnabled) return Unavailable();
+        string? processorVersion = null;
+        if (!Settings.UploadOnlyEnabled)
+        {
+            var available = await capability.GetAsync(cancellationToken);
+            if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId ||
+                string.IsNullOrWhiteSpace(available.ProcessorVersion) || available.ProcessorVersion.Length > 100) return Unavailable();
+            processorVersion = available.ProcessorVersion;
+        }
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
         // Serializes first-use intent keys without a distributed transaction or optimistic duplicate insertion.
         var workspace = await db.Workspaces.FromSqlInterpolated($"SELECT *, xmin FROM workspaces WHERE id = {request.WorkspaceId} FOR UPDATE")
@@ -48,7 +54,8 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         if (existing is not null)
         {
             if (existing.AssetId != request.AssetId || existing.DisplayFileName != request.DisplayFileName ||
-                existing.DeclaredLength != request.DeclaredLength || existing.PolicyId != request.PolicyId) return Conflict();
+                existing.DeclaredLength != request.DeclaredLength || existing.PolicyId != request.PolicyId ||
+                !string.Equals(existing.ExpectedSourceSha256, request.ExpectedSourceSha256, StringComparison.OrdinalIgnoreCase)) return Conflict();
             if (!await authorize(operation, cancellationToken)) return Denied();
             return Result<EmbeddedPhotoUploadOutcome>.Success(await OutcomeAsync(existing, cancellationToken));
         }
@@ -58,7 +65,8 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         {
             WorkspaceId = request.WorkspaceId, AssetId = request.AssetId, OperationKey = request.OperationKey,
             DisplayFileName = request.DisplayFileName, DeclaredLength = request.DeclaredLength,
-            PolicyId = request.PolicyId, ProcessorVersion = available.ProcessorVersion, CreatedAt = now
+            PolicyId = request.PolicyId, ProcessorVersion = processorVersion, UploadOnly = Settings.UploadOnlyEnabled,
+            ExpectedSourceSha256 = request.ExpectedSourceSha256?.ToLowerInvariant(), CreatedAt = now
         };
         if (!await authorize(operation, cancellationToken)) return Denied();
         db.MediaAssets.Add(new MediaAsset
@@ -111,6 +119,8 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
             await using var source = await request.Source.OpenReadAsync(deadline.Token);
             var bytes = await storage.StoreBoundedAsync(lease.StorageKey, source, session.DeclaredLength,
                 "application/octet-stream", deadline.Token);
+            if (session.ExpectedSourceSha256 is { } expected && !string.Equals(expected, bytes.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new PhotoByteValidationException(EmbeddedPhotoErrors.Validation);
             return await CompleteUploadAsync(lease, new(bytes.Provider, bytes.StorageKey, bytes.Length, bytes.Sha256), cancellationToken);
         }
         catch (PhotoByteValidationException error)
@@ -130,6 +140,21 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         if (actorId == Guid.Empty || !await authorize(new(EmbeddedPhotoOperationKind.ReadUploadOutcome,
                 session.WorkspaceId, session.AssetId), cancellationToken)) return Denied();
         return Result<EmbeddedPhotoUploadOutcome>.Success(await OutcomeAsync(session, cancellationToken));
+    }
+
+    public async Task<Result<EmbeddedPhotoUploadOutcome>> GetIntentAsync(GetEmbeddedPhotoUploadIntentRequest request,
+        Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken)
+    {
+        EnsureProvider();
+        var operation = new EmbeddedPhotoOperation(EmbeddedPhotoOperationKind.ReadUploadOutcome, request.WorkspaceId, request.AssetId);
+        if (actorId == Guid.Empty || !await authorize(operation, cancellationToken)) return Denied();
+        var session = await db.PhotoUploadSessions.AsNoTracking().SingleOrDefaultAsync(x =>
+            x.WorkspaceId == request.WorkspaceId && x.AssetId == request.AssetId && x.OperationKey == request.OperationKey, cancellationToken);
+        if (!await authorize(operation, cancellationToken)) return Denied();
+        if (session is null) return Missing();
+        var outcome = await OutcomeAsync(session, cancellationToken);
+        if (!await authorize(operation, cancellationToken)) return Denied();
+        return Result<EmbeddedPhotoUploadOutcome>.Success(outcome);
     }
 
     internal async Task<PhotoUploadLease?> TryClaimUploadAsync(Guid sessionId, Guid ownerId, CancellationToken cancellationToken)
@@ -177,7 +202,8 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         var session = await LockSessionAsync(lease.SessionId, cancellationToken);
         if (!Owns(session, lease)) return Conflict();
         if (original.StorageKey != lease.StorageKey || original.Provider != storage.ProviderName ||
-            original.Length != session!.DeclaredLength || !EmbeddedPhotoPolicy.IsSha256(original.Sha256))
+            original.Length != session!.DeclaredLength || !EmbeddedPhotoPolicy.IsSha256(original.Sha256) ||
+            session.ExpectedSourceSha256 is { } expected && !string.Equals(expected, original.Sha256, StringComparison.OrdinalIgnoreCase))
             return Failure(EmbeddedPhotoErrors.Validation, ResultErrorKind.Validation);
         if (asset is null || asset.WorkspaceId != lease.WorkspaceId || asset.BlobState != MediaBlobState.PendingUpload) return Conflict();
         var metadata = await storage.Provider.GetMetadataAsync(original.StorageKey, cancellationToken);
@@ -200,12 +226,13 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         db.PhotoRevisions.Add(new()
         {
             AssetId = lease.AssetId, WorkspaceId = lease.WorkspaceId, Revision = 1, OperationKey = session.OperationKey,
-            SourceSha256 = original.Sha256, PolicyId = session.PolicyId, ProcessorVersion = session.ProcessorVersion, CreatedAt = now
+            SourceSha256 = original.Sha256, PolicyId = session.PolicyId, ProcessorVersion = session.ProcessorVersion,
+            State = session.UploadOnly ? EmbeddedPhotoState.AwaitingProcessing : EmbeddedPhotoState.Queued, CreatedAt = now
         });
-        db.PhotoJobs.Add(new()
+        if (!session.UploadOnly) db.PhotoJobs.Add(new()
         {
             AssetId = lease.AssetId, WorkspaceId = lease.WorkspaceId, Revision = 1, SourceSha256 = original.Sha256,
-            PolicyId = session.PolicyId, ProcessorVersion = session.ProcessorVersion, NextAttemptAt = now, CreatedAt = now
+            PolicyId = session.PolicyId, ProcessorVersion = session.ProcessorVersion!, NextAttemptAt = now, CreatedAt = now
         });
         asset.StorageKey = original.StorageKey;
         asset.SizeBytes = original.Length;

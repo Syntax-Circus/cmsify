@@ -32,6 +32,7 @@ internal static class EmbeddedPhotoConfiguration
         session.Property(x => x.DisplayFileName).HasMaxLength(255);
         session.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
         Identity(session);
+        session.Property(x => x.ExpectedSourceSha256).HasColumnType("char(64)");
         Asset(session);
 
         var upload = model.Entity<PhotoUploadAttemptRecord>();

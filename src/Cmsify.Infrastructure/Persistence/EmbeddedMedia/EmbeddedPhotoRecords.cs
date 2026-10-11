@@ -10,8 +10,10 @@ public sealed class PhotoUploadSessionRecord
     public Guid OperationKey { get; set; }
     public string DisplayFileName { get; set; } = null!;
     public long DeclaredLength { get; set; }
+    public bool UploadOnly { get; set; }
+    public string? ExpectedSourceSha256 { get; set; }
     public string PolicyId { get; set; } = null!;
-    public string ProcessorVersion { get; set; } = null!;
+    public string? ProcessorVersion { get; set; }
     public EmbeddedPhotoUploadState State { get; set; }
     public int AttemptGeneration { get; set; }
     public Guid? LeaseToken { get; set; }
@@ -67,7 +69,7 @@ public sealed class PhotoRevisionRecord
     public Guid OperationKey { get; set; }
     public string SourceSha256 { get; set; } = null!;
     public string PolicyId { get; set; } = null!;
-    public string ProcessorVersion { get; set; } = null!;
+    public string? ProcessorVersion { get; set; }
     public int QuarterTurnsClockwise { get; set; }
     public EmbeddedPhotoState State { get; set; }
     public int RetryGeneration { get; set; }

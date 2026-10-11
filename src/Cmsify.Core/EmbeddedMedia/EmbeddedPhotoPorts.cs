@@ -9,12 +9,14 @@ public interface IEmbeddedPhotoProcessorCapability { Task<EmbeddedPhotoCapabilit
 public interface IEmbeddedMediaRetentionGuard { Task<EmbeddedMediaRetentionDecision> CheckAsync(EmbeddedMediaRetentionRequest request, CancellationToken cancellationToken); }
 public interface IEmbeddedPhotoAuthorizationService { Task<bool> CanExecuteAsync(EmbeddedPhotoOperation operation, CancellationToken cancellationToken); }
 public interface IEmbeddedPhotoReadiness { Task<EmbeddedPhotoReadinessResult> CheckAsync(CancellationToken cancellationToken); }
+public interface IEmbeddedPhotoUploadReadiness { Task<EmbeddedPhotoReadinessResult> CheckAsync(CancellationToken cancellationToken); }
 
 public interface IEmbeddedPhotoUploadRepository
 {
     Task<Result<EmbeddedPhotoUploadOutcome>> BeginAsync(BeginEmbeddedPhotoUploadRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
     Task<Result<EmbeddedPhotoUploadOutcome>> WriteAsync(WriteEmbeddedPhotoUploadRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
     Task<Result<EmbeddedPhotoUploadOutcome>> GetOutcomeAsync(GetEmbeddedPhotoUploadOutcomeRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
+    Task<Result<EmbeddedPhotoUploadOutcome>> GetIntentAsync(GetEmbeddedPhotoUploadIntentRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
 }
 public interface IEmbeddedPhotoProcessingRepository
 {

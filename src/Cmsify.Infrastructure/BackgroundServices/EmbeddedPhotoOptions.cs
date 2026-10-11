@@ -5,6 +5,7 @@ public sealed class EmbeddedPhotoOptions
     public static readonly TimeSpan MaxUploadLease = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan MaxProcessingLease = TimeSpan.FromMinutes(2);
     public bool Enabled { get; set; }
+    public bool UploadOnlyEnabled { get; set; }
     public bool ProcessingEnabled { get; set; }
     public string PolicyId { get; set; } = "phone-sdr-webp-v1";
     public TimeSpan UploadLeaseDuration { get; set; } = TimeSpan.FromMinutes(2);

@@ -20,6 +20,26 @@ namespace Cmsify.Infrastructure.Tests;
 public sealed class EmbeddedPhotoRegistrationTests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void ConflictingUploadOnlyOptionsReject(bool enabled, bool processing)
+    {
+        var services = Services();
+        Should.Throw<ArgumentException>(() => services.AddCmsifyEmbeddedPhotos(o =>
+        { o.Enabled = enabled; o.UploadOnlyEnabled = true; o.ProcessingEnabled = processing; }));
+    }
+
+    [Fact]
+    public void UploadOnlyRegistrationRetainsModeAndRejectsChangedRegistration()
+    {
+        var services = Services();
+        services.AddCmsifyEmbeddedPhotos(o => { o.Enabled = true; o.UploadOnlyEnabled = true; });
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IOptions<EmbeddedPhotoOptions>>().Value.UploadOnlyEnabled.ShouldBeTrue();
+        Should.Throw<InvalidOperationException>(() => services.AddCmsifyEmbeddedPhotos(o => o.Enabled = true));
+    }
+
+    [Theory]
     [InlineData(true, 601)]
     [InlineData(false, 121)]
     public void StartupRejectsLeasesOutsideRuntimeLimits(bool upload, int seconds)

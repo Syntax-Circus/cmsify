@@ -2775,7 +2775,6 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnName("policy_id");
 
                     b.Property<string>("ProcessorVersion")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("processor_version");
@@ -2975,6 +2974,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("display_file_name");
 
+                    b.Property<string>("ExpectedSourceSha256")
+                        .HasColumnType("char(64)")
+                        .HasColumnName("expected_source_sha256");
+
                     b.Property<string>("FailureCode")
                         .HasColumnType("text")
                         .HasColumnName("failure_code");
@@ -3002,7 +3005,6 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnName("policy_id");
 
                     b.Property<string>("ProcessorVersion")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("processor_version");
@@ -3012,6 +3014,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("state");
+
+                    b.Property<bool>("UploadOnly")
+                        .HasColumnType("boolean")
+                        .HasColumnName("upload_only");
 
                     b.Property<Guid>("WorkspaceId")
                         .HasColumnType("uuid")
