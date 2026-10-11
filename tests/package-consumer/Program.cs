@@ -10,6 +10,11 @@ using Microsoft.EntityFrameworkCore;
 using SyntaxCircus.Common;
 
 // This executable is copied outside the checkout and built exclusively from candidate .nupkg references.
+if (args.Length > 0 && args[0] == "--upload-only-crash")
+{
+    await UploadOnlyPhotoQualification.RunChildAsync(args[1..]);
+    return;
+}
 foreach (var assembly in new[] { "Core", "Infrastructure" })
 {
     var id = $"SyntaxCircus.Cmsify.{assembly}";
@@ -145,7 +150,10 @@ await using (var embeddedApp = embeddedBuilder.Build())
     await EmbeddedContentQualification.RunAsync(embeddedApp.Services, embeddedWorkspace, ct);
 
 if (Environment.GetEnvironmentVariable("CMSIFY_PHOTO_QUALIFICATION") == "1")
+{
+    await UploadOnlyPhotoQualification.RunAsync(app.Services, ct);
     await EmbeddedPhotoQualification.RunAsync(app.Services, ct);
+}
 
 static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 static T Success<T>(Result<T> result) { Require(result.IsSuccess, "Direct handler failed."); return result.Value; }

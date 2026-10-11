@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+-[0-9A-Za-z.-]+$')][string]$PackageVersion,
+    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')][string]$PackageVersion,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$SourceCommit,
     [Parameter(Mandatory)][string]$PackageDirectory,
     [string]$DotnetPath = 'dotnet',
-    [ValidateSet('Both', 'Windows', 'Linux')][string]$Platform = 'Both'
+    [ValidateSet('Both', 'Windows', 'Linux')][string]$Platform = 'Both',
+    [switch]$PublicPackages
 )
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -25,7 +26,7 @@ $startedPg = $false
 $startedNetwork = $false
 function Invoke-Recorded([string]$Command, [string[]]$Arguments) {
     $script:sequence++
-    $output = (& $Command @Arguments 2>&1 | Out-String)
+    $output = (& rtk proxy $Command @Arguments 2>&1 | Out-String)
     $code = $LASTEXITCODE
     $safe = $output.Replace($password, '[fixture-password]').Replace($connection, '[fixture-connection]')
     $name = '{0:D3}-{1}.log' -f $script:sequence, ([IO.Path]::GetFileNameWithoutExtension($Command))
@@ -42,11 +43,19 @@ try {
     & git diff --quiet HEAD -- src/Cmsify.Core src/Cmsify.Infrastructure
     if ($LASTEXITCODE -ne 0) { throw 'Candidate engine source must be committed.' }
     $sdk = Invoke-Recorded $DotnetPath @('--version')
-    if ($sdk -ne '10.0.400') { throw 'Qualification requires SDK10.0.400.' }
+    if ($sdk -notmatch '(?m)^10\.0\.400\s*$') { throw 'Qualification requires SDK10.0.400.' }
     foreach ($project in @('Core','Infrastructure')) {
-        Invoke-Recorded $DotnetPath @('pack', "src/Cmsify.$project/Cmsify.$project.csproj", '--configuration','Release',
-            '-p:CmsifyReleaseBuild=true', "-p:Version=$PackageVersion", "-p:PackageVersion=$PackageVersion",
-            "-p:RepositoryCommit=$SourceCommit", '--output',$feed, '--verbosity','quiet') | Out-Null
+        if ($PublicPackages) {
+            $id = "syntaxcircus.cmsify.$($project.ToLowerInvariant())"
+            $target = Join-Path $feed "SyntaxCircus.Cmsify.$project.$PackageVersion.nupkg"
+            if (Test-Path -LiteralPath $target) { throw 'Public package download requires a fresh destination.' }
+            Invoke-Recorded 'curl.exe' @('--fail','--silent','--show-error','--location',"https://api.nuget.org/v3-flatcontainer/$id/$PackageVersion/$id.$PackageVersion.nupkg",'--output',$target) | Out-Null
+        }
+        else {
+            Invoke-Recorded $DotnetPath @('pack', "src/Cmsify.$project/Cmsify.$project.csproj", '--configuration','Release',
+                '-p:CmsifyReleaseBuild=true', "-p:Version=$PackageVersion", "-p:PackageVersion=$PackageVersion",
+                "-p:RepositoryCommit=$SourceCommit", '--output',$feed, '--verbosity','quiet') | Out-Null
+        }
     }
     if ([IO.Path]::IsPathRooted($DotnetPath)) { $env:PATH = [IO.Path]::GetDirectoryName($DotnetPath) + [IO.Path]::PathSeparator + $oldPath }
     $env:CMSIFY_PHOTO_QUALIFICATION = '1'
@@ -102,7 +111,7 @@ try {
     $consumerHashes = Get-ChildItem (Join-Path $repo 'tests/package-consumer') -File | ForEach-Object {
         @{ name = $_.Name; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash }
     }
-    @{ scope='synthetic-generic-foundation-only'; version=$PackageVersion; sourceCommit=$SourceCommit; packageDirectory=$feed;
+    @{ scope='private-upload-intake-and-synthetic-processing-foundation-only'; publicPackages=[bool]$PublicPackages; version=$PackageVersion; sourceCommit=$SourceCommit; packageDirectory=$feed;
        requestedPlatform=$Platform; sdk=$sdk; packages=$packages; consumerFiles=$consumerHashes; operations=$operations; passed=$true } |
         ConvertTo-Json -Depth 10 | Set-Content (Join-Path $evidence 'evidence.json')
     Write-Output "PASS generic embedded photo package qualification: $evidence"
