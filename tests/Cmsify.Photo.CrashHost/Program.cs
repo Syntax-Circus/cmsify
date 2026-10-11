@@ -15,6 +15,9 @@ using SyntaxCircus.Common;
 // Disposable synthetic orchestration host. No image decoder or native qualification.
 if (args.Length != 9) return 2;
 var stage = args[0];
+var uploadOnly = stage.StartsWith("upload-only-", StringComparison.Ordinal);
+if (uploadOnly) stage = stage["upload-only-".Length..];
+if (uploadOnly && stage is not ("after-stage" or "before-receipt" or "after-receipt")) return 2;
 if (stage is not ("after-stage" or "before-receipt" or "after-receipt" or
     "processing-after-claim" or "processing-during-variants" or "processing-after-manifest" or
     "reference-after-protection" or "reference-after-release" or "reference-race-protect" or "reference-race-delete")) return 2;
@@ -82,8 +85,8 @@ if (stage.StartsWith("processing-", StringComparison.Ordinal))
     return 7;
 }
 var repository = new EmbeddedPhotoUploadRepository(db, new EmbeddedPhotoStorage(provider, "local"),
-    Options.Create(new EmbeddedPhotoOptions { Enabled = true, PolicyId = "synthetic-photo-v1" }),
-    new SyntheticCapability(), TimeProvider.System);
+    Options.Create(new EmbeddedPhotoOptions { Enabled = true, UploadOnlyEnabled = uploadOnly, PolicyId = "synthetic-photo-v1" }),
+    uploadOnly ? new MissingCapability() : new SyntheticCapability(), TimeProvider.System);
 static Task<bool> Permit(EmbeddedPhotoOperation _, CancellationToken ct) => Task.FromResult(true);
 var begin = await repository.BeginAsync(new(workspace, asset, operation, "synthetic.heic", 3, "synthetic-photo-v1"),
     actor, Permit, CancellationToken.None);
@@ -115,6 +118,11 @@ internal sealed class SyntheticCapability : IEmbeddedPhotoProcessorCapability
 {
     public Task<EmbeddedPhotoCapability> GetAsync(CancellationToken cancellationToken) => Task.FromResult(
         new EmbeddedPhotoCapability(true, true, "synthetic-photo-v1", "synthetic-only-1", "TEST-ONLY-NO-NATIVE-QUALIFICATION", null));
+}
+internal sealed class MissingCapability : IEmbeddedPhotoProcessorCapability
+{
+    public Task<EmbeddedPhotoCapability> GetAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(new EmbeddedPhotoCapability(false, false, "", "", "", "missing"));
 }
 internal sealed class CrashBoundaryStorage(IStorageProvider inner, string stage, string marker) : IStorageProvider
 {

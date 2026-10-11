@@ -218,10 +218,15 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
             StorageProvider = original.Provider, StorageKey = original.StorageKey,
             Length = original.Length, SourceSha256 = original.Sha256, CreatedAt = now
         });
-        db.PhotoUploadReceipts.Add(new()
+        var receipt = new PhotoUploadReceiptRecord
         {
             WorkspaceId = lease.WorkspaceId, SessionId = session.Id, AssetId = lease.AssetId,
             OperationKey = session.OperationKey, SourceSha256 = original.Sha256, Length = original.Length, CreatedAt = now
+        };
+        db.PhotoUploadReceipts.Add(receipt);
+        if (session.UploadOnly) db.PhotoIntakeRetentions.Add(new()
+        {
+            WorkspaceId = lease.WorkspaceId, AssetId = lease.AssetId, UploadReceiptId = receipt.Id, CreatedAt = now
         });
         db.PhotoRevisions.Add(new()
         {

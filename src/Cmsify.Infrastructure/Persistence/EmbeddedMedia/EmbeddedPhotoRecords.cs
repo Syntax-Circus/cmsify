@@ -61,6 +61,13 @@ public sealed class PhotoUploadReceiptRecord
     public int InitialRevision { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+internal sealed class PhotoIntakeRetentionRecord
+{
+    public Guid WorkspaceId { get; set; }
+    public Guid AssetId { get; set; }
+    public Guid UploadReceiptId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
 public sealed class PhotoRevisionRecord
 {
     public Guid AssetId { get; set; }

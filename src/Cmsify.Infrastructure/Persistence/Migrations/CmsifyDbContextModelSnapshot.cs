@@ -2417,6 +2417,40 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.ToTable("embedded_media_reference_sets", (string)null);
                 });
 
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedMedia.PhotoIntakeRetentionRecord", b =>
+                {
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("UploadReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("upload_receipt_id");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("AssetId")
+                        .HasName("pk_embedded_photo_intake_retentions");
+
+                    b.HasIndex("UploadReceiptId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_photo_intake_retentions_upload_receipt_id");
+
+                    b.HasIndex("AssetId", "WorkspaceId")
+                        .HasDatabaseName("ix_embedded_photo_intake_retentions_asset_id_workspace_id");
+
+                    b.HasIndex("UploadReceiptId", "AssetId", "WorkspaceId")
+                        .HasDatabaseName("ix_embedded_photo_intake_retentions_upload_receipt_id_asset_id");
+
+                    b.ToTable("embedded_photo_intake_retentions", (string)null);
+                });
+
             modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedMedia.PhotoJobRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2923,6 +2957,9 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_embedded_photo_upload_receipts");
+
+                    b.HasAlternateKey("Id", "AssetId", "WorkspaceId")
+                        .HasName("ak_embedded_photo_upload_receipts_id_asset_id_workspace_id");
 
                     b.HasIndex("SessionId")
                         .IsUnique()
@@ -3551,6 +3588,25 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_embedded_media_reference_sets_workspaces_workspace_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedMedia.PhotoIntakeRetentionRecord", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId", "WorkspaceId")
+                        .HasPrincipalKey("Id", "WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_photo_intake_retentions_media_assets_asset_id_work");
+
+                    b.HasOne("Cmsify.Infrastructure.Persistence.EmbeddedMedia.PhotoUploadReceiptRecord", null)
+                        .WithMany()
+                        .HasForeignKey("UploadReceiptId", "AssetId", "WorkspaceId")
+                        .HasPrincipalKey("Id", "AssetId", "WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_photo_intake_retentions_embedded_photo_upload_rece");
                 });
 
             modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedMedia.PhotoJobRecord", b =>

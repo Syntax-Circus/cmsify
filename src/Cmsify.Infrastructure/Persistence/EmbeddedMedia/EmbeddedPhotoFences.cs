@@ -34,9 +34,12 @@ internal static class EmbeddedPhotoFences
     }
     internal static Task<bool> ProtectedAsync(CmsifyDbContext db, Guid asset, CancellationToken ct) =>
         db.Database.IsNpgsql()
-            ? db.MediaReferenceEntries.AnyAsync(entry => entry.AssetId == asset &&
-                db.MediaReferenceSets.Any(set => set.Id == entry.ReferenceSetId && set.State == EmbeddedMediaReferenceState.Protected), ct)
+            ? ProtectedPhotoAsync(db, asset, ct)
             : Task.FromResult(false);
+    private static async Task<bool> ProtectedPhotoAsync(CmsifyDbContext db, Guid asset, CancellationToken ct) =>
+        await db.PhotoIntakeRetentions.AnyAsync(hold => hold.AssetId == asset, ct) ||
+        await db.MediaReferenceEntries.AnyAsync(entry => entry.AssetId == asset &&
+                db.MediaReferenceSets.Any(set => set.Id == entry.ReferenceSetId && set.State == EmbeddedMediaReferenceState.Protected), ct);
     internal static Task<List<Guid>> ContentReferencesAsync(CmsifyDbContext db, Guid asset, bool includeRecovery, CancellationToken ct) =>
         db.ContentVersionFieldValues.AsNoTracking().Where(value => value.MediaAssetId == asset || value.FileAssetId == asset)
             .Join(db.ContentVersions.AsNoTracking(), value => value.ContentVersionId, version => version.Id, (value, version) => version.ContentItemId)

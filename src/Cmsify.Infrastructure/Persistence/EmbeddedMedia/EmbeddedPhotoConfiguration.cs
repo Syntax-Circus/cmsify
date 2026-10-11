@@ -15,7 +15,7 @@ internal static class EmbeddedPhotoConfiguration
     private static readonly Type[] Types =
     [
         typeof(PhotoUploadSessionRecord), typeof(PhotoUploadAttemptRecord), typeof(PhotoOriginalRecord),
-        typeof(PhotoUploadReceiptRecord), typeof(PhotoRevisionRecord), typeof(PhotoJobRecord),
+        typeof(PhotoUploadReceiptRecord), typeof(PhotoIntakeRetentionRecord), typeof(PhotoRevisionRecord), typeof(PhotoJobRecord),
         typeof(PhotoProcessingAttemptRecord), typeof(PhotoManifestRecord), typeof(PhotoVariantRecord),
         typeof(MediaReferenceSetRecord), typeof(MediaReferenceEntryRecord), typeof(PhotoOperationReceiptRecord)
     ];
@@ -58,12 +58,21 @@ internal static class EmbeddedPhotoConfiguration
         var receipt = model.Entity<PhotoUploadReceiptRecord>();
         receipt.ToTable("embedded_photo_upload_receipts");
         receipt.HasKey(x => x.Id);
+        receipt.HasAlternateKey(x => new { x.Id, x.AssetId, x.WorkspaceId });
         receipt.HasIndex(x => x.SessionId).IsUnique();
         receipt.HasIndex(x => new { x.WorkspaceId, x.OperationKey }).IsUnique();
         receipt.Property(x => x.SourceSha256).HasColumnType("char(64)");
         receipt.HasOne<PhotoUploadSessionRecord>().WithMany().HasForeignKey(x => new { x.SessionId, x.WorkspaceId })
             .HasPrincipalKey(x => new { x.Id, x.WorkspaceId }).OnDelete(DeleteBehavior.Restrict);
         Asset(receipt);
+
+        var intake = model.Entity<PhotoIntakeRetentionRecord>();
+        intake.ToTable("embedded_photo_intake_retentions");
+        intake.HasKey(x => x.AssetId);
+        intake.HasIndex(x => x.UploadReceiptId).IsUnique();
+        intake.HasOne<PhotoUploadReceiptRecord>().WithMany().HasForeignKey(x => new { x.UploadReceiptId, x.AssetId, x.WorkspaceId })
+            .HasPrincipalKey(x => new { x.Id, x.AssetId, x.WorkspaceId }).OnDelete(DeleteBehavior.Restrict);
+        Asset(intake);
 
         var revision = model.Entity<PhotoRevisionRecord>();
         revision.ToTable("embedded_photo_revisions", t => t.HasCheckConstraint("ck_photo_revision_instruction",

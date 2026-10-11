@@ -32,6 +32,7 @@ public sealed class EmbeddedPhotoUploadReadiness(CmsifyDbContext db, IStoragePro
                     await db.PhotoUploadAttempts.AsNoTracking().Take(1).ToListAsync(cancellationToken);
                     await db.PhotoOriginals.AsNoTracking().Take(1).ToListAsync(cancellationToken);
                     await db.PhotoUploadReceipts.AsNoTracking().Take(1).ToListAsync(cancellationToken);
+                    await db.PhotoIntakeRetentions.AsNoTracking().Take(1).ToListAsync(cancellationToken);
                     await db.PhotoRevisions.AsNoTracking().Take(1).ToListAsync(cancellationToken);
                     await db.PhotoJobs.AsNoTracking().Take(1).ToListAsync(cancellationToken);
                     await db.PhotoProcessingAttempts.AsNoTracking().Take(1).ToListAsync(cancellationToken);

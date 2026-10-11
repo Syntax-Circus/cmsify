@@ -36,6 +36,7 @@ public sealed class CmsifyDbContext : DbContext
     public DbSet<EmbeddedMedia.PhotoUploadAttemptRecord> PhotoUploadAttempts => Set<EmbeddedMedia.PhotoUploadAttemptRecord>();
     public DbSet<EmbeddedMedia.PhotoOriginalRecord> PhotoOriginals => Set<EmbeddedMedia.PhotoOriginalRecord>();
     public DbSet<EmbeddedMedia.PhotoUploadReceiptRecord> PhotoUploadReceipts => Set<EmbeddedMedia.PhotoUploadReceiptRecord>();
+    internal DbSet<EmbeddedMedia.PhotoIntakeRetentionRecord> PhotoIntakeRetentions => Set<EmbeddedMedia.PhotoIntakeRetentionRecord>();
     public DbSet<EmbeddedMedia.PhotoRevisionRecord> PhotoRevisions => Set<EmbeddedMedia.PhotoRevisionRecord>();
     public DbSet<EmbeddedMedia.PhotoJobRecord> PhotoJobs => Set<EmbeddedMedia.PhotoJobRecord>();
     public DbSet<EmbeddedMedia.PhotoProcessingAttemptRecord> PhotoProcessingAttempts => Set<EmbeddedMedia.PhotoProcessingAttemptRecord>();
