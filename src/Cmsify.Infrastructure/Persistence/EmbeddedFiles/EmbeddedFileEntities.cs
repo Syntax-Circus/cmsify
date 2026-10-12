@@ -28,6 +28,30 @@ public sealed class FileUploadAttemptRecord
     public string StorageProvider { get; set; }="";
     public string StorageKey { get; set; }="";
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? RetiredAt { get; set; }
+}
+public sealed class FileReferenceSetRecord
+{
+    public Guid Id { get; set; }=Guid.NewGuid();
+    public Guid WorkspaceId { get; set; }
+    public string ConsumerNamespace { get; set; }="";
+    public Guid ReferenceKey { get; set; }
+    public Guid OperationKey { get; set; }
+    public Guid ActorId { get; set; }
+    public string Fingerprint { get; set; }="";
+    public int ProtectionRevision { get; set; }=1;
+    public EmbeddedFileReferenceState State { get; set; }
+    public Guid? ReleaseOperationKey { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+public sealed class FileReferenceEntryRecord
+{
+    public Guid ReferenceSetId { get; set; }
+    public int Ordinal { get; set; }
+    public Guid AssetId { get; set; }
+    public Guid ReceiptId { get; set; }
+    public long Length { get; set; }
+    public string SourceSha256 { get; set; }="";
 }
 public sealed class FileUploadReceiptRecord
 {

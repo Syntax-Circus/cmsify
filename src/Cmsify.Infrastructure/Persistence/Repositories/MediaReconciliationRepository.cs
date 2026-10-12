@@ -3,6 +3,7 @@ using Cmsify.Core.Domain.Enums;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence.Providers;
 using Cmsify.Infrastructure.Persistence.EmbeddedMedia;
+using Cmsify.Infrastructure.Persistence.EmbeddedFiles;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
@@ -225,9 +226,10 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
 
         await dbContext.SaveChangesAsync(ct);
         var abandonedPhotos = await EmbeddedPhotoRetirement.RetireAsync(dbContext, cutoff, now, limit, ct);
+        var abandonedFiles = await EmbeddedFileRetirement.RetireAsync(dbContext, cutoff, now, limit, ct);
         await dbContext.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return assets.Count + abandonedPhotos;
+        return assets.Count + abandonedPhotos + abandonedFiles;
     }
 
     public async Task<MediaCheckpointClaim?> ClaimCheckpointAsync(
@@ -311,7 +313,9 @@ public sealed class MediaReconciliationRepository(CmsifyDbContext dbContext) : I
 
         // The optional photo model is PostgreSQL-only; legacy SQLite media stays unchanged.
         if (!dbContext.Database.IsNpgsql()) return false;
-        return await dbContext.PhotoOriginals.AnyAsync(
+        return await dbContext.FileUploadReceipts.AnyAsync(item=>item.StorageProvider==provider && item.StorageKey==storageKey,ct) ||
+               await dbContext.FileUploadAttempts.AnyAsync(item=>item.StorageProvider==provider && item.StorageKey==storageKey && item.RetiredAt==null,ct) ||
+               await dbContext.PhotoOriginals.AnyAsync(
                    item => item.StorageProvider == provider && item.StorageKey == storageKey &&
                        dbContext.MediaAssets.IgnoreQueryFilters().Any(asset => asset.Id == item.AssetId && asset.BlobState != MediaBlobState.Deleted), ct) ||
                await dbContext.PhotoVariants.AnyAsync(

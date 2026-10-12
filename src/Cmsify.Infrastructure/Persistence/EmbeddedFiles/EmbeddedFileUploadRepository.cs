@@ -70,6 +70,7 @@ public sealed class EmbeddedFileUploadRepository(CmsifyDbContext db,EmbeddedFile
             if(actor==Guid.Empty || s.ActorId!=actor || !await auth(op,ct))return EmbeddedFileErrors.Forbidden<EmbeddedFileUploadOutcome>();
             if(r.OperationKey==Guid.Empty || r.Source is null || s.WriteOperationKey is { } key && key!=r.OperationKey)return Error(EmbeddedFileErrors.Conflict);
             if(s.State==EmbeddedFileUploadState.Completed)return Result<EmbeddedFileUploadOutcome>.Success(await OutcomeAsync(s,ct));
+            if(s.State==EmbeddedFileUploadState.Expired)return Error(EmbeddedFileErrors.Conflict);
             var now=clock.GetUtcNow();if(s.State==EmbeddedFileUploadState.Active && s.LeaseUntil>now)return Error(EmbeddedFileErrors.Conflict);
             var asset=await EmbeddedPhotoFences.LockAssetAsync(db,s.AssetId,ct);if(asset is null || asset.IsDeleted || asset.BlobState!=MediaBlobState.PendingUpload)return Error(EmbeddedFileErrors.Conflict);
             var token=Guid.NewGuid();s.WriteOperationKey=r.OperationKey;s.LeaseToken=token;s.LeaseUntil=now+options.Value.UploadLeaseDuration;s.State=EmbeddedFileUploadState.Active;s.FailureCode=null;

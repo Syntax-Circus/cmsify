@@ -22,5 +22,9 @@ public sealed class EmbeddedFileSchemaTests
         (await db.FileUploadSessions.CountAsync(ct)).ShouldBe(0);
         (await db.PhotoUploadSessions.CountAsync(ct)).ShouldBe(1);
         (await db.MediaAssets.CountAsync(ct)).ShouldBe(2);
+        await db.GetService<IMigrator>().MigrateAsync(fileMigration,ct);
+        await db.Database.MigrateAsync(ct);
+        (await db.FileReferenceSets.CountAsync(ct)).ShouldBe(0);
+        (await db.PhotoUploadSessions.CountAsync(ct)).ShouldBe(1);
     }
 }

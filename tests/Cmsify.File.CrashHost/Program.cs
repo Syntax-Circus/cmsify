@@ -10,10 +10,23 @@ using Microsoft.Extensions.Options;
 using SyntaxCircus.EntityFrameworkCore.Postgres;
 using SyntaxCircus.Storage;
 
-if(args.Length!=8 || args[0] is not ("before-store" or "after-store"))return 2;
+if(args.Length!=8 || args[0] is not ("before-store" or "after-store" or "after-protect" or "after-release"))return 2;
 var options=new DbContextOptionsBuilder<CmsifyDbContext>().UseNpgsql(args[1]).UseSyntaxCircusSnakeCaseNamingConvention().Options;
 await using var db=new CmsifyDbContext(options);
 var provider=new BoundaryStorage(new LocalFileStorageProvider(Options.Create(new LocalStorageOptions { RootPath=args[2] })),args[0],args[7]);
+if(args[0] is "after-protect" or "after-release")
+{
+    var workspace=Guid.Parse(args[3]);var reference=Guid.Parse(args[4]);var key=Guid.Parse(args[5]);var actor=Guid.Parse(args[6]);
+    var references=new EmbeddedFileReferenceRepository(db,new(provider,"local"),Options.Create(new EmbeddedFileOptions { Enabled=true }),[new("dog-documents",new ReleaseGuard())],TimeProvider.System);
+    if(args[0]=="after-protect")
+    {
+        var receipt=await db.FileUploadReceipts.SingleAsync(x=>x.WorkspaceId==workspace);
+        var protectedSet=await references.ProtectAsync(new(workspace,"dog-documents",reference,key,[new(receipt.AssetId,receipt.Id,receipt.Length,receipt.SourceSha256)]),actor,(_,_)=>Task.FromResult(true),CancellationToken.None);
+        if(protectedSet.IsFailure)return 4;
+    }
+    else if((await references.ReleaseAsync(new(workspace,"dog-documents",reference,key,1),actor,(_,_)=>Task.FromResult(true),CancellationToken.None)).IsFailure)return 5;
+    await provider.Pause();return 6;
+}
 var repository=new EmbeddedFileUploadRepository(db,new(provider,"local"),Options.Create(new EmbeddedFileOptions { Enabled=true }),TimeProvider.System);
 var result=await repository.WriteAsync(new(Guid.Parse(args[3]),Guid.Parse(args[4]),Guid.Parse(args[5]),new Source()),Guid.Parse(args[6]),(_,_)=>Task.FromResult(true),CancellationToken.None);
 return result.IsSuccess?0:3;
@@ -25,7 +38,7 @@ internal sealed class Source : IEmbeddedFileByteSource
 }
 internal sealed class BoundaryStorage(IStorageProvider inner,string boundary,string marker) : IStorageProvider
 {
-    private async Task Pause()
+    public async Task Pause()
     {
         using(var file=new FileStream(marker,FileMode.Create,FileAccess.Write,FileShare.Read))
         { file.Write(Encoding.ASCII.GetBytes(boundary));file.Flush(flushToDisk:true); }
@@ -44,4 +57,8 @@ internal sealed class BoundaryStorage(IStorageProvider inner,string boundary,str
     public Task DeleteAsync(string key,CancellationToken cancellationToken=default)=>inner.DeleteAsync(key,cancellationToken);
     public Task<StorageObjectPage> ListAsync(ListStorageObjectsRequest request,CancellationToken cancellationToken=default)=>inner.ListAsync(request,cancellationToken);
     public Task<string> GetAccessUrlAsync(string key,TimeSpan? expiry=null,CancellationToken cancellationToken=default)=>inner.GetAccessUrlAsync(key,expiry,cancellationToken);
+}
+internal sealed class ReleaseGuard : IEmbeddedFileRetentionGuard
+{
+    public Task<EmbeddedFileRetentionDecision> CheckAsync(EmbeddedFileRetentionRequest request,CancellationToken ct)=>Task.FromResult(new EmbeddedFileRetentionDecision(true));
 }

@@ -56,8 +56,8 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
     {
         if (!MediaStorageKeys.IsCanonical(command.StorageKey))
             throw new InvalidOperationException("Media storage keys must be canonical relative paths.");
-        if (MediaStorageKeys.IsPhoto(command.StorageKey))
-            throw new InvalidOperationException("Photo storage keys are reserved for the embedded photo foundation.");
+        if (MediaStorageKeys.IsEmbedded(command.StorageKey))
+            throw new InvalidOperationException("Storage keys are reserved for embedded media.");
         if (!string.Equals(command.StorageProvider, providerName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Media storage provider does not match the configured provider.");
@@ -93,6 +93,7 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
     public async Task<MediaAssetDto> UpdateAsync(UpdateMediaAssetCommand command, CancellationToken ct = default)
     {
         var entity = await dbContext.MediaAssets
+            .GenericMedia(dbContext)
             .Where(asset => asset.BlobState == MediaBlobState.Available)
             .ScopeToActorWorkspace(currentActor)
             .FirstAsync(asset => asset.Id == command.Id, ct);
@@ -108,6 +109,7 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
         await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
         await EmbeddedPhotoFences.LockAssetAsync(dbContext, id, ct);
         var entity = await dbContext.MediaAssets
+            .GenericMedia(dbContext)
             .Where(asset => asset.BlobState == MediaBlobState.Available)
             .ScopeToActorWorkspace(currentActor)
             .FirstAsync(asset => asset.Id == id, ct);

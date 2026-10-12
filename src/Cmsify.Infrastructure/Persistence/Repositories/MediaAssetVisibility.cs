@@ -9,9 +9,10 @@ internal static class MediaAssetVisibility
     internal static IQueryable<MediaAsset> GenericMedia(this IQueryable<MediaAsset> query, CmsifyDbContext db)
     {
         query = query.Where(asset => !asset.StorageKey.ToLower().StartsWith(MediaStorageKeys.PhotoPrefix) &&
+            !asset.StorageKey.ToLower().StartsWith(MediaStorageKeys.FilePrefix) &&
             !asset.StorageKey.Contains("//") && !asset.StorageKey.Contains("\\"));
         return db.Database.IsNpgsql()
-            ? query.Where(asset => !db.PhotoUploadSessions.Any(session => session.AssetId == asset.Id))
+            ? query.Where(asset => !db.PhotoUploadSessions.Any(session => session.AssetId == asset.Id) && !db.FileUploadSessions.Any(session => session.AssetId == asset.Id))
             : query;
     }
 }

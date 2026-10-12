@@ -33,6 +33,7 @@ public static class EmbeddedFileServiceCollectionExtensions
             services.TryAddScoped(sp=>new EmbeddedFileStorage(sp.GetRequiredService<IStorageProvider>(),provider));
             services.TryAddScoped<IEmbeddedFileUploadRepository,EmbeddedFileUploadRepository>();
             services.TryAddScoped<IEmbeddedFileReadRepository,EmbeddedFileReadRepository>();
+            services.TryAddScoped<IEmbeddedFileReferenceRepository,EmbeddedFileReferenceRepository>();
         }
         else
         {

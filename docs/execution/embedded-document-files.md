@@ -30,6 +30,28 @@ applied twice and measured (cost if wrong: regenerate with matching tools).
 The combined MTP middle-wildcard filter selected zero tests; individual class
 filters were used and actual counts inspected. No zero-test success claimed.
 
+Task3 checkpoint: reference1/1, retirement/generic repository3/3, migration1/1,
+process boundaries3/3 and six API privacy cases pass on Windows. Reference
+repository/schema absence was compile RED. File download routes returned200
+before exclusions (two observed RED cases); failed incomplete-attempt retirement
+was observed RED before implementation. Guard denial preserves exact protection;
+release replay requires the original operation. Real children killed after protect
+and release preserve their outcomes in fresh contexts. Source/package suites remain
+pending, so this checkpoint is not release qualification.
+
+API regression initially18/19: one newly added deletion assertion supplied the
+unsupported wildcard If-Match, yielding412. Traced numeric ETag parsing and changed
+the fixture to send its real seeded revision. All six privacy cases then pass.
+Existing photo deletion behavior is preserved. Session ownership independently
+excludes files even when a storage key looks ordinary.
+
+Ruling: completed immutable originals remain owned even after reference release;
+this increment retires incomplete/losing attempts and exposes no generic file
+delete route. Cost: retained disk until a future explicit file retirement policy.
+Generated new crash-host lock retains Windows CRLF under a single-path whitespace
+attribute; dependency bytes/pins are unchanged. The tool preserves existing CRLF,
+so an attempted apply_patch normalization did not remove the whitespace report.
+
 Ruling: use available SDK10.0.401, explicitly recording the AGENTS10.0.400
 mismatch — global.json permits latestPatch and10.0.400 is not installed — cost
 if wrong: qualification must be repeated with10.0.400. No SDK/pin file changes.

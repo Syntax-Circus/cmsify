@@ -48,6 +48,8 @@ public sealed class CmsifyDbContext : DbContext
 
     public DbSet<MediaDeletionIntent> MediaDeletionIntents => Set<MediaDeletionIntent>();
     public DbSet<EmbeddedFiles.FileUploadSessionRecord> FileUploadSessions => Set<EmbeddedFiles.FileUploadSessionRecord>();
+    public DbSet<EmbeddedFiles.FileReferenceSetRecord> FileReferenceSets => Set<EmbeddedFiles.FileReferenceSetRecord>();
+    public DbSet<EmbeddedFiles.FileReferenceEntryRecord> FileReferenceEntries => Set<EmbeddedFiles.FileReferenceEntryRecord>();
     public DbSet<EmbeddedFiles.FileUploadAttemptRecord> FileUploadAttempts => Set<EmbeddedFiles.FileUploadAttemptRecord>();
     public DbSet<EmbeddedFiles.FileUploadReceiptRecord> FileUploadReceipts => Set<EmbeddedFiles.FileUploadReceiptRecord>();
 

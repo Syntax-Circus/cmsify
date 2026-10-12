@@ -19,7 +19,19 @@ internal static class EmbeddedFileModelConfiguration
         var r=m.Entity<FileUploadReceiptRecord>();r.ToTable("embedded_file_upload_receipts");r.HasKey(x=>x.Id);r.HasIndex(x=>x.SessionId).IsUnique();r.HasIndex(x=>x.AssetId).IsUnique();
         r.HasOne<FileUploadSessionRecord>().WithMany().HasForeignKey(x=>new { x.SessionId,x.WorkspaceId,x.AssetId }).HasPrincipalKey(x=>new { x.Id,x.WorkspaceId,x.AssetId }).OnDelete(DeleteBehavior.Restrict);
         r.Property(x=>x.ConsumerNamespace).HasMaxLength(100);r.Property(x=>x.SourceSha256).HasMaxLength(64);r.Property(x=>x.StorageProvider).HasMaxLength(50);r.Property(x=>x.StorageKey).HasMaxLength(500);
+        r.HasAlternateKey(x=>new { x.Id,x.AssetId });
+        var set=m.Entity<FileReferenceSetRecord>();set.ToTable("embedded_file_reference_sets");set.HasKey(x=>x.Id);
+        set.HasOne<Workspace>().WithMany().HasForeignKey(x=>x.WorkspaceId).OnDelete(DeleteBehavior.Restrict);
+        set.Property(x=>x.ConsumerNamespace).HasMaxLength(100);set.Property(x=>x.Fingerprint).HasMaxLength(64);
+        set.HasIndex(x=>new { x.WorkspaceId,x.ConsumerNamespace,x.ReferenceKey }).IsUnique();
+        set.HasIndex(x=>new { x.WorkspaceId,x.ConsumerNamespace,x.OperationKey }).IsUnique();
+        set.HasIndex(x=>new { x.WorkspaceId,x.ConsumerNamespace,x.ReleaseOperationKey }).IsUnique();
+        var entry=m.Entity<FileReferenceEntryRecord>();entry.ToTable("embedded_file_reference_entries");entry.HasKey(x=>new { x.ReferenceSetId,x.Ordinal });
+        entry.Property(x=>x.SourceSha256).HasMaxLength(64);
+        entry.HasOne<FileReferenceSetRecord>().WithMany().HasForeignKey(x=>x.ReferenceSetId).OnDelete(DeleteBehavior.Restrict);
+        entry.HasOne<FileUploadReceiptRecord>().WithMany().HasForeignKey(x=>new { x.ReceiptId,x.AssetId }).HasPrincipalKey(x=>new { x.Id,x.AssetId }).OnDelete(DeleteBehavior.Restrict);
+        entry.HasIndex(x=>new { x.ReferenceSetId,x.AssetId }).IsUnique();
     }
     internal static void Ignore(ModelBuilder m)
-    { m.Ignore<FileUploadSessionRecord>();m.Ignore<FileUploadAttemptRecord>();m.Ignore<FileUploadReceiptRecord>(); }
+    { m.Ignore<FileUploadSessionRecord>();m.Ignore<FileUploadAttemptRecord>();m.Ignore<FileUploadReceiptRecord>();m.Ignore<FileReferenceSetRecord>();m.Ignore<FileReferenceEntryRecord>(); }
 }

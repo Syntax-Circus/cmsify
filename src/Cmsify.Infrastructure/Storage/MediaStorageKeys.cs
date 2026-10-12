@@ -3,6 +3,7 @@ namespace Cmsify.Infrastructure.Storage;
 internal static class MediaStorageKeys
 {
     internal const string PhotoPrefix = "cmsify/media/photos/";
+    internal const string FilePrefix = "cmsify/media/files/";
 
     // One portable relative spelling is required for ownership and physical deletion.
     internal static bool IsCanonical(string key) => !string.IsNullOrWhiteSpace(key) &&
@@ -11,4 +12,6 @@ internal static class MediaStorageKeys
             !segment.EndsWith('.') && !segment.EndsWith(' '));
 
     internal static bool IsPhoto(string key) => key.StartsWith(PhotoPrefix, StringComparison.OrdinalIgnoreCase);
+    internal static bool IsFile(string key) => key.StartsWith(FilePrefix, StringComparison.OrdinalIgnoreCase);
+    internal static bool IsEmbedded(string key) => IsPhoto(key) || IsFile(key);
 }

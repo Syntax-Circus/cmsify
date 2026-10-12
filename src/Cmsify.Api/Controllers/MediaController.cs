@@ -25,6 +25,7 @@ namespace Cmsify.Api.Controllers;
 public sealed class MediaController : ControllerBase
 {
     private const string EmbeddedPhotoStoragePrefix = "cmsify/media/photos/";
+    private const string EmbeddedFileStoragePrefix = "cmsify/media/files/";
     private static readonly string[] DefaultAllowedMimeTypes =
     [
         "image/",
@@ -135,6 +136,8 @@ public sealed class MediaController : ControllerBase
         var query = dbContext.MediaAssets.AsNoTracking().Where(asset =>
             asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
         query = query.Where(asset => !dbContext.PhotoUploadSessions.Any(session => session.AssetId == asset.Id) &&
+            !dbContext.FileUploadSessions.Any(session => session.AssetId == asset.Id) &&
+            !asset.StorageKey.ToLower().StartsWith(EmbeddedFileStoragePrefix) &&
             !asset.StorageKey.ToLower().StartsWith(EmbeddedPhotoStoragePrefix) &&
             !asset.StorageKey.Contains("//") && !asset.StorageKey.Contains("\\"));
         if (!string.IsNullOrWhiteSpace(mimeType))
@@ -263,6 +266,8 @@ public sealed class MediaController : ControllerBase
         var query = dbContext.MediaAssets.Where(asset =>
             asset.Id == id && asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
         query = query.Where(asset => !dbContext.PhotoUploadSessions.Any(session => session.AssetId == asset.Id) &&
+            !dbContext.FileUploadSessions.Any(session => session.AssetId == asset.Id) &&
+            !asset.StorageKey.ToLower().StartsWith(EmbeddedFileStoragePrefix) &&
             !asset.StorageKey.ToLower().StartsWith(EmbeddedPhotoStoragePrefix) &&
             !asset.StorageKey.Contains("//") && !asset.StorageKey.Contains("\\"));
         return await (tracking ? query : query.AsNoTracking()).FirstOrDefaultAsync(ct);
