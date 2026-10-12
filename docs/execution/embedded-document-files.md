@@ -162,3 +162,12 @@ Public release/product adoption/deployment are still separate authorization gate
 The report presents a proposed0.8.16 public release sequence and subsequent fresh
 public consumers before product Task0/Tasks1–4 can resume. No push/merge/tag,
 publication, product pin/runtime change or deployment occurred.
+
+Release authorization: owner approved upstream integration/public0.8.16 release
+and fresh public Windows/Linux qualification. Remote main remains9f11f086;
+0.8.16 remote tag and public Core/Infrastructure archives are absent. Historical
+local tags differ from remote; Ruling: preserve them and fetch branches without
+tags, because they are unrelated owner state (cost: those tags remain divergent).
+Prepare dated changelog and enable generic-file cases in the existing release
+package-consumer step before promotion. The release environment requires a
+reviewer other than the run initiator; preserve that existing gate.
