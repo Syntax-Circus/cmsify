@@ -111,3 +111,54 @@ inventory and exact source manifest checks required for this candidate); guide's
 Reviewer declined completed-original GC (documented deferred policy), PDF active
 content/rendering safety, public release/product adoption/deployment, and pending
 qualification/SQLite failure claims. Final source/candidate gates remain pending.
+
+Final review rulings: completed-original GC stays a future explicit policy because
+this contract retains immutable winners; cost if wrong is retained storage until
+that policy exists. PDF active-content safety and rendering are outside byte
+identification; reasonable consumers receive exact identified bytes and must own
+their delivery/security policy (cost if wrong: an additional safety prerequisite).
+Public release, product adoption and deployment remain separately authorized;
+private artifacts do not establish public support (cost: repeat public consumers).
+Pending qualification and the earlier SQLite failure remain open evidence gates,
+not silently waived; the final complete suites decide them (cost if they fail:
+diagnose and repeat the affected final gates).
+
+Task4 measurement: the earlier Linux baseline completed2031/2031, zero failed or
+skipped,23m59.599s. It predates final review corrections and does not qualify final
+source. Its verified owned container exited naturally before the attempted stop;
+the daemon reported no such container and no other container was stopped.
+Final source3078a81ea0651f8b5e41c534d2d925314f3cd75e manifests contain967files
+on both Windows and Linux; all path/SHA256 pairs match, zero differences. Manual
+untracked Core/Infrastructure engine inventory is empty. Final runs are
+`artifacts/file-source/windows-a74048feb63a4daa80841555b486ccec` and
+`artifacts/file-source/linux-299442faa7e3499394fe834ce63d9131`.
+
+Final source gates: Windows2039/2039, zero failed/skipped,24m35.596s; pinned
+Linux2039/2039, zero failed/skipped,26m23.698s. Both locked restores and clean
+Release builds pass, zero warnings/errors, including both crash helpers and
+existing PostgreSQL/SQLite/photo/standalone regression suites. The earlier SQLite
+Approved-save failure did not recur in the final complete Windows run; its root
+cause is not established, and the assertion retains the error code for any future
+recurrence. No save behavior fix or claim of eliminated flakiness is made.
+Private candidate qualification now runs from committed source3078a81; ledger
+updates after that commit change only documentation and will be committed after
+archive qualification. Archive metadata remains bound to3078a81.
+
+Task4 complete: private0.8.16-documents.1 Core/Infrastructure archive consumers
+pass on Windows and pinned Linux, using identical archives and package-only
+graphs. Both builds zero warnings/errors. Exact upload/read/replay, receipt
+isolation, anonymous read/mutation denial, streaming revocation, loaded-reference
+authority, retention/release and three actual killed-process boundaries pass.
+License/readmes/source metadata, same Core dependency and25packaged migrations
+verified. Archive/DLL hashes and raw evidence locations are preserved in
+[qualification report](../evidence/2026-10-12-embedded-document-files.md) and its
+machine summary. Candidate fixture containers/network/temp staging are absent
+after successful cleanup; owner services remain. Engine tracked diff and manual
+untracked inventory remain empty. Evidence rollup is documentation only.
+
+Final source gates close the review's pending qualification ruling; earlier
+SQLite failure did not recur, with unknown root cause explicitly retained above.
+Public release/product adoption/deployment are still separate authorization gates.
+The report presents a proposed0.8.16 public release sequence and subsequent fresh
+public consumers before product Task0/Tasks1–4 can resume. No push/merge/tag,
+publication, product pin/runtime change or deployment occurred.
