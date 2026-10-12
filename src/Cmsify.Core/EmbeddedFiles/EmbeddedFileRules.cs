@@ -18,7 +18,7 @@ public static class EmbeddedFileRules
     public static bool Digest(string? value) => value is { Length:64 } && value.All(Uri.IsHexDigit);
     public static bool File(EmbeddedFileIdentity? file) => file is not null && file.AssetId!=Guid.Empty && file.ReceiptId!=Guid.Empty && file.Length>0 && file.Length<=MaxBytes && Digest(file.SourceSha256);
     public static string DisplayName(string name) => name.Replace('\\','/').Split('/')[^1].Trim();
-    internal static bool Begin(BeginEmbeddedFileUploadRequest r) => r.WorkspaceId!=Guid.Empty && r.AssetId!=Guid.Empty && r.OperationKey!=Guid.Empty && Named(r.ConsumerNamespace) && r.PolicyId==PolicyId && !string.IsNullOrWhiteSpace(r.DisplayFileName) && r.DisplayFileName.Length<=MaxFileName && DisplayName(r.DisplayFileName).Length>0 && !r.DisplayFileName.Any(char.IsControl) && r.DeclaredLength>0 && r.DeclaredLength<=MaxBytes && Digest(r.ExpectedSourceSha256);
+    public static bool Begin(BeginEmbeddedFileUploadRequest r) => r.WorkspaceId!=Guid.Empty && r.AssetId!=Guid.Empty && r.OperationKey!=Guid.Empty && Named(r.ConsumerNamespace) && r.PolicyId==PolicyId && !string.IsNullOrWhiteSpace(r.DisplayFileName) && r.DisplayFileName.Length<=MaxFileName && DisplayName(r.DisplayFileName).Length>0 && !r.DisplayFileName.Any(char.IsControl) && r.DeclaredLength>0 && r.DeclaredLength<=MaxBytes && Digest(r.ExpectedSourceSha256);
     internal static Func<EmbeddedFileOperation,CancellationToken,Task<bool>> Guard(ICurrentActor actor,IEmbeddedFileAuthorizationService resource,EmbeddedFileOperation expected)
     {
         var subject=actor.UserId;

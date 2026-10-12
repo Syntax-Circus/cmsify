@@ -1,4 +1,7 @@
 using Cmsify.Core.EmbeddedFiles;
+using Cmsify.Infrastructure.Persistence.EmbeddedFiles;
+using Cmsify.Infrastructure.Storage;
+using SyntaxCircus.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -23,8 +26,19 @@ public static class EmbeddedFileServiceCollectionExtensions
         services.AddSingleton(registration);
         services.Configure<EmbeddedFileOptions>(o=> { o.Enabled=registration.Enabled;o.PolicyId=registration.PolicyId;o.UploadDeadline=registration.Deadline;o.UploadLeaseDuration=registration.Lease; });
         services.TryAddScoped<IEmbeddedFileAuthorizationService,DenyFiles>();
-        services.TryAddScoped<IEmbeddedFileUploadRepository,DisabledFiles>();
-        services.TryAddScoped<IEmbeddedFileReadRepository,DisabledFiles>();
+        if(options.Enabled)
+        {
+            var provider=ServiceCollectionExtensions.RegisteredStorageProvider(services);
+            services.TryAddSingleton(TimeProvider.System);
+            services.TryAddScoped(sp=>new EmbeddedFileStorage(sp.GetRequiredService<IStorageProvider>(),provider));
+            services.TryAddScoped<IEmbeddedFileUploadRepository,EmbeddedFileUploadRepository>();
+            services.TryAddScoped<IEmbeddedFileReadRepository,EmbeddedFileReadRepository>();
+        }
+        else
+        {
+            services.TryAddScoped<IEmbeddedFileUploadRepository,DisabledFiles>();
+            services.TryAddScoped<IEmbeddedFileReadRepository,DisabledFiles>();
+        }
         services.TryAddScoped<IEmbeddedFileReferenceRepository,DisabledFiles>();
         services.TryAddScoped<IBeginEmbeddedFileUploadRequestHandler,BeginEmbeddedFileUploadRequestHandler>();
         services.TryAddScoped<IWriteEmbeddedFileUploadRequestHandler,WriteEmbeddedFileUploadRequestHandler>();
