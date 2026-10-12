@@ -60,3 +60,54 @@ Preflight: Task1 defines ports consumed by Task2 uploads/reads and Task3 referen
 Task2 produces exact receipts/fences consumed by Task3; Task4 measures their same
 source/candidate archives. PostgreSQL-only entities must be ignored by SQLite.
 No interface conflict found. Tracked Windows ledger replaces POSIX bookkeeping.
+
+Task4 in progress: complete Windows locked restore and clean Release build pass,
+zero warnings/errors. Linux SDK10.0.400 pinned image
+`sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c`
+locked restore/build pass with the existing CI locked-assets target, zero build
+warnings/errors. Initial Linux restore omitted that existing target and failed
+NU1004; the next build lost an ephemeral cache between containers (NETSDK1064).
+Both orchestration errors were corrected without dependency/pin edits. Fresh
+owned snapshots and persistent isolated cache now preserve exact inputs.
+Candidate consumer compiles zero warnings/errors in a source-referenced diagnostic,
+not package qualification. Its byte/reference/revocation/process-death scenarios
+await actual candidate archives. An adaptation text-replacement error was caught
+before execution; corrected scripts parse.
+
+Authorization audit observed RED: nonempty UserId with IsAuthenticated=false
+could reach mutations under a permissive host guard. Guard now checks current
+authentication before/after authorization; focused Core3/3 passes. An in-flight
+Windows full run was stopped, not claimed passed, after a SQLite direct save
+Approved case failed without a code. Focused six provider parity cases subsequently
+pass; assertion now preserves the stable code if it recurs. No unrelated save
+behavior changed. A concurrent focused build hit owned running DLL locks and
+failed; releasing that runner allowed the clean focused pass. Final qualification
+must use rebuilt/authenticated-guard sources. Fresh whole-change review dispatched
+once under the approved inline skill method; no implementing subagents.
+
+Final independent review: no Critical, five Important. All accepted and corrected
+in one test-first pass: noncanonical dot-segment file access, independently owned
+provider/key alias adoption, missing loaded-member authorization on reference
+replay/outcome/release, completed winners starving bounded retirement, and opposing
+multi-asset retirement/reference lock orders. Observed RED includes two API200
+responses, successful forbidden key creation, unretired failed attempt with limit1,
+unauthorized reference replay, and PostgreSQL40P01 from a real lock-wait race.
+GREEN: retirement/generic key6/6, reference2/2 and API privacy9/9. New protection
+also rechecks loaded members before commit. Retirement selects bounded eligible
+work before taking the complete asset set in common AssetId order, preserving
+session-before-asset order for each writer. Shared SQL visibility preserves server
+paging and excludes independently owned provider/key aliases.
+
+Ruling: expose the shared Infrastructure query helper to the standalone API so
+all repository/controller paths use the same canonical and ownership filters.
+Cost if wrong: one public infrastructure helper may need compatibility management.
+Case-insensitive provider/key exclusion is deliberately conservative across hosts;
+cost: distinct case-sensitive keys matching private custody may also be hidden.
+
+Deferred review Minors (exhaustive): candidate runner's git diff committed-input
+check does not automatically reject untracked engine files (manual clean engine
+inventory and exact source manifest checks required for this candidate); guide's
+"1–20MiB" wording should say positive byte length up to20MiB plus signature.
+Reviewer declined completed-original GC (documented deferred policy), PDF active
+content/rendering safety, public release/product adoption/deployment, and pending
+qualification/SQLite failure claims. Final source/candidate gates remain pending.

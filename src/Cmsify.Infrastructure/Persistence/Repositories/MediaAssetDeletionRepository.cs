@@ -22,7 +22,7 @@ public sealed class MediaAssetDeletionRepository(CmsifyDbContext db, IOptions<Me
         var asset = await EmbeddedPhotoFences.LockAssetAsync(db, request.AssetId, cancellationToken);
         if (asset is null || asset.WorkspaceId != request.WorkspaceId || asset.IsDeleted || asset.BlobState != MediaBlobState.Available) return Missing();
         if (MediaStorageKeys.IsFile(asset.StorageKey) || !MediaStorageKeys.IsCanonical(asset.StorageKey) ||
-            db.Database.IsNpgsql() && await db.FileUploadSessions.AnyAsync(x=>x.AssetId==asset.Id,cancellationToken))return Missing();
+            !await db.MediaAssets.IgnoreQueryFilters().FileUnowned(db).AnyAsync(x=>x.Id==asset.Id,cancellationToken))return Missing();
         if (request.ExpectedRevision is null || request.ExpectedRevision != asset.UpdatedAt.UtcTicks / TimeSpan.TicksPerMicrosecond &&
             request.ExpectedRevision != asset.UpdatedAt.UtcTicks)
             return Result<MediaAssetDeletionOutcome>.Failure(new("concurrency-mismatch", "Concurrency mismatch", ResultErrorKind.Conflict));

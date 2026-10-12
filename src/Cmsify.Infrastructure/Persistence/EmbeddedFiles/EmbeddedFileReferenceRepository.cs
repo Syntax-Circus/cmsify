@@ -22,6 +22,13 @@ public sealed class EmbeddedFileReferenceRepository(CmsifyDbContext db,EmbeddedF
             Array.AsReadOnly(entries.Select(x=>new EmbeddedFileIdentity(x.AssetId,x.ReceiptId,x.Length,x.SourceSha256)).ToArray()));
     }
     private async Task<bool> LockWorkspace(Guid workspace,CancellationToken ct)=>await db.Workspaces.FromSqlInterpolated($"SELECT *, xmin FROM workspaces WHERE id={workspace} FOR UPDATE").AsNoTracking().SingleOrDefaultAsync(ct) is not null;
+    private static async Task<bool> AuthorizeMembers(EmbeddedFileReferenceOutcome outcome,EmbeddedFileOperation operation,Func<EmbeddedFileOperation,CancellationToken,Task<bool>> authorize,CancellationToken ct)
+    {
+        if(!await authorize(operation,ct))return false;
+        foreach(var file in outcome.Files)
+            if(!await authorize(operation with { AssetId=file.AssetId,ReceiptId=file.ReceiptId },ct))return false;
+        return await authorize(operation,ct);
+    }
     public async Task<Result<EmbeddedFileReferenceOutcome>> ProtectAsync(ProtectEmbeddedFileReferencesRequest request,Guid actor,
         Func<EmbeddedFileOperation,CancellationToken,Task<bool>> auth,CancellationToken ct)
     {
@@ -40,7 +47,7 @@ public sealed class EmbeddedFileReferenceRepository(CmsifyDbContext db,EmbeddedF
         if(known.Count>0)
         {
             if(known.Count!=1 || known[0].Fingerprint!=fingerprint || known[0].State!=EmbeddedFileReferenceState.Protected)return Error(EmbeddedFileErrors.Conflict);
-            var replay=await Outcome(known[0],ct);return await auth(op,ct)?Result<EmbeddedFileReferenceOutcome>.Success(replay):EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
+            var replay=await Outcome(known[0],ct);return await AuthorizeMembers(replay,op,auth,ct)?Result<EmbeddedFileReferenceOutcome>.Success(replay):EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
         }
         foreach(var file in request.Files.OrderBy(x=>x.AssetId))
         {
@@ -56,6 +63,8 @@ public sealed class EmbeddedFileReferenceRepository(CmsifyDbContext db,EmbeddedF
             catch(EmbeddedFileInvalidBytesException){return Error(EmbeddedFileErrors.InvalidBytes);}
         }
         if(!await auth(op,ct))return EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
+        foreach(var file in request.Files)
+            if(!await auth(op with { AssetId=file.AssetId,ReceiptId=file.ReceiptId },ct))return EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
         var set=new FileReferenceSetRecord { WorkspaceId=request.WorkspaceId,ConsumerNamespace=request.ConsumerNamespace,ReferenceKey=request.ReferenceKey,OperationKey=request.OperationKey,ActorId=actor,Fingerprint=fingerprint,State=EmbeddedFileReferenceState.Protected,CreatedAt=clock.GetUtcNow() };
         db.FileReferenceSets.Add(set);
         for(var i=0;i<request.Files.Count;i++){var f=request.Files[i];db.FileReferenceEntries.Add(new() { ReferenceSetId=set.Id,Ordinal=i,AssetId=f.AssetId,ReceiptId=f.ReceiptId,Length=f.Length,SourceSha256=f.SourceSha256 });}
@@ -69,7 +78,7 @@ public sealed class EmbeddedFileReferenceRepository(CmsifyDbContext db,EmbeddedF
         if(actor==Guid.Empty || !await auth(op,ct))return EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
         var set=await db.FileReferenceSets.AsNoTracking().SingleOrDefaultAsync(x=>x.WorkspaceId==request.WorkspaceId && x.ConsumerNamespace==request.ConsumerNamespace && x.ReferenceKey==request.ReferenceKey,ct);
         if(set is null)return Error(EmbeddedFileErrors.NotFound,ResultErrorKind.NotFound);
-        var outcome=await Outcome(set,ct);return await auth(op,ct)?Result<EmbeddedFileReferenceOutcome>.Success(outcome):EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
+        var outcome=await Outcome(set,ct);return await AuthorizeMembers(outcome,op,auth,ct)?Result<EmbeddedFileReferenceOutcome>.Success(outcome):EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
     }
     public async Task<Result<EmbeddedFileReferenceOutcome>> ReleaseAsync(ReleaseEmbeddedFileReferencesRequest request,Guid actor,
         Func<EmbeddedFileOperation,CancellationToken,Task<bool>> auth,CancellationToken ct)
@@ -84,6 +93,7 @@ public sealed class EmbeddedFileReferenceRepository(CmsifyDbContext db,EmbeddedF
         if(fresh.ProtectionRevision!=request.ExpectedProtectionRevision)return Error(EmbeddedFileErrors.Conflict);
         var outcome=await Outcome(fresh,ct);
         foreach(var file in outcome.Files.OrderBy(x=>x.AssetId))await EmbeddedPhotoFences.LockAssetAsync(db,file.AssetId,ct);
+        if(!await AuthorizeMembers(outcome,op,auth,ct))return EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
         if(fresh.State==EmbeddedFileReferenceState.Released)
             return fresh.ReleaseOperationKey==request.OperationKey && await auth(op,ct)?Result<EmbeddedFileReferenceOutcome>.Success(outcome):Error(EmbeddedFileErrors.Conflict);
         if(await db.FileReferenceSets.AnyAsync(x=>x.WorkspaceId==request.WorkspaceId && x.ConsumerNamespace==request.ConsumerNamespace && (x.OperationKey==request.OperationKey || x.ReleaseOperationKey==request.OperationKey),ct))return Error(EmbeddedFileErrors.Conflict);
@@ -93,7 +103,7 @@ public sealed class EmbeddedFileReferenceRepository(CmsifyDbContext db,EmbeddedF
         catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}
         catch(Exception){return Error(EmbeddedFileErrors.Retained);}
         if(decision is null || !decision.AllowRelease)return Error(EmbeddedFileErrors.Retained);
-        if(!await auth(op,ct))return EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
+        if(!await AuthorizeMembers(outcome,op,auth,ct))return EmbeddedFileErrors.Forbidden<EmbeddedFileReferenceOutcome>();
         var local=db.FileReferenceSets.Local.FirstOrDefault(x=>x.Id==fresh.Id);
         if(local is null){db.FileReferenceSets.Attach(fresh);local=fresh;}else { db.Entry(local).CurrentValues.SetValues(fresh);db.Entry(local).OriginalValues.SetValues(fresh); }
         local.State=EmbeddedFileReferenceState.Released;local.ReleaseOperationKey=request.OperationKey;

@@ -22,13 +22,14 @@ public static class EmbeddedFileRules
     internal static Func<EmbeddedFileOperation,CancellationToken,Task<bool>> Guard(ICurrentActor actor,IEmbeddedFileAuthorizationService resource,EmbeddedFileOperation expected)
     {
         var subject=actor.UserId;
-        return async (loaded,ct) => actor.UserId==subject && (expected.Kind==EmbeddedFileOperationKind.ReadFile || subject is { } id && id!=Guid.Empty)
+        return async (loaded,ct) => actor.UserId==subject && (expected.Kind==EmbeddedFileOperationKind.ReadFile || actor.IsAuthenticated && subject is { } id && id!=Guid.Empty)
             && loaded.Kind==expected.Kind && loaded.WorkspaceId==expected.WorkspaceId
             && (expected.AssetId is null || loaded.AssetId==expected.AssetId)
             && (expected.SessionId is null || loaded.SessionId==expected.SessionId)
             && (expected.ReceiptId is null || loaded.ReceiptId==expected.ReceiptId)
             && (expected.ConsumerNamespace is null || loaded.ConsumerNamespace==expected.ConsumerNamespace)
             && (expected.ReferenceKey is null || loaded.ReferenceKey==expected.ReferenceKey)
-            && await resource.CanExecuteAsync(loaded with { ActorId=subject },ct) && actor.UserId==subject;
+            && await resource.CanExecuteAsync(loaded with { ActorId=subject },ct) && actor.UserId==subject
+            && (expected.Kind==EmbeddedFileOperationKind.ReadFile || actor.IsAuthenticated);
     }
 }

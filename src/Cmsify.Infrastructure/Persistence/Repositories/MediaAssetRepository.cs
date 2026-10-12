@@ -58,6 +58,8 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
             throw new InvalidOperationException("Media storage keys must be canonical relative paths.");
         if (MediaStorageKeys.IsEmbedded(command.StorageKey))
             throw new InvalidOperationException("Storage keys are reserved for embedded media.");
+        if(await MediaAssetVisibility.FileOwnsKeyAsync(dbContext,command.StorageProvider,command.StorageKey,ct))
+            throw new InvalidOperationException("Storage key is owned by embedded files.");
         if (!string.Equals(command.StorageProvider, providerName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Media storage provider does not match the configured provider.");

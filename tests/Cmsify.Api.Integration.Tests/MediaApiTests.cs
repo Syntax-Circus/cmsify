@@ -215,6 +215,9 @@ public sealed class MediaApiTests : IAsyncLifetime
     [InlineData("cmsify/media//files/",false)]
     [InlineData("cmsify\\media\\files\\",false)]
     [InlineData("ordinary/",true)]
+    [InlineData("cmsify/media/./files/",false)]
+    [InlineData("./cmsify/media/files/",false)]
+    [InlineData("ordinary-alias/",true)]
     public async Task WorkspaceApiClientCannotDiscoverOrReadEmbeddedOriginal(string prefix,bool fileSession)
     {
         var storage = new TestStorageProvider();
@@ -230,6 +233,11 @@ public sealed class MediaApiTests : IAsyncLifetime
             storage.ReadResults[photo.StorageKey] = [1,2,3];
             db.MediaAssets.Add(photo);
             if(fileSession)db.FileUploadSessions.Add(new() { Id=Guid.NewGuid(),WorkspaceId=workspaceId,AssetId=photo.Id,ActorId=Guid.NewGuid(),OperationKey=Guid.NewGuid(),ConsumerNamespace="test",Fingerprint=new string('a',64),DisplayFileName="test.pdf",DeclaredLength=3,ExpectedSha256=new string('b',64),CreatedAt=DateTimeOffset.UtcNow });
+            if(prefix=="ordinary-alias/")
+            {
+                var alias=NewAsset(workspaceId,"alias.pdf",MediaBlobState.Available);alias.StorageKey=photo.StorageKey;
+                db.MediaAssets.Add(alias);photo=alias;
+            }
             await db.SaveChangesAsync(TestContext.Current.CancellationToken); id = photo.Id;
             revision=$"\"{photo.UpdatedAt.UtcTicks/TimeSpan.TicksPerMicrosecond}\"";
         }

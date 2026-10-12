@@ -10,6 +10,17 @@ namespace Cmsify.Core.Tests;
 public sealed class EmbeddedFileAuthorizationTests
 {
     [Fact]
+    public async Task UnauthenticatedSubjectCannotMutateEvenWithPermissiveHostGuard()
+    {
+        var actor=new CurrentActorInfo(Guid.NewGuid(),null,UserRole.Editor,null,false,false);
+        var repository=Substitute.For<IEmbeddedFileUploadRepository>();var guard=Substitute.For<IEmbeddedFileAuthorizationService>();
+        guard.CanExecuteAsync(Arg.Any<EmbeddedFileOperation>(),Arg.Any<CancellationToken>()).Returns(true);
+        repository.BeginAsync(Arg.Any<BeginEmbeddedFileUploadRequest>(),Arg.Any<Guid>(),Arg.Any<Func<EmbeddedFileOperation,CancellationToken,Task<bool>>>(),Arg.Any<CancellationToken>())
+            .Returns(Result<EmbeddedFileUploadOutcome>.Failure(new("sentinel","sentinel",ResultErrorKind.NotFound)));
+        var result=await new BeginEmbeddedFileUploadRequestHandler(repository,actor,guard).HandleAsync(new(Guid.NewGuid(),Guid.NewGuid(),Guid.NewGuid(),"dogs","a.pdf",10,new string('a',64),"pdf-v1"),TestContext.Current.CancellationToken);
+        result.Errors[0].Code.ShouldBe(EmbeddedFileErrors.Denied);repository.ReceivedCalls().ShouldBeEmpty();
+    }
+    [Fact]
     public async Task AnonymousReadRequiresExactExplicitGuardAndMutationRemainsDenied()
     {
         var actor=new CurrentActorInfo(null,null,UserRole.Reader,null,false,false);
@@ -37,7 +48,7 @@ public sealed class EmbeddedFileAuthorizationTests
     [Fact]
     public async Task NormalizeAcceptedIntentBeforeAsyncAuthorization()
     {
-        var actor=new CurrentActorInfo(Guid.NewGuid(),null,UserRole.Editor,null,false,true);
+        var actor=new CurrentActorInfo(Guid.NewGuid(),null,UserRole.Editor,null,true,true);
         var guard=Substitute.For<IEmbeddedFileAuthorizationService>();
         guard.CanExecuteAsync(Arg.Any<EmbeddedFileOperation>(),Arg.Any<CancellationToken>()).Returns(true);
         var repo=Substitute.For<IEmbeddedFileUploadRepository>();

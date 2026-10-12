@@ -182,7 +182,7 @@ public sealed class ContentVersionSaveSqliteApiTests
         var handler = new UpdateContentVersionRequestHandler(scope.ServiceProvider.GetRequiredService<IContentVersionEditRepository>(), actor, new WorkspaceAuthorizationService(db, actor), ContentVersionSaveFactory.Clock);
         var direct = await handler.HandleAsync(new(factory.WorkspaceId, factory.ItemId, 1, new(ContentVersionSaveFactory.OriginalAt.UtcTicks / 10), body.EffectiveStartAt, body.EffectiveEndAt,
             [new(factory.TextFieldId, 3, CoreKind.Text, "replacement", null, null, null, null, null), new(factory.ChildFieldId, 5, CoreKind.ChildContent, null, null, null, null, factory.ChildItemId, null)], query != "?expandChildren=false"), ct);
-        direct.IsSuccess.ShouldBeTrue();
+        direct.IsSuccess.ShouldBeTrue(direct.IsFailure ? string.Join(",",direct.Errors.Select(error=>error.Code)) : "success");
         await factory.ResetAsync(status); // identical stored save inputs and identity, using a fresh scope
         using var response = await SaveAsync(client, factory.Url + query, $"\"{ContentVersionSaveFactory.OriginalAt.UtcTicks}\"", body);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
