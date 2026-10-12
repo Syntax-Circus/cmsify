@@ -47,6 +47,11 @@ public sealed class CmsifyDbContext : DbContext
     public DbSet<EmbeddedMedia.PhotoOperationReceiptRecord> PhotoOperationReceipts => Set<EmbeddedMedia.PhotoOperationReceiptRecord>();
 
     public DbSet<MediaDeletionIntent> MediaDeletionIntents => Set<MediaDeletionIntent>();
+    public DbSet<EmbeddedFiles.FileUploadSessionRecord> FileUploadSessions => Set<EmbeddedFiles.FileUploadSessionRecord>();
+    public DbSet<EmbeddedFiles.FileReferenceSetRecord> FileReferenceSets => Set<EmbeddedFiles.FileReferenceSetRecord>();
+    public DbSet<EmbeddedFiles.FileReferenceEntryRecord> FileReferenceEntries => Set<EmbeddedFiles.FileReferenceEntryRecord>();
+    public DbSet<EmbeddedFiles.FileUploadAttemptRecord> FileUploadAttempts => Set<EmbeddedFiles.FileUploadAttemptRecord>();
+    public DbSet<EmbeddedFiles.FileUploadReceiptRecord> FileUploadReceipts => Set<EmbeddedFiles.FileUploadReceiptRecord>();
 
     public DbSet<MediaReconciliationCheckpoint> MediaReconciliationCheckpoints => Set<MediaReconciliationCheckpoint>();
 
@@ -95,6 +100,8 @@ public sealed class CmsifyDbContext : DbContext
             EmbeddedMedia.EmbeddedPhotoConfiguration.Ignore(modelBuilder);
         ProviderModel.Configure(modelBuilder);
         Configurations.CmsifyModelComparers.Configure(modelBuilder);
+        if (Database.IsNpgsql()) EmbeddedFiles.EmbeddedFileModelConfiguration.Configure(modelBuilder);
+        else EmbeddedFiles.EmbeddedFileModelConfiguration.Ignore(modelBuilder);
     }
 
     private ICmsifyProviderModel ProviderModel => Database.ProviderName switch
@@ -107,12 +114,19 @@ public sealed class CmsifyDbContext : DbContext
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ProviderModel.PrepareChanges(ChangeTracker);
+        GuardFileReceipts();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         ProviderModel.PrepareChanges(ChangeTracker);
+        GuardFileReceipts();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+    private void GuardFileReceipts()
+    {
+        if (ChangeTracker.Entries<EmbeddedFiles.FileUploadReceiptRecord>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Embedded file receipts are immutable.");
     }
 }

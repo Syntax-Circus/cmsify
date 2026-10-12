@@ -7,6 +7,7 @@ using Cmsify.Core.Media;
 using System.Globalization;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
+using Cmsify.Infrastructure.Persistence.Repositories;
 using Cmsify.Infrastructure.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,7 +25,6 @@ namespace Cmsify.Api.Controllers;
 [RequireRole(UserRole.Reader)]
 public sealed class MediaController : ControllerBase
 {
-    private const string EmbeddedPhotoStoragePrefix = "cmsify/media/photos/";
     private static readonly string[] DefaultAllowedMimeTypes =
     [
         "image/",
@@ -134,9 +134,7 @@ public sealed class MediaController : ControllerBase
 
         var query = dbContext.MediaAssets.AsNoTracking().Where(asset =>
             asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
-        query = query.Where(asset => !dbContext.PhotoUploadSessions.Any(session => session.AssetId == asset.Id) &&
-            !asset.StorageKey.ToLower().StartsWith(EmbeddedPhotoStoragePrefix) &&
-            !asset.StorageKey.Contains("//") && !asset.StorageKey.Contains("\\"));
+        query=query.GenericMedia(dbContext);
         if (!string.IsNullOrWhiteSpace(mimeType))
         {
             query = query.Where(asset => asset.MimeType.StartsWith(mimeType));
@@ -262,9 +260,7 @@ public sealed class MediaController : ControllerBase
 
         var query = dbContext.MediaAssets.Where(asset =>
             asset.Id == id && asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
-        query = query.Where(asset => !dbContext.PhotoUploadSessions.Any(session => session.AssetId == asset.Id) &&
-            !asset.StorageKey.ToLower().StartsWith(EmbeddedPhotoStoragePrefix) &&
-            !asset.StorageKey.Contains("//") && !asset.StorageKey.Contains("\\"));
+        query=query.GenericMedia(dbContext);
         return await (tracking ? query : query.AsNoTracking()).FirstOrDefaultAsync(ct);
     }
 

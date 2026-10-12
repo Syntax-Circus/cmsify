@@ -10,6 +10,9 @@ internal static class EmbeddedPhotoFences
     {
         if (!db.Database.IsNpgsql()) return null;
         return await db.PhotoOriginals.Where(x => x.StorageProvider == provider && x.StorageKey == key).Select(x => (Guid?)x.AssetId).FirstOrDefaultAsync(ct)
+            ?? await db.FileUploadReceipts.Where(x=>x.StorageProvider==provider && x.StorageKey==key).Select(x=>(Guid?)x.AssetId).FirstOrDefaultAsync(ct)
+            ?? await db.FileUploadAttempts.Where(x=>x.StorageProvider==provider && x.StorageKey==key)
+                .Join(db.FileUploadSessions,x=>x.SessionId,x=>x.Id,(attempt,session)=>(Guid?)session.AssetId).FirstOrDefaultAsync(ct)
             ?? await db.PhotoVariants.Where(x => x.StorageProvider == provider && x.StorageKey == key).Select(x => (Guid?)x.AssetId).FirstOrDefaultAsync(ct)
             ?? await db.PhotoUploadAttempts.Where(x => x.StorageProvider == provider && x.StorageKey == key)
                 .Join(db.PhotoUploadSessions, x => x.SessionId, x => x.Id, (attempt, session) => (Guid?)session.AssetId).FirstOrDefaultAsync(ct)
@@ -38,6 +41,7 @@ internal static class EmbeddedPhotoFences
             : Task.FromResult(false);
     private static async Task<bool> ProtectedPhotoAsync(CmsifyDbContext db, Guid asset, CancellationToken ct) =>
         await db.PhotoIntakeRetentions.AnyAsync(hold => hold.AssetId == asset, ct) ||
+        await db.FileReferenceEntries.AnyAsync(entry=>entry.AssetId==asset && db.FileReferenceSets.Any(set=>set.Id==entry.ReferenceSetId && set.State==Core.EmbeddedFiles.EmbeddedFileReferenceState.Protected),ct) ||
         await db.MediaReferenceEntries.AnyAsync(entry => entry.AssetId == asset &&
                 db.MediaReferenceSets.Any(set => set.Id == entry.ReferenceSetId && set.State == EmbeddedMediaReferenceState.Protected), ct);
     internal static Task<List<Guid>> ContentReferencesAsync(CmsifyDbContext db, Guid asset, bool includeRecovery, CancellationToken ct) =>

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.16] - 2026-10-12
+
+### Added
+
+- Optional PostgreSQL embedded PDF upload intents, fenced byte writes, immutable receipts, scoped streaming reads and durable consumer reference protection. Files default disabled and require explicit host authorization and retention guards; photo processing is independent.
+- Exact PDF byte/digest replay and actual process-death qualification on Windows and Linux, including private package-only consumers.
+
+### Fixed
+
+- Exclude private embedded-file custody and malformed/provider-key aliases from generic media access, creation and deletion. Reauthorize loaded reference members on replay, outcome lookup and release.
+- Prevent completed uploads from starving bounded cleanup and use a common asset lock order for reference/retirement operations.
+
+### Deferred
+
+- PDF rendering/sanitization, completed-original garbage collection, new embedded-file SQLite support and downstream host document features remain outside this release.
+
 ## [0.8.15] - 2026-10-11
 
 ### Fixed

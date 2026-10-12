@@ -4,6 +4,7 @@ using Cmsify.Core.EmbeddedMedia;
 using Cmsify.Core.Media;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence.EmbeddedMedia;
+using Cmsify.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SyntaxCircus.Common;
@@ -20,6 +21,8 @@ public sealed class MediaAssetDeletionRepository(CmsifyDbContext db, IOptions<Me
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
         var asset = await EmbeddedPhotoFences.LockAssetAsync(db, request.AssetId, cancellationToken);
         if (asset is null || asset.WorkspaceId != request.WorkspaceId || asset.IsDeleted || asset.BlobState != MediaBlobState.Available) return Missing();
+        if (MediaStorageKeys.IsFile(asset.StorageKey) || !MediaStorageKeys.IsCanonical(asset.StorageKey) ||
+            !await db.MediaAssets.IgnoreQueryFilters().FileUnowned(db).AnyAsync(x=>x.Id==asset.Id,cancellationToken))return Missing();
         if (request.ExpectedRevision is null || request.ExpectedRevision != asset.UpdatedAt.UtcTicks / TimeSpan.TicksPerMicrosecond &&
             request.ExpectedRevision != asset.UpdatedAt.UtcTicks)
             return Result<MediaAssetDeletionOutcome>.Failure(new("concurrency-mismatch", "Concurrency mismatch", ResultErrorKind.Conflict));

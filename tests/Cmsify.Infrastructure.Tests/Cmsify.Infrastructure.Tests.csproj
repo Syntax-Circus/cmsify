@@ -12,6 +12,7 @@
     <Compile Remove="Fixtures\SqliteUpgrade\**\*.cs" />
     <ProjectReference Include="..\Cmsify.Sqlite.MigrationProbe\Cmsify.Sqlite.MigrationProbe.csproj" />
     <ProjectReference Include="..\Cmsify.Photo.CrashHost\Cmsify.Photo.CrashHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Cmsify.File.CrashHost\Cmsify.File.CrashHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Cmsify.Infrastructure\Cmsify.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Cmsify.Infrastructure.Sqlite\Cmsify.Infrastructure.Sqlite.csproj" />
   </ItemGroup>

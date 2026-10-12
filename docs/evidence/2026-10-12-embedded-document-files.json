@@ -1,0 +1,95 @@
+{
+  "date": "2026-10-12",
+  "scope": "Generic PDF upload/read/reference prerequisite; private candidate only",
+  "sourceCommit": "3078a81ea0651f8b5e41c534d2d925314f3cd75e",
+  "baseCommit": "9f11f086a60dee27d0ff4adf93de5a550e55e1c0",
+  "sourceFiles": 967,
+  "sourceManifestDifferences": 0,
+  "manualUntrackedEngineFiles": 0,
+  "sourceManifestSha256": "3afa5c3ffe23016a1069418f403236eda153cf17175e13eff83aabfb4aca225d",
+  "source": [
+    {
+      "platform": "Windows",
+      "sdk": "10.0.401",
+      "passed": 2039,
+      "failed": 0,
+      "skipped": 0,
+      "duration": "24m35.596s",
+      "buildWarnings": 0,
+      "buildErrors": 0,
+      "evidence": "artifacts/file-source/windows-a74048feb63a4daa80841555b486ccec",
+      "evidenceSha256": "00f161aa29410c5c8fc7705aae8941e7e73c4e799a1d83c2e49e161c2862207c",
+      "testsLogSha256": "ac30e9c2aa72865bc8a9ff7ef90d3d3bf031532989928db16bd2c8a1a9803813"
+    },
+    {
+      "platform": "Linux",
+      "sdk": "10.0.400",
+      "image": "mcr.microsoft.com/dotnet/sdk@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c",
+      "passed": 2039,
+      "failed": 0,
+      "skipped": 0,
+      "duration": "26m23.698s",
+      "buildWarnings": 0,
+      "buildErrors": 0,
+      "evidence": "artifacts/file-source/linux-299442faa7e3499394fe834ce63d9131",
+      "evidenceSha256": "20099005a52f442f420ab6f102a7589792549995027f81df108aeb6fbc4a474a",
+      "testsLogSha256": "9a0f56089687d4ade97f8d8a57a62f91f1154c98c5950ed47bdee0104c7e26f9"
+    }
+  ],
+  "candidate": {
+    "version": "0.8.16-documents.1",
+    "publicPackages": false,
+    "platforms": [
+      "Windows",
+      "Linux"
+    ],
+    "passed": true,
+    "evidence": "artifacts/file-qualification/0.8.16-documents.1-2621a1c7b6f54c5588376fbb6b1ee8c5",
+    "evidenceSha256": "883955b2c308a86765f9ec874cb05a81dd7e97c510a3201ec155fcf7b7f4dde0",
+    "assemblyMeasurementSha256": "c8d25b83a2e8548f8c93505e708a31daec5ff8b01fb260f8da36f4d43fad979f",
+    "windowsRuntime": "10.0.12",
+    "linuxRuntime": "10.0.11",
+    "buildWarnings": 0,
+    "buildErrors": 0,
+    "postgresVersion": "17.10",
+    "packagedMigrations": 25,
+    "packageOnlyGraphs": true,
+    "fixtureCleanupVerified": true,
+    "crashBoundaries": [
+      "before-store",
+      "after-store",
+      "after-receipt"
+    ],
+    "archives": [
+      {
+        "id": "SyntaxCircus.Cmsify.Core",
+        "sha256": "f23d6ea20600f4f2a56ac6194767759956c6b7d58865b1ccfbe586d6e43647a2",
+        "assembly": "lib/net10.0/Cmsify.Core.dll",
+        "assemblySha256": "f3b3935d5de1be5a2c0e0b13c1416db35e824cf0c611a8c840cb8e911e813952"
+      },
+      {
+        "id": "SyntaxCircus.Cmsify.Infrastructure",
+        "sha256": "7d954768cb8a71124b46fcaec945a44cd4ab71de4392cc1610815e6a8b96ef03",
+        "assembly": "lib/net10.0/Cmsify.Infrastructure.dll",
+        "assemblySha256": "1ebec22735feac49f511b58fcd6ad86ec1ba6a80ca3fcd67074f2f8973bea9d6",
+        "coreDependency": "0.8.16-documents.1"
+      }
+    ]
+  },
+  "review": {
+    "critical": 0,
+    "important": 5,
+    "fixedImportant": 5,
+    "deferredMinors": [
+      "Runner does not automatically reject untracked engine files; actual candidate manually checked.",
+      "Guide says 1–20MiB instead of positive bytes up to20MiB plus signature."
+    ]
+  },
+  "limitations": [
+    "No public release/product adoption/deployment.",
+    "No new embedded-file SQLite support.",
+    "PDF identification preserves bytes; no active-content safety/rendering claim.",
+    "Completed originals remain retained after reference release.",
+    "Earlier SQLite failure did not recur; root cause unknown, no flakiness-elimination claim."
+  ]
+}

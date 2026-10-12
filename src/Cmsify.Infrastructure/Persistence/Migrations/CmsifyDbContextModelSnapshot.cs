@@ -2302,6 +2302,327 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                     b.ToTable("embedded_template_registrations", (string)null);
                 });
 
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileReferenceEntryRecord", b =>
+                {
+                    b.Property<Guid>("ReferenceSetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reference_set_id");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer")
+                        .HasColumnName("ordinal");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_id");
+
+                    b.Property<long>("Length")
+                        .HasColumnType("bigint")
+                        .HasColumnName("length");
+
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<string>("SourceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("source_sha256");
+
+                    b.HasKey("ReferenceSetId", "Ordinal")
+                        .HasName("pk_embedded_file_reference_entries");
+
+                    b.HasIndex("ReceiptId", "AssetId")
+                        .HasDatabaseName("ix_embedded_file_reference_entries_receipt_id_asset_id");
+
+                    b.HasIndex("ReferenceSetId", "AssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_reference_entries_reference_set_id_asset_id");
+
+                    b.ToTable("embedded_file_reference_entries", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileReferenceSetRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ConsumerNamespace")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("consumer_namespace");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<Guid>("OperationKey")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operation_key");
+
+                    b.Property<int>("ProtectionRevision")
+                        .HasColumnType("integer")
+                        .HasColumnName("protection_revision");
+
+                    b.Property<Guid>("ReferenceKey")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reference_key");
+
+                    b.Property<Guid?>("ReleaseOperationKey")
+                        .HasColumnType("uuid")
+                        .HasColumnName("release_operation_key");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer")
+                        .HasColumnName("state");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_embedded_file_reference_sets");
+
+                    b.HasIndex("WorkspaceId", "ConsumerNamespace", "OperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_reference_sets_workspace_id_consumer_namespac");
+
+                    b.HasIndex("WorkspaceId", "ConsumerNamespace", "ReferenceKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_reference_sets_workspace_id_consumer_namespac1");
+
+                    b.HasIndex("WorkspaceId", "ConsumerNamespace", "ReleaseOperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_reference_sets_workspace_id_consumer_namespac2");
+
+                    b.ToTable("embedded_file_reference_sets", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadAttemptRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("RetiredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retired_at");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("storage_key");
+
+                    b.Property<string>("StorageProvider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("storage_provider");
+
+                    b.HasKey("Id")
+                        .HasName("pk_embedded_file_upload_attempts");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_embedded_file_upload_attempts_session_id");
+
+                    b.HasIndex("StorageProvider", "StorageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_upload_attempts_storage_provider_storage_key");
+
+                    b.ToTable("embedded_file_upload_attempts", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadReceiptRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_id");
+
+                    b.Property<string>("ConsumerNamespace")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("consumer_namespace");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("Length")
+                        .HasColumnType("bigint")
+                        .HasColumnName("length");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("SourceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("source_sha256");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("storage_key");
+
+                    b.Property<string>("StorageProvider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("storage_provider");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_embedded_file_upload_receipts");
+
+                    b.HasAlternateKey("Id", "AssetId")
+                        .HasName("ak_embedded_file_upload_receipts_id_asset_id");
+
+                    b.HasIndex("AssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_upload_receipts_asset_id");
+
+                    b.HasIndex("SessionId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_upload_receipts_session_id");
+
+                    b.HasIndex("SessionId", "WorkspaceId", "AssetId")
+                        .HasDatabaseName("ix_embedded_file_upload_receipts_session_id_workspace_id_asset");
+
+                    b.ToTable("embedded_file_upload_receipts", (string)null);
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadSessionRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_id");
+
+                    b.Property<string>("ConsumerNamespace")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("consumer_namespace");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("DeclaredLength")
+                        .HasColumnType("bigint")
+                        .HasColumnName("declared_length");
+
+                    b.Property<string>("DisplayFileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("display_file_name");
+
+                    b.Property<string>("ExpectedSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("expected_sha256");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("failure_code");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<Guid>("OperationKey")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operation_key");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer")
+                        .HasColumnName("state");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.Property<Guid?>("WriteOperationKey")
+                        .HasColumnType("uuid")
+                        .HasColumnName("write_operation_key");
+
+                    b.HasKey("Id")
+                        .HasName("pk_embedded_file_upload_sessions");
+
+                    b.HasAlternateKey("Id", "WorkspaceId", "AssetId")
+                        .HasName("ak_embedded_file_upload_sessions_id_workspace_id_asset_id");
+
+                    b.HasIndex("AssetId")
+                        .HasDatabaseName("ix_embedded_file_upload_sessions_asset_id");
+
+                    b.HasIndex("WorkspaceId", "AssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_upload_sessions_workspace_id_asset_id");
+
+                    b.HasIndex("WorkspaceId", "ConsumerNamespace", "OperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_embedded_file_upload_sessions_workspace_id_consumer_namespa");
+
+                    b.ToTable("embedded_file_upload_sessions", (string)null);
+                });
+
             modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedMedia.MediaReferenceEntryRecord", b =>
                 {
                     b.Property<Guid>("ReferenceSetId")
@@ -3559,6 +3880,72 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_embedded_template_registrations_workspaces_workspace_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileReferenceEntryRecord", b =>
+                {
+                    b.HasOne("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileReferenceSetRecord", null)
+                        .WithMany()
+                        .HasForeignKey("ReferenceSetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_file_reference_entries_embedded_file_reference_set");
+
+                    b.HasOne("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadReceiptRecord", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiptId", "AssetId")
+                        .HasPrincipalKey("Id", "AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_file_reference_entries_embedded_file_upload_receip");
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileReferenceSetRecord", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.Workspace", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_file_reference_sets_workspaces_workspace_id");
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadAttemptRecord", b =>
+                {
+                    b.HasOne("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadSessionRecord", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_file_upload_attempts_embedded_file_upload_sessions");
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadReceiptRecord", b =>
+                {
+                    b.HasOne("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadSessionRecord", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId", "WorkspaceId", "AssetId")
+                        .HasPrincipalKey("Id", "WorkspaceId", "AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_file_upload_receipts_embedded_file_upload_sessions");
+                });
+
+            modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedFiles.FileUploadSessionRecord", b =>
+                {
+                    b.HasOne("Cmsify.Core.Domain.Entities.MediaAsset", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_file_upload_sessions_media_assets_asset_id");
+
+                    b.HasOne("Cmsify.Core.Domain.Entities.Workspace", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_embedded_file_upload_sessions_workspaces_workspace_id");
                 });
 
             modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedMedia.MediaReferenceEntryRecord", b =>

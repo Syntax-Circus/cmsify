@@ -1,5 +1,9 @@
 # Reusable model packages
 
+Engine NuGet consumers can opt into [embedded PDF files](embedded-files.md) on
+PostgreSQL. Their private candidate qualification and public release gates are
+separate from the reusable content-model packages described here.
+
 Cmsify packages (`.ctp` files) are portable JSON bundles for sharing reusable content models. Publish a package file in a Git repository or release asset; an operator downloads it and imports it in **Settings → Packages**. Cmsify does not fetch remote repositories directly.
 
 ## What a package can contain

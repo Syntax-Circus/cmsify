@@ -31,6 +31,8 @@ internal sealed class PostgresMediaReconciliationQueries(CmsifyDbContext dbConte
             WHERE blob_state = 'PendingUpload' AND blob_state_changed_at <= {cutoff} AND NOT is_deleted
               AND NOT EXISTS (
                   SELECT 1 FROM embedded_photo_upload_sessions photo WHERE photo.asset_id = media_assets.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM embedded_file_upload_sessions file WHERE file.asset_id = media_assets.id)
             ORDER BY blob_state_changed_at, id
             FOR UPDATE SKIP LOCKED
             LIMIT {limit}

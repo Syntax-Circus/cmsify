@@ -16,6 +16,7 @@ GUIDES = (
     "authentication-and-authorization.md",
     "integrating.md",
     "embedded-content.md",
+    "embedded-files.md",
     "engine-packages.md",
     "integrations/embedded-sqlite.md",
     "content-modeling.md",

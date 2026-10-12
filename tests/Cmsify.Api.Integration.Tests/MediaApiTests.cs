@@ -208,21 +208,38 @@ public sealed class MediaApiTests : IAsyncLifetime
         }
     }
 
-    [Fact]
-    public async Task WorkspaceApiClientCannotDiscoverOrReadEmbeddedPhotoOriginal()
+    [Theory]
+    [InlineData("cmsify/media/photos/",false)]
+    [InlineData("cmsify/media/files/",false)]
+    [InlineData("CMSIFY/MEDIA/FILES/",false)]
+    [InlineData("cmsify/media//files/",false)]
+    [InlineData("cmsify\\media\\files\\",false)]
+    [InlineData("ordinary/",true)]
+    [InlineData("cmsify/media/./files/",false)]
+    [InlineData("./cmsify/media/files/",false)]
+    [InlineData("ordinary-alias/",true)]
+    public async Task WorkspaceApiClientCannotDiscoverOrReadEmbeddedOriginal(string prefix,bool fileSession)
     {
         var storage = new TestStorageProvider();
         await using var factory = CreateFactory(storage); using var client = factory.CreateClient();
         var workspaceId = await SeedApiClientAsync(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiToken);
-        Guid id;
+        Guid id;string revision;
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
             var photo = NewAsset(workspaceId, "private-phone.heic", MediaBlobState.Available);
-            photo.StorageKey = $"cmsify/media/photos/{workspaceId:N}/{photo.Id:N}/original";
+            photo.StorageKey = $"{prefix}{workspaceId:N}/{photo.Id:N}/original";
             storage.ReadResults[photo.StorageKey] = [1,2,3];
-            db.MediaAssets.Add(photo); await db.SaveChangesAsync(TestContext.Current.CancellationToken); id = photo.Id;
+            db.MediaAssets.Add(photo);
+            if(fileSession)db.FileUploadSessions.Add(new() { Id=Guid.NewGuid(),WorkspaceId=workspaceId,AssetId=photo.Id,ActorId=Guid.NewGuid(),OperationKey=Guid.NewGuid(),ConsumerNamespace="test",Fingerprint=new string('a',64),DisplayFileName="test.pdf",DeclaredLength=3,ExpectedSha256=new string('b',64),CreatedAt=DateTimeOffset.UtcNow });
+            if(prefix=="ordinary-alias/")
+            {
+                var alias=NewAsset(workspaceId,"alias.pdf",MediaBlobState.Available);alias.StorageKey=photo.StorageKey;
+                db.MediaAssets.Add(alias);photo=alias;
+            }
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken); id = photo.Id;
+            revision=$"\"{photo.UpdatedAt.UtcTicks/TimeSpan.TicksPerMicrosecond}\"";
         }
         var file = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media/{id}/file", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, file.StatusCode); Assert.Null(storage.LastReadStream);
@@ -231,6 +248,12 @@ public sealed class MediaApiTests : IAsyncLifetime
         var list = await client.GetAsync($"/api/v1/workspaces/{workspaceId}/media", TestContext.Current.CancellationToken);
         list.EnsureSuccessStatusCode();
         Assert.DoesNotContain(id.ToString(), await list.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        if(!prefix.Contains("photos",StringComparison.Ordinal))
+        {
+            using var delete=new HttpRequestMessage(HttpMethod.Delete,$"/api/v1/workspaces/{workspaceId}/media/{id}");
+            delete.Headers.TryAddWithoutValidation("If-Match",revision);
+            Assert.Equal(HttpStatusCode.NotFound,(await client.SendAsync(delete,TestContext.Current.CancellationToken)).StatusCode);
+        }
     }
 
     [Fact]
