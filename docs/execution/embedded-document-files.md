@@ -171,3 +171,11 @@ tags, because they are unrelated owner state (cost: those tags remain divergent)
 Prepare dated changelog and enable generic-file cases in the existing release
 package-consumer step before promotion. The release environment requires a
 reviewer other than the run initiator; preserve that existing gate.
+
+Integration PR130 opened from release-preparation fcd7bfd. Documentation CI
+observed RED: packages.md links embedded-files.md, but the staging allowlist did
+not copy the new guide. Add the guide to staging/navigation; strict MkDocs build
+is the regression gate. No application behavior or qualified engine bytes change.
+GREEN: existing staging3/3 and strict MkDocs build pass with pinned Material9.7.7
+in isolated artifacts/docs-release-venv. Release YAML parses and the generic-file
+pre-promotion flag is verified. No shared Python environment/package pins changed.
