@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Cmsify.Core.Workspaces;
 using Cmsify.Core.ContentQueries;
 using Cmsify.Core.ContentWrites;
+using Cmsify.Core.Media;
 using Cmsify.Infrastructure.Persistence.ContentQueries;
 using Cmsify.Infrastructure.Persistence.ContentWrites;
 
@@ -23,6 +24,11 @@ namespace Cmsify.Infrastructure.Extensions;
 
 public static class ServiceCollectionExtensions
 {
+    internal static string? RegisteredDatabaseProvider(IServiceCollection services) =>
+        (services.FirstOrDefault(x => x.ServiceType == typeof(InfrastructureRegistration))?.ImplementationInstance as InfrastructureRegistration)?.ProviderName;
+    internal static string RegisteredStorageProvider(IServiceCollection services) =>
+        ((services.First(x => x.ServiceType == typeof(InfrastructureRegistration)).ImplementationInstance as InfrastructureRegistration)!
+            .Settings.FirstOrDefault(x => string.Equals(x.Key, "Storage:Provider", StringComparison.OrdinalIgnoreCase)).Value ?? "local").ToLowerInvariant();
     public static IServiceCollection AddCmsifyInfrastructure(this IServiceCollection services, IConfiguration configuration)
         => services.AddCmsifyInfrastructure(configuration, new CmsifyInfrastructureOptions());
 
@@ -131,6 +137,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITemplateRepository, TemplateRepository>();
         services.AddScoped<ITemplateVersionRepository, TemplateVersionRepository>();
         services.AddScoped<IMediaAssetRepository, MediaAssetRepository>();
+        services.AddScoped<IMediaAssetDeletionRepository, MediaAssetDeletionRepository>();
+        services.AddScoped<IDeleteMediaAssetRequestHandler, DeleteMediaAssetRequestHandler>();
         services.AddScoped<ITagRepository, TagRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IApiClientRepository, ApiClientRepository>();

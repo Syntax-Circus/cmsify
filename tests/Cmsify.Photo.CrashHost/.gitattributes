@@ -1,0 +1,2 @@
+# Normalize the generated dependency lock in Git without hand-editing its JSON.
+packages.lock.json text eol=lf

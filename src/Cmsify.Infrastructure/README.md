@@ -1,5 +1,12 @@
 # SyntaxCircus.Cmsify.Infrastructure
 
+`AddCmsifyEmbeddedPhotos` separately opts into the PostgreSQL photo foundation.
+Photo features and processing default disabled; missing host capability and
+resource grants fail closed. Readiness performs no migrations or repair.
+SQLite registration fails explicitly. No native decoder is installed, and local
+synthetic package qualification does not establish phone/HDR/native safety.
+See the [embedded photo guide](https://github.com/Syntax-Circus/cmsify/blob/main/docs/embedded-photo-media.md).
+
 Cmsify's existing `Cmsify.Infrastructure` assembly packaged for .NET 10 hosts. Namespaces remain `Cmsify.Infrastructure.*`. The matching `SyntaxCircus.Cmsify.Core` package is a transitive dependency.
 
 Includes PostgreSQL persistence and migrations, repositories, storage registration, audit interception and the existing background services. `AddCmsifyInfrastructure(configuration)` retains PostgreSQL and all Cmsify workers as its defaults. Hosts can use the existing `CmsifyInfrastructureOptions` to select workers and opt into their own scoped `ICurrentActor` for audit.

@@ -76,7 +76,7 @@ try {
     // Empty local feed deliberately yields NU1101 when an engine package is absent.
     if (existsSync(join(packages, file))) copyFileSync(join(packages, file), join(feed, file));
   }
-  for (const sqlite of [false, true]) {
+  for (const sqlite of args.includes('--postgres-only') ? [false] : [false, true]) {
   const consumerFixture = sqlite ? `${fixture}-sqlite` : fixture;
   const project = sqlite ? 'SqliteEngineConsumer.csproj' : 'EngineConsumer.csproj';
   consumerDirectory = join(staging, sqlite ? 'sqlite' : 'postgres');
@@ -85,7 +85,10 @@ try {
   copyFileSync(join(consumerFixture, 'Program.cs'), join(consumerDirectory, 'Program.cs'));
   copyFileSync(join(fixture, 'ContentQueryQualification.cs'), join(consumerDirectory, 'ContentQueryQualification.cs'));
   copyFileSync(join(fixture, 'WorkspaceVisibilityQualification.cs'), join(consumerDirectory, 'WorkspaceVisibilityQualification.cs'));
-  if (!sqlite) copyFileSync(join(fixture, 'EmbeddedContentQualification.cs'), join(consumerDirectory, 'EmbeddedContentQualification.cs'));
+  if (!sqlite) {
+    for (const file of ['EmbeddedContentQualification.cs', 'EmbeddedPhotoQualification.cs', 'UploadOnlyPhotoQualification.cs', 'EmbeddedPhotoHttpAdapter.cs', 'PhotoConsumerRetentionStore.cs'])
+      copyFileSync(join(fixture, file), join(consumerDirectory, file));
+  }
   writeFileSync(join(consumerDirectory, project),
     readFileSync(join(consumerFixture, project), 'utf8').replaceAll('__PACKAGE_VERSION__', version));
   writeFileSync(join(consumerDirectory, 'NuGet.Config'), `<?xml version="1.0" encoding="utf-8"?>

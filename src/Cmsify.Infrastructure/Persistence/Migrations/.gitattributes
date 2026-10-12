@@ -1,0 +1,2 @@
+# EF generates Windows CRLF; retain existing migration bytes and check real trailing spaces.
+*.cs whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

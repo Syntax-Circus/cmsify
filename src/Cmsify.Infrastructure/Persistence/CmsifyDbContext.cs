@@ -32,6 +32,19 @@ public sealed class CmsifyDbContext : DbContext
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
 
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
+    public DbSet<EmbeddedMedia.PhotoUploadSessionRecord> PhotoUploadSessions => Set<EmbeddedMedia.PhotoUploadSessionRecord>();
+    public DbSet<EmbeddedMedia.PhotoUploadAttemptRecord> PhotoUploadAttempts => Set<EmbeddedMedia.PhotoUploadAttemptRecord>();
+    public DbSet<EmbeddedMedia.PhotoOriginalRecord> PhotoOriginals => Set<EmbeddedMedia.PhotoOriginalRecord>();
+    public DbSet<EmbeddedMedia.PhotoUploadReceiptRecord> PhotoUploadReceipts => Set<EmbeddedMedia.PhotoUploadReceiptRecord>();
+    internal DbSet<EmbeddedMedia.PhotoIntakeRetentionRecord> PhotoIntakeRetentions => Set<EmbeddedMedia.PhotoIntakeRetentionRecord>();
+    public DbSet<EmbeddedMedia.PhotoRevisionRecord> PhotoRevisions => Set<EmbeddedMedia.PhotoRevisionRecord>();
+    public DbSet<EmbeddedMedia.PhotoJobRecord> PhotoJobs => Set<EmbeddedMedia.PhotoJobRecord>();
+    public DbSet<EmbeddedMedia.PhotoProcessingAttemptRecord> PhotoProcessingAttempts => Set<EmbeddedMedia.PhotoProcessingAttemptRecord>();
+    public DbSet<EmbeddedMedia.PhotoManifestRecord> PhotoManifests => Set<EmbeddedMedia.PhotoManifestRecord>();
+    public DbSet<EmbeddedMedia.PhotoVariantRecord> PhotoVariants => Set<EmbeddedMedia.PhotoVariantRecord>();
+    public DbSet<EmbeddedMedia.MediaReferenceSetRecord> MediaReferenceSets => Set<EmbeddedMedia.MediaReferenceSetRecord>();
+    public DbSet<EmbeddedMedia.MediaReferenceEntryRecord> MediaReferenceEntries => Set<EmbeddedMedia.MediaReferenceEntryRecord>();
+    public DbSet<EmbeddedMedia.PhotoOperationReceiptRecord> PhotoOperationReceipts => Set<EmbeddedMedia.PhotoOperationReceiptRecord>();
 
     public DbSet<MediaDeletionIntent> MediaDeletionIntents => Set<MediaDeletionIntent>();
 
@@ -76,6 +89,10 @@ public sealed class CmsifyDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(CmsifyDbContext).Assembly);
+        if (Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            EmbeddedMedia.EmbeddedPhotoConfiguration.Configure(modelBuilder);
+        else
+            EmbeddedMedia.EmbeddedPhotoConfiguration.Ignore(modelBuilder);
         ProviderModel.Configure(modelBuilder);
         Configurations.CmsifyModelComparers.Configure(modelBuilder);
     }

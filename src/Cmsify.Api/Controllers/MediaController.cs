@@ -3,6 +3,8 @@ using Cmsify.Api.Auth;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Services;
+using Cmsify.Core.Media;
+using System.Globalization;
 using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Storage;
@@ -22,6 +24,7 @@ namespace Cmsify.Api.Controllers;
 [RequireRole(UserRole.Reader)]
 public sealed class MediaController : ControllerBase
 {
+    private const string EmbeddedPhotoStoragePrefix = "cmsify/media/photos/";
     private static readonly string[] DefaultAllowedMimeTypes =
     [
         "image/",
@@ -131,6 +134,9 @@ public sealed class MediaController : ControllerBase
 
         var query = dbContext.MediaAssets.AsNoTracking().Where(asset =>
             asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
+        query = query.Where(asset => !dbContext.PhotoUploadSessions.Any(session => session.AssetId == asset.Id) &&
+            !asset.StorageKey.ToLower().StartsWith(EmbeddedPhotoStoragePrefix) &&
+            !asset.StorageKey.Contains("//") && !asset.StorageKey.Contains("\\"));
         if (!string.IsNullOrWhiteSpace(mimeType))
         {
             query = query.Where(asset => asset.MimeType.StartsWith(mimeType));
@@ -218,49 +224,30 @@ public sealed class MediaController : ControllerBase
 
     [HttpDelete("{id:guid}")]
     [RequireRole(UserRole.Editor)]
-    public async Task<IActionResult> Delete(Guid workspaceId, Guid id, CancellationToken ct)
+    public async Task<IActionResult> Delete(Guid workspaceId, Guid id, [FromServices] IDeleteMediaAssetRequestHandler handler, CancellationToken ct)
     {
-        var asset = await FindAssetAsync(workspaceId, id, requireWrite: true, tracking: true, ct);
-        if (asset is null)
+        var header = Request.Headers.IfMatch.ToString();
+        long? revision = null;
+        if (header.Length > 2 && header[0] == '"' && header[^1] == '"' &&
+            long.TryParse(header.AsSpan(1, header.Length - 2), NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) &&
+            header == $"\"{parsed.ToString(CultureInfo.InvariantCulture)}\"") revision = parsed;
+        var result = await handler.HandleAsync(new(workspaceId, id, revision), ct);
+        if (result.IsSuccess)
+            return result.Value.Deleted ? NoContent() :
+                this.Error(StatusCodes.Status409Conflict, "referenced-by-other-entity", "Media asset is referenced by content",
+                    extensions: new Dictionary<string, object?> { ["referencedBy"] = result.Value.ReferencedBy });
+        var error = result.Errors[0];
+        if (error.Code == "not-found") return NotFound();
+        if (error.Code == "concurrency-mismatch")
+            return this.Error(StatusCodes.Status412PreconditionFailed, error.Code, "Concurrency mismatch");
+        var status = error.Kind switch
         {
-            return NotFound();
-        }
-
-        if (!this.IfMatchMatches(asset.UpdatedAt))
-        {
-            return this.Error(StatusCodes.Status412PreconditionFailed, "concurrency-mismatch", "Concurrency mismatch");
-        }
-
-        var referencedBy = await dbContext.ContentVersionFieldValues.AsNoTracking()
-            .Where(value => value.MediaAssetId == id || value.FileAssetId == id)
-            .Join(dbContext.ContentVersions.AsNoTracking(), value => value.ContentVersionId, version => version.Id, (value, version) => version.ContentItemId)
-            .Where(contentItemId => dbContext.ContentItems.Any(content => content.Id == contentItemId && !content.IsDeleted))
-            .Distinct()
-            .ToListAsync(ct);
-        if (referencedBy.Count > 0)
-        {
-            return this.Error(StatusCodes.Status409Conflict, "referenced-by-other-entity", "Media asset is referenced by content", extensions: new Dictionary<string, object?> { ["referencedBy"] = referencedBy });
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        var purgeAfter = now.AddDays(mediaOperations.RetentionDays);
-        asset.TransitionBlobState(MediaBlobState.DeletePending, now, purgeAfter);
-        asset.IsDeleted = true;
-        asset.DeletedAt = now;
-        asset.DeletedByUserId = currentActor.UserId;
-        asset.UpdatedAt = now;
-        dbContext.MediaDeletionIntents.Add(new MediaDeletionIntent
-        {
-            MediaAssetId = asset.Id,
-            Provider = asset.StorageProvider,
-            StorageKey = asset.StorageKey,
-            Reason = "user_delete",
-            NotBefore = purgeAfter,
-            NextAttemptAt = purgeAfter,
-            CreatedAt = now
-        });
-        await dbContext.SaveChangesAsync(ct);
-        return NoContent();
+            SyntaxCircus.Common.ResultErrorKind.Unauthenticated => StatusCodes.Status401Unauthorized,
+            SyntaxCircus.Common.ResultErrorKind.Forbidden => StatusCodes.Status403Forbidden,
+            SyntaxCircus.Common.ResultErrorKind.Validation => StatusCodes.Status400BadRequest,
+            _ => StatusCodes.Status409Conflict
+        };
+        return this.Error(status, error.Code, error.Message);
     }
 
     private async Task<MediaAsset?> FindAssetAsync(Guid workspaceId, Guid id, bool requireWrite, bool tracking, CancellationToken ct)
@@ -275,6 +262,9 @@ public sealed class MediaController : ControllerBase
 
         var query = dbContext.MediaAssets.Where(asset =>
             asset.Id == id && asset.WorkspaceId == workspaceId && !asset.IsDeleted && asset.BlobState == MediaBlobState.Available);
+        query = query.Where(asset => !dbContext.PhotoUploadSessions.Any(session => session.AssetId == asset.Id) &&
+            !asset.StorageKey.ToLower().StartsWith(EmbeddedPhotoStoragePrefix) &&
+            !asset.StorageKey.Contains("//") && !asset.StorageKey.Contains("\\"));
         return await (tracking ? query : query.AsNoTracking()).FirstOrDefaultAsync(ct);
     }
 

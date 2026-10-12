@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-10-11
+
+### Fixed
+
+- Include the photo crash-recovery helper in the solution so a clean Release solution build produces the executable required by the process-kill tests. The 0.8.14 certification failed before promotion; no 0.8.14 release assets were published. This release includes the embedded photo foundation and upload-only changes described below.
+
+## [0.8.14] - 2026-10-11
+
+### Added
+
+- Optional PostgreSQL embedded photo contracts for private streaming originals, fenced upload receipts, immutable revisions/manifests, durable processing orchestration and retained consumer references. No image decoder is installed; native processing requires separate host qualification.
+- Explicit upload-only mode with independent schema/storage readiness, pinned source SHA-256, operation-key lookup for lost acknowledgements, and an atomic durable intake hold protecting acknowledged originals from logical and physical deletion. Upload-only completion is AwaitingProcessing with no processor version, manifest or processing job.
+
+### Changed
+
+- Photo options default off; upload-only requires processing disabled. Host subject, workspace and fresh exact-resource authority remain required. Generic media reads and discovery exclude photo-owned objects.
+- Windows/Linux package-only consumers cover private HTTP intake, digest mismatch, lost Begin/completion acknowledgements, byte-exact original recovery and a child-process kill after receipt commit. Synthetic processing fixtures do not qualify actual phone images or native isolation.
+
+### Deferred
+
+- Native decoding, phone/HDR acceptance, gallery publication and release of upload-only intake holds remain outside this release.
+
 ## [0.8.13] - 2026-10-08
 
 ### Added

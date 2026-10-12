@@ -3,10 +3,12 @@ using Cmsify.Core.Domain.Enums;
 using Cmsify.Core.Interfaces.Repositories;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.BackgroundServices;
+using Cmsify.Infrastructure.Persistence.EmbeddedMedia;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using SyntaxCircus.Storage;
+using Cmsify.Infrastructure.Storage;
 
 namespace Cmsify.Infrastructure.Persistence.Repositories;
 
@@ -37,12 +39,14 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
 
     public async Task<MediaAssetDto?> GetAsync(Guid id, CancellationToken ct = default) =>
         (await dbContext.MediaAssets.AsNoTracking()
+            .GenericMedia(dbContext)
             .Where(asset => asset.BlobState == MediaBlobState.Available)
             .ScopeToActorWorkspace(currentActor)
             .FirstOrDefaultAsync(asset => asset.Id == id, ct))?.ToDto();
 
     public Task<PagedResult<MediaAssetDto>> ListByWorkspaceAsync(Guid workspaceId, PageRequest page, CancellationToken ct = default) =>
         dbContext.MediaAssets.AsNoTracking()
+            .GenericMedia(dbContext)
             .Where(asset => asset.WorkspaceId == workspaceId && asset.BlobState == MediaBlobState.Available)
             .ScopeToActorWorkspace(currentActor)
             .OrderBy(asset => asset.FileName)
@@ -50,6 +54,10 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
 
     public async Task<MediaAssetDto> CreateAsync(CreateMediaAssetCommand command, CancellationToken ct = default)
     {
+        if (!MediaStorageKeys.IsCanonical(command.StorageKey))
+            throw new InvalidOperationException("Media storage keys must be canonical relative paths.");
+        if (MediaStorageKeys.IsPhoto(command.StorageKey))
+            throw new InvalidOperationException("Photo storage keys are reserved for the embedded photo foundation.");
         if (!string.Equals(command.StorageProvider, providerName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Media storage provider does not match the configured provider.");
@@ -97,10 +105,15 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
 
     public async Task SoftDeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(ct);
+        await EmbeddedPhotoFences.LockAssetAsync(dbContext, id, ct);
         var entity = await dbContext.MediaAssets
             .Where(asset => asset.BlobState == MediaBlobState.Available)
             .ScopeToActorWorkspace(currentActor)
             .FirstAsync(asset => asset.Id == id, ct);
+        if (await EmbeddedPhotoFences.ProtectedAsync(dbContext, id, ct) ||
+            (await EmbeddedPhotoFences.ContentReferencesAsync(dbContext, id, false, ct)).Count > 0)
+            throw new InvalidOperationException("Media is retained by content or a consumer reference.");
         var now = timeProvider.GetUtcNow();
         var purgeAfter = now.AddDays(mediaOperations.RetentionDays);
         entity.TransitionBlobState(MediaBlobState.DeletePending, now, purgeAfter);
@@ -119,5 +132,6 @@ public sealed class MediaAssetRepository : IMediaAssetRepository
             CreatedAt = now
         });
         await dbContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 }
