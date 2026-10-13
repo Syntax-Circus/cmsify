@@ -39,6 +39,7 @@ public sealed class PhotoUploadAttemptRecord
 }
 public sealed class PhotoOriginalRecord
 {
+    public int? ProcessingEnrollmentRevision { get; set; }
     public Guid AssetId { get; set; }
     public Guid WorkspaceId { get; set; }
     public Guid SessionId { get; set; }

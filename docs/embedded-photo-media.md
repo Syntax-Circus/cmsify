@@ -56,11 +56,33 @@ configuration or native safety; establish those during host setup/qualification.
 
 ## Private upload-only composition
 
+The enrollment amendment adds `IEnrollEmbeddedPhotoUploadRequestHandler` for
+acknowledged upload-only originals. Bind workspace/asset, upload receipt, original
+SHA256, expected latest revision, operation key and processing policy. It creates
+the next processing revision/job atomically without replacing the original or its
+upload receipt, original revision or intake retention hold. Same-key replay returns
+the original result; changed intent or a competing enrollment conflicts. A normal
+revision request still rejects an unenrolled upload-only asset.
+
+Upload-only intake and processing can coexist when both are explicitly enabled.
+New uploads remain AwaitingProcessing until enrollment. The host still supplies
+the processor/capability and narrowly scoped worker authority. Keep storage/intake
+readiness independent of decoder availability.
+
+Use `IGetEmbeddedPhotoOperationOutcomeRequestHandler` to recover enrollment/retry
+acknowledgements without writing. Its workspace/asset/operation-key/kind lookup
+returns the immutable operation result, which can say Queued even when current
+status is Ready. Read current status separately. Only enrollment/retry kinds are
+accepted, with fresh read authority; foreign keys do not reveal another asset.
+Apply the additive `AddPhotoProcessingEnrollment` migration before adoption.
+These are source amendment contracts; public0.8.16 does not export them.
+
 A host can accept opaque private originals before qualifying a processor. Register
 its current subject/resource authority and CMS infrastructure with `CmsifyWorkers.None`,
 then use `AddCmsifyEmbeddedPhotos(o => { o.Enabled = true; o.UploadOnlyEnabled = true; })`.
-Leave `ProcessingEnabled` false and register no processor or capability. Upload-only
-requires Enabled and rejects ProcessingEnabled; it defaults off.
+For intake alone, leave `ProcessingEnabled` false and register no processor or capability.
+Upload-only requires Enabled and defaults off; the amendment permits explicit
+ProcessingEnabled coexistence when a host supplies processing capability.
 
 Apply all packaged migrations, including AddUploadOnlyPhotoIntake,
 PinPhotoUploadSourceDigest and AddPhotoIntakeRetention.
@@ -78,8 +100,9 @@ It uses fresh ReadUploadOutcome authority for the exact asset. A denied or uncer
 lookup must not be interpreted as permission to restart.
 
 Begin persists the mode. Later settings do not enroll the original in processing.
-Revision creation also rejects persisted upload-only originals, even if a capability
-is registered later; explicit enrollment and hold reconciliation remain deferred.
+Revision creation rejects unenrolled upload-only originals even if a capability
+is registered later. Use the explicit enrollment contract above; hold release
+remains deferred and enrollment preserves the existing intake hold.
 Upload-only completion atomically commits original, immutable receipt, initial
 revision and an internal durable intake hold. The revision is AwaitingProcessing
 (value 5), ProcessorVersion is null, and no job/manifest exists. Existing enum values

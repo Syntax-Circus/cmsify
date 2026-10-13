@@ -20,6 +20,8 @@ public interface IEmbeddedPhotoUploadRepository
 }
 public interface IEmbeddedPhotoProcessingRepository
 {
+    Task<Result<EmbeddedPhotoStatus>> EnrollAsync(EnrollEmbeddedPhotoUploadRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
+    Task<Result<EmbeddedPhotoStatus>> GetOperationOutcomeAsync(GetEmbeddedPhotoOperationOutcomeRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
     Task<Result<EmbeddedPhotoStatus>> GetAsync(GetEmbeddedPhotoRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
     Task<Result<EmbeddedPhotoStatus>> CreateRevisionAsync(CreateEmbeddedPhotoRevisionRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
     Task<Result<EmbeddedPhotoStatus>> RetryAsync(RetryEmbeddedPhotoProcessingRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);

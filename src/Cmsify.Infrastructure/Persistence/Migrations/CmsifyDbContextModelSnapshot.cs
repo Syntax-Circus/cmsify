@@ -2991,6 +2991,10 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("metadata_json");
 
+                    b.Property<int?>("ProcessingEnrollmentRevision")
+                        .HasColumnType("integer")
+                        .HasColumnName("processing_enrollment_revision");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid")
                         .HasColumnName("session_id");
@@ -3029,8 +3033,13 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_embedded_photo_originals_storage_provider_storage_key");
 
+                    b.HasIndex("AssetId", "ProcessingEnrollmentRevision", "WorkspaceId")
+                        .HasDatabaseName("ix_embedded_photo_originals_asset_id_processing_enrollment_rev");
+
                     b.ToTable("embedded_photo_originals", null, t =>
                         {
+                            t.HasCheckConstraint("ck_photo_enrollment_revision", "processing_enrollment_revision IS NULL OR processing_enrollment_revision > 1");
+
                             t.HasCheckConstraint("ck_photo_original_length", "length > 0 AND length <= 20971520");
                         });
                 });
@@ -4045,6 +4054,13 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_embedded_photo_originals_embedded_photo_upload_sessions_ses");
+
+                    b.HasOne("Cmsify.Infrastructure.Persistence.EmbeddedMedia.PhotoRevisionRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId", "ProcessingEnrollmentRevision", "WorkspaceId")
+                        .HasPrincipalKey("AssetId", "Revision", "WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_embedded_photo_originals_photo_revisions_asset_id_processin");
                 });
 
             modelBuilder.Entity("Cmsify.Infrastructure.Persistence.EmbeddedMedia.PhotoProcessingAttemptRecord", b =>

@@ -45,13 +45,20 @@ internal static class EmbeddedPhotoConfiguration
         Storage(upload);
 
         var original = model.Entity<PhotoOriginalRecord>();
-        original.ToTable("embedded_photo_originals", t => t.HasCheckConstraint("ck_photo_original_length", "length > 0 AND length <= 20971520"));
+        original.ToTable("embedded_photo_originals", t =>
+        {
+            t.HasCheckConstraint("ck_photo_original_length", "length > 0 AND length <= 20971520");
+            t.HasCheckConstraint("ck_photo_enrollment_revision", "processing_enrollment_revision IS NULL OR processing_enrollment_revision > 1");
+        });
         original.HasKey(x => x.AssetId);
         original.HasIndex(x => new { x.StorageProvider, x.StorageKey }).IsUnique();
         original.HasOne<PhotoUploadSessionRecord>().WithMany().HasForeignKey(x => new { x.SessionId, x.WorkspaceId })
             .HasPrincipalKey(x => new { x.Id, x.WorkspaceId }).OnDelete(DeleteBehavior.Restrict);
         original.Property(x => x.SourceSha256).HasColumnType("char(64)");
         original.Property(x => x.MetadataJson).HasColumnType("jsonb");
+        original.HasOne<PhotoRevisionRecord>().WithMany()
+            .HasForeignKey(x => new { x.AssetId, x.ProcessingEnrollmentRevision, x.WorkspaceId })
+            .HasPrincipalKey(x => new { x.AssetId, x.Revision, x.WorkspaceId }).OnDelete(DeleteBehavior.Restrict);
         Storage(original);
         Asset(original);
 
@@ -78,7 +85,8 @@ internal static class EmbeddedPhotoConfiguration
         revision.ToTable("embedded_photo_revisions", t => t.HasCheckConstraint("ck_photo_revision_instruction",
             "revision > 0 AND quarter_turns_clockwise BETWEEN 0 AND 3 AND retry_generation >= 0"));
         revision.HasKey(x => new { x.AssetId, x.Revision });
-        revision.HasAlternateKey(x => new { x.AssetId, x.Revision, x.WorkspaceId });
+        revision.HasAlternateKey(x => new { x.AssetId, x.Revision, x.WorkspaceId })
+            .HasName("ak_embedded_photo_revisions_asset_id_revision_workspace_id");
         revision.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
         revision.Property(x => x.SourceSha256).HasColumnType("char(64)");
         Identity(revision);
