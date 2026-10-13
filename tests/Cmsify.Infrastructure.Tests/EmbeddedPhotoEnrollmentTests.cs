@@ -20,6 +20,52 @@ public sealed class EmbeddedPhotoEnrollmentTests
     private static CancellationToken Ct => EmbeddedPhotoFixture.Ct;
 
     [Fact]
+    public async Task UploadReadinessAllowsProcessingWithoutRequiringDecoderCapability()
+    {
+        await using var f = await EmbeddedPhotoProcessingFixture.Create();
+        f.Settings.UploadOnlyEnabled = true;
+        f.Capability.Available = false;
+        await using var db = f.Context();
+        var storage = new LocalFileStorageProvider(Options.Create(new LocalStorageOptions { RootPath = f.Root }));
+        var readiness = await new EmbeddedPhotoUploadReadiness(db, storage, Options.Create(f.Settings)).CheckAsync(Ct);
+        readiness.Reasons.ShouldBeEmpty();
+        readiness.Ready.ShouldBeTrue();
+        await f.Upload();
+        (await db.PhotoJobs.CountAsync(Ct)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task RetryOutcomeAndReplayRemainQueuedAfterReadyWithoutWrites()
+    {
+        await using var f = await EmbeddedPhotoProcessingFixture.Create();
+        var asset = await f.Upload();
+        for (var i = 0; i < 3; i++)
+        {
+            await using var failedDb = f.Context();
+            await f.Worker(failedDb, new EmbeddedPhotoProcessingFixture.FailingProcessor()).ProcessNextAsync(f.ActorId, Ct);
+            f.Time.Now += TimeSpan.FromSeconds(i == 0 ? 5 : 30);
+        }
+        await using var db = f.Context();
+        var repository = f.Repository(db);
+        var request = new RetryEmbeddedPhotoProcessingRequest(f.WorkspaceId, asset, 1, Guid.NewGuid(), 0);
+        var retry = await repository.RetryAsync(request, f.ActorId, EmbeddedPhotoProcessingFixture.Permit, Ct);
+        retry.IsSuccess.ShouldBeTrue();
+        await using (var workerDb = f.Context())
+            (await f.Worker(workerDb, new EmbeddedPhotoProcessingFixture.CandidateProcessor()).ProcessNextAsync(f.ActorId, Ct)).ShouldBeTrue();
+        (await repository.GetAsync(new(f.WorkspaceId, asset, 1), f.ActorId, EmbeddedPhotoProcessingFixture.Permit, Ct)).Value.State.ShouldBe(EmbeddedPhotoState.Ready);
+        var query = new GetEmbeddedPhotoOperationOutcomeRequest(f.WorkspaceId, asset, request.OperationKey, EmbeddedPhotoOperationKind.Retry);
+        (await repository.GetOperationOutcomeAsync(query, f.ActorId, EmbeddedPhotoProcessingFixture.Permit, Ct)).Value.ShouldBe(retry.Value);
+        retry.Value.State.ShouldBe(EmbeddedPhotoState.Queued);
+        (await repository.RetryAsync(request, f.ActorId, EmbeddedPhotoProcessingFixture.Permit, Ct)).Value.ShouldBe(retry.Value);
+        (await repository.GetOperationOutcomeAsync(query with { AssetId = Guid.NewGuid() }, f.ActorId, EmbeddedPhotoProcessingFixture.Permit, Ct)).Errors[0].Kind.ShouldBe(ResultErrorKind.NotFound);
+        (await repository.GetOperationOutcomeAsync(query with { Kind = EmbeddedPhotoOperationKind.EnrollUpload }, f.ActorId, EmbeddedPhotoProcessingFixture.Permit, Ct)).Errors[0].Kind.ShouldBe(ResultErrorKind.NotFound);
+        (await db.PhotoRevisions.CountAsync(Ct)).ShouldBe(1);
+        (await db.PhotoJobs.CountAsync(Ct)).ShouldBe(1);
+        (await db.PhotoOperationReceipts.CountAsync(Ct)).ShouldBe(1);
+        (await db.PhotoManifests.CountAsync(Ct)).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task PopulatedUploadOnlySchemaUpgradesWithoutChangingOriginalProof()
     {
         await using var f = await EmbeddedPhotoFixture.Create("20261012163607_AddEmbeddedFileReferences");

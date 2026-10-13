@@ -16,7 +16,6 @@ public sealed class EmbeddedPhotoUploadReadiness(CmsifyDbContext db, IStoragePro
         var reasons = new List<string>();
         if (!options.Value.Enabled) reasons.Add("disabled");
         if (!options.Value.UploadOnlyEnabled) reasons.Add("upload-only-disabled");
-        if (options.Value.ProcessingEnabled) reasons.Add("processing-enabled");
         if (string.IsNullOrWhiteSpace(options.Value.PolicyId) || options.Value.PolicyId.Length > 100) reasons.Add("policy-unavailable");
         if (!db.Database.IsNpgsql()) reasons.Add("unsupported-provider");
         else
