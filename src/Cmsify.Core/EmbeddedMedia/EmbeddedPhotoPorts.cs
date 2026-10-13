@@ -20,8 +20,18 @@ public interface IEmbeddedPhotoUploadRepository
 }
 public interface IEmbeddedPhotoProcessingRepository
 {
-    Task<Result<EmbeddedPhotoStatus>> EnrollAsync(EnrollEmbeddedPhotoUploadRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
-    Task<Result<EmbeddedPhotoStatus>> GetOperationOutcomeAsync(GetEmbeddedPhotoOperationOutcomeRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
+    // Additive defaults preserve custom repository implementations from earlier packages.
+    // A provider must explicitly implement enrollment/outcome lookup to support them.
+    Task<Result<EmbeddedPhotoStatus>> EnrollAsync(EnrollEmbeddedPhotoUploadRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Result<EmbeddedPhotoStatus>.Failure(new(EmbeddedPhotoErrors.Unavailable, "Enrollment is not supported by this repository.", ResultErrorKind.Conflict)));
+    }
+    Task<Result<EmbeddedPhotoStatus>> GetOperationOutcomeAsync(GetEmbeddedPhotoOperationOutcomeRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Result<EmbeddedPhotoStatus>.Failure(new(EmbeddedPhotoErrors.Unavailable, "Operation lookup is not supported by this repository.", ResultErrorKind.Conflict)));
+    }
     Task<Result<EmbeddedPhotoStatus>> GetAsync(GetEmbeddedPhotoRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
     Task<Result<EmbeddedPhotoStatus>> CreateRevisionAsync(CreateEmbeddedPhotoRevisionRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);
     Task<Result<EmbeddedPhotoStatus>> RetryAsync(RetryEmbeddedPhotoProcessingRequest request, Guid actorId, Func<EmbeddedPhotoOperation, CancellationToken, Task<bool>> authorize, CancellationToken cancellationToken);

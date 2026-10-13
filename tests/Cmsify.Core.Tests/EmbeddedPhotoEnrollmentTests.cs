@@ -12,6 +12,14 @@ public sealed class EmbeddedPhotoEnrollmentTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task ExistingCustomProcessingRepositoriesRemainSourceCompatible()
+    {
+        IEmbeddedPhotoProcessingRepository repository = new LegacyRepository();
+        var request = new EnrollEmbeddedPhotoUploadRequest(Guid.NewGuid(),Guid.NewGuid(),Guid.NewGuid(),new string('a',64),1,Guid.NewGuid(),"test-policy");
+        (await repository.EnrollAsync(request,Guid.NewGuid(),(_,_)=>Task.FromResult(true),Ct)).Errors[0].Code.ShouldBe(EmbeddedPhotoErrors.Unavailable);
+    }
+
+    [Fact]
     public async Task EnrollmentRequiresExactResourceAndFreshSubject()
     {
         var repository = Substitute.For<IEmbeddedPhotoProcessingRepository>();
@@ -83,5 +91,13 @@ public sealed class EmbeddedPhotoEnrollmentTests
         public Guid? WorkspaceId => null;
         public bool IsAuthenticated => true;
         public bool IsSuperAdmin => false;
+    }
+
+    private sealed class LegacyRepository : IEmbeddedPhotoProcessingRepository
+    {
+        public Task<Result<EmbeddedPhotoStatus>> GetAsync(GetEmbeddedPhotoRequest request,Guid actor,Func<EmbeddedPhotoOperation,CancellationToken,Task<bool>> authorize,CancellationToken ct) => throw new NotImplementedException();
+        public Task<Result<EmbeddedPhotoStatus>> CreateRevisionAsync(CreateEmbeddedPhotoRevisionRequest request,Guid actor,Func<EmbeddedPhotoOperation,CancellationToken,Task<bool>> authorize,CancellationToken ct) => throw new NotImplementedException();
+        public Task<Result<EmbeddedPhotoStatus>> RetryAsync(RetryEmbeddedPhotoProcessingRequest request,Guid actor,Func<EmbeddedPhotoOperation,CancellationToken,Task<bool>> authorize,CancellationToken ct) => throw new NotImplementedException();
+        public Task<Result<EmbeddedPhotoManifest>> GetManifestAsync(GetEmbeddedPhotoManifestRequest request,Guid actor,Func<EmbeddedPhotoOperation,CancellationToken,Task<bool>> authorize,CancellationToken ct) => throw new NotImplementedException();
     }
 }
