@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.17] - 2026-10-13
+
+### Added
+
+- Explicit processing enrollment of acknowledged upload-only photo originals, preserving original bytes, receipts, initial revisions and intake retention. A nullable enrollment marker and revision constraint support existing PostgreSQL upload-only data.
+- Fresh-authorized, read-only immutable enrollment/retry outcome lookup for lost acknowledgements, including recovery after the processing revision becomes Ready.
+
+### Fixed
+
+- Allow upload-only intake and processing to coexist without automatically enqueueing newly uploaded originals. Upload readiness remains independent of processor availability.
+- Preserve custom processing repository compatibility through default unavailable implementations of the added enrollment/outcome operations.
+
+### Deferred
+
+- Native decoding, downstream processing UI, public galleries and release of intake holds remain host responsibilities or later work. Package consumers qualify synthetic processing orchestration only.
+
 ## [0.8.16] - 2026-10-12
 
 ### Added
