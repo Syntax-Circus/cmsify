@@ -16,7 +16,7 @@ internal sealed record StoredPhotoVariant(EmbeddedPhotoVariantDescriptor Descrip
 internal sealed record StoredPhotoManifest(EmbeddedPhotoSourceMetadata Metadata, IReadOnlyList<StoredPhotoVariant> Variants);
 internal sealed record PhotoProcessingFailure(bool Deterministic, string Code);
 
-public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, EmbeddedPhotoStorage storage,
+public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, EmbeddedPhotoStorage storage,
     IOptions<EmbeddedPhotoOptions> options, IEmbeddedPhotoProcessorCapability capability,
     IEmbeddedPhotoProcessingAuthorization jobAuthorization, TimeProvider clock, EmbeddedPhotoQueueCursor? queueCursor = null) : IEmbeddedPhotoProcessingRepository
 {
@@ -71,9 +71,11 @@ public sealed class EmbeddedPhotoProcessingRepository(CmsifyDbContext db, Embedd
             return await authorize(operation, cancellationToken) ? Replay(prior, fingerprint) : Denied<EmbeddedPhotoStatus>();
         if (asset.BlobState != MediaBlobState.Available) return NotReady<EmbeddedPhotoStatus>();
         // Persisted intake is not eligible for processing enrollment through rotation.
-        // A future explicit enrollment design must reconcile the durable intake hold.
+        // Only explicit enrollment can move an upload-only original into processing.
         if (await db.PhotoUploadSessions.AnyAsync(x => x.AssetId == request.AssetId &&
-            x.WorkspaceId == request.WorkspaceId && x.UploadOnly, cancellationToken))
+            x.WorkspaceId == request.WorkspaceId && x.UploadOnly, cancellationToken) &&
+            !await db.PhotoOriginals.AnyAsync(x => x.AssetId == request.AssetId && x.WorkspaceId == request.WorkspaceId &&
+                x.ProcessingEnrollmentRevision != null, cancellationToken))
             return NotReady<EmbeddedPhotoStatus>();
         var available = await capability.GetAsync(cancellationToken);
         if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId || Settings.PolicyId != request.PolicyId)

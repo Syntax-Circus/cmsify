@@ -1,10 +1,14 @@
 [CmdletBinding()]
-param([ValidateSet('Windows','Linux')][string]$Platform='Windows')
+param(
+    [ValidateSet('Windows','Linux')][string]$Platform='Windows',
+    [ValidatePattern('^mcr\.microsoft\.com/dotnet/sdk@sha256:[a-f0-9]{64}$')]
+    [string]$SdkImage='mcr.microsoft.com/dotnet/sdk@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c'
+)
 $ErrorActionPreference='Stop'
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $destination=Join-Path $repo ('artifacts/file-source/'+$Platform.ToLowerInvariant()+'-'+[Guid]::NewGuid().ToString('N'))
 $snapshot=Join-Path $destination 'source'
-$image='mcr.microsoft.com/dotnet/sdk@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c'
+$image=$SdkImage
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 Set-Location $repo
 $files=@(& rtk proxy git ls-files --cached --others --exclude-standard)

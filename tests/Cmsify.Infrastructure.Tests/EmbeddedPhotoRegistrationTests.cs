@@ -21,12 +21,24 @@ public sealed class EmbeddedPhotoRegistrationTests
 {
     [Theory]
     [InlineData(false, false)]
-    [InlineData(true, true)]
     public void ConflictingUploadOnlyOptionsReject(bool enabled, bool processing)
     {
         var services = Services();
         Should.Throw<ArgumentException>(() => services.AddCmsifyEmbeddedPhotos(o =>
         { o.Enabled = enabled; o.UploadOnlyEnabled = true; o.ProcessingEnabled = processing; }));
+    }
+
+    [Fact]
+    public void UploadOnlyIntakeAndProcessingCanCoexistWithOneWorker()
+    {
+        var services = Services();
+        services.AddCmsifyEmbeddedPhotos(o => { o.Enabled = true; o.UploadOnlyEnabled = true; o.ProcessingEnabled = true; });
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<EmbeddedPhotoOptions>>().Value;
+        options.UploadOnlyEnabled.ShouldBeTrue(); options.ProcessingEnabled.ShouldBeTrue();
+        services.Count(x => x.ServiceType == typeof(IHostedService) && x.ImplementationType == typeof(EmbeddedPhotoProcessingService)).ShouldBe(1);
+        provider.GetRequiredService<IEnrollEmbeddedPhotoUploadRequestHandler>().ShouldNotBeNull();
+        provider.GetRequiredService<IGetEmbeddedPhotoOperationOutcomeRequestHandler>().ShouldNotBeNull();
     }
 
     [Fact]

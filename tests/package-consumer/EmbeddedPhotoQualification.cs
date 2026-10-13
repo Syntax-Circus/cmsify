@@ -154,9 +154,51 @@ internal static class EmbeddedPhotoQualification
                 var receipt = Value(await handler.HandleAsync(request, ct)).ReleaseReceipt;
                 Require(receipt is not null && Value(await handler.HandleAsync(request, ct)).ReleaseReceipt == receipt, "Terminal release replay differs.");
             }
+            await UploadOnlyEnrollment(app.Services, workspace, subjectId, ct);
             Console.WriteLine("PASS PHOTO authenticated HTTP streaming, receipt recovery/no resend, ready discovery, immutable rotation, private/public authority, durable pending/retired retention, terminal replay. SYNTHETIC ONLY.");
         }
         finally { await app.StopAsync(CancellationToken.None); }
+    }
+    private static async Task UploadOnlyEnrollment(IServiceProvider services, Guid workspace, Guid actor, CancellationToken ct)
+    {
+        var asset = Guid.NewGuid(); var key = Guid.NewGuid();
+        var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmbeddedPhotoOptions>>().Value;
+        // Disposable consumer mode switch: qualify old intake without rebuilding application services.
+        var previous = options.UploadOnlyEnabled; options.UploadOnlyEnabled = true;
+        try
+        {
+            await using var scope = services.CreateAsyncScope(); var p = scope.ServiceProvider;
+            var subject = p.GetRequiredService<Subject>(); subject.Workspace = workspace; subject.Asset = asset; subject.UserId = actor;
+            var digest = Convert.ToHexString(SHA256.HashData([1,2,3]));
+            var begun = Value(await p.GetRequiredService<IBeginEmbeddedPhotoUploadRequestHandler>()
+                .HandleAsync(new(workspace, asset, Guid.NewGuid(), "old-original.png", 3, options.PolicyId) { ExpectedSourceSha256 = digest }, ct));
+            var uploaded = Value(await p.GetRequiredService<IWriteEmbeddedPhotoUploadRequestHandler>()
+                .HandleAsync(new(workspace, begun.SessionId, Guid.NewGuid(), new Bytes([1,2,3])), ct));
+            var receipt = uploaded.Receipt!;
+            var db = p.GetRequiredService<CmsifyDbContext>();
+            Require(!await db.PhotoJobs.AnyAsync(x => x.AssetId == asset, ct), "Upload-only intake was automatically queued.");
+            var enrollment = new EnrollEmbeddedPhotoUploadRequest(workspace, asset, receipt.ReceiptId, receipt.SourceSha256, 1, key, options.PolicyId);
+            var handler = p.GetRequiredService<IEnrollEmbeddedPhotoUploadRequestHandler>();
+            var queued = Value(await handler.HandleAsync(enrollment, ct));
+            Require(queued.Revision == 2 && queued.State == EmbeddedPhotoState.Queued, "Enrollment did not create revision2.");
+            Require(Value(await handler.HandleAsync(enrollment, ct)) == queued, "Enrollment replay changed result.");
+            Require((await handler.HandleAsync(enrollment with { SourceSha256 = new string('a',64) }, ct)).IsFailure, "Changed enrollment proof replayed.");
+            Value(await p.GetRequiredService<IGetEmbeddedPhotoOperationOutcomeRequestHandler>()
+                .HandleAsync(new(workspace, asset, key, EmbeddedPhotoOperationKind.EnrollUpload), ct));
+            Require(await db.PhotoJobs.CountAsync(x => x.AssetId == asset, ct) == 1, "Enrollment duplicated jobs.");
+            var sink = new Sink();
+            Value(await p.GetRequiredService<IReadEmbeddedPhotoOriginalRequestHandler>().HandleAsync(new(workspace, asset, sink), ct));
+            Require(sink.Length == 3, "Original changed during enrollment.");
+            Require(await p.GetRequiredService<IProcessEmbeddedPhotoQueueRequestHandler>().HandleAsync(new(), ct), "Enrolled work was not processed.");
+            var ready = Value(await p.GetRequiredService<IGetEmbeddedPhotoRequestHandler>().HandleAsync(new(workspace, asset, 2), ct));
+            Require(ready.State == EmbeddedPhotoState.Ready, "Enrolled revision was not Ready.");
+            var outcome = Value(await p.GetRequiredService<IGetEmbeddedPhotoOperationOutcomeRequestHandler>()
+                .HandleAsync(new(workspace, asset, key, EmbeddedPhotoOperationKind.EnrollUpload), ct));
+            Require(outcome == queued && Value(await handler.HandleAsync(enrollment, ct)) == queued, "Ready state replaced immutable enrollment outcome.");
+            Require((await db.PhotoRevisions.AsNoTracking().SingleAsync(x => x.AssetId == asset && x.Revision == 1, ct)).State == EmbeddedPhotoState.AwaitingProcessing, "Original history was rewritten.");
+            Console.WriteLine("PASS PHOTO upload-only enrollment/no resend, stable receipt/original/history, single queued revision, exact read-only outcome after Ready. SYNTHETIC ONLY.");
+        }
+        finally { options.UploadOnlyEnabled = previous; }
     }
     private static async Task UpgradeLegacyPhotos(IServiceProvider services, Guid workspace, Guid asset,
         Guid actor, Guid beginKey, Guid session, Guid receipt, CancellationToken ct)

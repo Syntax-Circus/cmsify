@@ -5,7 +5,7 @@ public enum EmbeddedPhotoUploadState { Pending, Active, Completed, Abandoned, Fa
 public enum EmbeddedMediaReferenceState { Protected, Released }
 public enum EmbeddedMediaRetentionDecision { ReleaseAllowed, Retain, Unknown }
 public enum EmbeddedPhotoReadKind { PrivatePreview, ConsumerReference }
-public enum EmbeddedPhotoOperationKind { BeginUpload, WriteUpload, ReadUploadOutcome, ReadStatus, CreateRevision, Retry, ReadManifest, Protect, ReadReferenceOutcome, Release, ReadOriginal, ReadVariant, Process }
+public enum EmbeddedPhotoOperationKind { BeginUpload, WriteUpload, ReadUploadOutcome, ReadStatus, CreateRevision, Retry, ReadManifest, Protect, ReadReferenceOutcome, Release, ReadOriginal, ReadVariant, Process, EnrollUpload, ReadOperationOutcome }
 public sealed record EmbeddedPhotoInstructions(int QuarterTurnsClockwise);
 public sealed record EmbeddedPhotoManifestIdentity(Guid AssetId, int Revision, string ManifestSha256);
 public sealed record EmbeddedPhotoVariantDescriptor(string VariantKey, string ContentType, int Width, int Height, long Length, string Sha256);
@@ -66,6 +66,8 @@ public sealed record GetEmbeddedPhotoUploadOutcomeRequest(Guid WorkspaceId, Guid
 public sealed record GetEmbeddedPhotoUploadIntentRequest(Guid WorkspaceId, Guid AssetId, Guid OperationKey);
 public sealed record GetEmbeddedPhotoRequest(Guid WorkspaceId, Guid AssetId, int Revision);
 public sealed record CreateEmbeddedPhotoRevisionRequest(Guid WorkspaceId, Guid AssetId, Guid OperationKey, int ExpectedLatestRevision, EmbeddedPhotoInstructions Instructions, string PolicyId);
+public sealed record EnrollEmbeddedPhotoUploadRequest(Guid WorkspaceId, Guid AssetId, Guid UploadReceiptId, string SourceSha256, int ExpectedLatestRevision, Guid OperationKey, string PolicyId);
+public sealed record GetEmbeddedPhotoOperationOutcomeRequest(Guid WorkspaceId, Guid AssetId, Guid OperationKey, EmbeddedPhotoOperationKind Kind);
 public sealed record RetryEmbeddedPhotoProcessingRequest(Guid WorkspaceId, Guid AssetId, int Revision, Guid OperationKey, int ExpectedRetryGeneration);
 public sealed record GetEmbeddedPhotoManifestRequest(Guid WorkspaceId, Guid AssetId, int Revision, string ManifestSha256);
 public sealed record ProtectEmbeddedMediaReferencesRequest(Guid WorkspaceId, string ConsumerNamespace, Guid ReferenceKey, Guid OperationKey, IReadOnlyList<EmbeddedPhotoManifestIdentity> Manifests);

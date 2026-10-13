@@ -25,7 +25,7 @@ public static class EmbeddedPhotoServiceCollectionExtensions
             settings.UploadLeaseDuration <= settings.UploadDeadline || settings.UploadLeaseDuration > EmbeddedPhotoOptions.MaxUploadLease ||
             settings.ProcessingLeaseDuration <= TimeSpan.FromSeconds(EmbeddedPhotoPolicy.DeadlineSeconds) ||
             settings.ProcessingLeaseDuration > EmbeddedPhotoOptions.MaxProcessingLease || settings.PollInterval < TimeSpan.FromSeconds(1) || settings.PollInterval > TimeSpan.FromMinutes(5) ||
-            settings.ProcessingEnabled && !settings.Enabled || settings.UploadOnlyEnabled && (!settings.Enabled || settings.ProcessingEnabled))
+            settings.ProcessingEnabled && !settings.Enabled || settings.UploadOnlyEnabled && !settings.Enabled)
             throw new ArgumentException("Invalid embedded photo options.", nameof(configure));
         var snapshot = new Registration(settings.Enabled, settings.ProcessingEnabled, settings.UploadOnlyEnabled, settings.PolicyId, settings.UploadLeaseDuration,
             settings.UploadDeadline, settings.ProcessingLeaseDuration, settings.PollInterval);
@@ -65,6 +65,8 @@ public static class EmbeddedPhotoServiceCollectionExtensions
         services.TryAddScoped<IGetEmbeddedPhotoUploadIntentRequestHandler, GetEmbeddedPhotoUploadIntentRequestHandler>();
         services.TryAddScoped<IGetEmbeddedPhotoRequestHandler, GetEmbeddedPhotoRequestHandler>();
         services.TryAddScoped<ICreateEmbeddedPhotoRevisionRequestHandler, CreateEmbeddedPhotoRevisionRequestHandler>();
+        services.TryAddScoped<IEnrollEmbeddedPhotoUploadRequestHandler, EnrollEmbeddedPhotoUploadRequestHandler>();
+        services.TryAddScoped<IGetEmbeddedPhotoOperationOutcomeRequestHandler, GetEmbeddedPhotoOperationOutcomeRequestHandler>();
         services.TryAddScoped<IRetryEmbeddedPhotoProcessingRequestHandler, RetryEmbeddedPhotoProcessingRequestHandler>();
         services.TryAddScoped<IGetEmbeddedPhotoManifestRequestHandler, GetEmbeddedPhotoManifestRequestHandler>();
         services.TryAddScoped<IProtectEmbeddedMediaReferencesRequestHandler, ProtectEmbeddedMediaReferencesRequestHandler>();

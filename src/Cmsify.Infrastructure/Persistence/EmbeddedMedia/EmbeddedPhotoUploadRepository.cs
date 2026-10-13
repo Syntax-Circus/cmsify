@@ -35,7 +35,7 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
             string.IsNullOrWhiteSpace(request.PolicyId) || request.PolicyId.Length > 100 ||
             request.ExpectedSourceSha256 is { } expected && !EmbeddedPhotoPolicy.IsSha256(expected))
             return Failure(EmbeddedPhotoErrors.Validation, ResultErrorKind.Validation);
-        if (Settings.PolicyId != request.PolicyId || Settings.UploadOnlyEnabled && Settings.ProcessingEnabled) return Unavailable();
+        if (Settings.PolicyId != request.PolicyId) return Unavailable();
         string? processorVersion = null;
         if (!Settings.UploadOnlyEnabled)
         {

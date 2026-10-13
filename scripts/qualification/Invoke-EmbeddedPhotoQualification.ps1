@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$PackageDirectory,
     [string]$DotnetPath = 'dotnet',
     [ValidateSet('Both', 'Windows', 'Linux')][string]$Platform = 'Both',
-    [switch]$PublicPackages
+    [switch]$PublicPackages,
+    [ValidateSet('10.0.400', '10.0.401')][string]$SdkVersion = '10.0.400'
 )
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -15,7 +16,7 @@ $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::
 $stage = [IO.Path]::GetFullPath((Join-Path $tempRoot ('cmsify-photo-qualification-' + [Guid]::NewGuid().ToString('N'))))
 $pg = 'cmsify-photo-pg-' + [Guid]::NewGuid().ToString('N')
 $network = 'cmsify-photo-network-' + [Guid]::NewGuid().ToString('N')
-$sdkImage = 'mcr.microsoft.com/dotnet/sdk:10.0.400'
+$sdkImage = "mcr.microsoft.com/dotnet/sdk:$SdkVersion"
 $password = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
 $connection = "Host=$pg;Database=cmsify_consumer;Username=cmsify;Password=$password"
 $operations = [Collections.Generic.List[object]]::new()
@@ -43,7 +44,7 @@ try {
     & git diff --quiet HEAD -- src/Cmsify.Core src/Cmsify.Infrastructure
     if ($LASTEXITCODE -ne 0) { throw 'Candidate engine source must be committed.' }
     $sdk = Invoke-Recorded $DotnetPath @('--version')
-    if ($sdk -notmatch '(?m)^10\.0\.400\s*$') { throw 'Qualification requires SDK10.0.400.' }
+    if ($sdk -notmatch ('(?m)^' + [regex]::Escape($SdkVersion) + '\s*$')) { throw "Qualification requires SDK$SdkVersion." }
     foreach ($project in @('Core','Infrastructure')) {
         if ($PublicPackages) {
             $id = "syntaxcircus.cmsify.$($project.ToLowerInvariant())"
