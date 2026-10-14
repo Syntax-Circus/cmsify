@@ -86,7 +86,7 @@ try {
   copyFileSync(join(fixture, 'ContentQueryQualification.cs'), join(consumerDirectory, 'ContentQueryQualification.cs'));
   copyFileSync(join(fixture, 'WorkspaceVisibilityQualification.cs'), join(consumerDirectory, 'WorkspaceVisibilityQualification.cs'));
   if (!sqlite) {
-    for (const file of ['EmbeddedContentQualification.cs', 'EmbeddedPhotoQualification.cs', 'UploadOnlyPhotoQualification.cs', 'EmbeddedPhotoHttpAdapter.cs', 'PhotoConsumerRetentionStore.cs', 'EmbeddedFileQualification.cs'])
+    for (const file of ['EmbeddedContentQualification.cs', 'EmbeddedJsonContentQualification.cs', 'EmbeddedPhotoQualification.cs', 'UploadOnlyPhotoQualification.cs', 'EmbeddedPhotoHttpAdapter.cs', 'PhotoConsumerRetentionStore.cs', 'EmbeddedFileQualification.cs'])
       copyFileSync(join(fixture, file), join(consumerDirectory, file));
   }
   writeFileSync(join(consumerDirectory, project),
