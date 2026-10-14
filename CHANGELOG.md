@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.18] - 2026-10-14
+
+### Added
+
+- Allow the existing non-searchable JSON format hint on closed embedded Text fields. Hosts can store versioned structured documents with separate searchable plaintext titles, preserving existing character limits, fingerprints, scoped authority and operation receipts. Hosts remain responsible for JSON structure and UTF-8 byte validation; plaintext search limits are unchanged.
+
+### Fixed
+
+- Apply the existing locked ASP.NET assets target to Admin accessibility qualification so SDK patch roll-forward does not invalidate the unchanged dependency lock.
+
 ## [0.8.17] - 2026-10-13
 
 ### Added

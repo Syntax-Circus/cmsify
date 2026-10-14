@@ -1,0 +1,48 @@
+{
+  "scope": "Closed embedded Text contracts accept the existing non-searchable json hint; host validation and existing guards remain required.",
+  "engineSourceCommit": "0e51b7e929e02eea50f05f2f18c6186c3c8a399a",
+  "baseCommit": "ac196e9d4c114ab48d8d991bf8454a596ef1fc0f",
+  "windows": {
+    "sdk": "10.0.401",
+    "lockedRestore": true,
+    "releaseBuildWarnings": 0,
+    "releaseBuildErrors": 0,
+    "passed": 2064,
+    "failed": 0,
+    "skipped": 0,
+    "duration": "25m18.059s",
+    "log": "artifacts/embedded-json-tests.log"
+  },
+  "linux": {
+    "sdk": "10.0.400",
+    "image": "mcr.microsoft.com/dotnet/sdk@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c",
+    "lockedRestore": true,
+    "releaseBuildWarnings": 0,
+    "releaseBuildErrors": 0,
+    "passed": 2064,
+    "failed": 0,
+    "skipped": 0,
+    "duration": "28m07.712s",
+    "sourceCount": 979,
+    "evidence": "artifacts/file-source/linux-cd6753686fa642b88b9968e4291d617c/evidence.json",
+    "laterChanges": "Accessibility workflow and changelog were changed independently; final reporting follows verification. Runtime source/tests/consumer fixtures matched the snapshot."
+  },
+  "packageConsumers": {
+    "candidateOnly": true,
+    "version": "0.8.18-site.1",
+    "platforms": ["Windows", "Linux"],
+    "sdk": "10.0.401",
+    "passed": true,
+    "documentBytes": 262144,
+    "shapes": ["repeated-word", "long-Unicode", "multiple-sections"],
+    "operations": ["create", "read", "update", "new-version", "receipt", "replay", "source-preservation", "title-only-index"],
+    "engineProjectReferences": false,
+    "coreSha256": "d3ca02fd3b885408512751112bb40609779c06e49a0a146ca07da74916a2c84c",
+    "infrastructureSha256": "075a992d8bcb5e36838c75d1bbf7584991ff0c311f8d30a0abb897fd6d2606c3",
+    "evidence": "artifacts/photo-qualification/0.8.18-site.1-fa14f069d7b2416eadde11dec671525d/evidence.json"
+  },
+  "review": { "critical": 0, "important": 0, "minor": 0, "scope": "Independent read-only amendment review; executor verified external test gates." },
+  "publicRelease": false,
+  "downstreamAdoption": false,
+  "limitations": ["Hosts validate JSON syntax, typed structure and UTF-8 limits; CMS maxLength counts characters.", "Generic plaintext search limitations remain unchanged.", "No new migration, HTTP/SDK change, SQLite embedded-content support, native decoder or actual-phone qualification."]
+}
