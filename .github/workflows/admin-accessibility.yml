@@ -38,6 +38,8 @@ permissions:
 jobs:
   axe:
     runs-on: ubuntu-latest
+    env:
+      LOCKED_ASSETS_TARGET: ${{ github.workspace }}/scripts/qualification/locked-assets.targets
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
@@ -47,15 +49,15 @@ jobs:
         with: { node-version: "22", cache: npm, cache-dependency-path: eng/accessibility/package-lock.json }
       - name: Restore and build Admin source
         run: |
-          dotnet restore Cmsify.slnx --locked-mode
-          dotnet build src/Cmsify.Admin/Cmsify.Admin.csproj --configuration Release --no-restore
+          dotnet restore Cmsify.slnx --locked-mode "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
+          dotnet build src/Cmsify.Admin/Cmsify.Admin.csproj --configuration Release --no-restore "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
       - name: Install locked accessibility harness
         run: npm ci --prefix eng/accessibility
       - name: Run Admin source
         env:
           ASPNETCORE_ENVIRONMENT: Development
         run: |
-          nohup dotnet run --configuration Release --no-build --no-launch-profile --project src/Cmsify.Admin/Cmsify.Admin.csproj --urls http://127.0.0.1:5177 > admin.log 2>&1 &
+          nohup dotnet run --configuration Release --no-build --no-launch-profile --project src/Cmsify.Admin/Cmsify.Admin.csproj "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET" --urls http://127.0.0.1:5177 > admin.log 2>&1 &
           echo $! > admin.pid
       - name: Certify login accessibility
         env: { CMSIFY_ACCESSIBILITY_BROWSER_CHANNEL: chrome }
