@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SyntaxCircus.Common;
 
-internal static class EmbeddedContentQualification
+internal static partial class EmbeddedContentQualification
 {
     private static readonly Guid _subject = Guid.Parse("0af8d0c1-381c-4483-880f-a47b27d49589");
     internal static void RegisterHost(IServiceCollection services)
@@ -165,6 +165,7 @@ internal static class EmbeddedContentQualification
             Require(audit.Length > 0 && audit.All(a => a.ActorUserId == _subject && a.ActorApiClientId is null),"Embedded host GUID audit differs.");
         }
         Console.WriteLine("PASS embedded hostile scope/revoked replay denial, PostgreSQL independent counts/host audit; 8 named embedded scenarios completed.");
+        await RunJsonDocumentsAsync(services, workspace, ct);
     }
 
     private static EmbeddedTemplateContract ProfileContract() => new("puppies-plus.dog-profile.v1","Dog profile","puppies-plus-dog-profile-v1","name",
@@ -178,7 +179,7 @@ internal static class EmbeddedContentQualification
     private static void Require(bool condition,string message) { if(!condition) throw new InvalidOperationException(message); }
     private static T Success<T>(Result<T> result) { Require(result.IsSuccess,result.IsFailure ? result.Errors[0].Code : "Failed"); return result.Value; }
     private sealed record Binding(Guid Workspace,string Fingerprint,Guid Template,Guid? Item,int? Version,EmbeddedContentOperationKind? Kind,
-        bool Setup=false,bool revoked=false);
+        bool Setup=false,bool revoked=false,string ContractKey="puppies-plus.dog-profile.v1");
     private sealed class Scope
     {
         internal Binding? Current { get; private set; }
@@ -193,13 +194,13 @@ internal static class EmbeddedContentQualification
     private sealed class SetupAuthority(Scope scope) : IEmbeddedTemplateSetupAuthorizationService
     {
         public Task<bool> CanEnsureAsync(EmbeddedTemplateContractScope value,CancellationToken ct) => Task.FromResult(scope.Current is { Setup:true,revoked:false } b
-            && b.Workspace==value.WorkspaceId && b.Fingerprint==value.Fingerprint && value.ContractKey=="puppies-plus.dog-profile.v1");
+            && b.Workspace==value.WorkspaceId && b.Fingerprint==value.Fingerprint && value.ContractKey==b.ContractKey);
     }
     private sealed class ContentAuthority(Scope scope) : IEmbeddedContentAuthorizationService
     {
         public Task<bool> CanExecuteAsync(EmbeddedContentOperation value,CancellationToken ct) => Task.FromResult(scope.Current is { revoked:false } b
             && b.Workspace==value.WorkspaceId && b.Fingerprint==value.ContractFingerprint && b.Kind==value.Kind
-            && (value.ContractKey=="" || value.ContractKey=="puppies-plus.dog-profile.v1")
+            && (value.ContractKey=="" || value.ContractKey==b.ContractKey)
             && (value.TemplateVersionId==Guid.Empty || b.Template==value.TemplateVersionId) && b.Item==value.ContentItemId
             && (value.VersionNumber==null || b.Version==value.VersionNumber));
     }

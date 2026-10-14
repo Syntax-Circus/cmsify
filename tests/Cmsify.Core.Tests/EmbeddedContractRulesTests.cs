@@ -18,6 +18,28 @@ public sealed class EmbeddedContractRulesTests
     }
 
     [Theory]
+    [InlineData("json", false)]
+    [InlineData("plaintext", true)]
+    public void EmbeddedTextHintsHaveExplicitSearchSemantics(string hint, bool searchable)
+    {
+        var contract = Contract($$"""{"maxLength":262144,"formatHint":"{{hint}}"}""");
+        EmbeddedContractRules.ValidateAndCopy(contract).IsSuccess.ShouldBeTrue();
+        Cmsify.Core.Services.TextFormatHints.IsSearchIndexable(
+            Cmsify.Core.Services.TextFormatHints.GetEffectiveHint(contract.Fields[0].FieldConfig)).ShouldBe(searchable);
+    }
+
+    [Fact]
+    public void JsonAndPlaintextContractsHaveDifferentFingerprints()
+    {
+        var json = Contract("{\"maxLength\":262144,\"formatHint\":\"json\"}");
+        var text = Contract("{\"maxLength\":262144,\"formatHint\":\"plaintext\"}");
+        EmbeddedContractRules.Fingerprint(json).ShouldNotBe(EmbeddedContractRules.Fingerprint(text));
+    }
+
+    [Theory]
+    [InlineData("{\"maxLength\":200,\"formatHint\":\"JSON\"}")]
+    [InlineData("{\"maxLength\":200,\"formatHint\":\"json\",\"validateFormat\":true}")]
+    [InlineData("{\"maxLength\":200,\"formatHint\":\"json\",\"unknown\":true}")]
     [InlineData("{\"maxLength\":200,\"maxLength\":300}")]
     [InlineData("{\"maxLength\":200,\"unknown\":true}")]
     [InlineData("{\"maxLength\":0}")]

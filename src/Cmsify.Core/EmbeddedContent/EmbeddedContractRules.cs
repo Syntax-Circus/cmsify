@@ -64,7 +64,7 @@ public static class EmbeddedContractRules
                 hasMaximum = true;
             }
             else if (property.Name != "formatHint" || property.Value.ValueKind != JsonValueKind.String
-                || property.Value.GetString() != "plaintext") return false;
+                || property.Value.GetString() is not ("plaintext" or "json")) return false;
         }
         return hasMaximum;
     }
