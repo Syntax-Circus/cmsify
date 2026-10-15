@@ -81,9 +81,9 @@
       },
       "SyntaxCircus.AspNetCore.Authentication": {
         "type": "Direct",
-        "requested": "[0.1.4, )",
-        "resolved": "0.1.4",
-        "contentHash": "+G+I1VM6f8iftKeVnS57yReAyab0AYjASbClvkjPiK8MILJUbwUgoMUf2IyiC2+wiaR2e+w9pFeXouUPYVeVIw==",
+        "requested": "[0.1.5, )",
+        "resolved": "0.1.5",
+        "contentHash": "Q47174iAQKXODQCoBIF3I4hc0RBwlwGryVKiJshihzhDnMrfuGzlS/nuqcGvI5or71oMa/ncd+tXMXjM2tBDHQ==",
         "dependencies": {
           "Microsoft.AspNetCore.Authentication.JwtBearer": "10.0.11",
           "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.19.2"
@@ -91,18 +91,18 @@
       },
       "SyntaxCircus.AspNetCore.Common": {
         "type": "Direct",
-        "requested": "[0.1.13, )",
-        "resolved": "0.1.13",
-        "contentHash": "/JWFQWxbb9J+ZG/OPTaZz/6NIH14B2qyNTVHsgtMP36/gBCwLcV7VkFlwThAX4dN+Qm0csR7sOMQjVMkUkg2Zg==",
+        "requested": "[0.1.16, )",
+        "resolved": "0.1.16",
+        "contentHash": "MvNrXkdvxGBQCWu625Fuzvsp0PLE3KZ0zaPvqwMuqyuS/2Hf9BgoKHJSgQXE4QjEZJNMv9jLRWqUo78951qhtA==",
         "dependencies": {
-          "SyntaxCircus.Common": "[0.1.3]"
+          "SyntaxCircus.Common": "[0.2.0]"
         }
       },
       "SyntaxCircus.AspNetCore.Serilog": {
         "type": "Direct",
-        "requested": "[0.1.3, )",
-        "resolved": "0.1.3",
-        "contentHash": "n92ymEkUxbEeJXXg8iT6MIN9UZLM27008zSxxZHJHkL3yywMETUk6T4LZq3kHmHQDX+tAodwfGXLYmHJavu8dA==",
+        "requested": "[0.1.4, )",
+        "resolved": "0.1.4",
+        "contentHash": "jcAKN+SESgMeJxkheI+IaWD+2OhyDXOj0TQtCBCV+Hp4pNAEU4NzX2RQ/88qdGGBHu/NStbwjafp1Dnfz8peEQ==",
         "dependencies": {
           "Serilog.AspNetCore": "10.0.0",
           "Serilog.Sinks.Console": "6.1.1",
@@ -577,7 +577,7 @@
         "type": "Project",
         "dependencies": {
           "FluentValidation": "[12.1.1, )",
-          "SyntaxCircus.Common": "[0.1.3, )"
+          "SyntaxCircus.Common": "[0.2.0, )"
         }
       },
       "SyntaxCircus.Cmsify.Infrastructure": {
@@ -650,9 +650,9 @@
       },
       "SyntaxCircus.Common": {
         "type": "CentralTransitive",
-        "requested": "[0.1.3, )",
-        "resolved": "0.1.3",
-        "contentHash": "lEAI3tWVQp/PxyGLEEMh/Oip4OvIABO5Yi46S4mGZ3VKdfQ2m+BhsTtxCLdirFMzl8FxR2Bzi4IDX/fH2QqdpQ=="
+        "requested": "[0.2.0, )",
+        "resolved": "0.2.0",
+        "contentHash": "Z//g6WvX/b27zm5ZlRAbrsQrMnXbsovN8QYUS7m52jhSdiLYCmwSIurdly4BdADl3LhUG5HwLE7q0ZiKq6FD0A=="
       },
       "SyntaxCircus.EntityFrameworkCore.Postgres": {
         "type": "CentralTransitive",

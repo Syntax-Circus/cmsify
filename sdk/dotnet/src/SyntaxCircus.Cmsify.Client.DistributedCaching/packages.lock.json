@@ -255,12 +255,12 @@
       "syntaxcircus.cmsify.client": {
         "type": "Project",
         "dependencies": {
-          "Microsoft.Extensions.Caching.Memory": "[10.0.11, )",
+          "Microsoft.Extensions.Caching.Memory": "[10.0.12, )",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.12, )",
           "Microsoft.Extensions.Http": "[10.0.12, )",
           "Microsoft.Extensions.Options": "[10.0.12, )",
           "SyntaxCircus.Cmsify.Contracts": "[0.0.0-local, )",
-          "SyntaxCircus.Http.Resilience": "[0.2.1, )"
+          "SyntaxCircus.Http.Resilience": "[0.2.2, )"
         }
       },
       "SyntaxCircus.Cmsify.Contracts": {
@@ -268,15 +268,15 @@
       },
       "Microsoft.Extensions.Caching.Memory": {
         "type": "CentralTransitive",
-        "requested": "[10.0.11, )",
-        "resolved": "10.0.11",
-        "contentHash": "el1g0mBEbDBGY2bT9mcSfrTWO8QlPdq2nOCnvQugioOFwHV+bVBMeiakoI0dNOdj8d6Hi9K6HY2xzRUWJiDR3w==",
+        "requested": "[10.0.12, )",
+        "resolved": "10.0.12",
+        "contentHash": "fhC3DHcBcFF4bXvHIxFtXJYNut7q7ZItqNFcgWfrIgmpVImlcEKNHhE7ztpNSPJYMHYYStS5QGND2I5mC26yeA==",
         "dependencies": {
-          "Microsoft.Extensions.Caching.Abstractions": "10.0.11",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.11",
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.11",
-          "Microsoft.Extensions.Options": "10.0.11",
-          "Microsoft.Extensions.Primitives": "10.0.11"
+          "Microsoft.Extensions.Caching.Abstractions": "10.0.12",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.12",
+          "Microsoft.Extensions.Options": "10.0.12",
+          "Microsoft.Extensions.Primitives": "10.0.12"
         }
       },
       "Microsoft.Extensions.Hosting.Abstractions": {
@@ -318,9 +318,9 @@
       },
       "SyntaxCircus.Http.Resilience": {
         "type": "CentralTransitive",
-        "requested": "[0.2.1, )",
-        "resolved": "0.2.1",
-        "contentHash": "Dn1/TXSNCtfMFeEFykUS98wwUqyitvW0p0dRiAi6l+sAw+5FgOjmVhoEwyE8L3nJbiDOWzirLJfj+sjgB8RcvA==",
+        "requested": "[0.2.2, )",
+        "resolved": "0.2.2",
+        "contentHash": "rn2kLdGMTePJ4Ho4l8GekFb4eGTsRWaLF0QPdau8C36EeRKluuQaBgIn7l6Ia+xmTGw7ZPe6BP6hSO4wx68iYw==",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection": "10.0.0",
           "Microsoft.Extensions.Http": "10.0.0",
