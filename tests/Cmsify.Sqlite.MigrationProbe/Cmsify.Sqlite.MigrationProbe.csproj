@@ -7,6 +7,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <ProjectReference Include="..\..\src\Cmsify.Infrastructure.Sqlite\Cmsify.Infrastructure.Sqlite.csproj" />
     <Compile Include="..\Cmsify.Infrastructure.Tests\Fixtures\SqliteUpgrade\**\*.cs" Link="Fixtures\SqliteUpgrade\%(RecursiveDir)%(Filename)%(Extension)" />
