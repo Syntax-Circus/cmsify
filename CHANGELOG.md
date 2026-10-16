@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.19] - 2026-10-16
+
 ### Added
 
 - Show image thumbnails in the media picker and beside a selected media asset, so assets can be told apart without relying on file names.
