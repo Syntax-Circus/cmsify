@@ -247,7 +247,7 @@ internal sealed class ContentVersionSaveFactory(bool sqlite) : WebApplicationFac
     internal static readonly DateTimeOffset OriginalAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
     internal static readonly TimeProvider Clock = new FixedClock();
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"cmsify-save-task5-{Guid.NewGuid():N}.db");
-    private PostgreSqlContainer? _postgres;
+    private TestPostgres? _postgres;
     internal Guid WorkspaceId { get; } = Guid.NewGuid(); internal Guid ActorId { get; } = Guid.NewGuid();
     internal Guid ItemId { get; } = Guid.NewGuid(); internal Guid VersionId { get; } = Guid.NewGuid();
     internal Guid TextFieldId { get; } = Guid.NewGuid(); internal Guid ChildFieldId { get; } = Guid.NewGuid(); internal Guid ChildItemId { get; } = Guid.NewGuid();
@@ -277,7 +277,7 @@ internal sealed class ContentVersionSaveFactory(bool sqlite) : WebApplicationFac
         var ct = TestContext.Current.CancellationToken;
         if (!sqlite)
         {
-            _postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("save_parity").WithUsername("cmsify").WithPassword("cmsify").Build();
+            _postgres = new TestPostgres();
             await _postgres.StartAsync(ct);
         }
         var client = CreateClient();

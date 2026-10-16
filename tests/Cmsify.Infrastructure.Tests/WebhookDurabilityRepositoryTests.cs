@@ -27,11 +27,7 @@ namespace Cmsify.Infrastructure.Tests;
 [Collection(OperationalMetricsTestGroup.Name)]
 public sealed class WebhookDurabilityRepositoryTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify")
-        .WithUsername("cmsify")
-        .WithPassword("cmsify")
-        .Build();
+    private readonly TestPostgres postgres = new TestPostgres();
 
     public ValueTask InitializeAsync() => new(postgres.StartAsync());
 

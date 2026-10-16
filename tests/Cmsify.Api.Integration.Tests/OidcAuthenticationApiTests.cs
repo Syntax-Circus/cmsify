@@ -28,11 +28,7 @@ public sealed class OidcAuthenticationApiTests : IAsyncLifetime
     private const string Audience = "cmsify";
     private static readonly string IntegrationEncryptionKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     private static readonly SymmetricSecurityKey SigningKey = new(Encoding.UTF8.GetBytes("task-five-test-signing-key-must-be-at-least-32-bytes"));
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify")
-        .WithUsername("cmsify")
-        .WithPassword("cmsify")
-        .Build();
+    private readonly TestPostgres postgres = new();
 
     public async ValueTask InitializeAsync()
     {

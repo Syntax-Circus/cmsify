@@ -20,8 +20,7 @@ public sealed class ContentVersionProjectionBaselineTests
     public async Task FixedDepthIncreasingSiblingsRetainsTenQueries(int siblings)
     {
         var ct = TestContext.Current.CancellationToken;
-        await using var postgres = new PostgreSqlBuilder("postgres:17-alpine")
-            .WithDatabase("projection_baseline").WithUsername("cmsify").WithPassword("cmsify").Build();
+        await using var postgres = new TestPostgres();
         await postgres.StartAsync(ct);
         var probe = new Probe();
         var options = new DbContextOptionsBuilder<CmsifyDbContext>().UseNpgsql(postgres.GetConnectionString())

@@ -352,14 +352,14 @@ public sealed class WebhookProviderPortabilityTests
         return new(active, second, events, deliveries);
     }
 
-    private sealed class TestDatabase(string? path, PostgreSqlContainer? postgres, DbContextOptions<CmsifyDbContext> options) : IAsyncDisposable
+    private sealed class TestDatabase(string? path, TestPostgres? postgres, DbContextOptions<CmsifyDbContext> options) : IAsyncDisposable
     {
         public CmsifyDbContext Context(params IInterceptor[] interceptors) => new(new DbContextOptionsBuilder<CmsifyDbContext>(options).AddInterceptors(interceptors).Options);
 
         public static async Task<TestDatabase> CreateAsync(bool sqlite)
         {
             string? path = null;
-            PostgreSqlContainer? postgres = null;
+            TestPostgres? postgres = null;
             var builder = new DbContextOptionsBuilder<CmsifyDbContext>();
             if (sqlite)
             {
@@ -368,7 +368,7 @@ public sealed class WebhookProviderPortabilityTests
             }
             else
             {
-                postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("webhooks").WithUsername("cmsify").WithPassword("cmsify").Build();
+                postgres = new TestPostgres();
                 await postgres.StartAsync(Ct);
                 builder.UseNpgsql(postgres.GetConnectionString()).UseSyntaxCircusSnakeCaseNamingConvention();
             }

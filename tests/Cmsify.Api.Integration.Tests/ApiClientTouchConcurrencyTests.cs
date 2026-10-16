@@ -14,11 +14,7 @@ namespace Cmsify.Api.Integration.Tests;
 
 public sealed class ApiClientTouchConcurrencyTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify")
-        .WithUsername("cmsify")
-        .WithPassword("cmsify")
-        .Build();
+    private readonly TestPostgres postgres = new();
 
     public async ValueTask InitializeAsync()
     {

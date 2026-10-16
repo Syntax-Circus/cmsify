@@ -12,8 +12,7 @@ namespace Cmsify.Infrastructure.Tests.Fixtures;
 
 internal sealed class EmbeddedPhotoFixture : IAsyncDisposable
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("embedded_photo_tests").WithUsername("cmsify").WithPassword("cmsify").Build();
+    private readonly TestPostgres _postgres = new TestPostgres();
     public static CancellationToken Ct => TestContext.Current.CancellationToken;
     public DbContextOptions<CmsifyDbContext> Options { get; private set; } = null!;
     public Workspace Workspace { get; } = new() { Name = "Photo tests", Slug = "photo-tests" };
