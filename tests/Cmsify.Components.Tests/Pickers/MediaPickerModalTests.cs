@@ -61,4 +61,18 @@ public sealed class MediaPickerModalTests : BunitContext
 
         closed.ShouldBeTrue();
     }
+
+    [Fact]
+    public void ShowsThumbnailOnlyForImageAssets()
+    {
+        var image = CreateAsset("logo.png");
+        var pdf = new MediaAssetResponse(Guid.NewGuid(), "doc.pdf", "application/pdf", 1024, null, "/media/doc.pdf", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var cut = Render<MediaPickerModal>(parameters => parameters
+            .Add(p => p.Visible, true)
+            .Add(p => p.Items, new[] { image, pdf }));
+
+        var thumbs = cut.FindAll("img.cmsify-picker-item-thumb");
+        thumbs.Count.ShouldBe(1);
+        thumbs[0].GetAttribute("src").ShouldBe("/media/logo.png");
+    }
 }

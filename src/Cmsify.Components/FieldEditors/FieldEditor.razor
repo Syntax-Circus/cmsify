@@ -45,10 +45,10 @@ else
             <RichTextFieldEditor Value="@Value.TextValue" ValueChanged="@(v => UpdateAsync(x => x.TextValue = v))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.Media:
-            <MediaFieldEditor SelectedAsset="@Value.SelectedMediaAsset" OnPickRequested="@(() => OnMediaPickRequested.InvokeAsync(Value))" ReadOnly="@ReadOnly" />
+            <MediaFieldEditor SelectedAsset="@Value.SelectedMediaAsset" FallbackAssetId="@Value.FallbackMediaAssetId" OnPickRequested="@(() => OnMediaPickRequested.InvokeAsync(Value))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.File:
-            <FileFieldEditor SelectedAsset="@Value.SelectedFileAsset" OnPickRequested="@(() => OnFilePickRequested.InvokeAsync(Value))" ReadOnly="@ReadOnly" />
+            <FileFieldEditor SelectedAsset="@Value.SelectedFileAsset" FallbackAssetId="@Value.FallbackFileAssetId" OnPickRequested="@(() => OnFilePickRequested.InvokeAsync(Value))" ReadOnly="@ReadOnly" />
             break;
         case PrimitiveType.PickList:
             <PickListFieldEditor PickList="@ResolvedPickList" Multiple="@PickListBinding.Multiple" IsRequired="@Field.IsRequired" ReadOnly="@ReadOnly"

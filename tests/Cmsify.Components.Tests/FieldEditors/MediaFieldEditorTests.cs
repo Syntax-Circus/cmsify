@@ -41,4 +41,44 @@ public sealed class MediaFieldEditorTests : BunitContext
         cut.FindAll("button").ShouldBeEmpty();
         cut.Find(".cmsify-field-picker-value").TextContent.ShouldBe("logo.png");
     }
+
+    [Fact]
+    public void ShowsUnavailableAssetIdWhenSavedAssetCouldNotBeLoaded()
+    {
+        var id = Guid.NewGuid();
+        var cut = Render<MediaFieldEditor>(parameters => parameters.Add(p => p.FallbackAssetId, id));
+
+        cut.Find("button").TextContent.ShouldBe($"Unavailable asset ({id})");
+    }
+
+    [Fact]
+    public void ShowsUnavailableAssetIdInsteadOfNoneWhenReadOnly()
+    {
+        var id = Guid.NewGuid();
+        var cut = Render<MediaFieldEditor>(parameters => parameters
+            .Add(p => p.FallbackAssetId, id)
+            .Add(p => p.ReadOnly, true));
+
+        cut.Find(".cmsify-field-picker-value").TextContent.ShouldBe($"Unavailable asset ({id})");
+    }
+
+    [Fact]
+    public void ShowsThumbnailForSelectedImageAsset()
+    {
+        var asset = new MediaAssetResponse(Guid.NewGuid(), "logo.png", "image/png", 1024, "Logo", "/media/logo.png", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var cut = Render<MediaFieldEditor>(parameters => parameters.Add(p => p.SelectedAsset, asset));
+
+        var thumb = cut.Find("img.cmsify-field-picker-thumb");
+        thumb.GetAttribute("src").ShouldBe("/media/logo.png");
+        thumb.GetAttribute("alt").ShouldBe("Logo");
+    }
+
+    [Fact]
+    public void OmitsThumbnailForNonImageAsset()
+    {
+        var asset = new MediaAssetResponse(Guid.NewGuid(), "doc.pdf", "application/pdf", 1024, null, "/media/doc.pdf", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var cut = Render<MediaFieldEditor>(parameters => parameters.Add(p => p.SelectedAsset, asset));
+
+        cut.FindAll("img").ShouldBeEmpty();
+    }
 }

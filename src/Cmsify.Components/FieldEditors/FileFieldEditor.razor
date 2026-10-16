@@ -2,17 +2,18 @@
 
 @if (ReadOnly)
 {
-    <span class="cmsify-field-picker-value">@(SelectedAsset?.FileName ?? "(none)")</span>
+    <span class="cmsify-field-picker-value">@(SelectedAsset?.FileName ?? (FallbackAssetId is { } id ? $"Unavailable asset ({id})" : "(none)"))</span>
 }
 else
 {
     <button type="button" class="cmsify-field-picker-button" @onclick="() => OnPickRequested.InvokeAsync()">
-        @(SelectedAsset?.FileName ?? "Select asset")
+        @(SelectedAsset?.FileName ?? (FallbackAssetId is { } id ? $"Unavailable asset ({id})" : "Select asset"))
     </button>
 }
 
 @code {
     [Parameter] public MediaAssetResponse? SelectedAsset { get; set; }
+    [Parameter] public Guid? FallbackAssetId { get; set; }
     [Parameter] public EventCallback OnPickRequested { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
 }

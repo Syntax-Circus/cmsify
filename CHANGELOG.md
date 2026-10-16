@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Show image thumbnails in the media picker and beside a selected media asset, so assets can be told apart without relying on file names.
+
+### Fixed
+
+- Media and file fields whose saved asset cannot be loaded now show "Unavailable asset (id)" instead of looking empty with "(none)" or "Select asset".
+
 ## [0.8.18] - 2026-10-14
 
 ### Added

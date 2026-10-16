@@ -2,17 +2,35 @@
 
 @if (ReadOnly)
 {
-    <span class="cmsify-field-picker-value">@(SelectedAsset?.FileName ?? "(none)")</span>
+    <span class="cmsify-field-picker-value">
+        @if (ShowThumbnail)
+        {
+            <img class="cmsify-field-picker-thumb" src="@SelectedAsset!.Url" alt="@(SelectedAsset.AltText ?? "")" loading="lazy" />
+        }
+        @Label(none: "(none)")
+    </span>
 }
 else
 {
     <button type="button" class="cmsify-field-picker-button" @onclick="() => OnPickRequested.InvokeAsync()">
-        @(SelectedAsset?.FileName ?? "Select asset")
+        @if (ShowThumbnail)
+        {
+            <img class="cmsify-field-picker-thumb" src="@SelectedAsset!.Url" alt="@(SelectedAsset.AltText ?? "")" loading="lazy" />
+        }
+        @Label(none: "Select asset")
     </button>
 }
 
 @code {
     [Parameter] public MediaAssetResponse? SelectedAsset { get; set; }
+    /// <summary>Saved asset id whose lookup failed (deleted or inaccessible); shown instead of looking empty.</summary>
+    [Parameter] public Guid? FallbackAssetId { get; set; }
     [Parameter] public EventCallback OnPickRequested { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+
+    private bool ShowThumbnail => SelectedAsset is not null && SelectedAsset.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+
+    private string Label(string none) =>
+        SelectedAsset?.FileName
+        ?? (FallbackAssetId is { } id ? $"Unavailable asset ({id})" : none);
 }
