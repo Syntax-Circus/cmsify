@@ -21,3 +21,11 @@
     color: var(--cmsify-color-text, inherit);
     font-family: var(--cmsify-font-family, inherit);
 }
+
+.cmsify-field-picker-thumb {
+    width: 2.5rem;
+    height: 2.5rem;
+    object-fit: cover;
+    border-radius: var(--cmsify-radius, 0.375rem);
+    margin-right: var(--cmsify-spacing-sm, 0.375rem);
+}
