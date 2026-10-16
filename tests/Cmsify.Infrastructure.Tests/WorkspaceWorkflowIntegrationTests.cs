@@ -18,8 +18,7 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class WorkspaceWorkflowIntegrationTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("workspace_workflows").WithUsername("cmsify").WithPassword("cmsify").Build();
+    private readonly TestPostgres _postgres = new TestPostgres();
     private readonly CurrentActorInfo _actor = new(Guid.NewGuid(), null, UserRole.Admin, null, true, true);
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

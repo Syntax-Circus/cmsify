@@ -26,11 +26,7 @@ public sealed class MediaPostgresTestGroup : ICollectionFixture<MediaPostgresFix
 
 public sealed class MediaPostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify_media")
-        .WithUsername("cmsify")
-        .WithPassword("cmsify")
-        .Build();
+    private readonly TestPostgres postgres = new TestPostgres();
 
     public string ConnectionString => postgres.GetConnectionString();
 

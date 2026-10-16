@@ -18,8 +18,7 @@ namespace Cmsify.Api.Integration.Tests;
 public sealed class ContentVersionSaveCompatibilityTests : IAsyncLifetime
 {
     private static readonly JsonSerializerOptions _json = CmsifyJsonOptions.Create();
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify").WithUsername("cmsify").WithPassword("cmsify").Build();
+    private readonly TestPostgres _postgres = new TestPostgres();
 
     public async ValueTask InitializeAsync()
     {

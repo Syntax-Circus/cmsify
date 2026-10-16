@@ -449,17 +449,17 @@ public sealed class ContentIdentityControllerTests
         }
     }
 
-    private sealed class Database(DbContextOptions<CmsifyDbContext> options, string? path, PostgreSqlContainer? postgres) : IAsyncDisposable
+    private sealed class Database(DbContextOptions<CmsifyDbContext> options, string? path, TestPostgres? postgres) : IAsyncDisposable
     {
         public DbContextOptions<CmsifyDbContext> Options { get; } = options;
         public static async Task<Database> CreateAsync(bool usePostgres)
         {
             string? path = null;
-            PostgreSqlContainer? postgres = null;
+            TestPostgres? postgres = null;
             var builder = new DbContextOptionsBuilder<CmsifyDbContext>();
             if (usePostgres)
             {
-                postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("content_identity").WithUsername("cmsify").WithPassword("cmsify").Build();
+                postgres = new TestPostgres();
                 await postgres.StartAsync(Ct);
                 builder.UseNpgsql(postgres.GetConnectionString()).UseSnakeCaseNamingConvention();
             }

@@ -34,8 +34,7 @@ public sealed class TemplatePublicationConcurrencyTests
     [Fact]
     public async Task Postgres_PublishInvalidatesStalePublishedVersionAndScopesArchival()
     {
-        await using var postgres = new PostgreSqlBuilder("postgres:17-alpine")
-            .WithDatabase("template_publication").WithUsername("cmsify").WithPassword("cmsify").Build();
+        await using var postgres = new TestPostgres();
         await postgres.StartAsync(Ct);
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
             .UseNpgsql(postgres.GetConnectionString()).UseSyntaxCircusSnakeCaseNamingConvention().Options;
@@ -68,8 +67,7 @@ public sealed class TemplatePublicationConcurrencyTests
     [InlineData(true)]
     public async Task Postgres_CallerOwnsPublicationCommitAndRollback(bool failTrackedSave)
     {
-        await using var postgres = new PostgreSqlBuilder("postgres:17-alpine")
-            .WithDatabase("template_caller_transaction").WithUsername("cmsify").WithPassword("cmsify").Build();
+        await using var postgres = new TestPostgres();
         await postgres.StartAsync(Ct);
         var options = new DbContextOptionsBuilder<CmsifyDbContext>()
             .UseNpgsql(postgres.GetConnectionString()).UseSyntaxCircusSnakeCaseNamingConvention().Options;

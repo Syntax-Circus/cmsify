@@ -27,11 +27,7 @@ public sealed class ResolvedContentListQueryTests : IAsyncLifetime
     private static readonly DateTimeOffset CapacityAsOf = DateTimeOffset.Parse("2026-06-15T12:00:00Z");
     private static readonly DateTimeOffset CapacityPublishedBase = DateTimeOffset.Parse("2026-04-01T00:00:00Z");
 
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify")
-        .WithUsername("cmsify")
-        .WithPassword("cmsify")
-        .Build();
+    private readonly TestPostgres postgres = new();
 
     public async ValueTask InitializeAsync()
     {

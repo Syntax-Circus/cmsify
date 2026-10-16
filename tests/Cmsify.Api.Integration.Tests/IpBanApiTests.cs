@@ -19,11 +19,7 @@ public sealed class IpBanApiTests : IAsyncLifetime
     private const string ApiToken = "cmsify_ip_ban_api_test_token";
     private static readonly string IntegrationEncryptionKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify")
-        .WithUsername("cmsify")
-        .WithPassword("cmsify")
-        .Build();
+    private readonly TestPostgres postgres = new();
 
     public async ValueTask InitializeAsync()
     {

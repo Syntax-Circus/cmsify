@@ -17,11 +17,7 @@ public sealed class AuthLoginTests : IAsyncLifetime
     private const string AdminEmail = "admin@example.test";
     private const string AdminPassword = "change-this-temporary-password";
 
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify")
-        .WithUsername("cmsify")
-        .WithPassword("cmsify")
-        .Build();
+    private readonly TestPostgres postgres = new();
 
     public async ValueTask InitializeAsync()
     {

@@ -437,7 +437,7 @@ public sealed class ApiClientTouchProviderTests
         return client.Id;
     }
 
-    private sealed class Database(string? path, PostgreSqlContainer? postgres, DbContextOptions<CmsifyDbContext> options) : IAsyncDisposable
+    private sealed class Database(string? path, TestPostgres? postgres, DbContextOptions<CmsifyDbContext> options) : IAsyncDisposable
     {
         public CmsifyDbContext Context(params IInterceptor[] interceptors) =>
             new(new DbContextOptionsBuilder<CmsifyDbContext>(options).AddInterceptors(interceptors).Options);
@@ -445,11 +445,11 @@ public sealed class ApiClientTouchProviderTests
         public static async Task<Database> CreateAsync(bool usePostgres)
         {
             string? path = null;
-            PostgreSqlContainer? postgres = null;
+            TestPostgres? postgres = null;
             var builder = new DbContextOptionsBuilder<CmsifyDbContext>();
             if (usePostgres)
             {
-                postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("touch").WithUsername("cmsify").WithPassword("cmsify").Build();
+                postgres = new TestPostgres();
                 await postgres.StartAsync(Ct);
                 builder.UseNpgsql(postgres.GetConnectionString()).UseSyntaxCircusSnakeCaseNamingConvention();
             }

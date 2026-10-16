@@ -14,7 +14,7 @@ namespace Cmsify.Infrastructure.Tests.Fixtures;
 
 internal sealed class WorkspaceVisibilityFixture(bool sqlite = false) : IAsyncDisposable
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly TestPostgres _postgres = new TestPostgres();
     private readonly string _sqlitePath = Path.Combine(Path.GetTempPath(), $"cmsify-workspace-visibility-{Guid.NewGuid():N}.db");
     internal CurrentActorInfo Actor { get; } = new(Guid.NewGuid(), null, UserRole.Admin, null, true);
     internal MutableVisibility Visibility { get; } = new();

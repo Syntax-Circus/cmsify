@@ -22,8 +22,7 @@ public sealed class ContentListCompatibilityTests : IAsyncLifetime
     private const string ApiToken = "cmsify_content_list_compatibility_token";
     private const string AsOf = "2026-06-15T12:00:00Z";
     private static readonly DateTimeOffset PublishedAt = DateTimeOffset.Parse("2026-06-10T00:00:00Z");
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("cmsify").WithUsername("cmsify").WithPassword("cmsify").Build();
+    private readonly TestPostgres _postgres = new TestPostgres();
 
     public ContentListCompatibilityTests(ITestOutputHelper output) => _output = output;
 
