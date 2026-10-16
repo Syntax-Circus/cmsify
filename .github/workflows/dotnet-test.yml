@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       LOCKED_ASSETS_TARGET: ${{ github.workspace }}/scripts/qualification/locked-assets.targets
     steps:
@@ -15,12 +16,19 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
       - name: Restore locked dependencies
         run: dotnet restore Cmsify.slnx --locked-mode "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
       - name: Build Release binaries
         run: dotnet build Cmsify.slnx --configuration Release --no-restore --no-incremental "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
       - name: Run full test suite
+        if: github.event_name == 'pull_request'
         run: dotnet test --solution Cmsify.slnx --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET"
+      # Main pushes collect raw coverage during the one full run instead of repeating the suite afterwards.
+      - name: Run full test suite with raw coverage
+        if: github.event_name != 'pull_request'
+        run: dotnet test --solution Cmsify.slnx --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET" --coverage --coverage-output-format cobertura --results-directory artifacts/coverage
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
@@ -33,9 +41,6 @@ jobs:
           dotnet pack src/Cmsify.Infrastructure.Sqlite/Cmsify.Infrastructure.Sqlite.csproj --configuration Release --no-build --output artifacts/nuget -p:CmsifyReleaseBuild=true -p:PackageVersion="$VERSION" -p:RepositoryCommit="$GITHUB_SHA" -p:IncludeSymbols=false -p:WarningsNotAsErrors=NU5104
           node --test scripts/release/engine-package-graph.test.mjs
           node scripts/release/verify-engine-packages.mjs --packages artifacts/nuget --version "$VERSION" --source-sha "$GITHUB_SHA"
-      - name: Collect raw coverage
-        if: github.event_name != 'pull_request'
-        run: dotnet test --solution Cmsify.slnx --configuration Release --no-build --max-parallel-test-modules 1 --minimum-expected-tests 1 "-p:CustomAfterMicrosoftCommonTargets=$LOCKED_ASSETS_TARGET" --coverage --coverage-output-format cobertura --results-directory artifacts/coverage
       - name: Summarize coverage
         if: github.event_name != 'pull_request'
         run: node scripts/quality/summarize-coverage.mjs --input artifacts/coverage --json artifacts/coverage/summary.json --markdown artifacts/coverage/summary.md
