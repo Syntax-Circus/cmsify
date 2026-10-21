@@ -14,6 +14,7 @@ public sealed class EmbeddedPhotoReadiness(CmsifyDbContext db, IStorageProvider 
     {
         cancellationToken.ThrowIfCancellationRequested();
         var reasons = new List<string>();
+        if (!EmbeddedPhotoPolicy.ValidOriginalLimit(options.Value.MaximumOriginalBytes)) reasons.Add("original-limit-invalid");
         if (!options.Value.Enabled) reasons.Add("disabled");
         if (!db.Database.IsNpgsql()) reasons.Add("unsupported-provider");
         else

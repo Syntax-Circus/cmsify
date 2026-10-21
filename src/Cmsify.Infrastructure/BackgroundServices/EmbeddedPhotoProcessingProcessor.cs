@@ -75,7 +75,9 @@ public sealed class EmbeddedPhotoProcessingProcessor(EmbeddedPhotoProcessingRepo
     private static async Task VerifyOriginalAsync(IEmbeddedPhotoByteSource source, PhotoJobLease lease, CancellationToken ct)
     {
         await using var original = await source.OpenReadAsync(ct);
-        using var bounded = new PhotoBoundedReadStream(original, EmbeddedPhotoPolicy.MaxBytes);
+        if (!EmbeddedPhotoPolicy.ValidOriginalLimit(lease.OriginalLength))
+            throw new PhotoByteValidationException(EmbeddedPhotoErrors.TooLarge);
+        using var bounded = new PhotoBoundedReadStream(original, lease.OriginalLength);
         await bounded.CopyToAsync(Stream.Null, ct);
         if (!bounded.EndObserved || bounded.BytesRead != lease.OriginalLength ||
             !string.Equals(bounded.CompleteHash(), lease.SourceSha256, StringComparison.OrdinalIgnoreCase))

@@ -14,6 +14,7 @@ public sealed class EmbeddedPhotoUploadReadiness(CmsifyDbContext db, IStoragePro
     {
         cancellationToken.ThrowIfCancellationRequested();
         var reasons = new List<string>();
+        if (!EmbeddedPhotoPolicy.ValidOriginalLimit(options.Value.MaximumOriginalBytes)) reasons.Add("original-limit-invalid");
         if (!options.Value.Enabled) reasons.Add("disabled");
         if (!options.Value.UploadOnlyEnabled) reasons.Add("upload-only-disabled");
         if (string.IsNullOrWhiteSpace(options.Value.PolicyId) || options.Value.PolicyId.Length > 100) reasons.Add("policy-unavailable");

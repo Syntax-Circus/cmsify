@@ -12,10 +12,19 @@ public sealed class BeginEmbeddedPhotoUploadRequestHandler(IEmbeddedPhotoUploadR
     IWorkspaceAuthorizationService workspaceAuthorization, IEmbeddedPhotoAuthorizationService resourceAuthorization)
     : IBeginEmbeddedPhotoUploadRequestHandler
 {
+    private readonly IEmbeddedPhotoUploadLimits _limits = new EmbeddedPhotoUploadLimits();
+    public BeginEmbeddedPhotoUploadRequestHandler(IEmbeddedPhotoUploadRepository repository, ICurrentActor actor,
+        IWorkspaceAuthorizationService workspaceAuthorization, IEmbeddedPhotoAuthorizationService resourceAuthorization,
+        IEmbeddedPhotoUploadLimits limits) : this(repository, actor, workspaceAuthorization, resourceAuthorization)
+    {
+        _limits = limits ?? throw new ArgumentNullException(nameof(limits));
+    }
     public async Task<Result<EmbeddedPhotoUploadOutcome>> HandleAsync(BeginEmbeddedPhotoUploadRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (request.WorkspaceId == Guid.Empty || request.AssetId == Guid.Empty || request.OperationKey == Guid.Empty || string.IsNullOrWhiteSpace(request.DisplayFileName) || request.DisplayFileName.Length > 255 || request.DeclaredLength <= 0 || request.DeclaredLength > EmbeddedPhotoPolicy.MaxBytes || string.IsNullOrWhiteSpace(request.PolicyId) || request.PolicyId.Length > 100)
+        if (!EmbeddedPhotoPolicy.ValidOriginalLimit(_limits.MaximumOriginalBytes) || request.DeclaredLength > _limits.MaximumOriginalBytes)
+            return Result<EmbeddedPhotoUploadOutcome>.Failure(new(EmbeddedPhotoErrors.Validation, "Invalid request.", ResultErrorKind.Validation));
+        if (request.WorkspaceId == Guid.Empty || request.AssetId == Guid.Empty || request.OperationKey == Guid.Empty || string.IsNullOrWhiteSpace(request.DisplayFileName) || request.DisplayFileName.Length > 255 || request.DeclaredLength <= 0 || string.IsNullOrWhiteSpace(request.PolicyId) || request.PolicyId.Length > 100)
             return Result<EmbeddedPhotoUploadOutcome>.Failure(new(EmbeddedPhotoErrors.Validation, "Invalid request.", ResultErrorKind.Validation));
         var operation = new EmbeddedPhotoOperation(EmbeddedPhotoOperationKind.BeginUpload, request.WorkspaceId, request.AssetId);
         if (await EmbeddedPhotoAuthorization.CheckAsync(actor, workspaceAuthorization, resourceAuthorization, operation, true, cancellationToken) is { } error)

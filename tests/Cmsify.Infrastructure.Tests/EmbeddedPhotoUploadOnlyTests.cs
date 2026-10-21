@@ -6,6 +6,9 @@ using Cmsify.Infrastructure.Persistence.EmbeddedMedia;
 using Cmsify.Infrastructure.Storage;
 using Cmsify.Infrastructure.Tests.Fixtures;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using SyntaxCircus.Storage;
@@ -14,6 +17,54 @@ namespace Cmsify.Infrastructure.Tests;
 
 public sealed class EmbeddedPhotoUploadOnlyTests
 {
+    [Theory]
+    [InlineData(22020096)]
+    [InlineData(67108864)]
+    public async Task LargerOriginalSurvivesRestartAndPolicyReduction(long length)
+    {
+        await using var h = await Harness.Create();
+        var begin = h.Begin() with { DeclaredLength = length };
+        (await h.Repository(h.Db).BeginAsync(begin, Actor, Permit, Ct)).IsFailure.ShouldBeTrue();
+        h.Settings.MaximumOriginalBytes = 67108864;
+        (await h.Repository(h.Db).BeginAsync(h.Begin() with { DeclaredLength = 67108865 }, Actor, Permit, Ct)).IsFailure.ShouldBeTrue();
+        var started = await h.Repository(h.Db).BeginAsync(begin, Actor, Permit, Ct);
+        started.IsSuccess.ShouldBeTrue();
+        h.Settings.MaximumOriginalBytes = 20971520;
+        var bytes = new byte[checked((int)length)];
+        var completed = await h.Repository(h.Db).WriteAsync(new(h.WorkspaceId, started.Value.SessionId,
+            Guid.NewGuid(), new Source(bytes)), Actor, Permit, Ct);
+        completed.IsSuccess.ShouldBeTrue();
+        await using var restarted = h.Fixture.Context();
+        var sink = new HashSink();
+        var read = await new EmbeddedPhotoReadRepository(restarted, new(h.Provider, "local"))
+            .ReadOriginalAsync(new(h.WorkspaceId, begin.AssetId, sink), Actor, Permit, Ct);
+        read.IsSuccess.ShouldBeTrue();
+        sink.Length.ShouldBe(length);
+        sink.Sha.ShouldBe(Convert.ToHexString(SHA256.HashData(bytes)));
+        (await h.Repository(restarted).GetIntentAsync(new(h.WorkspaceId, begin.AssetId, begin.OperationKey), Actor, Permit, Ct))
+            .Value.Receipt!.ReceiptId.ShouldBe(completed.Value.Receipt!.ReceiptId);
+        (await h.Repository(restarted).BeginAsync(h.Begin() with { DeclaredLength = length }, Actor, Permit, Ct)).IsFailure.ShouldBeTrue();
+        var downgrade = await Should.ThrowAsync<PostgresException>(() =>
+            restarted.GetService<IMigrator>().MigrateAsync("20261013115504_AddPhotoProcessingEnrollment", Ct));
+        downgrade.MessageText.ShouldContain("Cannot downgrade photo limits");
+        (await restarted.PhotoOriginals.CountAsync(Ct)).ShouldBe(1);
+        (await restarted.PhotoUploadReceipts.CountAsync(Ct)).ShouldBe(1);
+    }
+
+    private sealed class HashSink : IEmbeddedPhotoByteSink
+    {
+        public long Length { get; private set; }
+        public string? Sha { get; private set; }
+        public async Task WriteAsync(Stream source, CancellationToken ct)
+        {
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[81920];
+            int n;
+            while ((n = await source.ReadAsync(buffer, ct)) != 0) { Length += n; hash.AppendData(buffer.AsSpan(0, n)); }
+            Sha = Convert.ToHexString(hash.GetHashAndReset());
+        }
+    }
+
     private static CancellationToken Ct => EmbeddedPhotoFixture.Ct;
     private static readonly Guid Actor = Guid.NewGuid();
     private static Task<bool> Permit(EmbeddedPhotoOperation _, CancellationToken ct)
