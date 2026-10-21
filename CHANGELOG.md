@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.20] - 2026-10-21
+
+### Added
+
+- Configurable embedded photo original intake through `EmbeddedPhotoOptions.MaximumOriginalBytes` and the Core `IEmbeddedPhotoUploadLimits` contract, supporting explicit limits up to 64 MiB while preserving the 20 MiB default and existing handler constructor.
+
+### Fixed
+
+- Preserve authorized pending uploads and private original readback after lowering the intake limit by bounding streams with persisted lengths and verifying checksums. PostgreSQL original/session constraints support the larger ceiling, with downgrade refused while larger originals or intents remain retained.
+- Require isolated absolute artifact outputs for coordinated local source builds, keeping qualification locks and build assets separate from ordinary outputs.
+
+### Unchanged
+
+- Original retention, authorization, responsive variant limits and processor dimension/resource controls remain enforced. Accepting a larger original does not make it eligible for derivatives or publish it.
+
 ## [0.8.19] - 2026-10-16
 
 ### Added
