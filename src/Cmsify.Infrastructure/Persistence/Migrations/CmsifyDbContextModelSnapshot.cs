@@ -3040,7 +3040,7 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_photo_enrollment_revision", "processing_enrollment_revision IS NULL OR processing_enrollment_revision > 1");
 
-                            t.HasCheckConstraint("ck_photo_original_length", "length > 0 AND length <= 20971520");
+                            t.HasCheckConstraint("ck_photo_original_length", "length > 0 AND length <= 67108864");
                         });
                 });
 
@@ -3413,7 +3413,7 @@ namespace Cmsify.Infrastructure.Persistence.Migrations
 
                     b.ToTable("embedded_photo_upload_sessions", null, t =>
                         {
-                            t.HasCheckConstraint("ck_photo_declared_length", "declared_length > 0 AND declared_length <= 20971520");
+                            t.HasCheckConstraint("ck_photo_declared_length", "declared_length > 0 AND declared_length <= 67108864");
                         });
                 });
 

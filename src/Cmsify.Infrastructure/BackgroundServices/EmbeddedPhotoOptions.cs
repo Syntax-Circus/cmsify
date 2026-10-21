@@ -1,7 +1,10 @@
+using Cmsify.Core.EmbeddedMedia;
+
 namespace Cmsify.Infrastructure.BackgroundServices;
 
-public sealed class EmbeddedPhotoOptions
+public sealed class EmbeddedPhotoOptions : IEmbeddedPhotoUploadLimits
 {
+    public long MaximumOriginalBytes { get; set; } = EmbeddedPhotoPolicy.MaxBytes;
     public static readonly TimeSpan MaxUploadLease = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan MaxProcessingLease = TimeSpan.FromMinutes(2);
     public bool Enabled { get; set; }

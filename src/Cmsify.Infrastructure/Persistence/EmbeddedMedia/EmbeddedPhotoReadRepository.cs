@@ -20,6 +20,7 @@ public sealed class EmbeddedPhotoReadRepository(CmsifyDbContext db, EmbeddedPhot
         var original = await db.PhotoOriginals.AsNoTracking().SingleOrDefaultAsync(x => x.AssetId == asset.Id, cancellationToken);
         if (original is null || original.StorageProvider != storage.ProviderName) return Missing();
         if (!await authorize(operation, cancellationToken)) return Denied();
+        if (!EmbeddedPhotoPolicy.ValidOriginalLimit(original.Length)) return Unavailable();
         return await TransferAsync(original.StorageKey, original.Length, original.SourceSha256, "application/octet-stream", request.Sink, cancellationToken);
     }
     public async Task<Result<EmbeddedPhotoReadOutput>> ReadVariantAsync(ReadEmbeddedPhotoVariantRequest request, Guid actorId,
@@ -54,6 +55,7 @@ public sealed class EmbeddedPhotoReadRepository(CmsifyDbContext db, EmbeddedPhot
         var variant = await db.PhotoVariants.AsNoTracking().SingleOrDefaultAsync(x => x.AssetId == request.Manifest.AssetId &&
             x.Revision == request.Manifest.Revision && x.VariantKey == request.VariantKey, cancellationToken);
         if (variant is null || variant.StorageProvider != storage.ProviderName) return Missing();
+        if (variant.Length <= 0 || variant.Length > EmbeddedPhotoPolicy.MaxBytes) return Unavailable();
         if (!await authorize(operation, cancellationToken)) return Denied();
         return await TransferAsync(variant.StorageKey, variant.Length, variant.Sha256, EmbeddedPhotoPolicy.WebpContentType, request.Sink, cancellationToken);
     }
@@ -65,13 +67,13 @@ public sealed class EmbeddedPhotoReadRepository(CmsifyDbContext db, EmbeddedPhot
         {
             // Verify before the sink sees bytes. A row lock holds reclamation while both immutable reads run.
             await using (var input = await source.OpenReadAsync(ct))
-            using (var bounded = new PhotoBoundedReadStream(input, EmbeddedPhotoPolicy.MaxBytes))
+            using (var bounded = new PhotoBoundedReadStream(input, length))
             {
                 await bounded.CopyToAsync(Stream.Null, ct);
                 if (bounded.BytesRead != length || !string.Equals(bounded.CompleteHash(), sha, StringComparison.OrdinalIgnoreCase)) return Unavailable();
             }
             await using var output = await source.OpenReadAsync(ct);
-            using var checkedOutput = new PhotoBoundedReadStream(output, EmbeddedPhotoPolicy.MaxBytes);
+            using var checkedOutput = new PhotoBoundedReadStream(output, length);
             await sink.WriteAsync(checkedOutput, ct);
             if (!checkedOutput.EndObserved || checkedOutput.BytesRead != length ||
                 !string.Equals(checkedOutput.CompleteHash(), sha, StringComparison.OrdinalIgnoreCase)) return Unavailable();

@@ -31,7 +31,8 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
         if (!Settings.Enabled) return Unavailable();
         if (request.WorkspaceId == Guid.Empty || request.AssetId == Guid.Empty || request.OperationKey == Guid.Empty ||
             string.IsNullOrWhiteSpace(request.DisplayFileName) || request.DisplayFileName.Length > 255 ||
-            request.DeclaredLength <= 0 || request.DeclaredLength > EmbeddedPhotoPolicy.MaxBytes ||
+            !EmbeddedPhotoPolicy.ValidOriginalLimit(Settings.MaximumOriginalBytes) ||
+            request.DeclaredLength <= 0 || request.DeclaredLength > Settings.MaximumOriginalBytes ||
             string.IsNullOrWhiteSpace(request.PolicyId) || request.PolicyId.Length > 100 ||
             request.ExpectedSourceSha256 is { } expected && !EmbeddedPhotoPolicy.IsSha256(expected))
             return Failure(EmbeddedPhotoErrors.Validation, ResultErrorKind.Validation);

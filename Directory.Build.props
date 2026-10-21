@@ -9,7 +9,22 @@
     <!-- Only the reviewed tag workflow may make public .NET projects packable. -->
     <IsPackable Condition="'$(CmsifyReleaseBuild)' != 'true'">false</IsPackable>
   </PropertyGroup>
+  <!-- Coordinated source consumers isolate their qualification lock files. -->
+  <PropertyGroup Condition="'$(UseLocalCmsifySource)' == 'true'">
+    <NuGetLockFilePath>$(ArtifactsPath)/locks/$(MSBuildProjectName).json</NuGetLockFilePath>
+    <RestoreLockedMode>false</RestoreLockedMode>
+  </PropertyGroup>
   <Target Name="RequireCmsifyReleaseInputs" BeforeTargets="Pack" Condition="'$(CmsifyReleaseBuild)' == 'true'">
     <Error Condition="'$(PackageVersion)' == '' Or '$(PackageVersion)' == '0.0.0-local'" Text="Cmsify release packing requires a validated tag-derived PackageVersion." />
+  </Target>
+  <Target Name="ValidateLocalCmsifySourceIsolation" BeforeTargets="CollectPackageReferences;PrepareForBuild" Condition="'$(UseLocalCmsifySource)' == 'true'">
+    <Error Condition="'$(UseArtifactsOutput)' != 'true' Or '$(ArtifactsPath)' == ''" Text="Local Cmsify source requires isolated artifact outputs: UseArtifactsOutput=true and an absolute ArtifactsPath under artifacts." />
+    <Error Condition="!$([System.IO.Path]::IsPathRooted('$(ArtifactsPath)'))" Text="Local Cmsify source requires isolated artifact outputs with an absolute ArtifactsPath." />
+    <PropertyGroup>
+      <_LocalCmsifyArtifacts>$([System.IO.Path]::GetFullPath('$(ArtifactsPath)').Replace('\','/').ToLowerInvariant())/</_LocalCmsifyArtifacts>
+      <_LocalCmsifyBin>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(BaseOutputPath)'))).Replace('\','/').ToLowerInvariant())/</_LocalCmsifyBin>
+      <_LocalCmsifyObj>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)'))).Replace('\','/').ToLowerInvariant())/</_LocalCmsifyObj>
+    </PropertyGroup>
+    <Error Condition="!$(_LocalCmsifyArtifacts.Contains('/artifacts/')) Or !$(_LocalCmsifyBin.StartsWith('$(_LocalCmsifyArtifacts)')) Or !$(_LocalCmsifyObj.StartsWith('$(_LocalCmsifyArtifacts)'))" Text="Local Cmsify source requires isolated artifact outputs under an artifacts directory, including bin and obj." />
   </Target>
 </Project>

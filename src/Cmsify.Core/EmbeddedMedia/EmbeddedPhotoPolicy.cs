@@ -3,6 +3,8 @@ namespace Cmsify.Core.EmbeddedMedia;
 public static class EmbeddedPhotoPolicy
 {
     public const long MaxBytes = 20L * 1024 * 1024;
+    public const long MaximumSupportedOriginalBytes = 64L * 1024 * 1024;
+    public static bool ValidOriginalLimit(long value) => value > 0 && value <= MaximumSupportedOriginalBytes;
     public const int MaxEdge = 8192;
     public const long MaxPixels = 24_000_000;
     public const string WebpContentType = "image/webp";

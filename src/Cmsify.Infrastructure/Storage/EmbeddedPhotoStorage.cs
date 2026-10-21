@@ -16,7 +16,10 @@ public sealed class EmbeddedPhotoStorage(IStorageProvider provider, string provi
     public async Task<StoredPhotoBytes> StoreBoundedAsync(string key, Stream source, long declaredLength,
         string contentType, CancellationToken cancellationToken)
     {
-        using var bounded = new PhotoBoundedReadStream(source, EmbeddedPhotoPolicy.MaxBytes);
+        if (!EmbeddedPhotoPolicy.ValidOriginalLimit(declaredLength))
+            throw new PhotoByteValidationException(EmbeddedPhotoErrors.TooLarge);
+        using var bounded = new PhotoBoundedReadStream(source, declaredLength,
+            declaredLength < EmbeddedPhotoPolicy.MaxBytes ? EmbeddedPhotoErrors.LengthMismatch : EmbeddedPhotoErrors.TooLarge);
         var stored = await Provider.StoreAsync(new StoreObjectRequest(key, bounded, contentType), cancellationToken);
         if (!bounded.EndObserved || bounded.BytesRead != declaredLength)
             throw new PhotoByteValidationException(EmbeddedPhotoErrors.LengthMismatch);
@@ -41,7 +44,7 @@ internal sealed class PhotoByteValidationException(string code) : IOException
 }
 
 /// <summary>Counts and hashes as the provider reads; one extra byte detects overflow without buffering the file.</summary>
-internal sealed class PhotoBoundedReadStream(Stream source, long maxBytes) : Stream
+internal sealed class PhotoBoundedReadStream(Stream source, long maxBytes, string overflowCode = EmbeddedPhotoErrors.TooLarge) : Stream
 {
     private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
     public long BytesRead { get; private set; }
@@ -52,7 +55,7 @@ internal sealed class PhotoBoundedReadStream(Stream source, long maxBytes) : Str
     {
         if (bytes.Length == 0) EndObserved = true;
         BytesRead += bytes.Length;
-        if (BytesRead > maxBytes) throw new PhotoByteValidationException(EmbeddedPhotoErrors.TooLarge);
+        if (BytesRead > maxBytes) throw new PhotoByteValidationException(overflowCode);
         _hash.AppendData(bytes);
         return bytes.Length;
     }

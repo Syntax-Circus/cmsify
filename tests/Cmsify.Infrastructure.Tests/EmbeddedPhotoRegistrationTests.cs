@@ -20,6 +20,26 @@ namespace Cmsify.Infrastructure.Tests;
 public sealed class EmbeddedPhotoRegistrationTests
 {
     [Theory]
+    [InlineData(0)]
+    [InlineData(67108865)]
+    public void InvalidOriginalLimitRejectsRegistration(long limit)
+    {
+        Should.Throw<ArgumentException>(() => Services().AddCmsifyEmbeddedPhotos(o => o.MaximumOriginalBytes = limit));
+    }
+
+    [Fact]
+    public void OriginalLimitIsSnapshottedAndChangedRegistrationRejects()
+    {
+        var services = Services();
+        EmbeddedPhotoOptions? captured = null;
+        services.AddCmsifyEmbeddedPhotos(o => { captured = o; o.MaximumOriginalBytes = 67108864; });
+        captured!.MaximumOriginalBytes = 1;
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IEmbeddedPhotoUploadLimits>().MaximumOriginalBytes.ShouldBe(67108864);
+        Should.Throw<InvalidOperationException>(() => services.AddCmsifyEmbeddedPhotos(_ => { }));
+    }
+
+    [Theory]
     [InlineData(false, false)]
     public void ConflictingUploadOnlyOptionsReject(bool enabled, bool processing)
     {

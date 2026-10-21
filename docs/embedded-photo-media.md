@@ -16,6 +16,39 @@ host's sandbox, corpus, licensing and image acceptance gates are qualified.
 
 ## Composition
 
+### Configurable original intake (local, unreleased)
+
+The coordinated local 0.8.18-source branch adds
+`EmbeddedPhotoOptions.MaximumOriginalBytes`. It defaults to20 MiB and may be
+explicitly configured from1 byte through64 MiB. Registration snapshots the value,
+rejects invalid/conflicting registrations, and exposes the immutable
+`IEmbeddedPhotoUploadLimits` Core contract. The existing four-argument begin
+handler constructor keeps20 MiB behavior; DI uses the limits-aware overload.
+
+The PostgreSQL migration widens original/session checks to the supported64 MiB
+ceiling. Reducing intake affects fresh reservations; retained originals and
+already authorized pending writes remain bounded by their persisted lengths.
+Resume through the existing intent/outcome handlers, rather than changing the
+original request. Storage counts/hashes while reading, rejects declared length
+overflow and validates complete provider acknowledgement. Private original reads
+verify retained length/hash before sending bytes. Authorization and retention
+fences remain mandatory. Down migration refuses larger retained rows without
+deleting or truncating them.
+
+This option does not change variants, dimensions,24 MP,8192 edge, decoder color
+support, time, memory or processor qualification. An accepted original may still
+be rejected for derivatives. Local actual-source testing demonstrated exactly
+that: two28.1 MP8-bit PNGs reject dimensions, and a4.46 MP16-bit PNG rejects color;
+their original bytes remain downloadable only with normal authority.
+
+No package is released by this change. The paired host uses explicit local
+project references with `UseLocalCmsifySource=true`, `UseArtifactsOutput=true`
+and an absolute `ArtifactsPath` under an `artifacts` directory. Both checkouts
+reject ordinary/relative output settings before restore/build; qualification
+locks remain separate from checked-in public package locks. Public consumers
+retain their existing released package and20 MiB behavior until a real separately
+authorized release and adoption.
+
 Register host services before CMS composition, or explicitly replace defaults:
 
 ```csharp

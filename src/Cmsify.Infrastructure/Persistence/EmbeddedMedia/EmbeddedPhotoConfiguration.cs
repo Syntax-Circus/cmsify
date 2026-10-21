@@ -24,7 +24,7 @@ internal static class EmbeddedPhotoConfiguration
     {
         model.Entity<MediaAsset>().HasAlternateKey(x => new { x.Id, x.WorkspaceId });
         var session = model.Entity<PhotoUploadSessionRecord>();
-        session.ToTable("embedded_photo_upload_sessions", t => t.HasCheckConstraint("ck_photo_declared_length", "declared_length > 0 AND declared_length <= 20971520"));
+        session.ToTable("embedded_photo_upload_sessions", t => t.HasCheckConstraint("ck_photo_declared_length", "declared_length > 0 AND declared_length <= 67108864"));
         session.HasKey(x => x.Id);
         session.HasAlternateKey(x => new { x.Id, x.WorkspaceId });
         session.HasIndex(x => new { x.WorkspaceId, x.OperationKey }).IsUnique();
@@ -47,7 +47,7 @@ internal static class EmbeddedPhotoConfiguration
         var original = model.Entity<PhotoOriginalRecord>();
         original.ToTable("embedded_photo_originals", t =>
         {
-            t.HasCheckConstraint("ck_photo_original_length", "length > 0 AND length <= 20971520");
+            t.HasCheckConstraint("ck_photo_original_length", "length > 0 AND length <= 67108864");
             t.HasCheckConstraint("ck_photo_enrollment_revision", "processing_enrollment_revision IS NULL OR processing_enrollment_revision > 1");
         });
         original.HasKey(x => x.AssetId);
