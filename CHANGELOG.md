@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Isolate content-version-save API tests from factory-registered hosted workers, preventing scheduled publication of Approved fixture data from racing a save and intermittently returning HTTP 409 under coverage.
+
 ## [0.8.20] - 2026-10-21
 
 ### Added
