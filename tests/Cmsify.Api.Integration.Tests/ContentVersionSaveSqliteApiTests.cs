@@ -6,6 +6,7 @@ using Cmsify.Core.ContentWrites;
 using Cmsify.Core.Domain.Entities;
 using Cmsify.Core.Interfaces.Services;
 using Cmsify.Infrastructure.Auth;
+using Cmsify.Infrastructure.BackgroundServices;
 using Cmsify.Infrastructure.Extensions;
 using Cmsify.Infrastructure.Persistence;
 using Cmsify.Infrastructure.Sqlite.Extensions;
@@ -14,6 +15,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Shouldly;
 using SyntaxCircus.Cmsify.Contracts;
@@ -28,6 +30,45 @@ namespace Cmsify.Api.Integration.Tests;
 // SQLite remains opt-in. The identical HTTP/direct matrix also runs against real PostgreSQL.
 public sealed class ContentVersionSaveSqliteApiTests
 {
+    [Fact]
+    public async Task SaveParityFixtureCannotPublishApprovedSeedDuringSave()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new ContentVersionSaveFactory(true);
+        using var client = await factory.CreateSeededClientAsync();
+        await factory.ResetAsync(CoreStatus.Approved);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+            var version = await db.ContentVersions.SingleAsync(v => v.Id == factory.VersionId, ct);
+            version.PublishAt = ContentVersionSaveFactory.Now.AddDays(-1);
+            version.PublishLeaseExpiresAt = ContentVersionSaveFactory.Now.AddDays(-1);
+            await db.SaveChangesAsync(ct);
+        }
+        // Force a worker tick, if the fixture accidentally starts the scheduler,
+        // instead of depending on coverage overhead to open the race window.
+        foreach (var scheduler in factory.Services.GetServices<IHostedService>().OfType<ScheduledPublishingService>())
+            await scheduler.RunOnceAsync(ct);
+        using var readScope = factory.Services.CreateScope();
+        var read = readScope.ServiceProvider.GetRequiredService<CmsifyDbContext>();
+        (await read.ContentVersions.SingleAsync(v => v.Id == factory.VersionId, ct)).Status.ShouldBe(CoreStatus.Approved);
+        using var response = await SaveAsync(client, factory.Url, $"\"{ContentVersionSaveFactory.OriginalAt.UtcTicks}\"", new(null, null, []));
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SaveParityFixtureStartsWithoutMutatingHostedWorkers(bool sqlite)
+    {
+        await using var factory = new ContentVersionSaveFactory(sqlite);
+        using var client = await factory.CreateSeededClientAsync();
+        var workers = factory.Services.GetServices<IHostedService>()
+            .Where(service => service.GetType().Namespace == "Cmsify.Infrastructure.BackgroundServices")
+            .Select(service => service.GetType().Name).ToArray();
+        workers.ShouldBeEmpty("Save parity fixtures must not start factory-registered publishers or other mutating workers.");
+    }
+
     [Theory]
     [MemberData(nameof(ContentVersionSaveCompatibilityTests.MalformedFieldCases), MemberType = typeof(ContentVersionSaveCompatibilityTests))]
     public async Task SaveMalformedFieldsRetainsBaselineHttpPrecedenceOnMigratedSqlite(string input, string scenario)
@@ -265,8 +306,11 @@ internal sealed class ContentVersionSaveFactory(bool sqlite) : WebApplicationFac
             var types = selected.Where(d => d.ServiceType == typeof(CmsifyDbContext) || d.ServiceType == typeof(DbContextOptions<CmsifyDbContext>) || d.ServiceType == typeof(DbContextOptions)
                 || d.ServiceType.FullName!.StartsWith("Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration", StringComparison.Ordinal)
                 || d.ServiceType == typeof(ICmsifyDatabaseMigrator)).Select(d => d.ServiceType).ToHashSet();
-            foreach (var descriptor in services.Where(d => types.Contains(d.ServiceType) || d.ServiceType == typeof(TimeProvider)
-                || d.ServiceType == typeof(IHostedService) && d.ImplementationType?.Namespace == "Cmsify.Infrastructure.BackgroundServices").ToArray()) services.Remove(descriptor);
+            foreach (var descriptor in services.Where(d => types.Contains(d.ServiceType) || d.ServiceType == typeof(TimeProvider)).ToArray()) services.Remove(descriptor);
+            // Cmsify workers use ImplementationFactory, so filtering by
+            // ImplementationType silently leaves the real scheduler running.
+            // This parity-only test host intentionally starts no hosted workers.
+            services.RemoveAll<IHostedService>();
             foreach (var descriptor in selected.Where(d => types.Contains(d.ServiceType))) services.Add(descriptor);
             services.AddSingleton(Clock);
         });
