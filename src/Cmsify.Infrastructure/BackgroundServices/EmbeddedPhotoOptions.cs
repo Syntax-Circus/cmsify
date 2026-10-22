@@ -10,6 +10,9 @@ public sealed class EmbeddedPhotoOptions : IEmbeddedPhotoUploadLimits
     public bool Enabled { get; set; }
     public bool UploadOnlyEnabled { get; set; }
     public bool ProcessingEnabled { get; set; }
+    public bool PngNormalizationEnabled { get; set; }
+    internal bool AllowsPolicy(string policyId) =>
+        policyId == EmbeddedPhotoPolicy.PngNormalizationPolicyId ? PngNormalizationEnabled : policyId == PolicyId;
     public string PolicyId { get; set; } = "phone-sdr-webp-v1";
     public TimeSpan UploadLeaseDuration { get; set; } = TimeSpan.FromMinutes(2);
     public TimeSpan UploadDeadline { get; set; } = TimeSpan.FromSeconds(90);

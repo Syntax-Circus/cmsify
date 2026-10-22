@@ -29,7 +29,7 @@ public sealed partial class EmbeddedPhotoProcessingRepository
             if (!await authorize(operation, cancellationToken)) return Denied<EmbeddedPhotoStatus>();
             return receipt.Kind == operation.Kind ? Replay(receipt, fingerprint) : Conflict<EmbeddedPhotoStatus>();
         }
-        if (!Settings.Enabled || !Settings.ProcessingEnabled || Settings.PolicyId != request.PolicyId) return Unavailable<EmbeddedPhotoStatus>();
+        if (!Settings.Enabled || !Settings.ProcessingEnabled || !Settings.AllowsPolicy(request.PolicyId)) return Unavailable<EmbeddedPhotoStatus>();
         var asset = await db.MediaAssets.FromSqlInterpolated($"SELECT *, xmin FROM media_assets WHERE id = {request.AssetId} FOR UPDATE")
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (asset is null || asset.WorkspaceId != request.WorkspaceId) return Missing<EmbeddedPhotoStatus>();
@@ -51,7 +51,7 @@ public sealed partial class EmbeddedPhotoProcessingRepository
         if (latest is null || latest.Revision != request.ExpectedLatestRevision || latest.Revision == int.MaxValue ||
             latest.State != EmbeddedPhotoState.AwaitingProcessing || latest.WorkspaceId != request.WorkspaceId)
             return Conflict<EmbeddedPhotoStatus>();
-        var available = await capability.GetAsync(cancellationToken);
+        var available = await capability.GetAsync(request.PolicyId, cancellationToken);
         if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId ||
             string.IsNullOrWhiteSpace(available.ProcessorVersion) || available.ProcessorVersion.Length > 100 ||
             string.IsNullOrWhiteSpace(available.SandboxIdentity)) return Unavailable<EmbeddedPhotoStatus>();

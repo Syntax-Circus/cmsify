@@ -14,7 +14,7 @@ public sealed class ReadEmbeddedPhotoVariantRequestHandler(IEmbeddedPhotoReadRep
     public async Task<Result<EmbeddedPhotoReadOutput>> HandleAsync(ReadEmbeddedPhotoVariantRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (request.WorkspaceId == Guid.Empty || request.Manifest is null || request.Manifest.AssetId == Guid.Empty || request.Manifest.Revision < 1 || !EmbeddedPhotoPolicy.IsSha256(request.Manifest.ManifestSha256) || request.Authority is null || request.Sink is null || !EmbeddedPhotoPolicy.RequiredVariants.Any(v => v.VariantKey == request.VariantKey))
+        if (request.WorkspaceId == Guid.Empty || request.Manifest is null || request.Manifest.AssetId == Guid.Empty || request.Manifest.Revision < 1 || !EmbeddedPhotoPolicy.IsSha256(request.Manifest.ManifestSha256) || request.Authority is null || request.Sink is null || !EmbeddedPhotoPolicy.IsVariantKey(request.VariantKey))
             return Result<EmbeddedPhotoReadOutput>.Failure(new(EmbeddedPhotoErrors.Validation, "Invalid request.", ResultErrorKind.Validation));
         var operation = new EmbeddedPhotoOperation(EmbeddedPhotoOperationKind.ReadVariant, request.WorkspaceId, request.Manifest.AssetId, request.Manifest.Revision, request.Authority.ConsumerNamespace, request.Authority.ReferenceKey);
         if (await EmbeddedPhotoAuthorization.CheckAsync(actor, workspaceAuthorization, resourceAuthorization, operation, false, cancellationToken) is { } error)

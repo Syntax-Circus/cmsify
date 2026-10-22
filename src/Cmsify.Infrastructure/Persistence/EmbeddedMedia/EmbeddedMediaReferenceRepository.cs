@@ -56,8 +56,10 @@ public sealed class EmbeddedMediaReferenceRepository(CmsifyDbContext db, Embedde
             var original = await db.PhotoOriginals.AsNoTracking().SingleAsync(x => x.AssetId == identity.AssetId, cancellationToken);
             if (!await PresentAsync(original.StorageProvider, original.StorageKey, original.Length, cancellationToken)) return NotReady();
             var variants = await db.PhotoVariants.AsNoTracking().Where(v => v.AssetId == identity.AssetId && v.Revision == identity.Revision).ToListAsync(cancellationToken);
-            if (variants.Count != EmbeddedPhotoPolicy.RequiredVariants.Count ||
-                EmbeddedPhotoPolicy.RequiredVariants.Any(r => variants.Count(v => v.VariantKey == r.VariantKey) != 1)) return NotReady();
+            var requirements = EmbeddedPhotoPolicy.VariantsFor(manifest.PolicyId);
+            if (variants.Count != requirements.Count ||
+                requirements.Any(r => variants.Count(v => v.VariantKey == r.VariantKey) != 1) ||
+                !EmbeddedPhotoManifestSerialization.ValidPngManifest(manifest, variants)) return NotReady();
             foreach (var variant in variants)
                 if (!await PresentAsync(variant.StorageProvider, variant.StorageKey, variant.Length, cancellationToken)) return NotReady();
         }

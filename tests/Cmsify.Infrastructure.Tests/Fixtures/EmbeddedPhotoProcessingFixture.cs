@@ -60,6 +60,12 @@ internal sealed class EmbeddedPhotoProcessingFixture : IAsyncDisposable
     internal sealed class TestCapability : IEmbeddedPhotoProcessorCapability
     {
         public bool Available { get; set; } = true;
+        public bool PngAvailable { get; set; } = true;
+        public bool ThrowForPng { get; set; }
+        public Task<EmbeddedPhotoCapability> GetAsync(string policyId, CancellationToken ct) =>
+            policyId == EmbeddedPhotoPolicy.PngNormalizationPolicyId && ThrowForPng ? throw new InvalidOperationException("PNG adapter not installed") :
+            policyId == EmbeddedPhotoPolicy.PngNormalizationPolicyId ? Task.FromResult(
+                new EmbeddedPhotoCapability(Available && PngAvailable, true, policyId, "synthetic-png-1", "TEST-ONLY-NO-NATIVE-QUALIFICATION", null)) : GetAsync(ct);
         public Task<EmbeddedPhotoCapability> GetAsync(CancellationToken ct) => Task.FromResult(
             new EmbeddedPhotoCapability(Available, true, "synthetic-photo-v1", "synthetic-only-1", "TEST-ONLY-NO-NATIVE-QUALIFICATION", null));
     }
@@ -72,15 +78,18 @@ internal sealed class EmbeddedPhotoProcessingFixture : IAsyncDisposable
     {
         public ValueTask<Stream> OpenReadAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult<Stream>(new MemoryStream(bytes, false)); }
     }
-    internal sealed class CandidateProcessor(string? defect = null, int width = 640, int height = 480, bool alpha = false, byte marker = 1) : IEmbeddedPhotoProcessor
+    internal sealed class CandidateProcessor(string? defect = null, int width = 640, int height = 480, bool alpha = false, byte marker = 1,
+        bool pngOriginal = false, int originalBitDepth = 16) : IEmbeddedPhotoProcessor
     {
         public int CleanupCount { get; private set; }
         public Task<Result<EmbeddedPhotoCandidate>> ProcessAsync(EmbeddedPhotoProcessingInput input, CancellationToken ct)
         {
-            var metadata = new EmbeddedPhotoSourceMetadata(defect == "metadata" ? "PDF" : "HEIC", width, height,
-                defect == "bitDepth" ? 16 : 8, "sRGB", alpha, true);
+            var png = input.Policy.PolicyId == EmbeddedPhotoPolicy.PngNormalizationPolicyId;
+            var metadata = new EmbeddedPhotoSourceMetadata(defect == "metadata" ? "PDF" : png || pngOriginal ? "PNG" : "HEIC", width, height,
+                defect == "bitDepth" ? 16 : 8, "sRGB", alpha, !png && !pngOriginal)
+            { Conversion = png && defect != "provenance" ? new(EmbeddedPhotoPolicy.PngNormalizationVersion, defect == "originalDepth" ? 32 : originalBitDepth) : null };
             var dimensions = input.Instructions.QuarterTurnsClockwise % 2 == 0 ? (width, height) : (height, width);
-            var variants = EmbeddedPhotoPolicy.RequiredVariants.Select(requirement =>
+            var variants = EmbeddedPhotoPolicy.VariantsFor(input.Policy.PolicyId).Select(requirement =>
             {
                 var fit = EmbeddedPhotoPolicy.Fit(dimensions.Item1, dimensions.Item2, requirement.Bound);
                 var bytes = Container(fit.Width, fit.Height, alpha, marker);

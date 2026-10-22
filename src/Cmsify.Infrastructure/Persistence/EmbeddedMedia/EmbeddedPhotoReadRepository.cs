@@ -28,7 +28,7 @@ public sealed class EmbeddedPhotoReadRepository(CmsifyDbContext db, EmbeddedPhot
     {
         EnsureProvider();
         if (request.Manifest is null || request.Authority is null || request.Sink is null ||
-            !EmbeddedPhotoPolicy.RequiredVariants.Any(v => v.VariantKey == request.VariantKey)) return Missing();
+            !EmbeddedPhotoPolicy.IsVariantKey(request.VariantKey)) return Missing();
         var authority = request.Authority;
         if (authority.Kind == EmbeddedPhotoReadKind.PrivatePreview &&
             (authority.ConsumerNamespace is not null || authority.ReferenceKey is not null || authority.ProtectionRevision is not null)) return Denied();
@@ -50,8 +50,12 @@ public sealed class EmbeddedPhotoReadRepository(CmsifyDbContext db, EmbeddedPhot
                 x.AssetId == request.Manifest.AssetId && x.Revision == request.Manifest.Revision &&
                 x.ManifestSha256 == request.Manifest.ManifestSha256, cancellationToken)) return Missing();
         }
-        if (!await db.PhotoManifests.AnyAsync(x => x.AssetId == request.Manifest.AssetId && x.WorkspaceId == request.WorkspaceId &&
-            x.Revision == request.Manifest.Revision && x.ManifestSha256 == request.Manifest.ManifestSha256, cancellationToken)) return Missing();
+        var manifest = await db.PhotoManifests.AsNoTracking().SingleOrDefaultAsync(x => x.AssetId == request.Manifest.AssetId && x.WorkspaceId == request.WorkspaceId &&
+            x.Revision == request.Manifest.Revision && x.ManifestSha256 == request.Manifest.ManifestSha256, cancellationToken);
+        if (manifest is null || !EmbeddedPhotoPolicy.VariantsFor(manifest.PolicyId).Any(x => x.VariantKey == request.VariantKey)) return Missing();
+        if (manifest.PolicyId == EmbeddedPhotoPolicy.PngNormalizationPolicyId &&
+            !EmbeddedPhotoManifestSerialization.ValidPngManifest(manifest, await db.PhotoVariants.AsNoTracking()
+                .Where(x => x.AssetId == manifest.AssetId && x.Revision == manifest.Revision).ToListAsync(cancellationToken))) return Unavailable();
         var variant = await db.PhotoVariants.AsNoTracking().SingleOrDefaultAsync(x => x.AssetId == request.Manifest.AssetId &&
             x.Revision == request.Manifest.Revision && x.VariantKey == request.VariantKey, cancellationToken);
         if (variant is null || variant.StorageProvider != storage.ProviderName) return Missing();

@@ -49,10 +49,17 @@ public sealed class EmbeddedPhotoReadiness(CmsifyDbContext db, IStorageProvider 
         catch (Exception) { reasons.Add("storage-unavailable"); }
         try
         {
-            var available = await capability.GetAsync(cancellationToken);
+            var available = await capability.GetAsync(options.Value.PolicyId, cancellationToken);
             if (!available.Available || !available.Qualified || string.IsNullOrWhiteSpace(available.ProcessorVersion) ||
                 available.ProcessorVersion.Length > 100 || string.IsNullOrWhiteSpace(available.SandboxIdentity)) reasons.Add("capability-unavailable");
             else if (available.PolicyId != options.Value.PolicyId) reasons.Add("policy-mismatch");
+            if (options.Value.PngNormalizationEnabled)
+            {
+                var png = await capability.GetAsync(EmbeddedPhotoPolicy.PngNormalizationPolicyId, cancellationToken);
+                if (!png.Available || !png.Qualified || png.PolicyId != EmbeddedPhotoPolicy.PngNormalizationPolicyId ||
+                    string.IsNullOrWhiteSpace(png.ProcessorVersion) || png.ProcessorVersion.Length > 100 || string.IsNullOrWhiteSpace(png.SandboxIdentity))
+                    reasons.Add("png-capability-unavailable");
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { reasons.Add("capability-unavailable"); }

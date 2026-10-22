@@ -16,9 +16,43 @@ host's sandbox, corpus, licensing and image acceptance gates are qualified.
 
 ## Composition
 
-### Configurable original intake (local, unreleased)
+### Versioned PNG normalization (local, unreleased)
 
-The coordinated local 0.8.18-source branch adds
+`PngNormalizationEnabled` defaults false. Explicitly enabling it allows policy
+`png-sdr-webp-v1` alongside the configured legacy `PolicyId`. The host must override
+`IEmbeddedPhotoProcessorCapability.GetAsync(policyId, cancellationToken)` and
+dispatch its processor by the immutable input policy/version. The default overload
+keeps existing single-policy adapters compatible and cannot advertise PNG support.
+Both old and new eligible jobs share the existing global slot, authorization,
+leases, attempt bounds and bounded queue paging. Readiness requires the opted-in
+PNG capability. An unavailable PNG adapter does not prevent eligible legacy work.
+
+The PNG contract admits one eight/16-bit PNG up to30 MP/8192 edge, selected
+eight-bit sRGB pixels, no HDR SDR-base assertion, and four WebP variants at
+320/640/1280/4096 bounds (quality85). The native host must enforce single-frame,
+color, encoded-size and resource admission; this library never decodes originals.
+Candidate metadata includes `Conversion` with version `png-q8-srgb-strip-v1` and
+`OriginalBitDepth`; oriented original dimensions stay truthful. Legacy policy
+IDs retain24 MP/eight-bit/three variants. No PDF conversion or dog association.
+
+Use normal explicit enrollment or `CreateEmbeddedPhotoRevision` with the new
+policy, expected latest revision and a durable operation key. A rejected prior
+revision stays rejected; it cannot become a transient Retry. Receipts replay their
+original acknowledgement after context recreation. Originals, upload receipts,
+old manifest hashes and protected references remain retained. PNG manifests use
+a version2 hash binding source/conversion metadata and all four descriptors;
+legacy version1 hashes stay unchanged. Reads/protection use the persisted policy,
+independent of the current opt-in, with the existing private/reference authority.
+The larger key is never accepted against a legacy manifest. No migration or new
+HTTP endpoint is required: additive provenance uses the existing manifest JSON.
+
+No native adapter, automatic activation, publication or release ships from these
+local changes. Synthetic PostgreSQL evidence tests orchestration/container headers;
+actual pixel/resource/privacy/browser qualification belongs to the embedding host.
+
+### Configurable original intake (0.8.20)
+
+Released0.8.20 adds
 `EmbeddedPhotoOptions.MaximumOriginalBytes`. It defaults to20 MiB and may be
 explicitly configured from1 byte through64 MiB. Registration snapshots the value,
 rejects invalid/conflicting registrations, and exposes the immutable
@@ -41,13 +75,11 @@ be rejected for derivatives. Local actual-source testing demonstrated exactly
 that: two28.1 MP8-bit PNGs reject dimensions, and a4.46 MP16-bit PNG rejects color;
 their original bytes remain downloadable only with normal authority.
 
-No package is released by this change. The paired host uses explicit local
-project references with `UseLocalCmsifySource=true`, `UseArtifactsOutput=true`
-and an absolute `ArtifactsPath` under an `artifacts` directory. Both checkouts
-reject ordinary/relative output settings before restore/build; qualification
-locks remain separate from checked-in public package locks. Public consumers
-retain their existing released package and20 MiB behavior until a real separately
-authorized release and adoption.
+The paired PuppiesPlus host now consumes public0.8.20 through ordinary locked
+NuGet references. Earlier isolated local-source qualification is historical; it
+is not required for this released setting. Defaults remain20 MiB unless the host
+explicitly configures a larger limit. The new PNG profile above remains local
+and unreleased, separate from that already-published original-intake setting.
 
 Register host services before CMS composition, or explicitly replace defaults:
 
@@ -83,7 +115,8 @@ Ready. `IEmbeddedPhotoReadiness.CheckAsync` reads required schema column shapes,
 storage reachability and policy/capability identity. It never migrates, saves,
 repairs uploads or creates probe objects. Reasons are allowlisted:
 `disabled`, `unsupported-provider`, `schema-unavailable`,
-`storage-unavailable`, `capability-unavailable`, `policy-mismatch`.
+`storage-unavailable`, `capability-unavailable`, `policy-mismatch`,
+and opt-in `png-capability-unavailable`.
 Readiness alone does not certify storage write permissions, private serving
 configuration or native safety; establish those during host setup/qualification.
 
