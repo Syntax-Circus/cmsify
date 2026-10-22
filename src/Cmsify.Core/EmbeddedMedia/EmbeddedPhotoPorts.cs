@@ -5,7 +5,12 @@ namespace Cmsify.Core.EmbeddedMedia;
 public interface IEmbeddedPhotoByteSource { ValueTask<Stream> OpenReadAsync(CancellationToken cancellationToken); }
 public interface IEmbeddedPhotoByteSink { Task WriteAsync(Stream source, CancellationToken cancellationToken); }
 public interface IEmbeddedPhotoProcessor { Task<Result<EmbeddedPhotoCandidate>> ProcessAsync(EmbeddedPhotoProcessingInput input, CancellationToken cancellationToken); }
-public interface IEmbeddedPhotoProcessorCapability { Task<EmbeddedPhotoCapability> GetAsync(CancellationToken cancellationToken); }
+public interface IEmbeddedPhotoProcessorCapability
+{
+    Task<EmbeddedPhotoCapability> GetAsync(CancellationToken cancellationToken);
+    // Existing adapters remain single-policy. A multi-policy adapter explicitly overrides this lookup.
+    Task<EmbeddedPhotoCapability> GetAsync(string policyId, CancellationToken cancellationToken) => GetAsync(cancellationToken);
+}
 public interface IEmbeddedMediaRetentionGuard { Task<EmbeddedMediaRetentionDecision> CheckAsync(EmbeddedMediaRetentionRequest request, CancellationToken cancellationToken); }
 public interface IEmbeddedPhotoAuthorizationService { Task<bool> CanExecuteAsync(EmbeddedPhotoOperation operation, CancellationToken cancellationToken); }
 public interface IEmbeddedPhotoReadiness { Task<EmbeddedPhotoReadinessResult> CheckAsync(CancellationToken cancellationToken); }

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `png-sdr-webp-v1` embedded processing profile with truthful PNG conversion provenance, a 4096-bound read preview and policy-specific capability lookup. Legacy processing/manifest identities stay unchanged; hosts still supply and qualify native conversion.
+
 ### Fixed
 
 - Isolate content-version-save API tests from factory-registered hosted workers, preventing scheduled publication of Approved fixture data from racing a save and intermittently returning HTTP 409 under coverage.

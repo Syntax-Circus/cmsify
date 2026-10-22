@@ -36,11 +36,11 @@ public sealed class EmbeddedPhotoUploadRepository(CmsifyDbContext db, EmbeddedPh
             string.IsNullOrWhiteSpace(request.PolicyId) || request.PolicyId.Length > 100 ||
             request.ExpectedSourceSha256 is { } expected && !EmbeddedPhotoPolicy.IsSha256(expected))
             return Failure(EmbeddedPhotoErrors.Validation, ResultErrorKind.Validation);
-        if (Settings.PolicyId != request.PolicyId) return Unavailable();
+        if (!Settings.AllowsPolicy(request.PolicyId)) return Unavailable();
         string? processorVersion = null;
         if (!Settings.UploadOnlyEnabled)
         {
-            var available = await capability.GetAsync(cancellationToken);
+            var available = await capability.GetAsync(request.PolicyId, cancellationToken);
             if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId ||
                 string.IsNullOrWhiteSpace(available.ProcessorVersion) || available.ProcessorVersion.Length > 100) return Unavailable();
             processorVersion = available.ProcessorVersion;

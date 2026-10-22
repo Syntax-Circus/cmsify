@@ -7,6 +7,25 @@ public static class EmbeddedPhotoPolicy
     public static bool ValidOriginalLimit(long value) => value > 0 && value <= MaximumSupportedOriginalBytes;
     public const int MaxEdge = 8192;
     public const long MaxPixels = 24_000_000;
+    public const string PngNormalizationPolicyId = "png-sdr-webp-v1";
+    public const string PngNormalizationVersion = "png-q8-srgb-strip-v1";
+    public const long PngMaxPixels = 30_000_000;
+    private static readonly IReadOnlyList<EmbeddedPhotoVariantRequirement> PngVariants = Array.AsReadOnly(
+        new[] { new EmbeddedPhotoVariantRequirement("320", 320, 85), new("640", 640, 85), new("1280", 1280, 85), new("4096", 4096, 85) });
+    // Unknown/custom policy IDs retain the historical contract. Only this explicit opt-in changes it.
+    public static IReadOnlyList<EmbeddedPhotoVariantRequirement> VariantsFor(string policyId) =>
+        policyId == PngNormalizationPolicyId ? PngVariants : RequiredVariants;
+    public static bool IsVariantKey(string key) => PngVariants.Any(x => x.VariantKey == key);
+    public static bool ValidMetadata(EmbeddedPhotoSourceMetadata source, string policyId) =>
+        ValidateDimensions(source.Width, source.Height, policyId) && source.BitDepth == 8 &&
+        !string.IsNullOrWhiteSpace(source.ColorDescription) && source.ColorDescription.Length <= 256 &&
+        (policyId == PngNormalizationPolicyId
+            ? source.Format == "PNG" && source.ColorDescription == "sRGB" && !source.UsedSdrBase &&
+              source.Conversion is { Version: PngNormalizationVersion, OriginalBitDepth: 8 or 16 }
+            : source.Format is "JPEG" or "PNG" or "WebP" or "HEIC" && source.Conversion is null);
+    public static bool ValidateDimensions(int width, int height, string policyId) =>
+        width > 0 && height > 0 && width <= MaxEdge && height <= MaxEdge &&
+        (long)width * height <= (policyId == PngNormalizationPolicyId ? PngMaxPixels : MaxPixels);
     public const string WebpContentType = "image/webp";
     public const int Quality = 80;
     public const int AutomaticAttempts = 3;

@@ -10,7 +10,11 @@ public sealed record EmbeddedPhotoInstructions(int QuarterTurnsClockwise);
 public sealed record EmbeddedPhotoManifestIdentity(Guid AssetId, int Revision, string ManifestSha256);
 public sealed record EmbeddedPhotoVariantDescriptor(string VariantKey, string ContentType, int Width, int Height, long Length, string Sha256);
 // Dimensions are after orientation and before manual quarter-turns; bit depth is the selected SDR decode.
-public sealed record EmbeddedPhotoSourceMetadata(string Format, int Width, int Height, int BitDepth, string ColorDescription, bool HasAlpha, bool UsedSdrBase);
+public sealed record EmbeddedPhotoSourceMetadata(string Format, int Width, int Height, int BitDepth, string ColorDescription, bool HasAlpha, bool UsedSdrBase)
+{
+    public EmbeddedPhotoConversion? Conversion { get; init; }
+}
+public sealed record EmbeddedPhotoConversion(string Version, int OriginalBitDepth);
 public sealed record EmbeddedPhotoUploadReceipt(Guid ReceiptId, string SourceSha256, long Length, int InitialRevision);
 public sealed record EmbeddedPhotoUploadOutcome(Guid WorkspaceId, Guid SessionId, Guid AssetId, Guid OperationKey, EmbeddedPhotoUploadState State, EmbeddedPhotoUploadReceipt? Receipt);
 public sealed record EmbeddedPhotoStatus(Guid WorkspaceId, Guid AssetId, int Revision, string PolicyId, string? ProcessorVersion, int RetryGeneration, EmbeddedPhotoState State, string? FailureCode,
@@ -25,6 +29,7 @@ public sealed record EmbeddedPhotoManifest
     public string ProcessorVersion { get; }
     public EmbeddedPhotoInstructions Instructions { get; }
     public IReadOnlyList<EmbeddedPhotoVariantDescriptor> Variants { get; }
+    public EmbeddedPhotoSourceMetadata? SourceMetadata { get; init; }
     public EmbeddedPhotoManifest(Guid workspaceId, EmbeddedPhotoManifestIdentity identity, string sourceSha256,
         string policyId, string processorVersion, EmbeddedPhotoInstructions instructions, IReadOnlyList<EmbeddedPhotoVariantDescriptor> variants)
     {

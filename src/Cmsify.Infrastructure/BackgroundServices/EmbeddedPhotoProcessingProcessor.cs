@@ -17,7 +17,7 @@ public sealed class EmbeddedPhotoProcessingProcessor(EmbeddedPhotoProcessingRepo
         if (lease is null) return false;
         if (clock.GetUtcNow() >= lease.ExpiresAt) return true;
         if (!await repository.AuthorizeLeaseAsync(lease, cancellationToken)) return true;
-        var available = await capability.GetAsync(cancellationToken);
+        var available = await capability.GetAsync(lease.PolicyId, cancellationToken);
         if (!available.Available || !available.Qualified || available.PolicyId != lease.PolicyId ||
             available.ProcessorVersion != lease.ProcessorVersion) return true;
         using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -38,10 +38,10 @@ public sealed class EmbeddedPhotoProcessingProcessor(EmbeddedPhotoProcessingRepo
             }
             if (result.Value is null) throw new PhotoByteValidationException(EmbeddedPhotoErrors.InvalidCandidate);
             await using var candidate = result.Value;
-            ValidateCandidate(candidate, lease.Instructions);
+            ValidateCandidate(candidate, lease.Instructions, lease.PolicyId);
             if (!await repository.ReserveVariantsAsync(lease, cancellationToken)) return true;
             var stored = new List<StoredPhotoVariant>();
-            foreach (var requirement in EmbeddedPhotoPolicy.RequiredVariants)
+            foreach (var requirement in EmbeddedPhotoPolicy.VariantsFor(lease.PolicyId))
             {
                 var variant = candidate.Variants.Single(v => v.Descriptor.VariantKey == requirement.VariantKey);
                 await using var bytes = await variant.Source.OpenReadAsync(attempt.Token);
@@ -83,16 +83,15 @@ public sealed class EmbeddedPhotoProcessingProcessor(EmbeddedPhotoProcessingRepo
             !string.Equals(bounded.CompleteHash(), lease.SourceSha256, StringComparison.OrdinalIgnoreCase))
             throw new PhotoByteValidationException(EmbeddedPhotoErrors.Corrupt);
     }
-    private static void ValidateCandidate(EmbeddedPhotoCandidate candidate, EmbeddedPhotoInstructions instructions)
+    private static void ValidateCandidate(EmbeddedPhotoCandidate candidate, EmbeddedPhotoInstructions instructions, string policyId)
     {
         var source = candidate.Metadata;
-        if (source is null || source.Format is not ("JPEG" or "PNG" or "WebP" or "HEIC") || source.BitDepth != 8 ||
-            string.IsNullOrWhiteSpace(source.ColorDescription) || source.ColorDescription.Length > 256 ||
-            !EmbeddedPhotoPolicy.ValidateDimensions(source.Width, source.Height) ||
-            candidate.Variants.Count != EmbeddedPhotoPolicy.RequiredVariants.Count)
+        var requirements = EmbeddedPhotoPolicy.VariantsFor(policyId);
+        if (source is null || !EmbeddedPhotoPolicy.ValidMetadata(source, policyId) ||
+            candidate.Variants.Count != requirements.Count)
             throw new PhotoByteValidationException(EmbeddedPhotoErrors.InvalidCandidate);
         var dimensions = instructions.QuarterTurnsClockwise % 2 == 0 ? (source.Width, source.Height) : (source.Height, source.Width);
-        foreach (var requirement in EmbeddedPhotoPolicy.RequiredVariants)
+        foreach (var requirement in requirements)
         {
             var variants = candidate.Variants.Where(v => v is not null && v.Descriptor?.VariantKey == requirement.VariantKey).ToArray();
             if (variants.Length != 1) throw new PhotoByteValidationException(EmbeddedPhotoErrors.InvalidCandidate);
