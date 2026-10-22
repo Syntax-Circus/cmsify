@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.21] - 2026-10-22
+
 ### Added
 
 - Opt-in `png-sdr-webp-v1` embedded processing profile with truthful PNG conversion provenance, a 4096-bound read preview and policy-specific capability lookup. Legacy processing/manifest identities stay unchanged; hosts still supply and qualify native conversion.
@@ -13,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Isolate content-version-save API tests from factory-registered hosted workers, preventing scheduled publication of Approved fixture data from racing a save and intermittently returning HTTP 409 under coverage.
+
+### Unchanged
+
+- PNG normalization defaults off and requires a host-qualified native processor. Legacy photo processing, retained originals, manifest identities and private/reference authorization remain enforced; this release does not activate downstream host processing or publish content.
 
 ## [0.8.20] - 2026-10-21
 
