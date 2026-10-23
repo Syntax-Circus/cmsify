@@ -6,9 +6,9 @@ namespace Cmsify.Infrastructure.Persistence.EmbeddedMedia;
 
 internal static class EmbeddedPhotoManifestSerialization
 {
-    internal static bool ValidPngManifest(PhotoManifestRecord manifest, IReadOnlyList<PhotoVariantRecord> variants)
+    internal static bool ValidVersionedManifest(PhotoManifestRecord manifest, IReadOnlyList<PhotoVariantRecord> variants)
     {
-        if (manifest.PolicyId != EmbeddedPhotoPolicy.PngNormalizationPolicyId) return true;
+        if (manifest.PolicyId is not (EmbeddedPhotoPolicy.PngNormalizationPolicyId or EmbeddedPhotoPolicy.JpegSdrBasePolicyId)) return true;
         if (manifest.MetadataJson is null) return false;
         EmbeddedPhotoSourceMetadata? metadata;
         try { metadata = JsonSerializer.Deserialize<EmbeddedPhotoSourceMetadata>(manifest.MetadataJson); }
@@ -30,11 +30,12 @@ internal static class EmbeddedPhotoManifestSerialization
         using (var json = new Utf8JsonWriter(output))
         {
             var png = policy == EmbeddedPhotoPolicy.PngNormalizationPolicyId;
-            json.WriteStartObject(); json.WriteNumber("version", png ? 2 : 1);
+            var jpeg = policy == EmbeddedPhotoPolicy.JpegSdrBasePolicyId;
+            json.WriteStartObject(); json.WriteNumber("version", png ? 2 : jpeg ? 3 : 1);
             json.WriteString("workspace", workspace); json.WriteString("asset", asset); json.WriteNumber("revision", revision);
             json.WriteString("sourceSha256", sourceSha.ToUpperInvariant()); json.WriteString("policy", policy);
             json.WriteString("processor", processor); json.WriteNumber("quarterTurnsClockwise", instructions.QuarterTurnsClockwise);
-            if (png)
+            if (png || jpeg)
             {
                 ArgumentNullException.ThrowIfNull(metadata);
                 json.WriteStartObject("source");
