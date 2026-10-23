@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.22] - 2026-10-23
+
 ### Added
 
 - Opt-in JPEG SDR-base processing policy with exact conversion provenance, version-three manifest identity, policy-specific readiness and mixed-queue worker negotiation. Hosts retain and qualify native conversion; legacy and PNG defaults/manifest identities remain unchanged.
@@ -13,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Avoid probing disabled optional photo adapters during revision/retry, and isolate JPEG capability probe failures so eligible legacy/PNG jobs continue.
+
+### Unchanged
+
+- JPEG SDR-base processing defaults off and requires a host-qualified native processor. Retained originals, legacy/PNG manifest identities, authorization and retention remain enforced; this release does not activate downstream host processing or publish content.
 
 ## [0.8.21] - 2026-10-22
 
