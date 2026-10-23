@@ -9,6 +9,8 @@ public static class EmbeddedPhotoPolicy
     public const long MaxPixels = 24_000_000;
     public const string PngNormalizationPolicyId = "png-sdr-webp-v1";
     public const string PngNormalizationVersion = "png-q8-srgb-strip-v1";
+    public const string JpegSdrBasePolicyId = "jpeg-sdr-base-webp-v1";
+    public const string JpegSdrBaseVersion = "apple-jpeg-sdr-base-q8-srgb-strip-v1";
     public const long PngMaxPixels = 30_000_000;
     private static readonly IReadOnlyList<EmbeddedPhotoVariantRequirement> PngVariants = Array.AsReadOnly(
         new[] { new EmbeddedPhotoVariantRequirement("320", 320, 85), new("640", 640, 85), new("1280", 1280, 85), new("4096", 4096, 85) });
@@ -22,7 +24,10 @@ public static class EmbeddedPhotoPolicy
         (policyId == PngNormalizationPolicyId
             ? source.Format == "PNG" && source.ColorDescription == "sRGB" && !source.UsedSdrBase &&
               source.Conversion is { Version: PngNormalizationVersion, OriginalBitDepth: 8 or 16 }
-            : source.Format is "JPEG" or "PNG" or "WebP" or "HEIC" && source.Conversion is null);
+            : policyId == JpegSdrBasePolicyId
+                ? source.Format == "JPEG" && source.ColorDescription == "sRGB" && source.UsedSdrBase && !source.HasAlpha &&
+                  source.Conversion is { Version: JpegSdrBaseVersion, OriginalBitDepth: 8 }
+                : source.Format is "JPEG" or "PNG" or "WebP" or "HEIC" && source.Conversion is null);
     public static bool ValidateDimensions(int width, int height, string policyId) =>
         width > 0 && height > 0 && width <= MaxEdge && height <= MaxEdge &&
         (long)width * height <= (policyId == PngNormalizationPolicyId ? PngMaxPixels : MaxPixels);

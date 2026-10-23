@@ -77,8 +77,9 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
             !await db.PhotoOriginals.AnyAsync(x => x.AssetId == request.AssetId && x.WorkspaceId == request.WorkspaceId &&
                 x.ProcessingEnrollmentRevision != null, cancellationToken))
             return NotReady<EmbeddedPhotoStatus>();
+        if (!Settings.AllowsPolicy(request.PolicyId)) return Unavailable<EmbeddedPhotoStatus>();
         var available = await capability.GetAsync(request.PolicyId, cancellationToken);
-        if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId || !Settings.AllowsPolicy(request.PolicyId))
+        if (!available.Available || !available.Qualified || available.PolicyId != request.PolicyId)
             return Unavailable<EmbeddedPhotoStatus>();
         var original = await db.PhotoOriginals.AsNoTracking().SingleOrDefaultAsync(
             x => x.AssetId == request.AssetId && x.WorkspaceId == request.WorkspaceId, cancellationToken);
@@ -129,8 +130,9 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
         if (job is null || job.WorkspaceId != request.WorkspaceId) return Missing<EmbeddedPhotoStatus>();
         if (job.State != EmbeddedPhotoState.Failed || job.RetryGeneration != request.ExpectedRetryGeneration || job.RetryGeneration == int.MaxValue)
             return Conflict<EmbeddedPhotoStatus>();
+        if (!Settings.AllowsPolicy(job.PolicyId)) return Unavailable<EmbeddedPhotoStatus>();
         var available = await capability.GetAsync(job.PolicyId, cancellationToken);
-        if (!Settings.AllowsPolicy(job.PolicyId) || !Matches(available, job.PolicyId, job.ProcessorVersion)) return Unavailable<EmbeddedPhotoStatus>();
+        if (!Matches(available, job.PolicyId, job.ProcessorVersion)) return Unavailable<EmbeddedPhotoStatus>();
         var revision = await FreshRevisionAsync(job, cancellationToken);
         if (!await authorize(operation, cancellationToken)) return Denied<EmbeddedPhotoStatus>();
         job.RetryGeneration++; job.AutomaticAttemptCount = 0; job.State = EmbeddedPhotoState.Queued;
@@ -158,7 +160,7 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
             .ToListAsync(cancellationToken);
         var ordered = EmbeddedPhotoPolicy.VariantsFor(manifest.PolicyId).Select(r => variants.SingleOrDefault(v => v.VariantKey == r.VariantKey)).ToArray();
         if (ordered.Any(v => v is null) || variants.Count != ordered.Length ||
-            !EmbeddedPhotoManifestSerialization.ValidPngManifest(manifest, variants)) return NotReady<EmbeddedPhotoManifest>();
+            !EmbeddedPhotoManifestSerialization.ValidVersionedManifest(manifest, variants)) return NotReady<EmbeddedPhotoManifest>();
         foreach (var variant in variants)
             if (variant.StorageProvider != storage.ProviderName ||
                 (await storage.Provider.GetMetadataAsync(variant.StorageKey, cancellationToken))?.SizeBytes != variant.Length)
@@ -180,14 +182,18 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
             : new EmbeddedPhotoCapability(false, false, EmbeddedPhotoPolicy.PngNormalizationPolicyId, "", "", null);
         var primaryReady = Settings.AllowsPolicy(available.PolicyId) && Matches(available, Settings.PolicyId, available.ProcessorVersion);
         var pngReady = Settings.PngNormalizationEnabled && Matches(png, EmbeddedPhotoPolicy.PngNormalizationPolicyId, png.ProcessorVersion);
-        if (!primaryReady && !pngReady) return null;
+        var jpeg = Settings.JpegSdrBaseEnabled
+            ? await JpegCapabilityAsync(cancellationToken)
+            : new EmbeddedPhotoCapability(false, false, EmbeddedPhotoPolicy.JpegSdrBasePolicyId, "", "", null);
+        var jpegReady = Settings.JpegSdrBaseEnabled && Matches(jpeg, EmbeddedPhotoPolicy.JpegSdrBasePolicyId, jpeg.ProcessorVersion);
+        if (!primaryReady && !pngReady && !jpegReady) return null;
         if (Settings.ProcessingLeaseDuration <= TimeSpan.FromSeconds(EmbeddedPhotoPolicy.DeadlineSeconds) ||
             Settings.ProcessingLeaseDuration > EmbeddedPhotoOptions.MaxProcessingLease) throw new InvalidOperationException("Invalid photo processing lease configuration.");
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({SiteClaimLock})", cancellationToken);
         var now = clock.GetUtcNow();
         if (await db.PhotoJobs.AnyAsync(x => x.State == EmbeddedPhotoState.Processing && x.LeaseExpiresAt > now, cancellationToken)) return null;
-        var eligible = EligibleJobs(available, primaryReady, png, pngReady);
+        var eligible = EligibleJobs(available, primaryReady, png, pngReady, jpeg, jpegReady);
         var expiredCandidates = eligible.Where(x => x.State == EmbeddedPhotoState.Processing && x.LeaseExpiresAt <= now);
         var expired = await ReadClaimPageAsync(expiredCandidates, true, cancellationToken);
         foreach (var stale in expired)
@@ -207,7 +213,8 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
         foreach (var candidate in due)
         {
             _queueCursor.Advance(candidate.NextAttemptAt, candidate.Id);
-            if (!(primaryReady && Matches(available, candidate.PolicyId, candidate.ProcessorVersion) || pngReady && Matches(png, candidate.PolicyId, candidate.ProcessorVersion)) || !await AuthorizedAsync(ownerId, candidate, cancellationToken)) continue;
+            if (!(primaryReady && Matches(available, candidate.PolicyId, candidate.ProcessorVersion) || pngReady && Matches(png, candidate.PolicyId, candidate.ProcessorVersion)
+                || jpegReady && Matches(jpeg, candidate.PolicyId, candidate.ProcessorVersion)) || !await AuthorizedAsync(ownerId, candidate, cancellationToken)) continue;
             // Acquire asset first so publication/protection and processing completion share lock order.
             var asset = await db.MediaAssets.FromSqlInterpolated($"SELECT *, xmin FROM media_assets WHERE id = {candidate.AssetId} FOR UPDATE")
                 .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
@@ -229,9 +236,18 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
         await tx.CommitAsync(cancellationToken); return null;
     }
 
-    private IQueryable<PhotoJobRecord> EligibleJobs(EmbeddedPhotoCapability available, bool primaryReady, EmbeddedPhotoCapability png, bool pngReady) =>
+    private async Task<EmbeddedPhotoCapability> JpegCapabilityAsync(CancellationToken ct)
+    {
+        try { return await capability.GetAsync(EmbeddedPhotoPolicy.JpegSdrBasePolicyId, ct); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return new(false,false,EmbeddedPhotoPolicy.JpegSdrBasePolicyId,"","","jpeg-sdr-capability-unavailable"); }
+    }
+
+    private IQueryable<PhotoJobRecord> EligibleJobs(EmbeddedPhotoCapability available, bool primaryReady, EmbeddedPhotoCapability png, bool pngReady,
+        EmbeddedPhotoCapability jpeg, bool jpegReady) =>
         db.PhotoJobs.AsNoTracking().Where(x => ((primaryReady && x.PolicyId == available.PolicyId && x.ProcessorVersion == available.ProcessorVersion) ||
-            (pngReady && x.PolicyId == png.PolicyId && x.ProcessorVersion == png.ProcessorVersion)) &&
+            (pngReady && x.PolicyId == png.PolicyId && x.ProcessorVersion == png.ProcessorVersion) ||
+            (jpegReady && x.PolicyId == jpeg.PolicyId && x.ProcessorVersion == jpeg.ProcessorVersion)) &&
             db.MediaAssets.Any(asset => asset.Id == x.AssetId && asset.WorkspaceId == x.WorkspaceId && asset.BlobState == MediaBlobState.Available) &&
             db.PhotoOriginals.Any(original => original.AssetId == x.AssetId && original.StorageProvider == storage.ProviderName));
 

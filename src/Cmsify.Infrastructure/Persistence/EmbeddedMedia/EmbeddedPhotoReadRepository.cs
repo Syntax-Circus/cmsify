@@ -53,8 +53,8 @@ public sealed class EmbeddedPhotoReadRepository(CmsifyDbContext db, EmbeddedPhot
         var manifest = await db.PhotoManifests.AsNoTracking().SingleOrDefaultAsync(x => x.AssetId == request.Manifest.AssetId && x.WorkspaceId == request.WorkspaceId &&
             x.Revision == request.Manifest.Revision && x.ManifestSha256 == request.Manifest.ManifestSha256, cancellationToken);
         if (manifest is null || !EmbeddedPhotoPolicy.VariantsFor(manifest.PolicyId).Any(x => x.VariantKey == request.VariantKey)) return Missing();
-        if (manifest.PolicyId == EmbeddedPhotoPolicy.PngNormalizationPolicyId &&
-            !EmbeddedPhotoManifestSerialization.ValidPngManifest(manifest, await db.PhotoVariants.AsNoTracking()
+        if (manifest.PolicyId is EmbeddedPhotoPolicy.PngNormalizationPolicyId or EmbeddedPhotoPolicy.JpegSdrBasePolicyId &&
+            !EmbeddedPhotoManifestSerialization.ValidVersionedManifest(manifest, await db.PhotoVariants.AsNoTracking()
                 .Where(x => x.AssetId == manifest.AssetId && x.Revision == manifest.Revision).ToListAsync(cancellationToken))) return Unavailable();
         var variant = await db.PhotoVariants.AsNoTracking().SingleOrDefaultAsync(x => x.AssetId == request.Manifest.AssetId &&
             x.Revision == request.Manifest.Revision && x.VariantKey == request.VariantKey, cancellationToken);

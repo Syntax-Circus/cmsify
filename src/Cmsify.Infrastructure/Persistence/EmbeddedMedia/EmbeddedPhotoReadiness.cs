@@ -60,6 +60,13 @@ public sealed class EmbeddedPhotoReadiness(CmsifyDbContext db, IStorageProvider 
                     string.IsNullOrWhiteSpace(png.ProcessorVersion) || png.ProcessorVersion.Length > 100 || string.IsNullOrWhiteSpace(png.SandboxIdentity))
                     reasons.Add("png-capability-unavailable");
             }
+            if (options.Value.JpegSdrBaseEnabled)
+            {
+                var jpeg = await capability.GetAsync(EmbeddedPhotoPolicy.JpegSdrBasePolicyId, cancellationToken);
+                if (!jpeg.Available || !jpeg.Qualified || jpeg.PolicyId != EmbeddedPhotoPolicy.JpegSdrBasePolicyId ||
+                    string.IsNullOrWhiteSpace(jpeg.ProcessorVersion) || jpeg.ProcessorVersion.Length > 100 || string.IsNullOrWhiteSpace(jpeg.SandboxIdentity))
+                    reasons.Add("jpeg-sdr-capability-unavailable");
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { reasons.Add("capability-unavailable"); }

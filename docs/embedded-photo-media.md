@@ -16,6 +16,29 @@ host's sandbox, corpus, licensing and image acceptance gates are qualified.
 
 ## Composition
 
+### Versioned JPEG SDR-base policy (local, unreleased)
+
+`JpegSdrBaseEnabled` defaults false. Opting in enables `jpeg-sdr-base-webp-v1`
+alongside the configured legacy and optional PNG policies. The host supplies a
+policy-specific qualified capability and processor; Cmsify does not decode JPEG,
+recognize gain maps or select frames. The host must separately qualify its SDR
+conversion and obtain any required fidelity decision while preserving full originals.
+
+Candidate proof must identify JPEG,8-bit,sRGB,no alpha,`UsedSdrBase=true`, conversion
+version `apple-jpeg-sdr-base-q8-srgb-strip-v1` and original bit depth8. The existing
+320/640/1280 WebP requirements and24MP bound apply. JPEG manifests use identity
+version3, binding conversion/source metadata and variants. Legacy version1 and PNG
+version2 identities remain unchanged. Reads, reference protection and historical
+manifest lookup verify the JPEG proof even after the option is disabled.
+
+Use the existing source-hash/receipt-bound upload enrollment or exact-revision
+operation; operation replay, source-metadata consistency, authority, immutable
+originals and retention still apply. Disabled revision/retry requests do not invoke
+the optional adapter. An unavailable or throwing JPEG capability probe leaves its
+jobs queued while eligible legacy/PNG work continues; cancellation propagates.
+Readiness requires the JPEG capability only when opted in. The adapter must dispatch
+by the persisted policy/processor version and never relabel a PNG or legacy proof.
+
 ### Versioned PNG normalization (local, unreleased)
 
 `PngNormalizationEnabled` defaults false. Explicitly enabling it allows policy
