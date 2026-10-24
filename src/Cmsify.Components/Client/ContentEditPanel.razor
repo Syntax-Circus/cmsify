@@ -9,7 +9,7 @@
                  OnMediaPickRequested="OpenMediaPickerAsync" OnFilePickRequested="OpenFilePickerAsync"
                  FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText"
                  Client="@Client" WorkspaceId="@WorkspaceId"
-                 ReadOnly="@ReadOnly" Busy="@busy" />
+                 ReadOnly="@ReadOnly" Busy="@busy" MarkdownPreviewRenderer="@MarkdownPreviewRenderer" />
 
 <MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix"
                    Selected="OnAssetSelectedAsync" Closed="() => pickerVisible = false" />
@@ -27,6 +27,8 @@
     [Parameter] public string? SlugHelpText { get; set; }
     [Parameter] public int? VersionNumber { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>Opt-in. When set, Markdown fields show a rendered preview (Markdown in, trusted HTML out) instead of the raw source. The host owns sanitization.</summary>
+    [Parameter] public Func<string?, string>? MarkdownPreviewRenderer { get; set; }
     [Parameter] public bool RequireSlug { get; set; }
     [Parameter] public EventCallback<bool> BusyChanged { get; set; }
 
