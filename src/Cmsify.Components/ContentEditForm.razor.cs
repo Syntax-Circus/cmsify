@@ -4,6 +4,8 @@ namespace SyntaxCircus.Cmsify.Components;
 
 public partial class ContentEditForm
 {
+    /// <summary>Opt-in. When set, Markdown fields show a rendered preview using this function (Markdown in, trusted HTML out) instead of the raw source. The host owns sanitization.</summary>
+    [Parameter] public Func<string?, string>? MarkdownPreviewRenderer { get; set; }
     [Parameter, EditorRequired] public TemplateVersionResponse TemplateVersion { get; set; } = null!;
     [Parameter, EditorRequired] public IDictionary<Guid, ContentFieldEditorValue> FieldValues { get; set; } = new Dictionary<Guid, ContentFieldEditorValue>();
     [Parameter] public EventCallback<(TemplateFieldResponse Field, ContentFieldEditorValue Value)> FieldValueChanged { get; set; }

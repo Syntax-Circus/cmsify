@@ -7,3 +7,22 @@
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+.cmsify-field-markdown-rendered {
+    margin-top: var(--cmsify-spacing-sm, 0.375rem);
+    padding: var(--cmsify-spacing-md, 0.75rem);
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    border-radius: var(--cmsify-radius, 0.375rem);
+    overflow-x: auto;
+    word-break: break-word;
+}
+
+.cmsify-field-markdown-rendered ::deep table {
+    border-collapse: collapse;
+}
+
+.cmsify-field-markdown-rendered ::deep th,
+.cmsify-field-markdown-rendered ::deep td {
+    border: 1px solid var(--cmsify-color-border, #ced4da);
+    padding: 0.25rem 0.5rem;
+}

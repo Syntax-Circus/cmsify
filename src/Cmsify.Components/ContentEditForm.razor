@@ -1,5 +1,6 @@
 @namespace SyntaxCircus.Cmsify.Components
 
+<CascadingValue Name="MarkdownPreviewRenderer" Value="@MarkdownPreviewRenderer">
 <div class="cmsify-form">
     @if (!string.IsNullOrWhiteSpace(Error))
     {
@@ -54,3 +55,4 @@
         <button type="button" class="cmsify-form-save-button" @onclick="() => OnSave.InvokeAsync()" disabled="@Busy">@(Busy ? "Saving…" : "Save")</button>
     }
 </div>
+</CascadingValue>

@@ -4,10 +4,20 @@
 {
     <RichTextFieldEditor Value="@Value" ValueChanged="ValueChanged" Rows="6" ReadOnly="@ReadOnly" />
 }
-<pre class="cmsify-field-markdown-preview">@Value</pre>
+@if (PreviewRenderer is not null)
+{
+    <div class="cmsify-field-markdown-rendered">@((MarkupString)PreviewRenderer(Value))</div>
+}
+else
+{
+    <pre class="cmsify-field-markdown-preview">@Value</pre>
+}
 
 @code {
     [Parameter] public string? Value { get; set; }
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Opt-in renderer supplied by the host through <c>ContentEditForm.MarkdownPreviewRenderer</c>.</summary>
+    [CascadingParameter(Name = "MarkdownPreviewRenderer")] public Func<string?, string>? PreviewRenderer { get; set; }
 }
