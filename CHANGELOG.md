@@ -6,9 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.23] - 2026-10-24
+
 ### Added
 
 - Opt-in rendered Markdown preview: `ContentEditPanel` and `ContentEditForm` accept `MarkdownPreviewRenderer` (`Func<string?, string>`, Markdown in, trusted HTML out). When unset, Markdown fields keep the raw-source preview. The host supplies the renderer and owns sanitization, so the package gains no Markdown dependency.
+
+### Unchanged
+
+- Without a renderer, Markdown fields behave exactly as in 0.8.22. No API, storage or content-model changes.
 
 ## [0.8.22] - 2026-10-23
 
