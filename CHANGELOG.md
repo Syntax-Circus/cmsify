@@ -6,9 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.24] - 2026-10-28
+
 ### Added
 
 - Opt-in Display P3 PNG SDR policy with exact conversion provenance, four WebP bounds and version-four manifest integrity. Native admission/color conversion remains host-owned; previous policies, retained originals and immutable manifests remain unchanged.
+
+### Fixed
+
+- Isolate optional photo adapter capability failures, including adapter self-cancellation, so eligible jobs continue while actual worker cancellation still propagates.
+
+### Unchanged
+
+- Display P3 PNG processing defaults off and requires a host-qualified native processor. Retained originals, previous manifest identities, authorization and retention remain enforced; this release does not activate downstream processing or publish content.
 
 ## [0.8.23] - 2026-10-24
 
