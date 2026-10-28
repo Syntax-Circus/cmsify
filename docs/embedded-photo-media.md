@@ -344,3 +344,25 @@ retention service or disaster-proof filesystem backup design.
 
 The runner neither publishes packages nor upgrades hosts. Qualify deployment
 and actual phone images separately before release/adoption.
+
+## Explicit Display P3 PNG conversion
+
+`EmbeddedPhotoOptions.PngCicpSdrEnabled` defaults off. Enabling it admits the
+separate `png-cicp-sdr-webp-v1` policy only when the host advertises a qualified
+capability for that exact policy and processor version. It does not enable the
+existing PNG policy or reinterpret previous manifests.
+
+Candidates require PNG, selected8-bit sRGB, original depth8/16, no SDR-base flag,
+and conversion `png-cicp-p3-q8-srgb-strip-v1`. Bounds are320/640/1280/4096 at quality85,
+with30MP/8192-edge limits. Version4 manifest hashes bind conversion metadata and
+variant descriptors; historical versions1/2/3 remain readable after disable.
+The new opt-in participates in registration snapshots and readiness. An absent
+or throwing optional capability leaves those jobs queued while eligible existing
+policies continue; it does not consume processing attempts for unclaimed jobs.
+
+The host must verify the exact source, parse cICP/CRC/order conservatively,
+apply color-declaration precedence, retain originals and qualify real conversion
+and resource controls. Cmsify validates candidate/manifest/storage contracts,
+not compressed pixels or the truth of a host's color-conversion claim.
+See [local implementation evidence](execution/png-cicp-sdr-policy.md). No HTTP
+or generated SDK contract changes are included.

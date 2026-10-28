@@ -20,6 +20,26 @@ namespace Cmsify.Infrastructure.Tests;
 public sealed class EmbeddedPhotoRegistrationTests
 {
     [Fact]
+    public void PngCicpOptInIsSnapshottedAndChangedRegistrationRejects()
+    {
+        var services = Services(); EmbeddedPhotoOptions? captured = null;
+        services.AddCmsifyEmbeddedPhotos(o => { captured = o; o.PngCicpSdrEnabled = true; });
+        captured!.PngCicpSdrEnabled = false;
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IOptions<EmbeddedPhotoOptions>>().Value.PngCicpSdrEnabled.ShouldBeTrue();
+        Should.Throw<InvalidOperationException>(() => services.AddCmsifyEmbeddedPhotos(_ => { }));
+    }
+    [Fact]
+    public async Task OptedInPngCicpRequiresItsOwnQualifiedCapability()
+    {
+        await using var f = await EmbeddedPhotoFixture.Create(); var services = Services(f.ConnectionString);
+        services.AddSingleton<IEmbeddedPhotoProcessorCapability>(new Capability("synthetic-photo-v1"));
+        services.AddCmsifyEmbeddedPhotos(o => { o.Enabled = true; o.PolicyId = "synthetic-photo-v1"; o.PngCicpSdrEnabled = true; });
+        using var provider = services.BuildServiceProvider(); await using var scope = provider.CreateAsyncScope();
+        var result = await scope.ServiceProvider.GetRequiredService<IEmbeddedPhotoReadiness>().CheckAsync(TestContext.Current.CancellationToken);
+        result.Ready.ShouldBeFalse(); result.Reasons.ShouldContain("png-cicp-capability-unavailable");
+    }
+    [Fact]
     public void JpegSdrOptInIsSnapshottedAndChangedRegistrationRejects()
     {
         var services=Services();EmbeddedPhotoOptions? captured=null;

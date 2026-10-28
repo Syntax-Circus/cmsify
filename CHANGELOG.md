@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in Display P3 PNG SDR policy with exact conversion provenance, four WebP bounds and version-four manifest integrity. Native admission/color conversion remains host-owned; previous policies, retained originals and immutable manifests remain unchanged.
+
 ## [0.8.23] - 2026-10-24
 
 ### Added

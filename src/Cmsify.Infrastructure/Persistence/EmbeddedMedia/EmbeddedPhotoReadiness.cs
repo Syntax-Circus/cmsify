@@ -67,6 +67,13 @@ public sealed class EmbeddedPhotoReadiness(CmsifyDbContext db, IStorageProvider 
                     string.IsNullOrWhiteSpace(jpeg.ProcessorVersion) || jpeg.ProcessorVersion.Length > 100 || string.IsNullOrWhiteSpace(jpeg.SandboxIdentity))
                     reasons.Add("jpeg-sdr-capability-unavailable");
             }
+            if (options.Value.PngCicpSdrEnabled)
+            {
+                var cicp = await capability.GetAsync(EmbeddedPhotoPolicy.PngCicpSdrPolicyId, cancellationToken);
+                if (!cicp.Available || !cicp.Qualified || cicp.PolicyId != EmbeddedPhotoPolicy.PngCicpSdrPolicyId ||
+                    string.IsNullOrWhiteSpace(cicp.ProcessorVersion) || cicp.ProcessorVersion.Length > 100 || string.IsNullOrWhiteSpace(cicp.SandboxIdentity))
+                    reasons.Add("png-cicp-capability-unavailable");
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { reasons.Add("capability-unavailable"); }
