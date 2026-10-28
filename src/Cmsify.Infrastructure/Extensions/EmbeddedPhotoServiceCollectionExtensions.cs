@@ -28,7 +28,7 @@ public static class EmbeddedPhotoServiceCollectionExtensions
             settings.ProcessingEnabled && !settings.Enabled || settings.UploadOnlyEnabled && !settings.Enabled)
             throw new ArgumentException("Invalid embedded photo options.", nameof(configure));
         var snapshot = new Registration(settings.Enabled, settings.ProcessingEnabled, settings.UploadOnlyEnabled, settings.PolicyId, settings.UploadLeaseDuration,
-            settings.UploadDeadline, settings.ProcessingLeaseDuration, settings.PollInterval, settings.MaximumOriginalBytes, settings.PngNormalizationEnabled, settings.JpegSdrBaseEnabled);
+            settings.UploadDeadline, settings.ProcessingLeaseDuration, settings.PollInterval, settings.MaximumOriginalBytes, settings.PngNormalizationEnabled, settings.JpegSdrBaseEnabled, settings.PngCicpSdrEnabled);
         var previous = services.FirstOrDefault(x => x.ServiceType == typeof(Registration))?.ImplementationInstance as Registration;
         if (previous is not null)
         {
@@ -42,6 +42,7 @@ public static class EmbeddedPhotoServiceCollectionExtensions
             o.Enabled = snapshot.Enabled; o.ProcessingEnabled = snapshot.ProcessingEnabled; o.PolicyId = snapshot.PolicyId;
             o.UploadOnlyEnabled = snapshot.UploadOnlyEnabled;
             o.PngNormalizationEnabled = snapshot.PngNormalizationEnabled;
+            o.PngCicpSdrEnabled = snapshot.PngCicpSdrEnabled;
             o.JpegSdrBaseEnabled = snapshot.JpegSdrBaseEnabled;
             o.MaximumOriginalBytes = snapshot.MaximumOriginalBytes;
             o.UploadLeaseDuration = snapshot.UploadLease; o.UploadDeadline = snapshot.UploadDeadline;
@@ -83,7 +84,7 @@ public static class EmbeddedPhotoServiceCollectionExtensions
     }
 
     private sealed record Registration(bool Enabled, bool ProcessingEnabled, bool UploadOnlyEnabled, string PolicyId, TimeSpan UploadLease,
-        TimeSpan UploadDeadline, TimeSpan ProcessingLease, TimeSpan Poll, long MaximumOriginalBytes, bool PngNormalizationEnabled, bool JpegSdrBaseEnabled);
+        TimeSpan UploadDeadline, TimeSpan ProcessingLease, TimeSpan Poll, long MaximumOriginalBytes, bool PngNormalizationEnabled, bool JpegSdrBaseEnabled, bool PngCicpSdrEnabled);
     private sealed class DeniedAuthorization : IEmbeddedPhotoAuthorizationService
     {
         public Task<bool> CanExecuteAsync(EmbeddedPhotoOperation operation, CancellationToken ct) => Task.FromResult(false);

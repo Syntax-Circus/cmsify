@@ -186,14 +186,18 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
             ? await JpegCapabilityAsync(cancellationToken)
             : new EmbeddedPhotoCapability(false, false, EmbeddedPhotoPolicy.JpegSdrBasePolicyId, "", "", null);
         var jpegReady = Settings.JpegSdrBaseEnabled && Matches(jpeg, EmbeddedPhotoPolicy.JpegSdrBasePolicyId, jpeg.ProcessorVersion);
-        if (!primaryReady && !pngReady && !jpegReady) return null;
+        var cicp = Settings.PngCicpSdrEnabled
+            ? await PngCicpCapabilityAsync(cancellationToken)
+            : new EmbeddedPhotoCapability(false, false, EmbeddedPhotoPolicy.PngCicpSdrPolicyId, "", "", null);
+        var cicpReady = Settings.PngCicpSdrEnabled && Matches(cicp, EmbeddedPhotoPolicy.PngCicpSdrPolicyId, cicp.ProcessorVersion);
+        if (!primaryReady && !pngReady && !jpegReady && !cicpReady) return null;
         if (Settings.ProcessingLeaseDuration <= TimeSpan.FromSeconds(EmbeddedPhotoPolicy.DeadlineSeconds) ||
             Settings.ProcessingLeaseDuration > EmbeddedPhotoOptions.MaxProcessingLease) throw new InvalidOperationException("Invalid photo processing lease configuration.");
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({SiteClaimLock})", cancellationToken);
         var now = clock.GetUtcNow();
         if (await db.PhotoJobs.AnyAsync(x => x.State == EmbeddedPhotoState.Processing && x.LeaseExpiresAt > now, cancellationToken)) return null;
-        var eligible = EligibleJobs(available, primaryReady, png, pngReady, jpeg, jpegReady);
+        var eligible = EligibleJobs(available, primaryReady, png, pngReady, jpeg, jpegReady, cicp, cicpReady);
         var expiredCandidates = eligible.Where(x => x.State == EmbeddedPhotoState.Processing && x.LeaseExpiresAt <= now);
         var expired = await ReadClaimPageAsync(expiredCandidates, true, cancellationToken);
         foreach (var stale in expired)
@@ -214,7 +218,7 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
         {
             _queueCursor.Advance(candidate.NextAttemptAt, candidate.Id);
             if (!(primaryReady && Matches(available, candidate.PolicyId, candidate.ProcessorVersion) || pngReady && Matches(png, candidate.PolicyId, candidate.ProcessorVersion)
-                || jpegReady && Matches(jpeg, candidate.PolicyId, candidate.ProcessorVersion)) || !await AuthorizedAsync(ownerId, candidate, cancellationToken)) continue;
+                || jpegReady && Matches(jpeg, candidate.PolicyId, candidate.ProcessorVersion) || cicpReady && Matches(cicp, candidate.PolicyId, candidate.ProcessorVersion)) || !await AuthorizedAsync(ownerId, candidate, cancellationToken)) continue;
             // Acquire asset first so publication/protection and processing completion share lock order.
             var asset = await db.MediaAssets.FromSqlInterpolated($"SELECT *, xmin FROM media_assets WHERE id = {candidate.AssetId} FOR UPDATE")
                 .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
@@ -243,11 +247,19 @@ public sealed partial class EmbeddedPhotoProcessingRepository(CmsifyDbContext db
         catch (Exception) { return new(false,false,EmbeddedPhotoPolicy.JpegSdrBasePolicyId,"","","jpeg-sdr-capability-unavailable"); }
     }
 
+    private async Task<EmbeddedPhotoCapability> PngCicpCapabilityAsync(CancellationToken ct)
+    {
+        try { return await capability.GetAsync(EmbeddedPhotoPolicy.PngCicpSdrPolicyId, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception) { return new(false,false,EmbeddedPhotoPolicy.PngCicpSdrPolicyId,"","","png-cicp-capability-unavailable"); }
+    }
+
     private IQueryable<PhotoJobRecord> EligibleJobs(EmbeddedPhotoCapability available, bool primaryReady, EmbeddedPhotoCapability png, bool pngReady,
-        EmbeddedPhotoCapability jpeg, bool jpegReady) =>
+        EmbeddedPhotoCapability jpeg, bool jpegReady, EmbeddedPhotoCapability cicp, bool cicpReady) =>
         db.PhotoJobs.AsNoTracking().Where(x => ((primaryReady && x.PolicyId == available.PolicyId && x.ProcessorVersion == available.ProcessorVersion) ||
             (pngReady && x.PolicyId == png.PolicyId && x.ProcessorVersion == png.ProcessorVersion) ||
-            (jpegReady && x.PolicyId == jpeg.PolicyId && x.ProcessorVersion == jpeg.ProcessorVersion)) &&
+            (jpegReady && x.PolicyId == jpeg.PolicyId && x.ProcessorVersion == jpeg.ProcessorVersion) ||
+            (cicpReady && x.PolicyId == cicp.PolicyId && x.ProcessorVersion == cicp.ProcessorVersion)) &&
             db.MediaAssets.Any(asset => asset.Id == x.AssetId && asset.WorkspaceId == x.WorkspaceId && asset.BlobState == MediaBlobState.Available) &&
             db.PhotoOriginals.Any(original => original.AssetId == x.AssetId && original.StorageProvider == storage.ProviderName));
 
