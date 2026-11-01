@@ -813,6 +813,7 @@ export interface paths {
                     SortDesc?: boolean;
                     Page?: number;
                     PageSize?: number;
+                    Fields?: string;
                 };
                 header?: never;
                 path: {
@@ -4013,6 +4014,7 @@ export interface components {
             versionCount: number;
             currentlyServingVersion?: components["schemas"]["ContentVersionSummaryResponse"];
             templateSlug: string;
+            fields?: components["schemas"]["ContentVersionFieldValueResponse"][] | null;
         };
         ContentItemSummaryResponsePagedResponse: {
             items: components["schemas"]["ContentItemSummaryResponse"][];

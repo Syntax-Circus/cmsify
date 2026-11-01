@@ -38,6 +38,8 @@ export interface ContentListOptions {
   translationGroupId?: string;
   slug?: string;
   tags?: string;
+  /** Field keys (max 10) whose values are returned on each list row, e.g. ["title", "summary"]. */
+  fields?: string | readonly string[];
   createdAfter?: string | Date;
   createdBefore?: string | Date;
   publishedAfter?: string | Date;
@@ -169,7 +171,7 @@ export class CmsifyClient {
 
 const contentQuery = (options: ContentListOptions, resolve: boolean): Record<string, string | number | boolean | undefined> => ({
   Q: options.q, TemplateVersionId: options.templateVersionId, TemplateId: options.templateId, Status: options.status,
-  LocaleCode: options.localeCode, TranslationGroupId: options.translationGroupId, Slug: options.slug, Tags: options.tags,
+  LocaleCode: options.localeCode, TranslationGroupId: options.translationGroupId, Slug: options.slug, Tags: options.tags, Fields: typeof options.fields === "string" ? options.fields : options.fields?.join(","),
   CreatedAfter: asIso(options.createdAfter), CreatedBefore: asIso(options.createdBefore), PublishedAfter: asIso(options.publishedAfter), PublishedBefore: asIso(options.publishedBefore),
   Resolve: resolve, AsOf: asIso(options.asOf), SortBy: options.sortBy, SortDesc: options.sortDesc, page: options.page, pageSize: options.pageSize,
 });

@@ -69,7 +69,7 @@ public sealed class ContentController : ControllerBase
                 ResultErrorKind.Unauthenticated => StatusCode(StatusCodes.Status401Unauthorized),
                 ResultErrorKind.Forbidden => StatusCode(StatusCodes.Status403Forbidden),
                 ResultErrorKind.NotFound => NotFound(),
-                ResultErrorKind.Validation => this.Error(StatusCodes.Status400BadRequest, CmsifyError.ValidationFailed, "Invalid pagination", result.Errors[0].Message),
+                ResultErrorKind.Validation => this.Error(StatusCodes.Status400BadRequest, CmsifyError.ValidationFailed, result.Errors[0].Code == ContentListRules.InvalidFieldsCode ? "Invalid fields" : "Invalid pagination", result.Errors[0].Message),
                 ResultErrorKind.Conflict => this.Error(StatusCodes.Status409Conflict, CmsifyError.Conflict, "Conflict", result.Errors[0].Message),
                 _ => this.Error(StatusCodes.Status500InternalServerError, CmsifyError.InternalServerError, "Internal Server Error")
             };

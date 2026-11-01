@@ -39,6 +39,30 @@ public sealed class ContentListHandlerTests
         Assert.Equal(0, _clock.Reads);
     }
 
+    [Theory]
+    [InlineData("title, summary ,title", new[] { "title", "summary" })]
+    [InlineData(" ", null)]
+    [InlineData(null, null)]
+    public async Task Fields_AreParsedTrimmedAndDeduplicatedIntoCriteria(string? fields, string[]? expected)
+    {
+        var result = await Handler().HandleAsync(new(_workspaceId, Fields: fields));
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected, Assert.Single(_ordinaryCalls).FieldKeys);
+    }
+
+    [Theory]
+    [InlineData("bad-key")]
+    [InlineData("1abc")]
+    [InlineData("a,b,c,d,e,f,g,h,i,j,k")]
+    public async Task InvalidFields_AreRejectedBeforeAnyQuery(string fields)
+    {
+        var result = await Handler().HandleAsync(new(_workspaceId, Fields: fields));
+        Assert.True(result.IsFailure);
+        Assert.Equal(ResultErrorKind.Validation, result.Errors[0].Kind);
+        Assert.Equal(ContentListRules.InvalidFieldsCode, result.Errors[0].Code);
+        AssertNoQueryOrClock();
+    }
+
     [Fact]
     public async Task Anonymous_IsDeniedBeforeWorkspaceAccessAndPagination()
     {

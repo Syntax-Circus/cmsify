@@ -31,9 +31,12 @@ public sealed class ListContentRequestHandler : IListContentRequestHandler
         if (request.Page < 1 || request.PageSize < 1 || request.PageSize > ContentListRules.MaxPageSize)
             return Result<ContentListOutput>.Failure(new("validation-failed", "Invalid pagination.", ResultErrorKind.Validation));
 
+        if (!ContentListRules.TryParseFieldKeys(request.Fields, out var fieldKeys, out var fieldsError))
+            return Result<ContentListOutput>.Failure(new(ContentListRules.InvalidFieldsCode, fieldsError!, ResultErrorKind.Validation));
+
         var offset = ((long)request.Page - 1) * request.PageSize;
         var evaluationTime = request.Resolve && request.AsOf.HasValue ? request.AsOf.Value : _clock.GetUtcNow();
-        var criteria = new ContentListCriteria(request, evaluationTime, offset > int.MaxValue ? null : (int)offset);
+        var criteria = new ContentListCriteria(request, evaluationTime, offset > int.MaxValue ? null : (int)offset, fieldKeys);
         var page = request.Resolve
             ? await _repository.ListResolvedAsync(criteria, cancellationToken)
             : await _repository.ListItemsAsync(criteria, cancellationToken);
@@ -48,6 +51,7 @@ public sealed class ListContentRequestHandler : IListContentRequestHandler
         Tags = Array.AsReadOnly(item.Tags.ToArray()),
         CurrentlyServingVersion = item.CurrentlyServingVersion is { } version
             ? version with { Tags = Array.AsReadOnly(version.Tags.ToArray()) }
-            : null
+            : null,
+        Fields = item.Fields is null ? null : Array.AsReadOnly(item.Fields.ToArray())
     };
 }

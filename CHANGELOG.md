@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Optional `fields` query parameter on the content list endpoint (`GET /api/v1/workspaces/{workspaceId}/content`), plus `ContentListQuery.Fields` (.NET) and `fields` (TypeScript `ContentListOptions`). It takes up to 10 comma-separated template field keys and returns just those values in a new, nullable `fields` array on each `ContentItemSummaryResponse` row, read from the version that row represents (the currently serving version for ordinary lists, the resolved version for `resolve=true`). Values are batch-loaded in one extra query per page; child references are returned as ids only. Omitting `fields` leaves responses and query counts unchanged.
+
 ## [0.8.24] - 2026-10-28
 
 ### Added

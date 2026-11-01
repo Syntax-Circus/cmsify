@@ -104,6 +104,40 @@ public sealed class ContentListHandlerApiTests
         Assert.Single(handler.Requests);
     }
 
+    [Fact]
+    public async Task FieldsParameterReachesHandlerAndProjectedValuesAreMapped()
+    {
+        var fieldId = Guid.NewGuid();
+        var field = new ContentListFieldOutput(fieldId, "title", "Title", 0,
+            Cmsify.Core.Domain.Enums.ValueKind.Text, "Hello", null, null, null, null, null);
+        var item = new ContentListItemOutput(Guid.NewGuid(), Guid.NewGuid(), "Template", "s", null, null, [],
+            ContentListSqliteFactory.Clock.GetUtcNow(), ContentListSqliteFactory.Clock.GetUtcNow(), 1, null, "template", [field]);
+        var handler = new RecordingHandler(Result<ContentListOutput>.Success(new([item], 1, 1, 20)));
+        await using var factory = new ContentListSqliteFactory(handler);
+        using var client = await factory.CreateSeededClientAsync();
+        using var response = await client.GetAsync(factory.Url("fields=title,summary"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("title,summary", Assert.Single(handler.Requests).Fields);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        var mapped = body.GetProperty("items")[0].GetProperty("fields")[0];
+        Assert.Equal(fieldId, mapped.GetProperty("fieldId").GetGuid());
+        Assert.Equal("title", mapped.GetProperty("key").GetString());
+        Assert.Equal("Hello", mapped.GetProperty("textValue").GetString());
+    }
+
+    [Fact]
+    public async Task InvalidFieldsFailureUsesDedicatedProblemTitle()
+    {
+        var handler = new RecordingHandler(Result<ContentListOutput>.Failure(new(ContentListRules.InvalidFieldsCode, "Bad key.", ResultErrorKind.Validation)));
+        await using var factory = new ContentListSqliteFactory(handler);
+        using var client = await factory.CreateSeededClientAsync();
+        using var response = await client.GetAsync(factory.Url("fields=bad-key"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("Invalid fields", problem.GetProperty("title").GetString());
+        Assert.Equal("Bad key.", problem.GetProperty("detail").GetString());
+    }
+
     private sealed class RecordingHandler(Result<ContentListOutput>? result, Exception? error = null) : IListContentRequestHandler
     {
         internal List<ListContentRequest> Requests { get; } = [];

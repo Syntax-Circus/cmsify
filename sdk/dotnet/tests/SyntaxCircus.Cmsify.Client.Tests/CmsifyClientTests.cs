@@ -618,6 +618,33 @@ public sealed class CmsifyClientTests
     }
 
     [Fact]
+    public async Task ContentListAsync_SendsFieldsProjectionAndDeserializesFieldValues()
+    {
+        var requests = new List<string>();
+        var workspaceId = Guid.NewGuid();
+        var fieldId = Guid.NewGuid();
+        var client = CreateClient(request =>
+        {
+            requests.Add(request.RequestUri!.PathAndQuery);
+            return Json(HttpStatusCode.OK, new
+            {
+                items = new[] { new { id = Guid.NewGuid(), templateVersionId = Guid.NewGuid(), templateName = "Post", templateSlug = "post", slug = "hi", tags = Array.Empty<string>(), createdAt = DateTimeOffset.UnixEpoch, updatedAt = DateTimeOffset.UnixEpoch, versionCount = 1,
+                    fields = new[] { new { fieldId, key = "title", label = "Title", order = 0, valueKind = "Text", textValue = "Hello" } } } },
+                totalCount = 1, page = 1, pageSize = 20, totalPages = 1
+            });
+        });
+
+        var page = await client.Content.ListAsync(workspaceId, new ContentListQuery(null, null, null, null, null, null, null, null, null, null, null, null, Fields: "title,summary"), TestContext.Current.CancellationToken);
+        await client.Content.ListAsync(workspaceId, new ContentListQuery(null, null, null, null, null, null, null, null, null, null, null, null), TestContext.Current.CancellationToken);
+
+        requests[0].ShouldContain("&fields=title%2Csummary");
+        requests[1].ShouldNotContain("fields=");
+        var field = page!.Items.Single().Fields!.Single();
+        field.Key.ShouldBe("title");
+        field.TextValue.ShouldBe("Hello");
+    }
+
+    [Fact]
     public async Task ComponentListAllAsync_TraversesEveryPage()
     {
         var requests = new List<string>();

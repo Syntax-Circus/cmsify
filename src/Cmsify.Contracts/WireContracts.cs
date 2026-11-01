@@ -89,7 +89,7 @@ public sealed record ReorderFieldRequest(Guid FieldId, int Order);
 // TemplateName is the template's display name (e.g. "Libraries Index"); TemplateSlug is the stable
 // key (e.g. "libraries-index") consumers should match against. Never match on TemplateName: it is
 // editor-editable and does not generally equal the slug, so comparisons against it silently fail.
-public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int VersionCount, ContentVersionSummaryResponse? CurrentlyServingVersion, string TemplateSlug = "");
+public sealed record ContentItemSummaryResponse(Guid Id, Guid TemplateVersionId, string TemplateName, string? Slug, string? LocaleCode, Guid? TranslationGroupId, IReadOnlyList<string> Tags, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int VersionCount, ContentVersionSummaryResponse? CurrentlyServingVersion, string TemplateSlug = "", [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ContentVersionFieldValueResponse>? Fields = null);
 
 // TemplateName is the template's display name (e.g. "Libraries Index"); TemplateSlug is the stable
 // key (e.g. "libraries-index") consumers should match against. Never match on TemplateName: it is
@@ -225,7 +225,7 @@ public sealed record PackageImportResolutionsRequest(IReadOnlyDictionary<string,
 public sealed record LoginRequest(string Email, string Password);
 public sealed record ActorResponse(Guid? UserId, Guid? ApiClientId, string Role, Guid? WorkspaceId, bool IsSuperAdmin);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
-public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20) : IValidatableObject
+public sealed record ContentListQuery(string? Q, Guid? TemplateVersionId, Guid? TemplateId, ContentStatus? Status, string? LocaleCode, Guid? TranslationGroupId, string? Slug, string? Tags, DateTimeOffset? CreatedAfter, DateTimeOffset? CreatedBefore, DateTimeOffset? PublishedAfter, DateTimeOffset? PublishedBefore, bool Resolve = false, DateTimeOffset? AsOf = null, string? SortBy = "createdAt", bool SortDesc = true, int Page = 1, int PageSize = 20, string? Fields = null) : IValidatableObject
 {
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) => PaginationValidation.Validate(Page, PageSize);
 }
