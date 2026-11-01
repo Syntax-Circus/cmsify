@@ -1211,6 +1211,13 @@
               "type": "integer",
               "format": "int32"
             }
+          },
+          {
+            "name": "Fields",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6326,6 +6333,13 @@
           },
           "templateSlug": {
             "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContentVersionFieldValueResponse"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false

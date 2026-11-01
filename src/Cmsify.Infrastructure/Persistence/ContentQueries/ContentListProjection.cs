@@ -48,9 +48,15 @@ internal static class ContentListProjection
             v.Tags.ToArray(), v.CreatedAt, v.UpdatedAt)).ToListAsync(ct);
         var tagsByOwner = tags.ToLookup(row => row.Owner, row => row.Name);
         var winnerByOwner = winners.ToDictionary(row => row.ContentItemId);
-        return new(page.Select(row => new ContentListItemOutput(row.Id, row.TemplateVersionId, row.TemplateName!,
-            row.Slug, row.LocaleCode, row.TranslationGroupId, tagsByOwner[row.Id].ToArray(), row.CreatedAt,
-            row.UpdatedAt, row.VersionCount, winnerByOwner.GetValueOrDefault(row.Id), row.TemplateSlug!)).ToArray(), total);
+        var fields = await LoadFields(db, winners.Select(w => w.Id).ToArray(), criteria.FieldKeys, ct);
+        return new(page.Select(row =>
+        {
+            var winner = winnerByOwner.GetValueOrDefault(row.Id);
+            return new ContentListItemOutput(row.Id, row.TemplateVersionId, row.TemplateName!,
+                row.Slug, row.LocaleCode, row.TranslationGroupId, tagsByOwner[row.Id].ToArray(), row.CreatedAt,
+                row.UpdatedAt, row.VersionCount, winner, row.TemplateSlug!,
+                fields is null ? null : winner is null ? [] : fields.GetValueOrDefault(winner.Id) ?? []);
+        }).ToArray(), total);
     }
 
     internal static async Task<ContentListPage> Resolved(CmsifyDbContext db, IQueryable<ContentVersion> winners,
@@ -74,11 +80,41 @@ internal static class ContentListProjection
             _ => joined.OrderBy(x => x.Version.PublishedAt == null ? 1 : 0)
                 .ThenBy(x => x.Version.PublishedAt).ThenBy(x => x.Version.ContentItemId)
         };
-        var rows = await ordered.Skip(offset).Take(request.PageSize).Select(x => new ContentListItemOutput(
-            x.Version.ContentItemId, x.Version.TemplateVersionId, x.Name, x.Version.Slug, x.Version.LocaleCode,
-            x.Version.TranslationGroupId, x.Version.Tags.ToArray(), x.Version.PublishedAt.GetValueOrDefault(),
-            x.Version.PublishedAt.GetValueOrDefault(), 1, null, x.Slug)).ToListAsync(ct);
+        var projected = await ordered.Skip(offset).Take(request.PageSize).Select(x => new
+        {
+            VersionId = x.Version.Id,
+            Row = new ContentListItemOutput(
+                x.Version.ContentItemId, x.Version.TemplateVersionId, x.Name, x.Version.Slug, x.Version.LocaleCode,
+                x.Version.TranslationGroupId, x.Version.Tags.ToArray(), x.Version.PublishedAt.GetValueOrDefault(),
+                x.Version.PublishedAt.GetValueOrDefault(), 1, null, x.Slug, null)
+        }).ToListAsync(ct);
+        var fields = await LoadFields(db, projected.Select(x => x.VersionId).ToArray(), criteria.FieldKeys, ct);
+        var rows = projected.Select(x => fields is null
+            ? x.Row
+            : x.Row with { Fields = fields.GetValueOrDefault(x.VersionId) ?? [] }).ToArray();
         return new(rows, total);
+    }
+
+    /// <summary>
+    /// One batched query for the requested field keys across every version on the page (no per-item
+    /// round trips). Keys absent from a version's template are simply not returned. Child references
+    /// are returned as ids only; the list never expands children.
+    /// </summary>
+    private static async Task<Dictionary<Guid, IReadOnlyList<ContentListFieldOutput>>?> LoadFields(
+        CmsifyDbContext db, Guid[] versionIds, IReadOnlyList<string>? keys, CancellationToken ct)
+    {
+        if (keys is null || keys.Count == 0) return null;
+        if (versionIds.Length == 0) return [];
+        var keyArray = keys.ToArray();
+        var rows = await (from value in db.ContentVersionFieldValues.AsNoTracking()
+            join field in db.TemplateFields.AsNoTracking() on value.FieldId equals field.Id
+            where versionIds.Contains(value.ContentVersionId) && keyArray.Contains(field.Key)
+            select new { value, field.Key, field.Label, FieldOrder = field.Order }).ToListAsync(ct);
+        return rows.GroupBy(r => r.value.ContentVersionId).ToDictionary(g => g.Key,
+            g => (IReadOnlyList<ContentListFieldOutput>)g.OrderBy(r => r.FieldOrder).ThenBy(r => r.value.Order).ThenBy(r => r.value.Id)
+                .Select(r => new ContentListFieldOutput(r.value.FieldId, r.Key, r.Label, r.value.Order, r.value.ValueKind,
+                    r.value.TextValue, r.value.BoolValue, r.value.MediaAssetId, r.value.FileAssetId, r.value.ChildContentItemId,
+                    r.value.JsonValue?.GetRawText(), r.value.DisplayLabel)).ToArray());
     }
 
     private sealed record ItemRow(Guid Id, Guid TemplateVersionId, string? TemplateName, string? TemplateSlug,

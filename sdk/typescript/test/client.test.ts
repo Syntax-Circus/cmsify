@@ -55,6 +55,15 @@ describe("CmsifyClient", () => {
     expect(requestHeaders(fetchImpl, 0).get("Authorization")).toBe("Bearer cmsify_token");
   });
 
+  it("sends the fields projection as a comma-separated list", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(pagedContent));
+    await createClient(fetchImpl as typeof fetch).content.list({ fields: ["title", "summary"], page: 1 });
+    await createClient(fetchImpl as typeof fetch).content.list({ fields: "title" });
+    const urls = (fetchImpl.mock.calls as unknown[][]).map((call) => new URL(String(call[0])));
+    expect(urls[0]?.searchParams.get("Fields")).toBe("title,summary");
+    expect(urls[1]?.searchParams.get("Fields")).toBe("title");
+  });
+
   it("returns translations as a page so consumers retain page metadata", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(pagedContent));
     await expect(createClient(fetchImpl as typeof fetch).content.translations(contentSummary.id, { page: 1, pageSize: 20 })).resolves.toEqual(pagedContent);
