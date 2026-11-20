@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.26] - 2026-11-19
+
 ### Fixed
 
 - Media thumbnails were broken images in embedding hosts and in the hosted Admin media library: the API returns asset URLs relative to Cmsify, and its file endpoint requires a bearer token, so the browser could not load them. Thumbnails in `ContentEditPanel`, `MediaPickerPanel`, `MediaFieldEditor`, `MediaPickerModal` and the Admin media library now load through the authenticated `CmsifyClient` and render inline (images up to 2 MiB; larger or failed assets show a neutral placeholder instead of a broken image).
