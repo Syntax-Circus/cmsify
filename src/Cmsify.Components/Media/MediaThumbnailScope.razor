@@ -1,0 +1,29 @@
+@namespace SyntaxCircus.Cmsify.Components
+
+<CascadingValue Value="@context" IsFixed="false">@ChildContent</CascadingValue>
+
+@code {
+    /// <summary>Authenticated client used to fetch thumbnails when no <see cref="UrlResolver"/> is set.</summary>
+    [Parameter] public CmsifyClient? Client { get; set; }
+    [Parameter] public Guid WorkspaceId { get; set; }
+    /// <summary>Opt-in. Maps an asset to the URL the browser should load; takes precedence over the built-in loader.</summary>
+    [Parameter] public Func<MediaAssetResponse, string?>? UrlResolver { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private MediaThumbnailContext context = new(null, Guid.Empty);
+    private CmsifyClient? lastClient;
+    private Guid lastWorkspaceId;
+    private Func<MediaAssetResponse, string?>? lastResolver;
+
+    protected override void OnParametersSet()
+    {
+        // Keep one context (and its cache) across re-renders; rebuild only when its inputs change.
+        if (!ReferenceEquals(lastClient, Client) || lastWorkspaceId != WorkspaceId || lastResolver != UrlResolver)
+        {
+            context = new MediaThumbnailContext(Client, WorkspaceId, UrlResolver);
+            lastClient = Client;
+            lastWorkspaceId = WorkspaceId;
+            lastResolver = UrlResolver;
+        }
+    }
+}

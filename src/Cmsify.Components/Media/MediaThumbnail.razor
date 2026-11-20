@@ -1,0 +1,63 @@
+@namespace SyntaxCircus.Cmsify.Components
+@implements IDisposable
+
+@if (src is not null)
+{
+    <img class="@CssClass" src="@src" alt="@(Asset.AltText ?? "")" loading="lazy" />
+}
+else
+{
+    <span class="@CssClass cmsify-media-thumb-placeholder" role="img" aria-label="@(Asset.AltText ?? Asset.FileName)"></span>
+}
+
+@code {
+    [Parameter, EditorRequired] public MediaAssetResponse Asset { get; set; } = null!;
+    [Parameter] public string? CssClass { get; set; }
+    [CascadingParameter] private MediaThumbnailContext? Context { get; set; }
+
+    private string? src;
+    private MediaAssetResponse? loadedFor;
+    private MediaThumbnailContext? loadedContext;
+    private CancellationTokenSource? cts;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReferenceEquals(loadedFor, Asset) && ReferenceEquals(loadedContext, Context)) return;
+        loadedFor = Asset;
+        loadedContext = Context;
+        cts?.Cancel();
+        cts?.Dispose();
+        cts = null;
+
+        if (Context is null)
+        {
+            src = Asset.Url; // no scope: previous behaviour
+        }
+        else if (Context.UrlResolver is { } resolver)
+        {
+            src = resolver(Asset);
+        }
+        else if (Context.CanLoad)
+        {
+            src = null;
+            cts = new CancellationTokenSource();
+            var token = cts.Token;
+            try
+            {
+                var loaded = await Context.LoadDataUrlAsync(Asset, token);
+                if (!token.IsCancellationRequested) src = loaded;
+            }
+            catch (OperationCanceledException) { }
+        }
+        else
+        {
+            src = Asset.Url;
+        }
+    }
+
+    public void Dispose()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+}

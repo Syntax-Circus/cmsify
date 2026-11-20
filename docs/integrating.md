@@ -145,6 +145,8 @@ Blazor Server applications don't have to hand-build content-editing UI against t
 
 See the [`Cmsify.Components` README](../src/Cmsify.Components/README.md) for the full component set, extensibility hooks, and styling variables.
 
+Media thumbnails load through that same `CmsifyClient` (the API's asset URLs are relative and need a bearer token); pass `MediaUrlResolver` to serve media yourself instead. See "Media thumbnails" in the Components README.
+
 ## Direct HTTP smoke test
 
 When diagnosing an integration, make one authenticated request outside the application:

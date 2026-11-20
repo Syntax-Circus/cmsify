@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Media thumbnails were broken images in embedding hosts and in the hosted Admin media library: the API returns asset URLs relative to Cmsify, and its file endpoint requires a bearer token, so the browser could not load them. Thumbnails in `ContentEditPanel`, `MediaPickerPanel`, `MediaFieldEditor`, `MediaPickerModal` and the Admin media library now load through the authenticated `CmsifyClient` and render inline (images up to 2 MiB; larger or failed assets show a neutral placeholder instead of a broken image).
+
+### Added
+
+- Opt-in `MediaUrlResolver` (`Func<MediaAssetResponse, string?>`) on `ContentEditPanel` and `MediaPickerPanel` for hosts that serve media themselves (absolute URL, proxy, CDN); it takes precedence over the built-in loader. New `MediaThumbnail` and `MediaThumbnailScope` components expose the same behaviour for custom UI.
+
+### Unchanged
+
+- `MediaAssetResponse.Url` and every API/contract shape are unchanged. A bare `MediaFieldEditor` or `MediaPickerModal` rendered outside any scope still uses the raw `Url` as before.
+
 ## [0.8.25] - 2026-11-01
 
 ### Added

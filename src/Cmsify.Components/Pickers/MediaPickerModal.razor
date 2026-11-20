@@ -20,7 +20,7 @@
                         <button type="button" class="cmsify-picker-item" @onclick="() => OnSelect.InvokeAsync(asset)">
                             @if (asset.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
                             {
-                                <img class="cmsify-picker-item-thumb" src="@asset.Url" alt="@(asset.AltText ?? "")" loading="lazy" />
+                                <MediaThumbnail Asset="@asset" CssClass="cmsify-picker-item-thumb" />
                             }
                             <strong>@asset.FileName</strong>
                             <span class="cmsify-picker-item-meta">@asset.MimeType</span>
