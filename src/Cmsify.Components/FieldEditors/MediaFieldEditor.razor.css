@@ -22,7 +22,8 @@
     font-family: var(--cmsify-font-family, inherit);
 }
 
-.cmsify-field-picker-thumb {
+.cmsify-field-picker-button ::deep .cmsify-field-picker-thumb,
+.cmsify-field-picker-value ::deep .cmsify-field-picker-thumb {
     width: 2.5rem;
     height: 2.5rem;
     object-fit: cover;

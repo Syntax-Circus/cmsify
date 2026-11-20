@@ -65,6 +65,19 @@ asset loading and child deletion. Direct content persistence and reusable Admin
 routes remain separate extraction work. The direct-source bUnit fixtures prove
 presentation behavior, not database qualification or full embedded Admin parity.
 
+## Media thumbnails
+
+`MediaAssetResponse.Url` is relative to Cmsify and its file endpoint needs a bearer token, so a browser `<img src>` in an embedding host cannot use it. `ContentEditPanel` and `MediaPickerPanel` therefore load thumbnails through the `CmsifyClient` you already pass them and show them inline as `data:` URLs (images up to 2 MiB, fetched at most four at a time and cached per asset version). Larger, non-image or failed assets render a neutral placeholder, never a broken image.
+
+If you serve media yourself (absolute URL, reverse proxy, CDN), pass `MediaUrlResolver`; it takes precedence and the client is not used for thumbnails:
+
+```razor
+<ContentEditPanel Client="@Cmsify" WorkspaceId="@WorkspaceId" ContentId="@ContentId"
+                  MediaUrlResolver="@(asset => $"https://media.example.com/{asset.Id}")" />
+```
+
+For custom UI, wrap it in `<MediaThumbnailScope Client=... WorkspaceId=... UrlResolver=...>` and render `<MediaThumbnail Asset="@asset" />`. Outside any scope, `MediaThumbnail` (and the bare `MediaFieldEditor` / `MediaPickerModal`) use the raw `Url` as before.
+
 ## Extensibility: FieldTemplateOverrides
 
 `FieldEditor`, `ContentEditForm`, and `ContentEditPanel` all accept an optional `FieldTemplateOverrides` parameter:

@@ -1,6 +1,7 @@
 @page "/workspaces/{WorkspaceId:guid}/media"
 @rendermode InteractiveServer
 @inject CmsifyClient Cmsify
+@using SyntaxCircus.Cmsify.Components
 @inject ToastState Toasts
 
 <div class="cms-page-head">
@@ -26,6 +27,7 @@
     }
 </div>
 
+<MediaThumbnailScope Client="@Cmsify" WorkspaceId="@WorkspaceId">
 @if (grid)
 {
     <div class="row g-3">
@@ -35,7 +37,7 @@
                 <button class="cms-card w-100 text-start" @onclick="() => selected = asset">
                     @if (asset.MimeType.StartsWith("image/"))
                     {
-                        <img src="@asset.Url" alt="@asset.AltText" class="img-fluid rounded mb-2" />
+                        <MediaThumbnail Asset="@asset" CssClass="img-fluid rounded mb-2" />
                     }
                     <strong>@asset.FileName</strong>
                     <div class="small text-muted">@asset.MimeType · @asset.SizeBytes bytes</div>
@@ -53,6 +55,7 @@ else
         </table>
     </div>
 }
+</MediaThumbnailScope>
 
 @if (selected is not null)
 {

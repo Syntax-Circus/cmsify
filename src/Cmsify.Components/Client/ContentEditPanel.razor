@@ -1,6 +1,7 @@
 @namespace SyntaxCircus.Cmsify.Components.Client
 @using System.Collections.Immutable
 
+<MediaThumbnailScope Client="@Client" WorkspaceId="@WorkspaceId" UrlResolver="@MediaUrlResolver">
 <ContentEditForm TemplateVersion="@templateVersion" FieldValues="@fieldValues" FieldValueChanged="OnFieldValueChangedAsync"
                  PickListsByRevisionId="@pickListsByRevisionId" ReferenceOptionsByTemplateId="@referenceOptionsByTemplateId"
                  ComponentSchemas="@componentSchemas"
@@ -10,8 +11,9 @@
                  FieldTemplateOverrides="@FieldTemplateOverrides" CurrentContentId="@ContentId" SlugHelpText="@SlugHelpText"
                  Client="@Client" WorkspaceId="@WorkspaceId"
                  ReadOnly="@ReadOnly" Busy="@busy" MarkdownPreviewRenderer="@MarkdownPreviewRenderer" />
+</MediaThumbnailScope>
 
-<MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix"
+<MediaPickerPanel Client="@Client" WorkspaceId="@WorkspaceId" Visible="@pickerVisible" MimePrefix="@pickerMimePrefix" MediaUrlResolver="@MediaUrlResolver"
                    Selected="OnAssetSelectedAsync" Closed="() => pickerVisible = false" />
 
 @code {
@@ -29,6 +31,8 @@
     [Parameter] public bool ReadOnly { get; set; }
     /// <summary>Opt-in. When set, Markdown fields show a rendered preview (Markdown in, trusted HTML out) instead of the raw source. The host owns sanitization.</summary>
     [Parameter] public Func<string?, string>? MarkdownPreviewRenderer { get; set; }
+    /// <summary>Opt-in. Maps a media asset to the URL its thumbnail should load (absolute, proxied, CDN). Without it, thumbnails are fetched through <see cref="Client"/> and shown inline; the API's relative asset URL is not usable from an embedding host's browser.</summary>
+    [Parameter] public Func<MediaAssetResponse, string?>? MediaUrlResolver { get; set; }
     [Parameter] public bool RequireSlug { get; set; }
     [Parameter] public EventCallback<bool> BusyChanged { get; set; }
 
