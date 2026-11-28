@@ -90,4 +90,61 @@ public sealed class ContentSearchVectorBuilderTests
         Assert.Contains("'markdown'", searchVector);
         Assert.Contains("'body'", searchVector);
     }
+
+    [Fact]
+    public void Build_KeepsTheFirst256PositionsOfARepeatedWord()
+    {
+        var positions = Positions(BuildFrom(string.Join(' ', Enumerable.Repeat("word", 300))), "word");
+
+        Assert.Equal(Enumerable.Range(1, 256), positions);
+    }
+
+    [Fact]
+    public void Build_CapsPositionsAtTheHighestPostgresAllows_WithoutDuplicates()
+    {
+        var text = string.Join(' ', Enumerable.Range(0, 16500).Select(i => $"w{i}")) + " tail tail tail";
+
+        var vector = BuildFrom(text);
+
+        Assert.Equal([16383], Positions(vector, "w16499"));
+        Assert.Equal([16383], Positions(vector, "tail"));
+    }
+
+    [Fact]
+    public void Build_SkipsWordsTooLongForPostgres_AndKeepsTheirNeighbours()
+    {
+        var vector = BuildFrom($"before {new string('x', 2047)} {new string('é', 1024)} {new string('y', 2046)} after");
+
+        Assert.DoesNotContain("xxx", vector);
+        Assert.DoesNotContain("ééé", vector);
+        Assert.Contains(new string('y', 2046), vector);
+        Assert.Equal([1], Positions(vector, "before"));
+        Assert.Equal([5], Positions(vector, "after"));
+    }
+
+    [Fact]
+    public void Build_FillsTheTotalSizeLimitWithTheEarliestWords()
+    {
+        // Each word is 16 bytes and costs 21 of the 1,048,575 available, so about 49,900 of them fit.
+        var vector = BuildFrom(string.Join(' ', Enumerable.Range(0, 60_000).Select(i => $"distinct{i:D8}")));
+
+        var entries = vector.Split(' ');
+
+        Assert.InRange(entries.Length, 49_000, 50_000);
+        Assert.All(entries.Index(), entry => Assert.StartsWith($"'distinct{entry.Index:D8}':", entry.Item, StringComparison.Ordinal));
+    }
+
+    private static int[] Positions(string vector, string term) => vector.Split(' ')
+        .Single(entry => entry.StartsWith($"'{term}':", StringComparison.Ordinal))
+        .Split(':')[1].Split(',').Select(int.Parse).ToArray();
+
+    private static string BuildFrom(string text)
+    {
+        var field = new TemplateField { TemplateVersionId = Guid.CreateVersion7(), Key = "body", Label = "Body", PrimitiveType = PrimitiveType.RichText };
+        var schema = new TemplateVersion { TemplateId = Guid.CreateVersion7(), VersionNumber = 1 };
+        schema.Fields.Add(field);
+        var version = new ContentVersion { WorkspaceId = Guid.CreateVersion7(), TemplateVersionId = schema.Id };
+        version.FieldValues.Add(new ContentVersionFieldValue { ContentVersionId = version.Id, FieldId = field.Id, ValueKind = ValueKind.Text, TextValue = text });
+        return new ContentSearchVectorBuilder().Build(version, schema);
+    }
 }
