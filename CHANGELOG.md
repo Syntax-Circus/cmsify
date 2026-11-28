@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Saving long content failed with a server error (PostgreSQL `unexpected number of tsvector positions`) once any word appeared more than 256 times in the searchable text. The text of a rich-content field is indexed as stored JSON, so its own keys, such as `text`, counted too. Saves could also fail on a very long word or a very large vocabulary. The search vector now stays within PostgreSQL's limits: the first 256 positions of each word, positions capped at 16383, words longer than 2046 bytes skipped, and the earliest words kept when the total size limit is reached. No migration is needed; existing rows are unchanged.
+
 ## [0.8.26] - 2026-11-19
 
 ### Fixed
